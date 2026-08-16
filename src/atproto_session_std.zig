@@ -108,11 +108,21 @@ pub const Sessions = struct {
     }
 
     pub fn has(self: *Sessions, did: []const u8) Error!bool {
-        return (try self.store.load(did)) != null;
+        var session = self.store.load(did) catch |err| switch (err) {
+            error.WrongDocumentType => return false,
+            else => return err,
+        } orelse return false;
+        session.deinit();
+        return true;
     }
 
     pub fn hasPassword(self: *Sessions, did: []const u8) Error!bool {
-        return (try self.store.loadPassword(did)) != null;
+        var session = self.store.loadPassword(did) catch |err| switch (err) {
+            error.WrongDocumentType => return false,
+            else => return err,
+        } orelse return false;
+        session.deinit();
+        return true;
     }
 
     /// Load and (if needed) refresh the app-password session for `did`. The

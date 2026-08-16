@@ -36,6 +36,12 @@ seed, and the Authorization Server nonce are `Token`/`ClientId`/bounded values
 before and after serialization; they are hex- or string-encoded into the JSON
 document and validated again on load, so a tampered or truncated document
 fails closed as `StoreCorrupt` rather than deserializing a partial session.
+A well-formed document whose `format` is the other store type
+(`boris-app-password-v1` when loading an OAuth session, or `boris-session-v1`
+when loading an app-password session) is `WrongDocumentType`, not
+`StoreCorrupt`. Publish and smoke treat only `WrongDocumentType` as “try the
+sibling credential.” Genuine corruption fails closed and never opens the
+browser or overwrites the file.
 
 ## Storage
 
@@ -136,6 +142,7 @@ zero network writes, even if its tokens are still cryptographically valid.
 | `RefreshAmbiguous` | interrupted rotation, token may be consumed | `standard-site login --did <DID>` |
 | `SessionAuthorityChanged` | DID moved PDS or authorization server | `standard-site login --did <DID>` |
 | `StoreCorrupt` / `InvalidSessionWire` / `InvalidKeySeed` | tampered or truncated document | `standard-site logout --did <DID>`, then log in |
+| `WrongDocumentType` | stored document is the other credential flavor | publish/smoke try the sibling loader; if both miss, `standard-site login` |
 | `StorePermissionDenied` / `StoreLocked` / `StoreFull` / `StoreIo` | store not usable | fix permissions / wait for the lock / free space |
 | `HomeUnavailable` | no `HOME` and no `--session-root` | pass `--session-root` or set `HOME` |
 

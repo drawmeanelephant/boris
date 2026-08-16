@@ -122,10 +122,13 @@ interactive terminal the echo is suppressed while typing (termios `ECHO` off
 for the duration of the read, restored even on failure) and exactly one line
 is consumed, so the credential never lands in terminal scrollback; on a pipe
 or file the secret is read to end of stream. Either way the first newline
-ends the credential and empty input is rejected.
+ends the credential. Empty input is a client-side usage failure (exit 2,
+“password cannot be empty”) before any network call — never a PDS denial.
 
 **Authentication.** The command resolves the handle (or takes the DID
-directly), calls `com.atproto.server.createSession` with the app password,
+directly). Handle resolution requires the DID document to name that handle
+in `alsoKnownAs` (`HandleMismatch` otherwise) and does not fetch OAuth
+authorization-server metadata. It then calls `com.atproto.server.createSession` with the app password,
 verifies the returned `did` matches the requested identity, and pins the PDS
 origin — preserving the existing authority gate (`SessionAuthorityChanged` on
 a fresh discovery mismatch, zero writes).

@@ -128,7 +128,7 @@ pub const SessionClient = struct {
             std.crypto.secureZero(u8, response.body);
             response.deinit();
         }
-        if (response.status == 400 and isRecordNotFound(allocator, response.body)) return .not_found;
+        if (isMissingRecord(response.status, allocator, response.body)) return .not_found;
         if (response.status != 200) return error.InvalidStatus;
         try requireJson(response);
         return .{ .found = try parseGetRecord(allocator, client, collection, rkey, response.body) };
@@ -624,6 +624,14 @@ fn isUseDpopNonce(allocator: std.mem.Allocator, body: []const u8) bool {
     return std.mem.eql(u8, parsed.value.@"error", "use_dpop_nonce");
 }
 
+fn isMissingRecord(status: u16, allocator: std.mem.Allocator, body: []const u8) bool {
+    // Bluesky's PDS returns 400 + RecordNotFound. Some XRPC proxies and
+    // alternative PDSes return 404 for the same "no such record" case.
+    if (status == 404) return true;
+    if (status != 400) return false;
+    return isRecordNotFound(allocator, body);
+}
+
 fn isRecordNotFound(allocator: std.mem.Allocator, body: []const u8) bool {
     const Wire = struct { @"error": []const u8 };
     var parsed = std.json.parseFromSlice(Wire, allocator, body, .{
@@ -905,6 +913,19 @@ test "getRecord classifies missing records without failing the request" {
     const scripted = [_]XrpcMock.Scripted{.{
         .status = 400,
         .body = "{\"error\":\"RecordNotFound\",\"message\":\"Could not locate record\"}",
+    }};
+    var mock = XrpcMock.init(std.testing.allocator, &scripted);
+    defer mock.deinit();
+    var proofs = TestProofSource{};
+    var client = SessionClient.init(try testBinding(), mock.client(), proofs.source());
+    const result = try client.getRecord(std.testing.allocator, "site.standard.document", "missing");
+    try std.testing.expect(result == .not_found);
+}
+
+test "getRecord classifies HTTP 404 as a missing record" {
+    const scripted = [_]XrpcMock.Scripted{.{
+        .status = 404,
+        .body = "",
     }};
     var mock = XrpcMock.init(std.testing.allocator, &scripted);
     defer mock.deinit();

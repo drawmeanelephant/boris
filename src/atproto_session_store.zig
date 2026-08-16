@@ -25,7 +25,26 @@ pub const Error = authorization.Error || std.mem.Allocator.Error || error{
     StoreNotFound,
     StorePermissionDenied,
     StoreUnexpected,
+    WrongDocumentType,
 };
+
+const oauth_document_format = "boris-session-v1";
+const password_document_format = "boris-app-password-v1";
+
+const DocumentKind = enum { oauth, app_password };
+
+fn peekDocumentKind(allocator: std.mem.Allocator, bytes: []const u8) Error!DocumentKind {
+    const Peek = struct { format: []const u8 };
+    var parsed = std.json.parseFromSlice(Peek, allocator, bytes, .{
+        .ignore_unknown_fields = true,
+        .max_value_len = max_session_document_bytes,
+        .allocate = .alloc_always,
+    }) catch return error.StoreCorrupt;
+    defer parsed.deinit();
+    if (std.mem.eql(u8, parsed.value.format, oauth_document_format)) return .oauth;
+    if (std.mem.eql(u8, parsed.value.format, password_document_format)) return .app_password;
+    return error.StoreCorrupt;
+}
 
 const file_prefix = "session-";
 const lock_name = "lock";
@@ -193,7 +212,9 @@ pub const Store = struct {
         atomic.replace(self.io) catch |err| return mapError(err);
     }
 
-    /// Load the session for `did`. Returns `null` when no session exists.
+    /// Load the OAuth session for `did`. Returns `null` when no document
+    /// exists. An app-password document under the same DID is
+    /// `WrongDocumentType`. A tampered or unknown document is `StoreCorrupt`.
     pub fn load(self: *Store, did: []const u8) Error!?authorization.AuthorizedSession {
         const file_name = try self.fileNameForDid(did);
         defer self.allocator.free(file_name);
@@ -217,9 +238,8 @@ pub const Store = struct {
     }
 
     /// Load the app-password session for `did`. Returns `null` when no
-    /// document exists. A document that exists but is not a valid
-    /// `boris-app-password-v1` payload (including an OAuth session document
-    /// stored under the same DID) fails closed with `StoreCorrupt`.
+    /// document exists. An OAuth session under the same DID is
+    /// `WrongDocumentType`. A tampered or unknown document is `StoreCorrupt`.
     pub fn loadPassword(self: *Store, did: []const u8) Error!?password.AppPasswordSession {
         const file_name = try self.fileNameForDid(did);
         defer self.allocator.free(file_name);
@@ -303,7 +323,7 @@ pub fn sessionToWireBytes(allocator: std.mem.Allocator, session: *const authoriz
 
     try buf.appendSlice(allocator, "{\n");
     const fields = [_]struct { name: []const u8, value: []const u8 }{
-        .{ .name = "format", .value = "boris-session-v1" },
+        .{ .name = "format", .value = oauth_document_format },
         .{ .name = "did", .value = session.account.did.slice() },
         .{ .name = "pds_origin", .value = session.account.pds_origin.slice() },
         .{ .name = "authorization_server_origin", .value = session.account.authorization_server_origin.slice() },
@@ -370,6 +390,10 @@ pub fn sessionToWireBytes(allocator: std.mem.Allocator, session: *const authoriz
 /// fails closed.
 pub fn sessionFromWireBytes(allocator: std.mem.Allocator, bytes: []const u8) Error!authorization.AuthorizedSession {
     if (bytes.len == 0 or bytes.len > max_session_document_bytes) return error.StoreCorrupt;
+    switch (try peekDocumentKind(allocator, bytes)) {
+        .oauth => {},
+        .app_password => return error.WrongDocumentType,
+    }
     const Parsed = struct {
         format: []const u8,
         did: []const u8,
@@ -395,7 +419,7 @@ pub fn sessionFromWireBytes(allocator: std.mem.Allocator, bytes: []const u8) Err
     }) catch return error.StoreCorrupt;
     defer parsed.deinit();
     const value = parsed.value;
-    if (!std.mem.eql(u8, value.format, "boris-session-v1")) return error.StoreCorrupt;
+    if (!std.mem.eql(u8, value.format, oauth_document_format)) return error.StoreCorrupt;
     const key_seed = decodeHex(allocator, value.key_seed_hex) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.StoreCorrupt,
@@ -434,7 +458,7 @@ pub fn passwordToWireBytes(allocator: std.mem.Allocator, session: *const passwor
 
     try buf.appendSlice(allocator, "{\n");
     const fields = [_]struct { name: []const u8, value: []const u8 }{
-        .{ .name = "format", .value = "boris-app-password-v1" },
+        .{ .name = "format", .value = password_document_format },
         .{ .name = "did", .value = session.did.slice() },
         .{ .name = "pds_origin", .value = session.pds_origin.slice() },
         .{ .name = "access_token", .value = session.access_token.slice() },
@@ -478,6 +502,10 @@ pub fn passwordToWireBytes(allocator: std.mem.Allocator, session: *const passwor
 /// tampered or corrupt document fails closed.
 pub fn passwordFromWireBytes(allocator: std.mem.Allocator, bytes: []const u8) Error!password.AppPasswordSession {
     if (bytes.len == 0 or bytes.len > max_session_document_bytes) return error.StoreCorrupt;
+    switch (try peekDocumentKind(allocator, bytes)) {
+        .app_password => {},
+        .oauth => return error.WrongDocumentType,
+    }
     const Parsed = struct {
         format: []const u8,
         did: []const u8,
@@ -494,7 +522,7 @@ pub fn passwordFromWireBytes(allocator: std.mem.Allocator, bytes: []const u8) Er
     }) catch return error.StoreCorrupt;
     defer parsed.deinit();
     const value = parsed.value;
-    if (!std.mem.eql(u8, value.format, "boris-app-password-v1")) return error.StoreCorrupt;
+    if (!std.mem.eql(u8, value.format, password_document_format)) return error.StoreCorrupt;
     return password.sessionFromWire(allocator, .{
         .did = value.did,
         .pds_origin = value.pds_origin,
@@ -594,8 +622,9 @@ test "app-password sessions save, load, remove, and fail closed on tamper" {
     try std.testing.expectEqual(@as(u64, 7200), loaded.access_token_expires_in);
 
     // An OAuth document and an app-password document share one filename per
-    // DID: the OAuth loader must reject the app-password document as corrupt.
-    try std.testing.expectError(error.StoreCorrupt, store.load(test_did));
+    // DID: the OAuth loader must reject the app-password document as the
+    // other type, not as corruption.
+    try std.testing.expectError(error.WrongDocumentType, store.load(test_did));
 
     const file_name = try store.fileNameForDid(test_did);
     defer gpa.free(file_name);
@@ -633,6 +662,24 @@ test "tampered session documents fail closed" {
     try store.dir.writeFile(io, .{ .sub_path = file_name, .data = tampered, .flags = .{ .truncate = true, .permissions = std.Io.File.Permissions.fromMode(0o600) } });
 
     try std.testing.expectError(error.InvalidSessionWire, store.load(test_did));
+}
+
+test "cross-type loads are WrongDocumentType and unknown format is StoreCorrupt" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var store = try Store.openIn(gpa, io, tmp.dir, "sessions");
+    defer store.deinit();
+
+    var oauth = try makeTestSession(gpa);
+    defer oauth.deinit();
+    try store.save(test_did, &oauth);
+    try std.testing.expectError(error.WrongDocumentType, store.loadPassword(test_did));
+
+    try std.testing.expectError(error.StoreCorrupt, sessionFromWireBytes(gpa, "{\"format\":\"boris-unknown-v0\"}\n"));
+    try std.testing.expectError(error.StoreCorrupt, sessionFromWireBytes(gpa, "{not json"));
+    try std.testing.expectError(error.StoreCorrupt, passwordFromWireBytes(gpa, "{\"format\":\"boris-unknown-v0\"}\n"));
 }
 
 test "lock acquires and store survives a second open" {
