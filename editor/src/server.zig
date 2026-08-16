@@ -77,6 +77,10 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
             if (request.head.method != .POST) return methodNotAllowed(request, "POST");
             return serveFileOpen(io, allocator, request, config);
         }
+        if (std.mem.eql(u8, target, "/api/files/probe")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveFileProbe(io, allocator, request, config);
+        }
         if (std.mem.eql(u8, target, "/api/files/save")) {
             if (request.head.method != .POST) return methodNotAllowed(request, "POST");
             return serveFileSave(io, allocator, request, config);
@@ -171,6 +175,11 @@ const SaveRequest = struct {
     recreate: bool = false,
 };
 
+const ProbeRequest = struct {
+    path: []const u8,
+    fingerprint: []const u8,
+};
+
 const CreateRequest = struct {
     path: []const u8,
     content: []const u8 = "",
@@ -198,6 +207,29 @@ fn serveFileList(io: Io, allocator: std.mem.Allocator, request: *http.Server.Req
     const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .files = files.entries }, .{});
     defer allocator.free(bytes);
     return respondJson(request, .ok, bytes);
+}
+
+fn serveFileProbe(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(ProbeRequest, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    var outcome = file_api.probe(allocator, io, config.project_root, parsed.value.path, parsed.value.fingerprint) catch |err| return respondApiError(request, err);
+    defer outcome.deinit(allocator);
+    switch (outcome) {
+        .unchanged => |meta| {
+            const bytes = try std.json.Stringify.valueAlloc(allocator, .{
+                .status = "unchanged",
+                .fingerprint = meta.fingerprint[0..],
+                .read_only = meta.read_only,
+            }, .{});
+            defer allocator.free(bytes);
+            return respondJson(request, .ok, bytes);
+        },
+        .changed => |buffer| return respondBuffer(allocator, request, .ok, "changed", parsed.value.path, buffer),
+        .deleted => return respondJson(request, .ok, "{\"status\":\"deleted\"}"),
+        .transient => return respondJson(request, .ok, "{\"status\":\"transient\"}"),
+    }
 }
 
 fn serveFileOpen(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {

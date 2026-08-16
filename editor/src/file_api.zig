@@ -60,6 +60,21 @@ pub const SaveHook = enum {
     fail_before_replace,
 };
 
+pub const ProbeOutcome = union(enum) {
+    unchanged: struct { fingerprint: Fingerprint, read_only: bool },
+    changed: Buffer,
+    deleted,
+    transient,
+
+    pub fn deinit(self: *ProbeOutcome, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .changed => |*buffer| buffer.deinit(allocator),
+            else => {},
+        }
+        self.* = undefined;
+    }
+};
+
 const PathParts = struct {
     parent: []const u8,
     basename: []const u8,
@@ -123,6 +138,42 @@ pub fn list(allocator: std.mem.Allocator, io: Io, project_root: []const u8) !Fil
         }
     }.less);
     return .{ .entries = try entries.toOwnedSlice(allocator) };
+}
+
+pub fn probe(
+    allocator: std.mem.Allocator,
+    io: Io,
+    project_root: []const u8,
+    path: []const u8,
+    expected_fingerprint: []const u8,
+) !ProbeOutcome {
+    try validatePath(path);
+    try validateFingerprint(expected_fingerprint);
+
+    var root = Io.Dir.cwd().openDir(io, project_root, .{ .follow_symlinks = false }) catch |err| {
+        return if (isTransientFs(err)) .transient else err;
+    };
+    defer root.close(io);
+    const parts = splitPath(path);
+    const parent = openParent(io, root, parts.parent) catch |err| switch (err) {
+        error.FileNotFound => return .deleted,
+        else => |other| return if (isTransientFs(other)) .transient else other,
+    };
+    defer parent.close(io);
+
+    var current = readBuffer(allocator, io, parent.dir, parts.basename) catch |err| switch (err) {
+        error.FileNotFound => return .deleted,
+        else => |other| return if (isTransientFs(other)) .transient else other,
+    };
+    if (std.mem.eql(u8, current.fingerprint[0..], expected_fingerprint)) {
+        const outcome: ProbeOutcome = .{ .unchanged = .{
+            .fingerprint = current.fingerprint,
+            .read_only = current.read_only,
+        } };
+        current.deinit(allocator);
+        return outcome;
+    }
+    return .{ .changed = current };
 }
 
 pub fn open(allocator: std.mem.Allocator, io: Io, project_root: []const u8, path: []const u8) !Buffer {
@@ -406,6 +457,13 @@ fn atomicWrite(
     temp_exists = false;
 }
 
+fn isTransientFs(err: anyerror) bool {
+    return switch (err) {
+        error.AccessDenied, error.Busy, error.SystemResources => true,
+        else => false,
+    };
+}
+
 fn isSaveTempName(name: []const u8) bool {
     if (!std.mem.startsWith(u8, name, save_temp_prefix) or !std.mem.endsWith(u8, name, save_temp_suffix)) return false;
     const hex = name[save_temp_prefix.len .. name.len - save_temp_suffix.len];
@@ -583,4 +641,30 @@ test "files larger than 8 MiB are refused without writing" {
     @memset(huge, 'a');
     try std.testing.expectError(error.FileTooLarge, create(allocator, io, root, "content/huge.md", huge));
     try std.testing.expectError(error.FileNotFound, open(allocator, io, root, "content/huge.md"));
+}
+
+test "probe reports unchanged, changed, and deleted disk state" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var temp = try createTestProject();
+    defer temp.cleanup();
+    const root = try testProjectPath(&temp, allocator);
+    defer allocator.free(root);
+    var opened = try open(allocator, io, root, "content/index.md");
+    defer opened.deinit(allocator);
+
+    var same = try probe(allocator, io, root, "content/index.md", &opened.fingerprint);
+    defer same.deinit(allocator);
+    try std.testing.expect(same == .unchanged);
+
+    try temp.dir.writeFile(io, .{ .sub_path = "content/index.md", .data = "# External\n" });
+    var changed = try probe(allocator, io, root, "content/index.md", &opened.fingerprint);
+    defer changed.deinit(allocator);
+    try std.testing.expect(changed == .changed);
+    try std.testing.expectEqualStrings("# External\n", changed.changed.content);
+
+    try temp.dir.deleteFile(io, "content/index.md");
+    var gone = try probe(allocator, io, root, "content/index.md", &opened.fingerprint);
+    defer gone.deinit(allocator);
+    try std.testing.expect(gone == .deleted);
 }
