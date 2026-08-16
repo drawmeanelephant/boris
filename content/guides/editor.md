@@ -191,7 +191,6 @@ Actions workflow; Standard.site publish stays on the CLI. The editor does not
 store secrets or run a deployer.
 
 - [[guides/publishing|Publishing targets]] — profile, plan, and verified targets
-- [Publication plan contract](/docs/contracts/publication-plan.md) — what `boris plan` emits
 
 ---
 
