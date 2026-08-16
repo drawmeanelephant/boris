@@ -650,7 +650,8 @@ test('structured problems group, navigate by UTF-8 byte position, and copy a bou
 
   const copy = page.getByRole('button', { name: 'Copy packet for EDUPLICATEID at index.md', exact: true });
   await expect(copy).toHaveText('Copy packet for EDUPLICATEID at index.md');
-  await copy.click();
+  await copy.focus();
+  await page.keyboard.press('Enter');
   copied = await page.evaluate(() => (window as unknown as { copied: string }).copied);
   expect(copied).toBe(packet);
   expect(copied.length).toBeLessThanOrEqual(4096);
