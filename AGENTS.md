@@ -81,8 +81,9 @@ Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the
   direction.
 - **Publication targets are a registry**, not a surprise. GitHub Pages and
   Standard.site are verified targets (`boris plan`, `boris standard-site`).
-  Nostr is an open program. Do not treat either shipped target as “not real
-  because the README used to mention only `dist/`.”
+  Nostr plan/sign/publish is a shipped CLI family and is not a verified
+  target. Do not treat Pages or Standard.site as “not real because the
+  README used to mention only `dist/`.”
 - **The editor is a product surface.** `editor/` is a local, compiler-backed
   authoring host. It does not own parsing, the graph, validation, rendering, or
   publication. Do not invent a parallel editor pipeline.

@@ -13,13 +13,14 @@ tags: [reference, cli, commands]
 
 This page is lookup. For which command to run first, see
 [[guides/cli-and-modes|CLI & Output Modes]] and
-[[guides/publishing|Publishing Targets]].
+[[guides/publishing|Publishing Targets]]. Nostr is
+[[guides/nostr-publication|its own family]].
 
 </Aside>
 
-The public CLI has six core commands plus the `standard-site` family. With no
-command, Boris runs `build` and publishes an HTML site under `dist/` — the
-default target, not the only one.
+The public CLI has six core commands plus the `standard-site` and `nostr`
+families. With no command, Boris runs `build` and publishes an HTML site
+under `dist/` — the default target, not the only one.
 
 ## Commands at a glance
 
@@ -32,6 +33,9 @@ default target, not the only one.
 | `impact ID` | Report transitive dependents of a page or source endpoint | No |
 | `plan --profile PATH` | Normalize a publication profile without publishing | No |
 | `standard-site …` | Atmosphere plan / records / login / publish / smoke / logout | Depends on the subcommand |
+| `nostr plan` | Emit the offline NIP-23 publication plan for the selected profile | No; plan JSON on stdout |
+| `nostr sign` | Sign a plan artifact into a signed-event bundle (key once via stdin) | No; bundle JSON on stdout or `--out PATH` |
+| `nostr publish` | Send the exact signed events to the plan's relays over WebSocket | No; report JSON on stdout or `--out PATH` |
 
 ## Basic usage
 
@@ -156,6 +160,37 @@ Sitemap publication is HTML-only, requires an HTTP(S) `--site-url`, and is
 limited to one HTML target. The path is relative to that target. `validate`
 accepts the same sitemap configuration but renders it in memory and discards
 the result.
+
+### Nostr NIP-23 publication
+
+The `nostr` family publishes allowlisted pages as NIP-23 long-form-content
+events. It is the only part of the CLI where a relay is contacted, and the
+secret and the network never mix:
+
+```bash
+./zig-out/bin/boris nostr plan --profile profiles/site.json
+./zig-out/bin/boris nostr sign --plan plan.json --key-stdin --out bundle.json
+./zig-out/bin/boris nostr publish --plan plan.json --bundle bundle.json --out report.json
+```
+
+| Command | Flags | Key | Network |
+|---|---|---|---|
+| `nostr plan` | `--profile PATH` (required) | never | never |
+| `nostr sign` | `--plan PATH` (required), `--key-stdin` (required), `--out PATH`, `--prior PATH`, `--created-at N` | once, from stdin | never |
+| `nostr publish` | `--plan PATH` (required), `--bundle PATH` (required), `--out PATH` | never | the plan's relays |
+
+`nostr plan` emits the offline publication plan (no key, no signature, no
+relay). `nostr sign` reads the secret key once from stdin (64 hex digits or a
+NIP-19 `nsec` — never argv/profile/env), signs every article's NIP-01 event
+id with BIP-340, and writes a signed-event bundle. `nostr publish` verifies
+the bundle against the plan before sending anything, delivers the exact
+signed events over `wss://` (loopback-only for `ws://`), and writes a report
+classifying the run `complete`/`partial`/`failed`/`incomplete` with per-relay
+evidence; a NIP-42 relay is reported honestly as `auth-required/unsupported`.
+A bare build never needs a key, a relay, or the network. See
+[[guides/nostr-publication|Nostr NIP-23 Publication]] for the workflow, and
+[`nostr-publication.md`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/nostr-publication.md)
+for the normative contract.
 
 ## Analysis output
 

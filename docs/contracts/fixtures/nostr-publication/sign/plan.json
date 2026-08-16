@@ -1,0 +1,36 @@
+{
+  "format": "boris-nostr-publication-plan",
+  "schema_version": 1,
+  "protocol": {
+    "nips_revision": "656cecc7c0a815b6a2b218d3b5d6f078b3f4dbab",
+    "research_date": "2026-08-14",
+    "kind": 30023
+  },
+  "author": {
+    "expected_pubkey": "dff1d77f2a671c5f36183726db2341be58feae1da2deced843240f7b502ba659"
+  },
+  "articles": [
+    {
+      "entity_id": "articles/vec",
+      "kind": 30023,
+      "tags": [
+        ["d", "articles/vec"],
+        ["published_at", "1705761000"],
+        ["title", "Vector"],
+        ["r", "https://example.com/a.html"]
+      ],
+      "content": "Line one\nLine \"two\" with \\ backslash\ttab and ünïcode. \b\f\r",
+      "intention_digest": "52d9d153d14dbd22c7530da30ea3a6ad82d82339984fa9ccd1ecb68b5b35d9ab"
+    },
+    {
+      "entity_id": "articles/simple",
+      "kind": 30023,
+      "tags": [
+        ["d", "articles/simple"],
+        ["published_at", "1705761000"]
+      ],
+      "content": "# Simple\n",
+      "intention_digest": "63f70c8f1af54cf7acf947df76a73714b257dc22e870d635ed78ff6225501535"
+    }
+  ]
+}

@@ -101,7 +101,8 @@ A first-time author should do this, in this order:
 
 For a hosted site, the deployment URL is publication truth: `base_url`,
 `origin`, and `base_path` must agree or the build fails closed
-(`EPUBLICATIONLOCATION`). Nostr is an open program, not a step on this trail.
+(`EPUBLICATIONLOCATION`). Nostr is a later, explicit family
+(`boris nostr plan` / `sign` / `publish`), not a step on this trail.
 
 - Contracts: [publication profile](contracts/publication-profile.md) ·
   [publication plan](contracts/publication-plan.md) ·

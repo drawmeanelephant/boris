@@ -26,6 +26,9 @@ boris plan --profile PATH [plan overrides]
 | `watch` | Run an HTML build, then rebuild after debounced source/layout changes | HTML output selected by build options |
 | `plan` | Parse and normalize one publication profile without executing it | Nothing; normalized declaration JSON is written to stdout |
 | `standard-site <subcommand>` | Explicit Standard.site family (plan / records / verify / login / sessions / logout / publish / smoke) | Plan/records/verify/evidence/smoke artifacts only when `--out` is given; login writes a `0600` session document under the session root |
+| `nostr plan` | Emit the offline NIP-23 publication plan for the selected profile (no key, no signature, no relay) | Nothing; plan JSON on stdout |
+| `nostr sign` | Sign a plan artifact into a signed-event bundle; the key is read once from stdin (hex or nsec) and never from argv/profile/env | Nothing; bundle JSON on stdout or `--out PATH` |
+| `nostr publish` | Send the exact signed events from a bundle to the plan's relays over RFC-6455 WebSocket (no key; the bundle was signed offline). Every relay interaction is bounded and produces per-relay evidence; the run always reaches a `complete`/`partial`/`failed`/`incomplete` verdict | Nothing; the report JSON on stdout or `--out PATH` |
 
 `boris standard-site` with no subcommand is a usage error (exit 2) that
 prints the family list, not the full compiler help. `boris standard-site
@@ -227,6 +230,48 @@ It requires `--site-url`, `--rss-title`, and `--rss-description`; `--rss-limit`
 is 1–500 (default 20). RSS is incompatible with every other build projection,
 `validate`, `check`, and `impact`. See the normative
 [RSS 2.0 contract](rss-2.0.md).
+
+## Nostr NIP-23 publication
+
+Three subcommands publish documentation pages as NIP-23 long-form-content
+events. The secret and the network are never mixed: `nostr sign` is the only
+command that reads a key (once, from stdin), and `nostr publish` is the only
+command that contacts a relay. A bare `boris build` never needs a key, a
+relay, or the network.
+
+```text
+boris nostr plan --profile PATH
+boris nostr sign --plan PLAN.json --key-stdin [--out BUNDLE.json] [--prior PRIOR.json] [--created-at N]
+boris nostr publish --plan PLAN.json --bundle BUNDLE.json [--out REPORT.json]
+```
+
+| Command | Key | Network | Writes by default |
+|---------|-----|---------|-------------------|
+| `nostr plan` | never | never | Plan JSON on stdout |
+| `nostr sign` | once, from stdin | never | Bundle JSON on stdout or `--out PATH` |
+| `nostr publish` | never | the plan's relays | Report JSON on stdout or `--out PATH` |
+
+`nostr sign` options: `--plan PATH` (required), `--key-stdin` (required; the
+key is 64 hex digits or a NIP-19 `nsec`, read once and zeroed best-effort —
+never from argv, profile, environment, or diagnostics), `--out PATH` (bundle
+output path; default stdout), `--prior PATH` (prior signed bundle for the
+same `(kind, pubkey, d)` address, to reuse unchanged evidence and enforce
+strict `created_at` update ordering), and `--created-at N` (explicit unix
+seconds; test/recovery only). `nostr publish` options: `--plan PATH`
+(required), `--bundle PATH` (required; verified against the plan before
+anything is sent), and `--out PATH` (report output path; default stdout).
+
+Exit codes: `0` success (`nostr sign` wrote a bundle; `nostr publish`
+wrote a report — the publish verdict lives in the report, not the code,
+even when relays emit `ENOSTRRELAY`); `1` content failure, including
+`ENOSTRSIGN` refusals and `ENOSTRTIME` ordering violations (no bundle or
+report is written); `2` usage error (missing `--plan`/`--key-stdin`/
+`--bundle`, an invalid `--created-at`, relay configuration refused by the
+strict profile parser, or a plan/bundle over the size bound); `3` I/O or
+system failure. See the normative
+[`nostr-publication` contract](nostr-publication.md) for the plan, signed
+bundle, and report artifacts, the `created_at` update-ordering rules, and
+the hostile mock-relay conformance matrix.
 
 ## HTML sitemap flags
 

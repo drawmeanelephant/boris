@@ -95,8 +95,8 @@ Local `dist/` is the default. It is not the only exit.
 
 Do not start with browser OAuth against bsky.social. Do not type an app
 password on argv. Do not edit files under `dist/`. Do not run the standalone
-search-index tool after a normal Boris build. Do not invent a `boris nostr`
-command because you read a roadmap issue.
+search-index tool after a normal Boris build. Do not start day one with
+`boris nostr publish` — that family exists; it is not the first command.
 
 </Details>
 

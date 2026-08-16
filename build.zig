@@ -390,12 +390,23 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "oliver", .module = oliver_mod }},
     });
 
+    // bitcoin-core/secp256k1, pinned at v0.8.0 in build.zig.zon (#492/#495).
+    // Compiled from source (schnorrsig + extrakeys modules; precomputed
+    // tables ship in-tree, so there is no configure or generator step) and
+    // exposed to Zig through a Boris-owned translate-c umbrella header
+    // (src/secp256k1_bindings.h). The narrow FFI wrapper lives in
+    // src/nostr_keys.zig; see docs/contracts/nostr-publication.md (signing)
+    // for the dependency record.
+    const secp = buildSecp256k1(b, target, optimize);
+
     // --- Product CLI (milestone 6 IR surface + m10 Oliver render seam) -----
     const root_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+    root_mod.addImport("secp256k1", secp.c_module);
+    root_mod.linkLibrary(secp.library);
     linkOliver(root_mod, oliver_mod);
 
     const exe = b.addExecutable(.{
@@ -655,7 +666,7 @@ pub fn build(b: *std.Build) void {
     const nostr_tests = b.addTest(.{ .root_module = nostr_mod });
     const run_nostr_tests = b.addRunArtifact(nostr_tests);
     run_nostr_tests.setCwd(b.path("."));
-    const test_nostr_step = b.step("test-nostr", "Run Nostr NIP-23 mapping, eligibility, and plan tests");
+    const test_nostr_step = b.step("test-nostr", "Run Nostr NIP-23 mapping, eligibility, plan, keys, and signing tests");
     test_nostr_step.dependOn(&run_nostr_tests.step);
 
     const nostr_plan_mod = b.createModule(.{
@@ -668,6 +679,59 @@ pub fn build(b: *std.Build) void {
     const run_nostr_plan_tests = b.addRunArtifact(nostr_plan_tests);
     run_nostr_plan_tests.setCwd(b.path("."));
     test_nostr_step.dependOn(&run_nostr_plan_tests.step);
+
+    // --- Nostr BIP-340 signing slice (#495) --------------------------------
+    const nostr_keys_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr_keys.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    nostr_keys_mod.addImport("secp256k1", secp.c_module);
+    nostr_keys_mod.linkLibrary(secp.library);
+    const nostr_keys_tests = b.addTest(.{ .root_module = nostr_keys_mod });
+    const run_nostr_keys_tests = b.addRunArtifact(nostr_keys_tests);
+    run_nostr_keys_tests.setCwd(b.path("."));
+    test_nostr_step.dependOn(&run_nostr_keys_tests.step);
+
+    const nostr_sign_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr_sign.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    nostr_sign_mod.addImport("secp256k1", secp.c_module);
+    nostr_sign_mod.linkLibrary(secp.library);
+    linkOliver(nostr_sign_mod, oliver_mod);
+    const nostr_sign_tests = b.addTest(.{ .root_module = nostr_sign_mod });
+    const run_nostr_sign_tests = b.addRunArtifact(nostr_sign_tests);
+    run_nostr_sign_tests.setCwd(b.path("."));
+    test_nostr_step.dependOn(&run_nostr_sign_tests.step);
+
+    // --- Nostr publish slice (#496): transport + hostile mock-relay matrix --
+    const nostr_publish_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr_publish.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    nostr_publish_mod.addImport("secp256k1", secp.c_module);
+    nostr_publish_mod.linkLibrary(secp.library);
+    linkOliver(nostr_publish_mod, oliver_mod);
+    const nostr_publish_tests = b.addTest(.{ .root_module = nostr_publish_mod });
+    const run_nostr_publish_tests = b.addRunArtifact(nostr_publish_tests);
+    run_nostr_publish_tests.setCwd(b.path("."));
+    test_nostr_step.dependOn(&run_nostr_publish_tests.step);
+
+    const nostr_publish_matrix_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr_publish_matrix_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    nostr_publish_matrix_mod.addImport("secp256k1", secp.c_module);
+    nostr_publish_matrix_mod.linkLibrary(secp.library);
+    linkOliver(nostr_publish_matrix_mod, oliver_mod);
+    const nostr_publish_matrix_tests = b.addTest(.{ .root_module = nostr_publish_matrix_mod });
+    const run_nostr_publish_matrix_tests = b.addRunArtifact(nostr_publish_matrix_tests);
+    run_nostr_publish_matrix_tests.setCwd(b.path("."));
+    test_nostr_step.dependOn(&run_nostr_publish_matrix_tests.step);
 
     // --- Runtime publication artifact inventory ---------------------------
     const artifact_inventory_mod = b.createModule(.{
@@ -1541,6 +1605,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_publication_plan_tests.step);
     test_step.dependOn(&run_nostr_tests.step);
     test_step.dependOn(&run_nostr_plan_tests.step);
+    test_step.dependOn(&run_nostr_keys_tests.step);
+    test_step.dependOn(&run_nostr_sign_tests.step);
     test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_publication_checks_tests.step);
     test_step.dependOn(&run_publication_claims_tests.step);
@@ -1607,4 +1673,61 @@ pub fn build(b: *std.Build) void {
 /// global state, nothing to pre-build.
 fn linkOliver(mod: *std.Build.Module, oliver: *std.Build.Module) void {
     mod.addImport("oliver", oliver);
+}
+
+/// bitcoin-core/secp256k1 as a static library plus a translate-c module.
+///
+/// The compile flags enable exactly the modules the signing slice needs:
+/// schnorrsig (BIP-340) and extrakeys (keypair/x-only, which schnorrsig
+/// depends on). The precomputed table sources ship in-tree upstream, so no
+/// configure or generator step runs; the Zig build compiles the pinned C
+/// directly. This arrangement mirrors the proven integration in the Zig
+/// ecosystem (zig-nostr/nostr) but the wrapper on top is Boris-owned
+/// (src/nostr_keys.zig) and written against the upstream headers.
+const Secp256k1 = struct {
+    library: *std.Build.Step.Compile,
+    c_module: *std.Build.Module,
+};
+
+fn buildSecp256k1(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) Secp256k1 {
+    const upstream = b.dependency("secp256k1", .{});
+
+    const lib = b.addLibrary(.{
+        .name = "secp256k1",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    lib.root_module.link_libc = true;
+    lib.root_module.addIncludePath(upstream.path("include"));
+    lib.root_module.addIncludePath(upstream.path("src"));
+    lib.root_module.addCSourceFiles(.{
+        .root = upstream.path("."),
+        .flags = &.{
+            "-DENABLE_MODULE_SCHNORRSIG=1",
+            "-DENABLE_MODULE_EXTRAKEYS=1",
+        },
+        .files = &.{
+            "src/secp256k1.c",
+            "src/precomputed_ecmult.c",
+            "src/precomputed_ecmult_gen.c",
+        },
+    });
+
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = b.path("src/secp256k1_bindings.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_c.addIncludePath(upstream.path("include"));
+    const c_module = translate_c.createModule();
+    c_module.linkLibrary(lib);
+
+    return .{ .library = lib, .c_module = c_module };
 }
