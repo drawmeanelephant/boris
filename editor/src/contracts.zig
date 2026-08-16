@@ -19,6 +19,7 @@ pub const Error = error{
 pub const Kind = enum {
     completion,
     build_report,
+    html_build_report,
     manifest,
     graph,
     documentation_intelligence,
@@ -105,6 +106,21 @@ pub fn readBuildReport(allocator: std.mem.Allocator, bytes: []const u8) Error!Do
     const diagnostic_views = try extractDiagnostics(allocator, &document);
     allocator.free(diagnostic_views);
     return withVersion(document, version);
+}
+
+pub fn readHtmlBuildReport(allocator: std.mem.Allocator, bytes: []const u8) Error!Document {
+    var document = try parseObject(allocator, bytes, .html_build_report);
+    errdefer document.deinit();
+    try expectString(&document, "schemaVersion", "html-build-report-0.1.0");
+    try requireString(&document, "compilerId");
+    try requireBool(&document, "ok");
+    try requireString(&document, "contentRoot");
+    try requireString(&document, "outDir");
+    try requireInteger(&document, "errorCount");
+    try requireArray(&document, "diagnostics");
+    const diagnostic_views = try extractDiagnostics(allocator, &document);
+    allocator.free(diagnostic_views);
+    return withVersion(document, "html-build-report-0.1.0");
 }
 
 pub fn readManifest(allocator: std.mem.Allocator, bytes: []const u8) Error!Document {
@@ -202,7 +218,7 @@ pub fn parseTextDiagnostic(line_bytes: []const u8) Error!TextDiagnostic {
 }
 
 pub fn extractDiagnostics(allocator: std.mem.Allocator, document: *const Document) Error![]Diagnostic {
-    if (document.kind != .build_report and document.kind != .documentation_intelligence) return error.InvalidField;
+    if (document.kind != .build_report and document.kind != .html_build_report and document.kind != .documentation_intelligence) return error.InvalidField;
     const value = rootObject(document).get("diagnostics") orelse return error.MissingField;
     if (value != .array) return error.InvalidField;
     const result = allocator.alloc(Diagnostic, value.array.items.len) catch return error.InvalidField;
@@ -431,6 +447,19 @@ test "IR adapters negotiate base and conditional facet versions" {
     );
     defer graph.deinit();
     try std.testing.expectEqualStrings("0.4.0", graph.version);
+}
+
+test "HTML-path report adapter accepts html-build-report-0.1.0" {
+    const allocator = std.testing.allocator;
+    var report = try readHtmlBuildReport(allocator,
+        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+    );
+    defer report.deinit();
+    try std.testing.expectEqual(.html_build_report, report.kind);
+    try std.testing.expectEqualStrings("html-build-report-0.1.0", report.version);
+    try std.testing.expectError(error.UnknownFormat, readHtmlBuildReport(allocator,
+        \\{"schemaVersion":"0.2.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+    ));
 
     try std.testing.expectError(error.UnsupportedSchemaVersion, readGraph(allocator,
         \\{"schemaVersion":"9.0.0","frozen":true,"nodes":[],"edges":[],"reverseIndex":[],"nav":[]}

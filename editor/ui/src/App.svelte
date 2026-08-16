@@ -143,6 +143,7 @@
   let graphPayload: GraphPayload | null = null;
   let graphStatus = 'Loading the Boris graph…';
   let inputMode: NonNullable<Health['project']['input_mode']> = 'empty';
+  let previewWidth: 'full' | '375' | '768' | '1440' = 'full';
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -161,6 +162,12 @@
   $: bufferWikiLinks = wikiLinksInSource(content).map(id => ({
     id, node: nodeForId(graphPayload?.graph ?? null, id)
   }));
+  $: themeLayoutOpen = activePath.startsWith('themes/') && activePath.endsWith('.html');
+  $: closedLayoutSlots = authoring?.completion?.layout_slots ?? [];
+  $: layoutSlotsInBuffer = closedLayoutSlots.filter(slot => content.includes(`{{${slot}}}`));
+  $: layoutSlotsMissing = closedLayoutSlots.filter(slot => !content.includes(`{{${slot}}}`));
+  $: themeAssets = files.filter(file => file.path.startsWith('themes/') && file.path.includes('/assets/'));
+  $: layoutSelections = (commandResult?.problems ?? []).filter(problem => problem.code === 'ILAYOUTSELECTED');
   $: resolutionPrompt = (() => {
     const pending = pendingResolution;
     if (!pending) return '';
@@ -1484,6 +1491,59 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
           </table>
         </section>
       {/if}
+      {#if themeLayoutOpen}
+        <section class="theme-pane" aria-labelledby="theme-heading">
+          <div class="problems-heading">
+            <div>
+              <h3 id="theme-heading">Theme layout</h3>
+              <p>Closed slots come from Boris <code>completion.json</code>. The buffer scan is presentation only.</p>
+            </div>
+          </div>
+          <p class="fallback-notice">Boris does not record fallback layout winners. Rule-selected pages appear as <code>ILAYOUTSELECTED</code> after Build HTML or Validate. See issue 557.</p>
+          {#if closedLayoutSlots.length === 0}
+            <p>Build diagnostics to load the closed layout-slot vocabulary.</p>
+          {:else}
+            <h4>Slots in this layout</h4>
+            <ul class="graph-links">
+              {#each layoutSlotsInBuffer as slot (slot)}
+                <li>Present: <code>{'{{' + slot + '}}'}</code></li>
+              {/each}
+            </ul>
+            {#if layoutSlotsMissing.length > 0}
+              <h4>Closed slots not in this file</h4>
+              <ul class="graph-links">
+                {#each layoutSlotsMissing as slot (slot)}
+                  <li>Absent: <code>{'{{' + slot + '}}'}</code></li>
+                {/each}
+              </ul>
+            {/if}
+          {/if}
+          {#if themeAssets.length > 0}
+            <h4>Theme assets</h4>
+            <ul class="graph-links">
+              {#each themeAssets as asset (asset.path)}
+                <li><button type="button" onclick={() => openFile(asset.path)}>Open {asset.path}</button></li>
+              {/each}
+            </ul>
+          {/if}
+          {#if layoutSelections.length > 0}
+            <h4>Layout selection from the last HTML report</h4>
+            <ul class="graph-links">
+              {#each layoutSelections as problem}
+                <li>
+                  {#if problem.source_path}
+                    <button type="button" onclick={() => navigateToProblem(problem)}>
+                      {problemLocationLabel(problem)}: {problem.message}
+                    </button>
+                  {:else}
+                    {problem.message}
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
+      {/if}
       <p class:warning={dirty || readOnly} class="buffer-state">
         {readOnly ? 'Read-only file' : dirty ? 'Unsaved changes' : 'Saved on disk'}
       </p>
@@ -1624,6 +1684,22 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
         {/if}
       </div>
     </div>
+    <fieldset class="preview-viewports" aria-label="Preview width">
+      <legend>Preview width</legend>
+      <label><input type="radio" name="preview-width" value="full" bind:group={previewWidth} /> Full pane</label>
+      <label><input type="radio" name="preview-width" value="375" bind:group={previewWidth} /> 375px</label>
+      <label><input type="radio" name="preview-width" value="768" bind:group={previewWidth} /> 768px</label>
+      <label><input type="radio" name="preview-width" value="1440" bind:group={previewWidth} /> 1440px</label>
+    </fieldset>
+    <details class="preview-a11y">
+      <summary>Accessibility review aid</summary>
+      <p>This list does not replace Voice Control, VoiceOver, or a real audit.</p>
+      <ul>
+        <li>Open the preview in a new tab and run Voice Control “Show names”.</li>
+        <li>Tab through the compiled page without a pointer.</li>
+        <li>Check that status is not color-only.</li>
+      </ul>
+    </details>
     <p class="preview-state" class:current={previewData?.phase === 'success'} class:failure={previewData?.phase === 'failed' || previewData?.phase === 'stale'}>
       <strong>{previewData?.phase ?? 'idle'}:</strong> {previewState}
     </p>
@@ -1631,11 +1707,13 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       <p class="fallback-notice">Rich HTML diagnostics are unavailable; this failure message comes from bounded Boris stderr.</p>
     {/if}
     {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
-      <iframe
-        title="Boris site preview"
-        src={`${previewData.preview_url}&generation=${previewData.generation}`}
-        sandbox="allow-same-origin"
-      ></iframe>
+      <div class="preview-frame" class:constrained={previewWidth !== 'full'} style={previewWidth === 'full' ? undefined : `width:${previewWidth}px`}>
+        <iframe
+          title="Boris site preview"
+          src={`${previewData.preview_url}&generation=${previewData.generation}`}
+          sandbox="allow-same-origin"
+        ></iframe>
+      </div>
     {:else}
       <p>No valid Boris preview output is available yet.</p>
     {/if}

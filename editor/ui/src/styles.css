@@ -109,6 +109,15 @@ input, select { width: 100%; padding: 0.7rem; border: 1px solid #82958b; border-
 .preview-state.current { border-color: #176247; background: #e5f5ec; }
 .preview-state.failure { border-color: #ad584d; background: #fff0ed; }
 #preview iframe { width: 100%; min-height: 36rem; border: 1px solid #82958b; border-radius: 0.4rem; background: #fff; }
+.preview-frame.constrained { max-width: 100%; margin-inline: auto; }
+.preview-viewports { display: flex; flex-wrap: wrap; gap: 0.65rem 1rem; margin: 0.75rem 0; padding: 0.65rem 0.75rem; border: 1px solid #ccd6cf; border-radius: 0.4rem; }
+.preview-viewports legend { font-weight: 700; }
+.preview-viewports label { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 500; }
+.preview-viewports input { width: auto; }
+.preview-a11y { margin: 0.75rem 0; padding: 0.45rem 0.75rem; border-left: 0.3rem solid #718078; background: #f4f8f5; }
+.preview-a11y ul { margin: 0.35rem 0 0; padding-left: 1.2rem; }
+.theme-pane { margin-top: 1rem; padding: 1rem; border: 1px solid #9ab8aa; border-radius: 0.5rem; background: #f4f7fa; }
+.theme-pane h4 { margin: 0.85rem 0 0.4rem; font-size: 0.95rem; }
 
 dialog { width: min(52rem, calc(100% - 2rem)); max-height: calc(100vh - 3rem); overflow: auto; padding: 1.5rem; border: 1px solid #82958b; border-radius: 0.75rem; box-shadow: 0 1.25rem 4rem #11231d55; }
 dialog::backdrop { background: #10251dc7; }

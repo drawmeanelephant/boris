@@ -63,11 +63,14 @@ node -e '
 
 run_command "$work/validate-invalid.json" '{"mode":"validate"}'
 node -e '
+  const fs = require("fs");
   const r = require(process.argv[1]);
+  const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
   const p = r.problems.find(p => p.code === "EDUPLICATEID");
-  if (r.exit_code !== 1 || r.failure_class !== "content" || !r.used_stderr_fallback || !p) throw Error("stderr fallback mismatch");
-  if (p.source_path !== "b.md" || p.line !== 1 || p.column !== 1 || p.origin !== "stderr" || p.position_confidence !== "best_effort") throw Error("stderr position mismatch");
-' "$work/validate-invalid.json"
+  if (r.exit_code !== 1 || r.failure_class !== "content" || r.used_stderr_fallback || r.report_version !== "html-build-report-0.1.0") throw Error("validate HTML report mismatch");
+  if (!p || p.source_path !== "b.md" || p.line !== 1 || p.column !== 1 || p.origin !== "build_report" || p.position_confidence !== "exact") throw Error("validate structured position mismatch");
+  if (!report.diagnostics.some(d => d.code === "EDUPLICATEID")) throw Error("html-build-report.json missing EDUPLICATEID");
+' "$work/validate-invalid.json" "$work/project/.boris/html-build-report.json"
 
 rm "$work/project/content/a.md" "$work/project/content/b.md"
 run_command "$work/ir-valid.json" '{"mode":"ir_build"}'
@@ -112,9 +115,13 @@ node -e '
 
 run_command "$work/html-valid.json" '{"mode":"html_build"}'
 node -e '
+  const fs = require("fs");
   const r = require(process.argv[1]);
+  const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
   if (r.exit_code !== 0 || r.failure_class !== "success") throw Error("HTML build failed");
-' "$work/html-valid.json"
+  if (r.used_stderr_fallback || r.report_version !== "html-build-report-0.1.0") throw Error("HTML report was not adapted");
+  if (report.schemaVersion !== "html-build-report-0.1.0") throw Error("html-build-report.json missing");
+' "$work/html-valid.json" "$work/project/.boris/html-build-report.json"
 [[ -f "$work/project/dist/index.html" ]]
 
 echo "editor Boris diagnostics integration: ok"

@@ -160,6 +160,22 @@ approximate** because Boris locates them on adapted Markdown.
 
 ---
 
+## Theme authoring
+
+Open a file under `themes/` to see the closed layout-slot vocabulary next to
+the buffer. **Build HTML** or **Validate project** now read Boris's HTML
+`--report`, so layout errors (`ELAYOUT*`) and rule-selected winners
+(`ILAYOUTSELECTED`) show in Problems. A page that used the fallback layout
+will not get a selection finding — Boris does not record that yet
+([issue 557](https://github.com/drawmeanelephant/boris/issues/557)).
+
+Preview can be constrained to 375px, 768px, or 1440px. The accessibility
+notes next to the frame are a review aid, not a certification.
+
+- [[guides/themes-and-layouts|Themes and layouts]] — slots and assets the compiler owns
+
+---
+
 ## Compiler-backed commands and problems
 
 The Problems pane runs a fixed allowlist of Boris invocations against saved
