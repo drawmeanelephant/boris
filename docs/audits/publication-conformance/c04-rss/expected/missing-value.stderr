@@ -10,6 +10,7 @@ Modes:
   check               Read-only graph health report (findings do not fail by default)
   impact <ID>         Read-only transitive impact report for a page
   plan                Emit a normalized publication plan (no publication)
+  nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
   init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
   (no command)        Same as build
   --html              Explicit HTML site mode → --html-dir (default dist)
@@ -50,10 +51,15 @@ Options:
   --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
   --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
   --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
+  --target-profile N=P Per-target Oliver serialization profile (NAME=html|xhtml; default html)
   --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
                       Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
   --incremental       Content-addressed incremental HTML rendering (HTML mode)
   --watch             Compatibility flag; same as the watch command
+  --serve             Serve the built tree over loopback HTTP (watch only);
+                      auto-reload helper: http://127.0.0.1:PORT/__boris/
+  --port N            Loopback port for --serve (default 8090; 0 = ephemeral);
+                      implies --serve
   --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
   --timings           Print a machine-readable phase timing/counter JSON report to stdout
                       (opt-in; default output, diagnostics, and exit codes unchanged)
@@ -109,6 +115,8 @@ Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
 Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
       `boris validate` observes the selected HTML target configuration but writes no artifacts.
       `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
+      `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
+      it never signs, never contacts a relay, and never reads a key.
       --html / --html-dir / bare CLI map to a single target named "default".
       Equivalent --target / --target-layout / --layout-rule permutations yield the
       same config (targets sorted by name; rules canonicalized). No layout frontmatter.

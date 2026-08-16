@@ -1,0 +1,14 @@
+{
+  "format": "boris-publication-profile",
+  "schema_version": 1,
+  "input": "docs/contracts/fixtures/nostr-publication/content",
+  "site": { "url": "https://example.github.io/docs", "title": "Fixture site", "description": "A fixture." },
+  "publication": { "target": "github-pages", "base_url": "https://example.github.io/docs", "origin": "https://example.github.io", "base_path": "/docs" },
+  "targets": [{ "name": "public", "output": "dist", "public": true, "theme": "themes/boris" }],
+  "nostr": {
+    "enabled": true,
+    "pubkey": "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919",
+    "articles": ["articles/second", "articles/first"],
+    "relays": ["wss://relay.example.com/", "wss://a.relay.example.com:443"]
+  }
+}

@@ -496,6 +496,24 @@ pub fn build(b: *std.Build) void {
     // select identical layouts under both rule declaration orders (fixed
     // precedence: id > glob specificity > role > fallback) and publish the
     // documented assets.
+    // XHTML output profile evidence (#448, acceptance criterion 5): Boris
+    // content must publish a page under the XHTML profile that an independent
+    // XML parser (xmllint/libxml2, else python3 ElementTree) accepts, and the
+    // layout-owned document wrapper must carry the XML declaration +
+    // xhtml namespace exactly once. Pins the profile seam so it cannot rot.
+    const xhtml_evidence_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-xhtml-evidence.sh",
+    });
+    xhtml_evidence_run.setCwd(b.path("."));
+    xhtml_evidence_run.has_side_effects = true;
+    xhtml_evidence_run.step.dependOn(b.getInstallStep());
+    const test_xhtml_evidence_step = b.step(
+        "test-xhtml-evidence",
+        "Run the XHTML output-profile well-formedness evidence guard",
+    );
+    test_xhtml_evidence_step.dependOn(&xhtml_evidence_run.step);
+
     const reference_theme_run = b.addSystemCommand(&.{
         "bash",
         "scripts/test-reference-theme-layout.sh",
@@ -596,6 +614,30 @@ pub fn build(b: *std.Build) void {
     run_publication_plan_tests.setCwd(b.path("."));
     const test_publication_plan_step = b.step("test-publication-plan", "Run publication plan renderer and schema tests");
     test_publication_plan_step.dependOn(&run_publication_plan_tests.step);
+
+    // --- Nostr NIP-23 long-form publication (offline plan slice) ----------
+    const nostr_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(nostr_mod, oliver_mod);
+    const nostr_tests = b.addTest(.{ .root_module = nostr_mod });
+    const run_nostr_tests = b.addRunArtifact(nostr_tests);
+    run_nostr_tests.setCwd(b.path("."));
+    const test_nostr_step = b.step("test-nostr", "Run Nostr NIP-23 mapping, eligibility, and plan tests");
+    test_nostr_step.dependOn(&run_nostr_tests.step);
+
+    const nostr_plan_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr_plan.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(nostr_plan_mod, oliver_mod);
+    const nostr_plan_tests = b.addTest(.{ .root_module = nostr_plan_mod });
+    const run_nostr_plan_tests = b.addRunArtifact(nostr_plan_tests);
+    run_nostr_plan_tests.setCwd(b.path("."));
+    test_nostr_step.dependOn(&run_nostr_plan_tests.step);
 
     // --- Runtime publication artifact inventory ---------------------------
     const artifact_inventory_mod = b.createModule(.{
@@ -1466,6 +1508,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_github_pages_tests.step);
     test_step.dependOn(&github_pages_artifact_run.step);
     test_step.dependOn(&run_publication_plan_tests.step);
+    test_step.dependOn(&run_nostr_tests.step);
+    test_step.dependOn(&run_nostr_plan_tests.step);
     test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_publication_checks_tests.step);
     test_step.dependOn(&run_publication_claims_tests.step);
@@ -1516,6 +1560,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&emitter_registry.step);
     test_step.dependOn(&doc_links_run.step);
     test_step.dependOn(&github_pages_audit_test.step);
+    test_step.dependOn(&xhtml_evidence_run.step);
 
     const test_harness_step = b.step(
         "test-harness",

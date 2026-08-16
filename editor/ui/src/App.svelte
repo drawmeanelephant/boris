@@ -21,6 +21,20 @@
   type ErrorResponse = { error?: string; status?: string };
   type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact';
   type FailureClass = 'success' | 'content' | 'usage' | 'io' | 'terminated';
+  type PendingResolution =
+    | { action: 'open'; target: string }
+    | { action: 'command'; mode: CommandMode }
+    | { action: 'preview'; reason: 'save' | 'manual' }
+    | { action: 'restore'; snapshot: RecoverySnapshot };
+  type PaletteItem =
+    | { kind: 'create' }
+    | { kind: 'rename' }
+    | { kind: 'delete' }
+    | { kind: 'save' }
+    | { kind: 'command'; mode: CommandMode }
+    | { kind: 'preview' }
+    | { kind: 'source' }
+    | { kind: 'open'; path: string };
   type Problem = {
     severity: 'error' | 'warning' | 'info';
     code: string | null;
@@ -84,11 +98,14 @@
   let conflict: BufferResponse | null = null;
   let deletedConflict = false;
   let conflictDialog: HTMLDialogElement;
+  let resolutionDialog: HTMLDialogElement;
   let createDialog: HTMLDialogElement;
   let renameDialog: HTMLDialogElement;
   let deleteDialog: HTMLDialogElement;
+  let paletteDialog: HTMLDialogElement;
   let createPath = 'content/new-page.md';
   let renamePath = '';
+  let pendingResolution: PendingResolution | null = null;
   let commandRunning = false;
   let commandResult: CommandResult | null = null;
   let impactId = '';
@@ -97,6 +114,9 @@
   let completionKind: CompletionKind = 'frontmatter_key';
   let completionQuery = '';
   let selectedSuggestion = 0;
+  let completionOpen = false;
+  let paletteQuery = '';
+  let paletteSelection = 0;
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -105,6 +125,49 @@
   );
   $: suggestions = completionSuggestions(authoring, completionKind, completionQuery);
   $: if (selectedSuggestion >= suggestions.length) selectedSuggestion = Math.max(0, suggestions.length - 1);
+  $: resolutionPrompt = (() => {
+    const pending = pendingResolution;
+    if (!pending) return '';
+    if (pending.action === 'open') return `Save or discard the changes before opening ${pending.target}?`;
+    if (pending.action === 'command') return `Boris commands read repository files from disk. Save or discard the changes before running ${commandLabel(pending.mode)}?`;
+    if (pending.action === 'restore') return `Save or discard the changes before restoring ${pending.snapshot.path}?`;
+    return 'Save or discard the changes before rebuilding the preview?';
+  })();
+  $: resolutionVerb = pendingResolution?.action === 'open' ? 'switch' : pendingResolution?.action === 'command' ? 'run' : pendingResolution?.action === 'restore' ? 'restore' : 'rebuild';
+  $: paletteItems = (() => {
+    const items: PaletteItem[] = [
+      { kind: 'create' }, { kind: 'rename' }, { kind: 'delete' },
+      { kind: 'save' },
+      { kind: 'command', mode: 'validate' },
+      { kind: 'command', mode: 'ir_build' },
+      { kind: 'command', mode: 'html_build' },
+      { kind: 'command', mode: 'check' },
+      { kind: 'command', mode: 'impact' },
+      { kind: 'preview' },
+      { kind: 'source' }
+    ];
+    for (const file of files) items.push({ kind: 'open', path: file.path });
+    const needle = paletteQuery.trim().toLocaleLowerCase();
+    return needle ? items.filter(item => paletteItemLabel(item).toLocaleLowerCase().includes(needle)) : items;
+  })();
+  $: paletteEnabled = new Map<string, boolean>(
+    paletteItems.map(item => {
+      if (item.kind === 'open' || item.kind === 'source') return [paletteItemKey(item), true] as const;
+      if (item.kind === 'save') return [paletteItemKey(item), dirty && !readOnly] as const;
+      if (item.kind === 'preview') return [paletteItemKey(item), previewData?.phase !== 'running'] as const;
+      if (item.kind === 'command') return [paletteItemKey(item), !commandRunning] as const;
+      if (dirty) return [paletteItemKey(item), false] as const;
+      return [paletteItemKey(item), item.kind === 'create' || activePath !== ''] as const;
+    })
+  );
+  $: if (paletteEnabled.size > 0) {
+    const current = paletteItems[paletteSelection];
+    const currentEnabled = current ? paletteEnabled.get(paletteItemKey(current)) : undefined;
+    if (!currentEnabled) {
+      const first = paletteItems.findIndex(item => paletteEnabled.get(paletteItemKey(item)));
+      paletteSelection = first >= 0 ? first : 0;
+    }
+  }
 
   const token = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
 
@@ -193,7 +256,7 @@
   async function openFile(path: string): Promise<boolean> {
     if (path === activePath) return true;
     if (dirty) {
-      editorStatus = `Save or undo changes to ${activePath} before opening another file.`;
+      await requestResolution({ action: 'open', target: path });
       return false;
     }
     const result = await api<BufferResponse | ErrorResponse>('/api/files/open', {
@@ -211,7 +274,7 @@
 
   async function runCommand(mode: CommandMode) {
     if (dirty) {
-      commandStatus = `Save or undo changes to ${activePath}; Boris commands read project files from disk.`;
+      await requestResolution({ action: 'command', mode });
       return;
     }
     if (mode === 'impact' && !impactId.trim()) {
@@ -259,7 +322,7 @@
 
   async function rebuildPreview(reason: 'save' | 'manual' = 'manual') {
     if (dirty) {
-      previewState = `Save or undo changes to ${activePath} before rebuilding preview.`;
+      await requestResolution({ action: 'preview', reason });
       return;
     }
     if (previewData) previewData = { ...previewData, phase: 'running' };
@@ -292,11 +355,14 @@
   }
 
   function completionKeydown(event: KeyboardEvent) {
-    if (!suggestions.length) return;
+    if (event.key === 'Escape') {
+      completionOpen = false;
+      return;
+    }
+    if (!suggestions.length || !completionOpen) return;
     if (event.key === 'ArrowDown') { event.preventDefault(); selectedSuggestion = (selectedSuggestion + 1) % suggestions.length; }
     if (event.key === 'ArrowUp') { event.preventDefault(); selectedSuggestion = (selectedSuggestion + suggestions.length - 1) % suggestions.length; }
     if (event.key === 'Enter') { event.preventDefault(); void insertSuggestion(suggestions[selectedSuggestion]); }
-    if (event.key === 'Escape') completionQuery = '';
   }
 
   async function insertSuggestion(suggestion: Suggestion | undefined) {
@@ -470,8 +536,8 @@
     if (!result.response.ok) editorStatus = `Unsaved changes in ${activePath}; recovery snapshot failed.`;
   }
 
-  async function saveFile(recreate = false, replacementFingerprint = fingerprint) {
-    if (!activePath || readOnly || !dirty) return;
+  async function saveFile(recreate = false, replacementFingerprint = fingerprint): Promise<boolean> {
+    if (!activePath || readOnly || !dirty) return false;
     const result = await api<BufferResponse | ErrorResponse>('/api/files/save', {
       method: 'POST',
       body: JSON.stringify({ path: activePath, content, fingerprint: replacementFingerprint, recreate })
@@ -485,7 +551,7 @@
       deletedConflict = false;
       await refreshFiles();
       await rebuildPreview('save');
-      return;
+      return true;
     }
     const error = result.data as ErrorResponse;
     if (result.response.status === 409 && error.status === 'conflict') {
@@ -494,18 +560,71 @@
       editorStatus = `External changes detected in ${activePath}. Nothing was overwritten.`;
       await tick();
       conflictDialog.showModal();
+      conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
     } else if (result.response.status === 409 && error.status === 'deleted') {
       conflict = null;
       deletedConflict = true;
       editorStatus = `${activePath} was deleted outside the editor. Nothing was written.`;
       await tick();
       conflictDialog.showModal();
+      conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
     } else if (error.error === 'read_only') {
       readOnly = true;
       editorStatus = `${activePath} is read-only. Nothing was written.`;
     } else {
       editorStatus = `Save failed for ${activePath}. Your buffer remains unsaved.`;
     }
+    return false;
+  }
+
+  async function requestResolution(pending: PendingResolution) {
+    pendingResolution = pending;
+    await tick();
+    resolutionDialog.showModal();
+  }
+
+  async function resolvePendingSave() {
+    const pending = pendingResolution;
+    if (!pending) return;
+    pendingResolution = null;
+    resolutionDialog.close();
+    if (await saveFile()) {
+      await proceedAfterResolution(pending);
+    } else if (readOnly) {
+      editorStatus = `${activePath} is read-only, so it was not saved. Discard the unsaved buffer to continue.`;
+    }
+  }
+
+  async function resolvePendingDiscard() {
+    const pending = pendingResolution;
+    if (!pending) return;
+    pendingResolution = null;
+    resolutionDialog.close();
+    await discardBuffer();
+    await proceedAfterResolution(pending);
+  }
+
+  async function proceedAfterResolution(pending: PendingResolution) {
+    if (pending.action === 'open') {
+      await openFile(pending.target);
+    } else if (pending.action === 'command') {
+      await runCommand(pending.mode);
+    } else if (pending.action === 'restore') {
+      await restoreSnapshot(pending.snapshot);
+    } else {
+      await rebuildPreview(pending.reason);
+    }
+  }
+
+  async function discardBuffer() {
+    if (!activePath) return;
+    const discardedPath = activePath;
+    await clearRecovery(discardedPath);
+    stopRecoveryTimer();
+    content = baseline;
+    undoStack = [];
+    redoStack = [];
+    editorStatus = `Discarded unsaved changes in ${discardedPath}.`;
   }
 
   async function loadDiskVersion() {
@@ -543,7 +662,7 @@
 
   async function restoreSnapshot(snapshot: RecoverySnapshot) {
     if (dirty) {
-      editorStatus = `Save or undo changes to ${activePath} before restoring recovered work.`;
+      await requestResolution({ action: 'restore', snapshot });
       return;
     }
     const opened = await api<BufferResponse>('/api/files/open', {
@@ -584,6 +703,102 @@
   function openRenameDialog() {
     renamePath = activePath;
     renameDialog.showModal();
+  }
+
+  function openDeleteDialog() {
+    deleteDialog.showModal();
+    deleteDialog.querySelector<HTMLButtonElement>('.dialog-actions .danger')?.focus();
+  }
+
+  function paletteItemLabel(item: PaletteItem): string {
+    if (item.kind === 'create') return 'Create file';
+    if (item.kind === 'rename') return 'Rename file';
+    if (item.kind === 'delete') return 'Delete file';
+    if (item.kind === 'save') return 'Save file';
+    if (item.kind === 'command') return commandLabel(item.mode);
+    if (item.kind === 'preview') return 'Rebuild preview';
+    if (item.kind === 'source') return 'Focus source pane';
+    return 'Open file';
+  }
+
+  function paletteItemDetail(item: PaletteItem): string {
+    if (item.kind === 'create') return 'New project-relative path';
+    if (item.kind === 'rename' || item.kind === 'delete' || item.kind === 'save') return activePath;
+    if (item.kind === 'command') return 'Boris command';
+    if (item.kind === 'preview') return 'Rebuild the published output';
+    if (item.kind === 'source') return 'Jump to the editor';
+    return item.path;
+  }
+
+  function paletteItemEnabled(item: PaletteItem): boolean {
+    if (item.kind === 'open' || item.kind === 'source') return true;
+    if (item.kind === 'save') return dirty && !readOnly;
+    if (item.kind === 'preview') return previewData?.phase !== 'running';
+    if (item.kind === 'command') return !commandRunning;
+    if (dirty) return false;
+    return item.kind === 'create' || activePath !== '';
+  }
+
+  function paletteItemKey(item: PaletteItem): string {
+    if (item.kind === 'open') return `open:${item.path}`;
+    if (item.kind === 'command') return `command:${item.mode}`;
+    return item.kind;
+  }
+
+  function paletteEnabledIndices(): number[] {
+    return paletteItems
+      .map((item, index) => paletteItemEnabled(item) ? index : -1)
+      .filter((index): index is number => index >= 0);
+  }
+
+  function openPalette() {
+    if (document.querySelector('dialog[open]')) return;
+    paletteQuery = '';
+    paletteSelection = 0;
+    paletteDialog.showModal();
+  }
+
+  function paletteKeydown(event: KeyboardEvent) {
+    handleDialogKeydown(event);
+    if (event.defaultPrevented) return;
+    const enabled = paletteEnabledIndices();
+    if (enabled.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const current = enabled.indexOf(paletteSelection);
+      const base = current >= 0 ? current : -1;
+      paletteSelection = enabled[(base + 1 + enabled.length) % enabled.length];
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const current = enabled.indexOf(paletteSelection);
+      const base = current >= 0 ? current : enabled.length;
+      paletteSelection = enabled[(base - 1 + enabled.length) % enabled.length];
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteSelection];
+      if (item && paletteItemEnabled(item)) executePaletteItem(item);
+    }
+  }
+
+  function executePaletteItem(item: PaletteItem) {
+    paletteDialog.close();
+    if (item.kind === 'create') createDialog.showModal();
+    else if (item.kind === 'rename') openRenameDialog();
+    else if (item.kind === 'delete') openDeleteDialog();
+    else if (item.kind === 'save') void saveFile();
+    else if (item.kind === 'command') void runCommand(item.mode);
+    else if (item.kind === 'preview') void rebuildPreview('manual');
+    else if (item.kind === 'source') focusSourcePane();
+    else void openFile(item.path);
+  }
+
+  function focusSourcePane() {
+    const editor = document.getElementById('source-editor') as HTMLTextAreaElement | null;
+    if (editor) {
+      editor.focus();
+      return;
+    }
+    document.getElementById('source')?.focus();
   }
 
   async function renameFile() {
@@ -631,6 +846,9 @@
       event.preventDefault();
       if (document.querySelector('dialog[open]')) return;
       void saveFile();
+    } else if (event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openPalette();
     } else if (event.key.toLowerCase() === 'z' && event.shiftKey) {
       if ((event.target as HTMLElement | null)?.id !== 'source-editor') return;
       event.preventDefault();
@@ -639,6 +857,41 @@
       if ((event.target as HTMLElement | null)?.id !== 'source-editor') return;
       event.preventDefault();
       undo();
+    }
+  }
+
+  function handleDialogKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Tab') return;
+    const dialog = event.currentTarget as HTMLDialogElement;
+    if (!dialog.open) return;
+    const focusable = [...dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )];
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey) {
+      if (active === first || active === dialog || !dialog.contains(active)) {
+        event.preventDefault();
+        last.focus();
+      }
+    } else if (active === last || !dialog.contains(active)) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function handleResolutionKeydown(event: KeyboardEvent) {
+    handleDialogKeydown(event);
+    if (event.defaultPrevented) return;
+    if (!event.altKey || event.metaKey || event.ctrlKey) return;
+    if (event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      void resolvePendingSave();
+    } else if (event.key.toLowerCase() === 'd') {
+      event.preventDefault();
+      void resolvePendingDiscard();
     }
   }
 
@@ -658,7 +911,10 @@
 <svelte:window onkeydown={handleShortcut} onbeforeunload={warnUnsaved} />
 
 <header>
-  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <a class="skip-link" href="#workspace" onclick={(event) => {
+    event.preventDefault();
+    document.getElementById('workspace')?.focus();
+  }}>Skip to workspace</a>
   <div>
     <p class="eyebrow">Local authoring environment</p>
     <h1>Boris Editor</h1>
@@ -678,6 +934,7 @@
     <div>
       <h2 id="recovery-heading">Recovered unsaved work</h2>
       <p>Recovery copies never replace project files without an explicit save.</p>
+      <p class="key-hint"><kbd>Tab</kbd> to an action · <kbd>Enter</kbd> runs it</p>
     </div>
     <ul>
       {#each snapshots as snapshot (snapshot.path)}
@@ -701,7 +958,7 @@
     <div class="file-actions" aria-label="File actions">
       <button type="button" disabled={dirty} onclick={() => createDialog.showModal()}>Create file</button>
       <button type="button" disabled={!activePath || dirty} onclick={openRenameDialog}>Rename file</button>
-      <button type="button" class="danger" disabled={!activePath || dirty} onclick={() => deleteDialog.showModal()}>Delete file</button>
+      <button type="button" class="danger" disabled={!activePath || dirty} onclick={openDeleteDialog}>Delete file</button>
     </div>
     <nav class="file-tree" aria-label="Project files">
       {#if files.length === 0}
@@ -723,7 +980,7 @@
     </nav>
   </section>
 
-  <section id="source" class="source-pane" aria-labelledby="source-heading">
+  <section id="source" class="source-pane" tabindex="-1" aria-labelledby="source-heading">
     <div class="source-heading">
       <div>
         <h2 id="source-heading">Source</h2>
@@ -755,7 +1012,7 @@
         <div class="completion-controls">
           <div>
             <label for="completion-kind">Completion category</label>
-            <select id="completion-kind" bind:value={completionKind} onchange={() => { completionQuery = ''; selectedSuggestion = 0; }}>
+            <select id="completion-kind" bind:value={completionKind} onchange={() => { completionQuery = ''; selectedSuggestion = 0; completionOpen = true; }}>
               <option value="frontmatter_key">Frontmatter key</option>
               <option value="status">Status value</option>
               <option value="entity">Entity id</option>
@@ -772,15 +1029,19 @@
               id="completion-query"
               role="combobox"
               aria-autocomplete="list"
-              aria-expanded={suggestions.length > 0}
+              aria-expanded={completionOpen && suggestions.length > 0}
               aria-controls="completion-options"
-              aria-activedescendant={suggestions.length ? `completion-option-${selectedSuggestion}` : undefined}
+              aria-activedescendant={completionOpen && suggestions.length ? `completion-option-${selectedSuggestion}` : undefined}
               bind:value={completionQuery}
+              onfocus={() => completionOpen = true}
+              oninput={() => completionOpen = true}
               onkeydown={completionKeydown}
             />
+            <p class="key-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> insert · <kbd>Esc</kbd> close</p>
           </div>
           <button type="button" disabled={!suggestions.length || readOnly} onclick={() => insertSuggestion(suggestions[selectedSuggestion])}>Insert selected completion</button>
         </div>
+        {#if completionOpen && suggestions.length > 0}
         <ul id="completion-options" role="listbox" aria-label="Boris completion suggestions">
           {#each suggestions as suggestion, suggestionIndex (`${completionKind}-${suggestion.value}`)}
             <li
@@ -789,13 +1050,14 @@
               tabindex="-1"
               aria-selected={suggestionIndex === selectedSuggestion}
               class:selected={suggestionIndex === selectedSuggestion}
-              onclick={() => { selectedSuggestion = suggestionIndex; void insertSuggestion(suggestion); }}
+              onclick={() => { selectedSuggestion = suggestionIndex; }}
               onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void insertSuggestion(suggestion); } }}
             >
               <strong>{suggestion.value}</strong><span>{suggestion.detail}</span>
             </li>
           {/each}
         </ul>
+        {/if}
         {#if authoring}
           <details>
             <summary>Frontmatter field bounds from Boris schema</summary>
@@ -831,6 +1093,7 @@
     <p role="status" aria-label="Editing status" aria-live="polite">{editorStatus}</p>
   </section>
 
+  <div class="workspace-rail">
   <section id="problems" class="problems-pane" aria-labelledby="problems-heading">
     <div class="problems-heading">
       <div>
@@ -844,20 +1107,20 @@
       {/if}
     </div>
     <div class="command-bar" aria-label="Boris commands">
-      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('validate')}>Validate project</button>
-      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('ir_build')}>Build diagnostics</button>
-      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('html_build')}>Build HTML</button>
-      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('check')}>Check graph</button>
+      <button type="button" disabled={commandRunning} onclick={() => runCommand('validate')}>Validate project</button>
+      <button type="button" disabled={commandRunning} onclick={() => runCommand('ir_build')}>Build diagnostics</button>
+      <button type="button" disabled={commandRunning} onclick={() => runCommand('html_build')}>Build HTML</button>
+      <button type="button" disabled={commandRunning} onclick={() => runCommand('check')}>Check graph</button>
     </div>
     <div class="impact-command">
       <label for="impact-id">Impact entity or source endpoint</label>
       <div>
-        <input id="impact-id" bind:value={impactId} disabled={commandRunning || dirty} />
-        <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('impact')}>Run impact</button>
+        <input id="impact-id" bind:value={impactId} disabled={commandRunning} />
+        <button type="button" disabled={commandRunning} onclick={() => runCommand('impact')}>Run impact</button>
       </div>
     </div>
     {#if dirty}
-      <p class="warning-text">Save or undo changes before running Boris; commands read repository files from disk.</p>
+      <p class="warning-text">Boris commands read repository files from disk. Choose Save &amp; run or Discard &amp; run to resolve the unsaved buffer.</p>
     {/if}
     <p role="status" aria-label="Boris command status" aria-live="polite">{commandStatus}</p>
 
@@ -935,7 +1198,7 @@
         <p>The frame serves unchanged files from Boris's committed <code>dist/</code> output.</p>
       </div>
       <div class="preview-actions" aria-label="Preview actions">
-        <button type="button" disabled={dirty || previewData?.phase === 'running'} onclick={() => rebuildPreview('manual')}>Rebuild preview</button>
+        <button type="button" disabled={previewData?.phase === 'running'} onclick={() => rebuildPreview('manual')}>Rebuild preview</button>
         {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
           <a class="button-link" href={previewData.preview_url} target="_blank" rel="noreferrer">Open preview in new tab</a>
         {/if}
@@ -957,18 +1220,19 @@
       <p>No valid Boris preview output is available yet.</p>
     {/if}
   </section>
+  </div>
 </main>
 
-<dialog bind:this={conflictDialog} aria-labelledby="conflict-heading">
+<dialog bind:this={conflictDialog} onkeydown={handleDialogKeydown} aria-labelledby="conflict-heading">
   <h2 id="conflict-heading">{deletedConflict ? 'File deleted outside Boris Editor' : 'External changes detected'}</h2>
   {#if deletedConflict}
     <p>{activePath} no longer exists on disk. Your unsaved version is still in the editor.</p>
     <label for="deleted-version">Your unsaved version</label>
     <textarea id="deleted-version" readonly value={content}></textarea>
     <div class="dialog-actions">
-      <button type="button" onclick={() => conflictDialog.close()}>Keep editing</button>
+      <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
       <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
-      <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file</button>
+      <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
     </div>
   {:else if conflict}
     <p>{activePath} changed on disk after you opened it. Compare both versions before choosing.</p>
@@ -983,44 +1247,96 @@
       </div>
     </div>
     <div class="dialog-actions">
-      <button type="button" onclick={() => conflictDialog.close()}>Keep editing</button>
+      <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
       <button type="button" onclick={loadDiskVersion}>Load disk version</button>
-      <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version</button>
+      <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
     </div>
   {/if}
 </dialog>
 
-<dialog bind:this={createDialog} aria-labelledby="create-heading">
+<dialog bind:this={resolutionDialog} onkeydown={handleResolutionKeydown} aria-labelledby="resolution-heading">
+  <h2 id="resolution-heading">Unsaved changes in {activePath}</h2>
+  <p>{resolutionPrompt}</p>
+  <div class="dialog-actions">
+    <button type="button" onclick={() => { pendingResolution = null; resolutionDialog.close(); }}>Cancel</button>
+    <button type="button" onclick={resolvePendingDiscard}>Discard &amp; {resolutionVerb}<kbd>Alt+D</kbd></button>
+    <button type="button" class="primary" onclick={resolvePendingSave}>Save &amp; {resolutionVerb}<kbd>Alt+S</kbd></button>
+  </div>
+</dialog>
+
+<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} aria-labelledby="create-heading">
   <h2 id="create-heading">Create file</h2>
   <p>Use a project-relative path under content/ or themes/, or boris.json.</p>
-  <label for="create-path">New file path</label>
-  <input id="create-path" bind:value={createPath} />
-  <div class="dialog-actions">
-    <button type="button" onclick={() => createDialog.close()}>Cancel</button>
-    <button type="button" class="primary" onclick={createFile}>Create file</button>
-  </div>
+  <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>
+    <label for="create-path">New file path</label>
+    <input id="create-path" bind:value={createPath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => createDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Create file<kbd>Enter</kbd></button>
+    </div>
+  </form>
 </dialog>
 
-<dialog bind:this={renameDialog} aria-labelledby="rename-heading">
+<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} aria-labelledby="rename-heading">
   <h2 id="rename-heading">Rename file</h2>
   <p>Rename {activePath} without replacing an existing file.</p>
-  <label for="rename-path">New file path</label>
-  <input id="rename-path" bind:value={renamePath} />
+  <form onsubmit={(event) => { event.preventDefault(); void renameFile(); }}>
+    <label for="rename-path">New file path</label>
+    <input id="rename-path" bind:value={renamePath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => renameDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Rename file<kbd>Enter</kbd></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog bind:this={deleteDialog} onkeydown={handleDialogKeydown} aria-labelledby="delete-heading">
+  <h2 id="delete-heading">Delete file</h2>
+  <p>Delete {activePath || 'selected file'}? This changes the project immediately and cannot be undone in Boris Editor.</p>
   <div class="dialog-actions">
-    <button type="button" onclick={() => renameDialog.close()}>Cancel</button>
-    <button type="button" class="primary" onclick={renameFile}>Rename file</button>
+    <button type="button" onclick={() => deleteDialog.close()}>Cancel<kbd>Esc</kbd></button>
+    <button type="button" class="danger" onclick={deleteFile}>Delete {activePath || 'file'}<kbd>Enter</kbd></button>
   </div>
 </dialog>
 
-<dialog bind:this={deleteDialog} aria-labelledby="delete-heading">
-  <h2 id="delete-heading">Delete file</h2>
-  <p>Delete {activePath}? This changes the project immediately and cannot be undone in Boris Editor.</p>
-  <div class="dialog-actions">
-    <button type="button" onclick={() => deleteDialog.close()}>Cancel</button>
-    <button type="button" class="danger" onclick={deleteFile}>Delete {activePath}</button>
-  </div>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown} aria-labelledby="palette-heading">
+  <h2 id="palette-heading">Commands</h2>
+  <p>Ctrl+K anywhere opens this palette.</p>
+  <label for="palette-query">Filter commands</label>
+  <input
+    id="palette-query"
+    role="combobox"
+    aria-autocomplete="list"
+    aria-expanded={paletteItems.length > 0}
+    aria-controls="palette-options"
+    aria-activedescendant={paletteItems.length ? `palette-option-${paletteSelection}` : undefined}
+    bind:value={paletteQuery}
+    onkeydown={paletteKeydown}
+  />
+  {#if paletteItems.length > 0}
+    <ul id="palette-options" role="listbox" aria-label="Boris commands">
+      {#each paletteItems as item, itemIndex (paletteItemKey(item))}
+        <li
+          id="palette-option-{itemIndex}"
+          role="option"
+          tabindex="-1"
+          aria-selected={itemIndex === paletteSelection}
+          aria-disabled={paletteEnabled.get(paletteItemKey(item)) ? 'false' : 'true'}
+          class:selected={itemIndex === paletteSelection}
+          class:disabled={!paletteEnabled.get(paletteItemKey(item))}
+          onclick={() => { if (paletteItemEnabled(item)) executePaletteItem(item); }}
+          onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}
+        >
+          <strong>{paletteItemLabel(item)}</strong><span>{paletteItemDetail(item)}</span>
+        </li>
+      {/each}
+    </ul>
+  {:else}
+    <p>No commands match “{paletteQuery}”.</p>
+  {/if}
 </dialog>
 
 <footer>
+  <p class="key-hint"><kbd>Ctrl</kbd>+<kbd>K</kbd> opens commands</p>
   <p>Boris owns meaning. Oliver owns markup semantics. The editor owns interaction.</p>
 </footer>

@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 type MockOptions = {
   saveConflict?: boolean;
+  saveConflictOnce?: boolean;
   recovery?: Array<{ path: string; content: string; fingerprint: string }>;
   disk?: string;
   commands?: Partial<Record<string, CommandResult>>;
@@ -34,7 +35,14 @@ function commandResult(mode: string, overrides: Partial<CommandResult> = {}): Co
   };
 }
 
-function authoringPayload(withGraph = true) {
+type CompletionEntity = {
+  id: string; title: string | null; parent: string | null; role: string; status: string;
+  tags: string[]; relations: Array<{ kind: string; target: string }>;
+};
+
+function authoringPayload(withGraph = true, entities: CompletionEntity[] = [
+  { id: 'guides/intro', title: 'Introduction', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] }
+]) {
   return {
     frontmatter_schema: {
       title: 'Boris frontmatter grammar (schema v1)',
@@ -51,7 +59,7 @@ function authoringPayload(withGraph = true) {
     },
     completion: withGraph ? {
       format: 'boris-completion-index', schema_version: 1, compiler_id: 'boris/0.8.1', frozen: true,
-      entities: [{ id: 'guides/intro', title: 'Introduction', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] }],
+      entities,
       relation_kinds: ['depends_on', 'relates_to'], parent_targets: ['guides/intro'],
       layout_slots: ['content', 'title', 'nav']
     } : null,
@@ -64,6 +72,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
   let fingerprint = 'a'.repeat(64);
   let authoringRequest = 0;
   let previewRebuild = 0;
+  let conflictOnceRemaining = options.saveConflictOnce ? 1 : 0;
 
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
@@ -92,7 +101,8 @@ async function installApi(page: Page, options: MockOptions = {}) {
   });
   await page.route('**/api/files/save', async route => {
     const body = route.request().postDataJSON() as { path: string; content: string };
-    if (options.saveConflict) {
+    if (options.saveConflict || conflictOnceRemaining > 0) {
+      if (conflictOnceRemaining > 0) conflictOnceRemaining -= 1;
       await route.fulfill({
         status: 409,
         contentType: 'application/json',
@@ -212,11 +222,65 @@ test('external edits open an explicit two-version conflict dialog', async ({ pag
   await expect(dialog.getByRole('textbox', { name: 'Your unsaved version' })).toHaveValue('# Mine\n');
   await expect(dialog.getByRole('textbox', { name: 'Current disk version' })).toHaveValue('# Changed elsewhere\n');
   for (const name of ['Keep editing', 'Load disk version', 'Replace disk version']) {
-    await expect(dialog.getByRole('button', { name, exact: true })).toHaveText(name);
+    await expect(dialog.getByRole('button', { name: new RegExp(name) })).toContainText(name);
   }
   await dialog.getByRole('button', { name: 'Load disk version' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Changed elsewhere\n');
+});
+
+test('Enter confirms the Delete dialog primary action with a visible hint (#462)', async ({ page }) => {
+  await installApi(page);
+  let deleteRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/delete')) deleteRequests += 1;
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete file' });
+  await expect(dialog).toBeVisible();
+  const confirm = dialog.getByRole('button', { name: /Delete content\/index\.md/ });
+  await expect(confirm).toContainText('Enter');
+  await expect(dialog.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+  await expect(confirm).toBeFocused();
+  const deleteRequest = page.waitForRequest('**/api/files/delete');
+  await page.keyboard.press('Enter');
+  expect((await deleteRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', confirmed: true });
+  await expect(dialog).toBeHidden();
+  expect(deleteRequests).toBe(1);
+});
+
+test('Enter confirms the conflict dialog primary action with a visible hint (#462)', async ({ page }) => {
+  await installApi(page, { saveConflictOnce: true });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'External changes detected' });
+  await expect(dialog).toBeVisible();
+  const primary = dialog.getByRole('button', { name: /Replace disk version/ });
+  await expect(primary).toBeFocused();
+  await expect(primary).toContainText('Enter');
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  await page.keyboard.press('Enter');
+  expect((await saveRequest).postDataJSON()).toMatchObject({
+    path: 'content/index.md', content: '# Mine\n', fingerprint: 'b'.repeat(64)
+  });
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/index.md.');
+});
+
+test('Create and Rename dialogs show visible Enter and Esc key hints (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const create = page.getByRole('dialog', { name: 'Create file' });
+  await expect(create.getByRole('button', { name: /Create file/ })).toContainText('Enter');
+  await expect(create.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename file' });
+  await expect(rename.getByRole('button', { name: /Rename file/ })).toContainText('Enter');
+  await expect(rename.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
 });
 
 test('recovery is announced and restored only on an explicit named action', async ({ page }) => {
@@ -233,6 +297,42 @@ test('recovery is announced and restored only on an explicit named action', asyn
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Recovered unsaved work');
 });
 
+test('restoring recovered work while dirty offers Save & restore and Discard & restore (#462)', async ({ page }) => {
+  await installApi(page, {
+    recovery: [{ path: 'content/guides/getting-started.md', content: '# Recovered guide\n', fingerprint: 'a'.repeat(64) }]
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Draft\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+  const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+  const restore = recovery.getByRole('button', { name: 'Restore content/guides/getting-started.md', exact: true });
+  await restore.click();
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('content/guides/getting-started.md');
+  await expect(dialog.getByRole('button', { name: /Save & restore/ })).toContainText('Save & restore');
+
+  // Cancel keeps the dirty buffer and does not restore.
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(editor).toHaveValue('# Draft\n');
+
+  // Discard & restore drops the buffer without saving, then restores the recovered work.
+  let saveRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/save')) saveRequests += 1;
+  });
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await restore.click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Discard & restore/ }).click();
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/guides/getting-started.md' });
+  expect(saveRequests).toBe(0);
+  await expect(page.getByRole('textbox', { name: 'Source for content/guides/getting-started.md' })).toHaveValue('# Recovered guide\n');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Recovered unsaved work for content/guides/getting-started.md.');
+});
+
 test('native file dialogs are keyboard-dismissible and all controls have visible names', async ({ page }) => {
   await installApi(page);
   const create = page.getByRole('button', { name: 'Create file', exact: true });
@@ -241,9 +341,210 @@ test('native file dialogs are keyboard-dismissible and all controls have visible
   const dialog = page.getByRole('dialog', { name: 'Create file' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('textbox', { name: 'New file path' })).toBeFocused();
-  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toHaveText('Cancel');
+  await expect(dialog.getByRole('button', { name: /Cancel/ })).toContainText('Cancel');
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+});
+
+test('Enter in the Create file path input submits the primary action exactly once (#459)', async ({ page }) => {
+  await installApi(page);
+  let createRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/create')) createRequests += 1;
+  });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await expect(dialog).toBeVisible();
+  const input = dialog.getByRole('textbox', { name: 'New file path' });
+  await input.fill('content/posts/new-post.md');
+  await input.press('Enter');
+  await expect(dialog).toBeHidden();
+  expect(createRequests).toBe(1);
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Created content/posts/new-post.md.');
+});
+
+test('Enter in the Rename file path input submits the primary action exactly once (#459)', async ({ page }) => {
+  await installApi(page);
+  let renameRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/rename')) renameRequests += 1;
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Rename file' });
+  await expect(dialog).toBeVisible();
+  const request = page.waitForRequest('**/api/files/rename');
+  const input = dialog.getByRole('textbox', { name: 'New file path' });
+  await input.fill('content/posts/moved.md');
+  await input.press('Enter');
+  expect((await request).postDataJSON()).toMatchObject({ path: 'content/index.md', new_path: 'content/posts/moved.md' });
+  await expect(dialog).toBeHidden();
+  expect(renameRequests).toBe(1);
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Renamed content/index.md to content/posts/moved.md.');
+});
+
+test('Enter with an invalid Create path does not submit (#459)', async ({ page }) => {
+  await installApi(page);
+  let createRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/create')) createRequests += 1;
+  });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  const input = dialog.getByRole('textbox', { name: 'New file path' });
+  await input.fill('   ');
+  await input.press('Enter');
+  await expect(dialog).toBeVisible();
+  expect(createRequests).toBe(0);
+});
+
+test('the Create file primary button still submits the same action (#459)', async ({ page }) => {
+  await installApi(page);
+  let createRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/create')) createRequests += 1;
+  });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await dialog.getByRole('textbox', { name: 'New file path' }).fill('content/posts/button-post.md');
+  await dialog.getByRole('button', { name: /Create file/ }).click();
+  await expect(dialog).toBeHidden();
+  expect(createRequests).toBe(1);
+});
+
+test('Delete dialog falls back to a named placeholder when no file is selected (#461)', async ({ page }) => {
+  await installApi(page);
+  const dialog = page.locator('dialog').filter({ has: page.locator('#delete-heading') });
+  expect(await dialog.locator('p').first().textContent()).toBe(
+    'Delete selected file? This changes the project immediately and cannot be undone in Boris Editor.'
+  );
+  expect(await dialog.locator('.dialog-actions .danger').textContent()).toContain('Delete file');
+});
+
+test('Delete dialog names the selected file and deletes exactly once (#461)', async ({ page }) => {
+  await installApi(page);
+  let deleteRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/delete')) deleteRequests += 1;
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete file' });
+  await page.getByRole('button', { name: 'Delete file', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('Delete content/index.md?');
+  const deleteRequest = page.waitForRequest('**/api/files/delete');
+  await dialog.getByRole('button', { name: /Delete content\/index\.md/ }).click();
+  expect((await deleteRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', confirmed: true });
+  await expect(dialog).toBeHidden();
+  expect(deleteRequests).toBe(1);
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Deleted content/index.md.');
+});
+
+test('Skip to workspace moves focus to the workspace landmark and keeps the session token (#447)', async ({ page }) => {
+  await installApi(page);
+  const skipLink = page.getByRole('link', { name: 'Skip to workspace' });
+  const workspace = page.locator('main#workspace');
+  await expect(workspace).toHaveAttribute('tabindex', '-1');
+  await page.keyboard.press('Tab');
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(workspace).toBeFocused();
+  expect(await page.evaluate(() => window.location.hash)).toContain('token=');
+  await page.evaluate(() => (document.querySelector('.skip-link') as HTMLAnchorElement).click());
+  await expect(workspace).toBeFocused();
+  expect(await page.evaluate(() => window.location.hash)).toContain('token=');
+});
+
+test('modal dialogs trap keyboard focus while open (#460)', async ({ page }) => {
+  await installApi(page);
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  const insideDialog = () => page.evaluate(() => {
+    const el = document.activeElement;
+    return el instanceof HTMLElement && Boolean(el.closest('dialog'));
+  });
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Tab');
+    expect(await insideDialog()).toBe(true);
+  }
+  await expect(dialog.getByRole('button', { name: /Create file/ })).toBeFocused();
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Shift+Tab');
+    expect(await insideDialog()).toBe(true);
+  }
+  await expect(dialog.getByRole('textbox', { name: 'New file path' })).toBeFocused();
+});
+
+test('switching files while dirty offers Cancel and Save & Switch (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Draft\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  const target = page.getByRole('button', { name: 'boris.json', exact: true });
+  await target.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: /content\/index\.md/ })).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('boris.json');
+
+  // Cancel keeps the current file and its unsaved buffer.
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(editor).toHaveValue('# Draft\n');
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+
+  // Save & Switch persists the buffer, then opens the target.
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await target.click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Save & switch/ }).click();
+  expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'boris.json' });
+  await expect(page.getByRole('textbox', { name: 'Source for boris.json' })).toBeVisible();
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+});
+
+test('Discard & Switch drops the dirty buffer without saving and opens the target (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Discard me\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+  let saveRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/save')) saveRequests += 1;
+  });
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await page.getByRole('button', { name: 'boris.json', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Discard & switch/ }).click();
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'boris.json' });
+  expect(saveRequests).toBe(0);
+  await expect(page.getByRole('textbox', { name: 'Source for boris.json' })).toHaveValue('# Home\n');
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+});
+
+test('desktop viewports place Problems and Preview beside the editor without a deep page scroll (#463)', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installApi(page);
+  const source = page.locator('#source');
+  const problems = page.locator('#problems');
+  const preview = page.locator('#preview');
+  await expect(problems).toBeVisible();
+  await expect(preview).toBeVisible();
+  const sourceBox = await source.boundingBox();
+  const problemsBox = await problems.boundingBox();
+  const previewBox = await preview.boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(problemsBox).not.toBeNull();
+  expect(previewBox).not.toBeNull();
+  // Files | Editor | Diagnostics+Preview: Problems and Preview open to the right of the editor.
+  expect(problemsBox!.x).toBeGreaterThan(sourceBox!.x + sourceBox!.width - 1);
+  expect(previewBox!.x).toBeGreaterThan(sourceBox!.x + sourceBox!.width - 1);
+  // Neither pane starts below the fold (previously ~1244px / ~1772px on this viewport).
+  expect(problemsBox!.y).toBeLessThan(900);
+  expect(previewBox!.y).toBeLessThan(900);
 });
 
 test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
@@ -306,7 +607,7 @@ test('structured problems group, navigate by UTF-8 byte position, and copy a bou
   expect(copied).not.toContain('/Users/');
 });
 
-test('stderr diagnostics are announced as best-effort and dirty buffers disable commands', async ({ page }) => {
+test('stderr diagnostics are announced as best-effort and dirty buffers route commands through a resolution dialog', async ({ page }) => {
   await installApi(page, {
     commands: {
       validate: commandResult('validate', {
@@ -324,8 +625,116 @@ test('stderr diagnostics are announced as best-effort and dirty buffers disable 
   await expect(page.getByText('Best-effort source position', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
   await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Dirty\n');
-  await expect(page.getByRole('button', { name: 'Validate project', exact: true })).toBeDisabled();
   await expect(page.getByText(/commands read repository files from disk/)).toBeVisible();
+  // Dirty buffers no longer disable commands; running one asks how to resolve the buffer.
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('Validate project');
+  await dialog.getByRole('button', { name: /Discard & run/ }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Content or graph failure (exit 1)');
+  await expect(page.getByText(/stderr was used/)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Home\n');
+});
+
+test('running a Boris command while dirty offers Cancel and Save & run (#462)', async ({ page }) => {
+  await installApi(page, { commands: { validate: commandResult('validate') } });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Draft\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('Validate project');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(editor).toHaveValue('# Draft\n');
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('No Boris command has run yet.');
+
+  // Save & run persists the buffer, then runs the command.
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  const commandRequest = page.waitForRequest('**/api/commands/run');
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Save & run/ }).click();
+  expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+  expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validate project finished: Success (exit 0).');
+});
+
+test('Alt+S in the resolution dialog saves and continues (#462)', async ({ page }) => {
+  await installApi(page, { commands: { validate: commandResult('validate') } });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /Save & run/ })).toContainText('Alt+S');
+  await expect(dialog.getByRole('button', { name: /Discard & run/ })).toContainText('Alt+D');
+
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  const commandRequest = page.waitForRequest('**/api/commands/run');
+  await page.keyboard.press('Alt+S');
+  expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+  expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validate project finished: Success (exit 0).');
+});
+
+test('Alt+D in the resolution dialog discards and continues (#462)', async ({ page }) => {
+  await installApi(page, { commands: { validate: commandResult('validate') } });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dialog).toBeVisible();
+  let saveRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/save')) saveRequests += 1;
+  });
+  const commandRequest = page.waitForRequest('**/api/commands/run');
+  await page.keyboard.press('Alt+D');
+  expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
+  expect(saveRequests).toBe(0);
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Home\n');
+});
+
+test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#462)', async ({ page }) => {
+  await installApi(page, {
+    previewRebuilds: [{
+      phase: 'success', generation: 2, exit_code: 0, used_stderr_fallback: false,
+      message: 'Preview is current from a successful Boris incremental build.',
+      preview_url: 'https://preview.invalid/?token=test'
+    }]
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Draft\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /Save & rebuild/ })).toContainText('Save & rebuild');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(editor).toHaveValue('# Draft\n');
+
+  // Discard & rebuild drops the buffer without saving, then rebuilds.
+  let saveRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/save')) saveRequests += 1;
+  });
+  const rebuildRequest = page.waitForRequest('**/api/preview/rebuild');
+  await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Discard & rebuild/ }).click();
+  await rebuildRequest;
+  expect(saveRequests).toBe(0);
+  await expect(page.locator('.preview-state')).toContainText('Preview is current');
+  await expect(page.getByTitle('Boris site preview')).toHaveAttribute('src', /generation=2/);
 });
 
 test('schema and graph completion are an ARIA combobox operable by keyboard and visible names', async ({ page }) => {
@@ -350,6 +759,55 @@ test('schema and graph completion are an ARIA combobox operable by keyboard and 
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Inserted draft from Boris authoring vocabulary');
 });
 
+test('clicking a completion option selects without inserting; the insert action inserts exactly one token (#446)', async ({ page }) => {
+  await installApi(page, { disk: '' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await expect(editor).toHaveValue('');
+  await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('wiki_link');
+  const wiki = page.getByRole('combobox', { name: 'Filter wiki link', exact: true });
+  await wiki.fill('guides');
+  const option = page.getByRole('listbox', { name: 'Boris completion suggestions' }).getByRole('option', { name: /guides\/intro/ });
+  await option.click();
+  await expect(option).toHaveAttribute('aria-selected', 'true');
+  await expect(editor).toHaveValue('');
+  await page.getByRole('button', { name: 'Insert selected completion', exact: true }).click();
+  await expect(editor).toHaveValue('[[guides/intro]]');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Inserted guides/intro from Boris authoring vocabulary');
+  await editor.focus();
+  await page.keyboard.press('Control+z');
+  await expect(editor).toHaveValue('');
+});
+
+test('keyboard selection in the completion combobox inserts only the selected token once (#446)', async ({ page }) => {
+  await installApi(page, {
+    disk: '',
+    authoring: [authoringPayload(true, [
+      { id: 'guides/intro', title: 'Introduction', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] },
+      { id: 'guides/advanced', title: 'Advanced guides', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] }
+    ])]
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('wiki_link');
+  const wiki = page.getByRole('combobox', { name: 'Filter wiki link', exact: true });
+  await wiki.fill('guides');
+  const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions' });
+  const first = listbox.getByRole('option', { name: /guides\/intro/ });
+  await expect(first).toHaveAttribute('aria-selected', 'true');
+  await expect(editor).toHaveValue('');
+  await wiki.press('ArrowDown');
+  const second = listbox.getByRole('option', { name: /guides\/advanced/ });
+  await expect(second).toHaveAttribute('aria-selected', 'true');
+  await expect(first).not.toHaveAttribute('aria-selected', 'true');
+  await expect(editor).toHaveValue('');
+  await wiki.press('Enter');
+  await expect(editor).toHaveValue('[[guides/advanced]]');
+  await editor.focus();
+  await page.keyboard.press('Control+z');
+  await expect(editor).toHaveValue('');
+});
+
 test('completion categories match Boris artifacts and refresh after a successful graph build', async ({ page }) => {
   await installApi(page, {
     disk: '',
@@ -367,6 +825,178 @@ test('completion categories match Boris artifacts and refresh after a successful
   await expect(listbox.getByRole('option', { name: /guides\/intro/ })).toBeVisible();
   await wiki.press('Enter');
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('[[guides/intro]]');
+});
+
+test('the completion combobox shows arrow, Enter, and Esc key hints (#462)', async ({ page }) => {
+  await installApi(page, { disk: '' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const filter = page.getByRole('combobox', { name: 'Filter frontmatter key', exact: true });
+  const hint = page.locator('.combobox-wrap .key-hint');
+  await expect(hint).toBeVisible();
+  await expect(hint).toContainText('navigate');
+  await expect(hint).toContainText('insert');
+  await expect(hint).toContainText('close');
+  await expect(hint).toContainText('↑');
+  await filter.focus();
+  const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions' });
+  await expect(listbox).toBeVisible();
+  await expect(filter).toHaveAttribute('aria-expanded', 'true');
+  await filter.press('Escape');
+  await expect(listbox).toBeHidden();
+  await expect(filter).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('Esc closes the completion list without clearing the filter (#462)', async ({ page }) => {
+  await installApi(page, { disk: '' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const filter = page.getByRole('combobox', { name: 'Filter frontmatter key', exact: true });
+  await filter.fill('sta');
+  const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions' });
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole('option', { name: /status/ }).first()).toBeVisible();
+  await filter.press('Escape');
+  await expect(listbox).toBeHidden();
+  await expect(filter).toHaveValue('sta');
+  // Refocusing (after moving focus away) reopens the filtered list, and Enter still inserts.
+  await page.getByRole('button', { name: 'Insert selected completion', exact: true }).focus();
+  await filter.focus();
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole('option', { name: /status/ }).first()).toBeVisible();
+  await filter.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('status: ');
+});
+
+test('the recovery banner shows a Tab + Enter key hint for its actions (#462)', async ({ page }) => {
+  await installApi(page, {
+    recovery: [{ path: 'content/index.md', content: '# Recovered draft\n', fingerprint: 'a'.repeat(64) }]
+  });
+  const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+  await expect(recovery).toBeVisible();
+  const hint = recovery.locator('.key-hint');
+  await expect(hint).toBeVisible();
+  await expect(hint).toContainText('Tab');
+  await expect(hint).toContainText('Enter');
+});
+
+test('Ctrl+K opens the command palette; filtering and arrows select a file to open (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  await expect(palette).toBeVisible();
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await expect(input).toBeFocused();
+
+  await input.fill('open');
+  const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
+  const openOptions = listbox.getByRole('option', { name: /Open file/ });
+  await expect(openOptions).toHaveCount(2);
+  await expect(openOptions.first()).toHaveAttribute('aria-selected', 'true');
+  await input.press('ArrowDown');
+  await expect(openOptions.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await input.press('Enter');
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+});
+
+test('the command palette reuses the file dialogs and Esc closes it (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  await expect(palette).toBeVisible();
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+
+  // The first command (Create file) executes the existing create dialog.
+  await input.press('Enter');
+  const create = page.getByRole('dialog', { name: 'Create file' });
+  await expect(create).toBeVisible();
+  await expect(palette).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(create).toBeHidden();
+
+  // Esc closes the palette directly.
+  await page.keyboard.press('Control+K');
+  await expect(palette).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(palette).toBeHidden();
+});
+
+test('the command palette disables guarded actions while dirty and opens files through the resolution dialog (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
+  const options = listbox.locator('[role="option"]');
+  await expect(options.filter({ hasText: 'Create file' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(options.filter({ hasText: 'Rename file' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(options.filter({ hasText: 'Delete file' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(options.filter({ hasText: 'Open file' }).first()).toHaveAttribute('aria-disabled', 'false');
+
+  // Open entries stay usable: Enter on the selected entry asks how to resolve the buffer.
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('open');
+  await input.press('Enter');
+  const resolution = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(resolution).toBeVisible();
+  await expect(resolution.getByRole('button', { name: /Save & switch/ })).toBeVisible();
+  await resolution.getByRole('button', { name: /Cancel/ }).click();
+  await expect(resolution).toBeHidden();
+});
+
+test('the Ctrl+K palette runs Boris commands (#462)', async ({ page }) => {
+  await installApi(page, {
+    commands: { validate: commandResult('validate', { exit_code: 2, failure_class: 'usage' }) }
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('validate');
+  const commandRequest = page.waitForRequest('**/api/commands/run');
+  await input.press('Enter');
+  expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Usage or configuration failure (exit 2)');
+});
+
+test('the Ctrl+K palette saves the dirty buffer (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('save');
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  await input.press('Enter');
+  expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+  await expect(palette).toBeHidden();
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+});
+
+test('the Ctrl+K palette focuses the Source pane editor (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('focus source');
+  await input.press('Enter');
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeFocused();
+});
+
+test('the palette marks editor commands by their enabled state (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const options = palette.locator('[role="option"]');
+  await expect(options.filter({ hasText: 'Save file' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(options.filter({ hasText: 'Validate project' })).toHaveAttribute('aria-disabled', 'false');
+  await expect(options.filter({ hasText: 'Rebuild preview' })).toHaveAttribute('aria-disabled', 'false');
+  await expect(options.filter({ hasText: 'Focus source pane' })).toHaveAttribute('aria-disabled', 'false');
 });
 
 test('explicit save rebuilds and reloads the real-output preview by keyboard', async ({ page }) => {
@@ -397,4 +1027,410 @@ test('failed rebuild keeps last output and labels it stale with stderr fallback'
   await expect(page.locator('.preview-state')).toContainText('last valid output is stale');
   await expect(page.getByText(/bounded Boris stderr/)).toBeVisible();
   await expect(page.getByTitle('Boris site preview')).toHaveAttribute('src', /generation=7/);
+});
+
+test.describe('keyboard hints conformance sweep (#462)', () => {
+  test('resolution dialog: Esc cancels and Alt+S / Alt+D resolve a file switch', async ({ page }) => {
+    await installApi(page);
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+    await editor.fill('# Draft\n');
+    await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+    // Esc cancels: dialog closes, buffer and file stay put.
+    const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+    await page.getByRole('button', { name: 'boris.json', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /Save & switch/ })).toContainText('Alt+S');
+    await expect(dialog.getByRole('button', { name: /Discard & switch/ })).toContainText('Alt+D');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(editor).toHaveValue('# Draft\n');
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+
+    // Alt+S saves the buffer, then switches.
+    const saveRequest = page.waitForRequest('**/api/files/save');
+    const openRequest = page.waitForRequest('**/api/files/open');
+    await page.getByRole('button', { name: 'boris.json', exact: true }).click();
+    await page.keyboard.press('Alt+S');
+    expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+    expect((await openRequest).postDataJSON()).toMatchObject({ path: 'boris.json' });
+    await expect(page.getByRole('textbox', { name: 'Source for boris.json' })).toBeVisible();
+
+    // Alt+D discards the new buffer without saving, then switches back.
+    const jsonEditor = page.getByRole('textbox', { name: 'Source for boris.json' });
+    await jsonEditor.fill('# JSON draft\n');
+    await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+    let saveRequests = 0;
+    page.on('request', request => {
+      if (request.url().includes('/api/files/save')) saveRequests += 1;
+    });
+    const backRequest = page.waitForRequest('**/api/files/open');
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await page.keyboard.press('Alt+D');
+    expect((await backRequest).postDataJSON()).toMatchObject({ path: 'content/index.md' });
+    expect(saveRequests).toBe(0);
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+  });
+
+  test('create and rename dialogs: Enter submits and Esc cancels', async ({ page }) => {
+    await installApi(page);
+    let createRequests = 0;
+    let renameRequests = 0;
+    page.on('request', request => {
+      if (request.url().includes('/api/files/create')) createRequests += 1;
+      if (request.url().includes('/api/files/rename')) renameRequests += 1;
+    });
+
+    const create = page.getByRole('dialog', { name: 'Create file' });
+    await page.getByRole('button', { name: 'Create file', exact: true }).click();
+    await expect(create).toBeVisible();
+    await expect(create.getByRole('button', { name: /Create file/ })).toContainText('Enter');
+    await expect(create.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+    await create.getByRole('textbox', { name: 'New file path' }).fill('content/posts/sweep.md');
+    await page.keyboard.press('Enter');
+    await expect(create).toBeHidden();
+    expect(createRequests).toBe(1);
+    await page.getByRole('button', { name: 'Create file', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await expect(create).toBeHidden();
+    expect(createRequests).toBe(1);
+
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    const rename = page.getByRole('dialog', { name: 'Rename file' });
+    await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+    await expect(rename).toBeVisible();
+    await expect(rename.getByRole('button', { name: /Rename file/ })).toContainText('Enter');
+    await expect(rename.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+    await rename.getByRole('textbox', { name: 'New file path' }).fill('content/posts/sweep-renamed.md');
+    await page.keyboard.press('Enter');
+    await expect(rename).toBeHidden();
+    expect(renameRequests).toBe(1);
+    await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await expect(rename).toBeHidden();
+    expect(renameRequests).toBe(1);
+  });
+
+  test('delete dialog: Enter confirms and Esc cancels', async ({ page }) => {
+    await installApi(page);
+    let deleteRequests = 0;
+    page.on('request', request => {
+      if (request.url().includes('/api/files/delete')) deleteRequests += 1;
+    });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Delete file' });
+    await page.getByRole('button', { name: 'Delete file', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    const confirm = dialog.getByRole('button', { name: /Delete content\/index\.md/ });
+    await expect(confirm).toContainText('Enter');
+    await expect(dialog.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+    await expect(confirm).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    expect(deleteRequests).toBe(0);
+    await page.getByRole('button', { name: 'Delete file', exact: true }).click();
+    await expect(confirm).toBeFocused();
+    const deleteRequest = page.waitForRequest('**/api/files/delete');
+    await page.keyboard.press('Enter');
+    expect((await deleteRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', confirmed: true });
+    await expect(dialog).toBeHidden();
+    expect(deleteRequests).toBe(1);
+  });
+
+  test('conflict dialog: Esc keeps editing and Enter replaces the disk version', async ({ page }) => {
+    await installApi(page, { saveConflict: true });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+    await editor.fill('# Mine\n');
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'External changes detected' });
+    await expect(dialog).toBeVisible();
+    const primary = dialog.getByRole('button', { name: /Replace disk version/ });
+    await expect(dialog.getByRole('button', { name: /Keep editing/ })).toContainText('Esc');
+    await expect(primary).toContainText('Enter');
+    await expect(primary).toBeFocused();
+
+    // Esc keeps editing: dialog closes, the unsaved buffer survives.
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(editor).toHaveValue('# Mine\n');
+    await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+    // Enter replaces: a save request carrying the conflict fingerprint fires (mock keeps 409ing).
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    const saveRequest = page.waitForRequest('**/api/files/save');
+    await page.keyboard.press('Enter');
+    expect((await saveRequest).postDataJSON()).toMatchObject({
+      path: 'content/index.md', content: '# Mine\n', fingerprint: 'b'.repeat(64)
+    });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: /Keep editing/ }).click();
+    await expect(dialog).toBeHidden();
+  });
+
+  test('command palette: Ctrl+K opens, arrows select, Enter runs, Esc closes', async ({ page }) => {
+    await installApi(page);
+    await expect(page.locator('footer .key-hint')).toContainText('Ctrl');
+    await expect(page.locator('footer .key-hint')).toContainText('K');
+    await page.keyboard.press('Control+K');
+    const palette = page.getByRole('dialog', { name: 'Commands' });
+    await expect(palette).toBeVisible();
+    const input = palette.getByRole('combobox', { name: 'Filter commands' });
+    await expect(input).toBeFocused();
+
+    await input.fill('open');
+    const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
+    const openOptions = listbox.getByRole('option', { name: /Open file/ });
+    await expect(openOptions).toHaveCount(2);
+    await expect(openOptions.first()).toHaveAttribute('aria-selected', 'true');
+    await input.press('ArrowDown');
+    await expect(openOptions.nth(1)).toHaveAttribute('aria-selected', 'true');
+    await input.press('Enter');
+    await expect(palette).toBeHidden();
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+
+    await page.keyboard.press('Control+K');
+    await expect(palette).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+  });
+
+  test('completion combobox: arrows navigate, Enter inserts, Esc closes', async ({ page }) => {
+    await installApi(page, {
+      disk: '',
+      authoring: [authoringPayload(true, [
+        { id: 'guides/intro', title: 'Introduction', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] },
+        { id: 'guides/advanced', title: 'Advanced guides', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] }
+      ])]
+    });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('wiki_link');
+    const filter = page.getByRole('combobox', { name: 'Filter wiki link', exact: true });
+    const hint = page.locator('.combobox-wrap .key-hint');
+    await expect(hint).toContainText('navigate');
+    await expect(hint).toContainText('insert');
+    await expect(hint).toContainText('close');
+    const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions' });
+    await filter.fill('guides');
+    await expect(listbox).toBeVisible();
+    const first = listbox.getByRole('option', { name: /guides\/intro/ });
+    await expect(first).toHaveAttribute('aria-selected', 'true');
+    await filter.press('ArrowDown');
+    await expect(listbox.getByRole('option', { name: /guides\/advanced/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(first).not.toHaveAttribute('aria-selected', 'true');
+    await filter.press('ArrowUp');
+    await expect(first).toHaveAttribute('aria-selected', 'true');
+    await filter.press('Enter');
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('[[guides/intro]]');
+
+    await filter.fill('guides');
+    await expect(listbox).toBeVisible();
+    await filter.press('Escape');
+    await expect(listbox).toBeHidden();
+    await expect(filter).toHaveValue('guides');
+  });
+
+  test('recovery banner: Tab + Enter runs Restore and Discard', async ({ page }) => {
+    await installApi(page, {
+      recovery: [
+        { path: 'content/index.md', content: '# Recovered draft\n', fingerprint: 'a'.repeat(64) },
+        { path: 'content/guides/getting-started.md', content: '# Recovered guide\n', fingerprint: 'a'.repeat(64) }
+      ]
+    });
+    const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+    await expect(recovery).toBeVisible();
+    const hint = recovery.locator('.key-hint');
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText('Tab');
+    await expect(hint).toContainText('Enter');
+
+    // Enter runs Discard: the snapshot's clear request fires and its row leaves the banner.
+    const discard = recovery.getByRole('button', { name: 'Discard recovery for content/guides/getting-started.md', exact: true });
+    const clearRequest = page.waitForRequest('**/api/recovery/clear');
+    await discard.focus();
+    await page.keyboard.press('Enter');
+    expect((await clearRequest).postDataJSON()).toMatchObject({ path: 'content/guides/getting-started.md' });
+    await expect(recovery.getByRole('button', { name: /getting-started/ })).toHaveCount(0);
+
+    // Enter runs Restore: the recovered content lands in the editor.
+    const restore = recovery.getByRole('button', { name: 'Restore content/index.md', exact: true });
+    await restore.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Recovered draft\n');
+    await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Recovered unsaved work for content/index.md.');
+  });
+
+  test('recovery banner: Enter on Restore while dirty routes through the resolution dialog', async ({ page }) => {
+    await installApi(page, {
+      recovery: [{ path: 'content/guides/getting-started.md', content: '# Recovered guide\n', fingerprint: 'a'.repeat(64) }]
+    });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+    await editor.fill('# Draft\n');
+    await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+    const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+    const restore = recovery.getByRole('button', { name: 'Restore content/guides/getting-started.md', exact: true });
+    await restore.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /Save & restore/ })).toContainText('Alt+S');
+    await expect(dialog.getByRole('button', { name: /Discard & restore/ })).toContainText('Alt+D');
+
+    // Alt+D discards the buffer without saving, then the recovered content is restored.
+    let saveRequests = 0;
+    page.on('request', request => {
+      if (request.url().includes('/api/files/save')) saveRequests += 1;
+    });
+    const openRequest = page.waitForRequest('**/api/files/open');
+    await page.keyboard.press('Alt+D');
+    expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/guides/getting-started.md' });
+    expect(saveRequests).toBe(0);
+    await expect(page.getByRole('textbox', { name: 'Source for content/guides/getting-started.md' })).toHaveValue('# Recovered guide\n');
+  });
+
+  test.describe('pointer conformance', () => {
+    test('resolution dialog: clicking Save & switch matches Alt+S and Cancel matches Esc', async ({ page }) => {
+      await installApi(page);
+      await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+      const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+      await editor.fill('# Draft\n');
+      await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+      const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+      await page.getByRole('button', { name: 'boris.json', exact: true }).click();
+      await expect(dialog).toBeVisible();
+      // Cancel click matches Esc: dialog closes, buffer and file stay put.
+      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(dialog).toBeHidden();
+      await expect(editor).toHaveValue('# Draft\n');
+      await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+
+      // Save & switch click matches Alt+S: the buffer is saved, then the target opens.
+      const saveRequest = page.waitForRequest('**/api/files/save');
+      const openRequest = page.waitForRequest('**/api/files/open');
+      await page.getByRole('button', { name: 'boris.json', exact: true }).click();
+      await dialog.getByRole('button', { name: /Save & switch/ }).click();
+      expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+      expect((await openRequest).postDataJSON()).toMatchObject({ path: 'boris.json' });
+      await expect(page.getByRole('textbox', { name: 'Source for boris.json' })).toBeVisible();
+    });
+
+    test('create and rename dialogs: clicking the primary matches Enter and Cancel matches Esc', async ({ page }) => {
+      await installApi(page);
+      let createRequests = 0;
+      let renameRequests = 0;
+      page.on('request', request => {
+        if (request.url().includes('/api/files/create')) createRequests += 1;
+        if (request.url().includes('/api/files/rename')) renameRequests += 1;
+      });
+
+      const create = page.getByRole('dialog', { name: 'Create file' });
+      await page.getByRole('button', { name: 'Create file', exact: true }).click();
+      await expect(create).toBeVisible();
+      await create.getByRole('button', { name: /Cancel/ }).click();
+      await expect(create).toBeHidden();
+      expect(createRequests).toBe(0);
+      await page.getByRole('button', { name: 'Create file', exact: true }).click();
+      await create.getByRole('textbox', { name: 'New file path' }).fill('content/posts/pointer.md');
+      await create.getByRole('button', { name: /Create file/ }).click();
+      await expect(create).toBeHidden();
+      expect(createRequests).toBe(1);
+
+      await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+      const rename = page.getByRole('dialog', { name: 'Rename file' });
+      await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+      await expect(rename).toBeVisible();
+      await rename.getByRole('button', { name: /Cancel/ }).click();
+      await expect(rename).toBeHidden();
+      expect(renameRequests).toBe(0);
+      await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+      await rename.getByRole('textbox', { name: 'New file path' }).fill('content/posts/pointer-renamed.md');
+      await rename.getByRole('button', { name: /Rename file/ }).click();
+      await expect(rename).toBeHidden();
+      expect(renameRequests).toBe(1);
+    });
+
+    test('delete dialog: clicking the danger button matches Enter and Cancel matches Esc', async ({ page }) => {
+      await installApi(page);
+      let deleteRequests = 0;
+      page.on('request', request => {
+        if (request.url().includes('/api/files/delete')) deleteRequests += 1;
+      });
+      await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'Delete file' });
+      await page.getByRole('button', { name: 'Delete file', exact: true }).click();
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: /Cancel/ }).click();
+      await expect(dialog).toBeHidden();
+      expect(deleteRequests).toBe(0);
+      await page.getByRole('button', { name: 'Delete file', exact: true }).click();
+      const deleteRequest = page.waitForRequest('**/api/files/delete');
+      await dialog.getByRole('button', { name: /Delete content\/index\.md/ }).click();
+      expect((await deleteRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', confirmed: true });
+      await expect(dialog).toBeHidden();
+      expect(deleteRequests).toBe(1);
+    });
+
+    test('conflict dialog: clicking Replace disk version matches Enter and Keep editing matches Esc', async ({ page }) => {
+      await installApi(page, { saveConflict: true });
+      await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+      const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+      await editor.fill('# Mine\n');
+      await page.getByRole('button', { name: 'Save file', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'External changes detected' });
+      await expect(dialog).toBeVisible();
+
+      // Keep editing click matches Esc: dialog closes, the unsaved buffer survives.
+      await dialog.getByRole('button', { name: /Keep editing/ }).click();
+      await expect(dialog).toBeHidden();
+      await expect(editor).toHaveValue('# Mine\n');
+      await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+      // Replace disk version click matches Enter: a retry save with the conflict fingerprint fires.
+      await page.getByRole('button', { name: 'Save file', exact: true }).click();
+      await expect(dialog).toBeVisible();
+      const saveRequest = page.waitForRequest('**/api/files/save');
+      await dialog.getByRole('button', { name: /Replace disk version/ }).click();
+      expect((await saveRequest).postDataJSON()).toMatchObject({
+        path: 'content/index.md', content: '# Mine\n', fingerprint: 'b'.repeat(64)
+      });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: /Keep editing/ }).click();
+      await expect(dialog).toBeHidden();
+    });
+
+    test('command palette: clicking an option matches Enter', async ({ page }) => {
+      await installApi(page);
+      await page.keyboard.press('Control+K');
+      const palette = page.getByRole('dialog', { name: 'Commands' });
+      await expect(palette).toBeVisible();
+      const input = palette.getByRole('combobox', { name: 'Filter commands' });
+      await input.fill('open');
+      const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
+      await listbox.getByRole('option', { name: /content\/index\.md/ }).click();
+      await expect(palette).toBeHidden();
+      await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+    });
+
+    test('recovery banner: clicking Restore and Discard matches Enter', async ({ page }) => {
+      await installApi(page, {
+        recovery: [
+          { path: 'content/index.md', content: '# Recovered draft\n', fingerprint: 'a'.repeat(64) },
+          { path: 'content/guides/getting-started.md', content: '# Recovered guide\n', fingerprint: 'a'.repeat(64) }
+        ]
+      });
+      const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+      await expect(recovery).toBeVisible();
+      const clearRequest = page.waitForRequest('**/api/recovery/clear');
+      await recovery.getByRole('button', { name: 'Discard recovery for content/guides/getting-started.md', exact: true }).click();
+      expect((await clearRequest).postDataJSON()).toMatchObject({ path: 'content/guides/getting-started.md' });
+      await expect(recovery.getByRole('button', { name: /getting-started/ })).toHaveCount(0);
+      await recovery.getByRole('button', { name: 'Restore content/index.md', exact: true }).click();
+      await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Recovered draft\n');
+    });
+  });
 });

@@ -16,6 +16,14 @@ pub const Options = struct {
     /// Optional cache-only collection of resolved page references. These are
     /// deliberately not emitted as graph/RAG semantic edges.
     reference_ids: ?*std.ArrayList([]const u8) = null,
+    /// When non-null, destinations are rewritten as absolute canonical web
+    /// URLs (`base_url ++ "/" ++ html_output_path`) instead of site-relative
+    /// hrefs. Consumers that publish the Markdown *outside* the site — the
+    /// Nostr NIP-23 projection — need links that resolve from anywhere, since
+    /// a relative href has no meaning in a reader client. `null` keeps the
+    /// site's relative hrefs byte-for-byte. `base_url` carries no trailing
+    /// slash.
+    base_url: ?[]const u8 = null,
 };
 
 const Destination = struct {
@@ -289,6 +297,9 @@ fn rewriteDestination(allocator: std.mem.Allocator, destination: []const u8, opt
     const node = try destinationNode(allocator, destination, options, nodes) orelse return null;
     const target_output = identity.htmlOutputPath(allocator, node.id) catch return null;
     defer allocator.free(target_output);
+    if (options.base_url) |base| {
+        return try std.fmt.allocPrint(allocator, "{s}/{s}{s}", .{ base, target_output, split.suffix });
+    }
     const href = identity.relativeHref(allocator, options.output_path, target_output) catch return null;
     defer allocator.free(href);
     return try std.fmt.allocPrint(allocator, "{s}{s}", .{ href, split.suffix });
@@ -484,4 +495,53 @@ test "documentation links leave excluded and unsafe forms literal" {
     try std.testing.expect(std.mem.indexOf(u8, result, "[code](guide.md)") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "[raw](guide.md)") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "[escape](../../guide.md)") != null);
+}
+
+fn absoluteTestNodes() [1]graph_mod.Node {
+    return .{
+        .{ .id = "guides/intro", .source_path = "guides/intro.md" },
+    };
+}
+
+test "documentation links stay relative when no base url is configured" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteTestNodes();
+    const result = try rewrite(gpa, "[intro](../guides/intro.md)", .{
+        .nodes = &nodes,
+        .source_path = "docs/page.md",
+        .output_path = "docs/page.html",
+        .base_url = null,
+    });
+    defer gpa.free(result);
+    try std.testing.expectEqualStrings("[intro](../guides/intro.html)", result);
+}
+
+test "documentation links become absolute canonical urls under a base url" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteTestNodes();
+    const result = try rewrite(gpa, "[intro](../guides/intro.md)", .{
+        .nodes = &nodes,
+        .source_path = "docs/page.md",
+        .output_path = "docs/page.html",
+        .base_url = "https://example.com/docs",
+    });
+    defer gpa.free(result);
+    try std.testing.expectEqualStrings("[intro](https://example.com/docs/guides/intro.html)", result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "docs//") == null);
+}
+
+test "absolute documentation links keep query and fragment suffixes" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteTestNodes();
+    const result = try rewrite(gpa, "[intro](../guides/intro.md#usage) [q](../guides/intro.md?view=all#usage)", .{
+        .nodes = &nodes,
+        .source_path = "docs/page.md",
+        .output_path = "docs/page.html",
+        .base_url = "https://example.com/docs",
+    });
+    defer gpa.free(result);
+    try std.testing.expectEqualStrings(
+        "[intro](https://example.com/docs/guides/intro.html#usage) [q](https://example.com/docs/guides/intro.html?view=all#usage)",
+        result,
+    );
 }

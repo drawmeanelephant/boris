@@ -29,6 +29,10 @@ pub const Options = struct {
     /// Optional HTML-path report collector; every diagnostic printed by this
     /// module is also appended here.
     diagnostics: ?*diag.Collector = null,
+    /// Oliver serialization profile (#448). `.html` is the byte-identical
+    /// default; `.xhtml` renders XML-compatible output and fails closed on
+    /// verbatim raw HTML (`error.RawHtmlNotXmlWellFormed`).
+    output_profile: render.OutputProfile = .html,
 };
 
 fn sourceLineAt(source: []const u8, offset: usize) u32 {
@@ -194,7 +198,7 @@ pub fn renderSource(
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try render.render(md, doc_arena);
+                const h = try render.renderProfile(md, doc_arena, options.output_profile);
                 try html_buf.appendSlice(arena, h.bytes);
             },
             .aside => |component| {
@@ -310,7 +314,7 @@ fn prepareBody(
     // Content-local Markdown images → published sibling-tree URLs (pre-render).
     const with_assets = if (options.page_assets) |bundle| blk: {
         var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
-        break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail) catch |err| {
+        break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail, null) catch |err| {
             content_asset.printDiagnostic(gpa, err, source_path, asset_fail, options.diagnostics);
             return error.AssetFailed;
         };

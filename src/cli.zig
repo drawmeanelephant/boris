@@ -11,6 +11,7 @@ const identity = @import("identity.zig");
 const github_pages = @import("github_pages.zig");
 const site_url_mod = @import("site_url.zig");
 const sitemap = @import("sitemap.zig");
+const render = @import("render.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
@@ -38,6 +39,10 @@ pub const Command = enum {
     impact,
     watch,
     plan,
+    /// `boris nostr plan` — the offline NIP-23 publication plan. A family of
+    /// its own rather than a mode of `plan`, because `plan` is a configuration
+    /// declaration that never scans content and must not start.
+    nostr_plan,
     init,
     /// `standard-site publish` — the explicit one-shot publish family. The
     /// network operation lives only here; no other command publishes.
@@ -188,6 +193,17 @@ pub const Options = struct {
     jobs: usize = 1,
     /// Opt-in local-development watch mode for HTML builds.
     watch: bool = false,
+    /// Serve the built HTML tree over loopback HTTP with reload-on-rebuild
+    /// (`watch --serve`). Requires watch mode.
+    serve: bool = false,
+    /// Loopback port for `--serve` (default `preview_server.default_port`;
+    /// `0` selects an ephemeral port). Implies `serve`.
+    serve_port: ?u16 = null,
+    /// Effective Oliver serialization profile for the synthetic "default"
+    /// target (`--target-profile default=xhtml`, #448). Per-target profiles
+    /// live on `targets`; this mirrors the default target for the
+    /// single-target compile path. Null → `.html`.
+    html_profile: ?render.OutputProfile = null,
     /// Dynamic target list.
     targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
 
@@ -222,6 +238,10 @@ pub const ParseError = error{
     // `--rss-limit` given a non-numeric or out-of-range value: the parse
     // loop knows the flag, so name it instead of letting findBadArg guess.
     InvalidRssLimit,
+    // `boris nostr <x>` where `<x>` is not a subcommand this build implements.
+    // Named separately so the message can list what does exist rather than
+    // reporting a bare unknown positional.
+    UnknownNostrSubcommand,
     OutOfMemory,
 };
 
@@ -294,6 +314,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_incremental = false;
     var saw_jobs = false;
     var saw_watch = false;
+    var saw_serve = false;
+    var serve_port: ?u16 = null;
     var saw_textile = false;
     var saw_cooklang = false;
     var saw_format = false;
@@ -338,6 +360,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // Pending --target-layout NAME=PATH applied after targets are known.
     var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
     defer target_layouts.deinit(gpa);
+    // Pending --target-profile NAME=PROFILE applied after targets are known.
+    var target_profiles: std.ArrayListUnmanaged(struct { name: []const u8, profile: render.OutputProfile }) = .{ .items = &.{}, .capacity = 0 };
+    defer target_profiles.deinit(gpa);
     // Pending --layout-rule TARGET SELECTOR LAYOUT_PATH (three following args).
     var pending_rules: std.ArrayListUnmanaged(struct {
         target: []const u8,
@@ -375,6 +400,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         // the loop so `boris impact` stays a usage error.
     } else if (i < args.len and std.mem.eql(u8, args[i], "plan")) {
         command = .plan;
+        i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "nostr")) {
+        i += 1;
+        // Exactly one subcommand today. An unknown one is a usage error rather
+        // than a stub, so nothing can look like signing or publishing exists.
+        if (i >= args.len or !std.mem.eql(u8, args[i], "plan")) return error.UnknownNostrSubcommand;
+        command = .nostr_plan;
         i += 1;
     } else if (i < args.len and std.mem.eql(u8, args[i], "init")) {
         command = .init;
@@ -569,6 +601,19 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--serve")) {
+            if (saw_serve) return error.DuplicateFlag;
+            saw_serve = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--port") or std.mem.startsWith(u8, a, "--port=")) {
+            if (serve_port != null) return error.DuplicateFlag;
+            const value = try takeValue(args, &i, a, "--port");
+            serve_port = std.fmt.parseUnsigned(u16, value, 10) catch return error.InvalidValue;
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--format") or std.mem.startsWith(u8, a, "--format=")) {
             if (saw_format) return error.DuplicateFlag;
             saw_format = true;
@@ -637,6 +682,33 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
                 }
             }
             try target_layouts.append(gpa, .{ .name = name, .path = path });
+            continue;
+        }
+
+        // --target-profile NAME=PROFILE (html|xhtml), applied after targets are
+        // known. Mirrors --target-layout; the profile is a serialization switch
+        // (#448) and composes with layout/rule selection.
+        if (std.mem.eql(u8, a, "--target-profile") or std.mem.startsWith(u8, a, "--target-profile=")) {
+            const val = try takeValue(args, &i, a, "--target-profile");
+            const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
+                return error.InvalidValue;
+            };
+            const name = val[0..eq_idx];
+            const profile_raw = val[eq_idx + 1 ..];
+            if (name.len == 0 or profile_raw.len == 0) return error.InvalidValue;
+            if (!target_mod.isValidTargetName(name)) return error.InvalidValue;
+            const profile: render.OutputProfile = if (std.mem.eql(u8, profile_raw, "html"))
+                .html
+            else if (std.mem.eql(u8, profile_raw, "xhtml"))
+                .xhtml
+            else
+                return error.InvalidValue;
+            for (target_profiles.items) |existing| {
+                if (std.mem.eql(u8, existing.name, name)) {
+                    return error.DuplicateFlag;
+                }
+            }
+            try target_profiles.append(gpa, .{ .name = name, .profile = profile });
             continue;
         }
 
@@ -915,10 +987,11 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
 
     const has_explicit_targets = targets.items.len > 0;
     const has_target_layouts = target_layouts.items.len > 0;
+    const has_target_profiles = target_profiles.items.len > 0;
     const has_layout_rules = pending_rules.items.len > 0;
     const wants_sitemap = saw_sitemap or saw_sitemap_path;
     // Explicit HTML selectors (not the bare default).
-    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme or has_layout_rules or wants_sitemap;
+    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or has_target_profiles or saw_theme or has_layout_rules or wants_sitemap;
     const wants_rag = saw_rag or saw_rag_dir;
     const wants_context = saw_context or saw_context_dir;
     const wants_llms = saw_llms or saw_llms_path;
@@ -948,7 +1021,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         // declaration JSON document, and it runs no compiler phase, so the
         // machine-readable timing report has nowhere to go without corrupting
         // the plan stream.
-        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or wants_sitemap or
+        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
             wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
             saw_format or saw_report or saw_watch or saw_timings)
         {
@@ -973,13 +1046,41 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         };
     }
 
+    if (command == .nostr_plan) {
+        if (profile_path == null) return error.MissingValue;
+        // Same boundary as `plan`, and for the same reason: the profile is the
+        // only configuration source. This command does scan content, so
+        // `--input`/`--cooklang`/`--textile` overrides stay meaningful, but
+        // stdout belongs to the single plan document — hence no `--timings`.
+        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or wants_sitemap or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
+            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental)
+        {
+            return error.ConflictingFlags;
+        }
+        return .{
+            .help = false,
+            .quiet = quiet,
+            .timings = false,
+            .command = .nostr_plan,
+            .profile_path = profile_path,
+            .profile_input_override = if (saw_input) input_dir else null,
+            .profile_input_format_override = if (saw_input_format) input_format else null,
+            .mode = .html,
+            .input_format = input_format,
+            .input_dir = input_dir,
+            .jobs = jobs,
+            .targets = targets,
+        };
+    }
+
     if (command == .init) {
         // `init` writes a deterministic starter tree into one positional
         // target directory. Compiler modes, output selectors, publication
         // inputs, analysis flags, and watch/incremental controls select work
         // init does not perform; the target directory is positional, so
         // `--input` is rejected rather than silently misread.
-        if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or
+        if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or
             wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or
             saw_rss_title or saw_rss_description or saw_rss_limit or saw_format or saw_report or saw_watch or saw_timings or
             saw_profile or saw_input or saw_textile or saw_cooklang or saw_out or saw_rag_dir or saw_incremental or saw_jobs)
@@ -1094,7 +1195,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             return error.ConflictingFlags;
         }
     } else if (command == .check or command == .impact) {
-        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
+        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_target_profiles or has_layout_rules) {
             return error.ConflictingFlags;
         }
     } else if (command == .build and saw_format) {
@@ -1102,6 +1203,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     } else if (command == .watch and (saw_format or saw_report)) {
         return error.ConflictingFlags;
     }
+
+    // The preview server is a watch-mode surface (`boris watch --serve`).
+    if ((saw_serve or serve_port != null) and !saw_watch) return error.ConflictingFlags;
 
     // --- conflict matrix ---------------------------------------------------
     if (saw_rag and saw_no_rag) return error.ConflictingFlags;
@@ -1214,6 +1318,31 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             }
         }
         if (!found) return error.InvalidValue;
+    }
+
+    // Apply --target-profile NAME=PROFILE onto matching targets (including the
+    // synthetic "default" target on bare HTML / --html / --html-dir).
+    for (target_profiles.items) |tp| {
+        var found = false;
+        for (targets.items) |*t| {
+            if (std.mem.eql(u8, t.name, tp.name)) {
+                if (t.html_profile != null) return error.DuplicateFlag;
+                t.html_profile = tp.profile;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return error.InvalidValue;
+    }
+
+    // The effective profile for the synthetic "default" target, surfaced on
+    // Options for the single-target compile path (`main.runHtml`).
+    var default_profile: ?render.OutputProfile = null;
+    for (targets.items) |t| {
+        if (std.mem.eql(u8, t.name, "default")) {
+            default_profile = t.html_profile;
+            break;
+        }
     }
 
     // Attach --layout-rule TARGET SELECTOR PATH. Order relative to --target is
@@ -1398,6 +1527,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .incremental = saw_incremental or saw_watch,
             .jobs = jobs,
             .watch = saw_watch,
+            .serve = saw_serve or serve_port != null,
+            .serve_port = serve_port,
+            .html_profile = default_profile,
             .targets = targets,
             .command = command,
             .impact_id = impact_id,
@@ -1468,6 +1600,7 @@ pub fn printUsage() void {
         \\  standard-site sessions  List persisted sessions (DIDs only; no secrets)
         \\  standard-site logout  Remove a persisted session (secure erase; does not revoke)
         \\  standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
+        \\  nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
         \\  init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
         \\  (no command)        Same as build
         \\  standard-site publish options:
@@ -1534,10 +1667,15 @@ pub fn printUsage() void {
         \\  --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
         \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
         \\  --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
+        \\  --target-profile N=P Per-target Oliver serialization profile (NAME=html|xhtml; default html)
         \\  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
         \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
         \\  --watch             Compatibility flag; same as the watch command
+        \\  --serve             Serve the built tree over loopback HTTP (watch only);
+        \\                      auto-reload helper: http://127.0.0.1:PORT/__boris/
+        \\  --port N            Loopback port for --serve (default 8090; 0 = ephemeral);
+        \\                      implies --serve
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
         \\  --timings           Print a machine-readable phase timing/counter JSON report to stdout
         \\                      (opt-in; default output, diagnostics, and exit codes unchanged)
@@ -1593,6 +1731,8 @@ pub fn printUsage() void {
         \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
         \\      `boris validate` observes the selected HTML target configuration but writes no artifacts.
         \\      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
+        \\      `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
+        \\      it never signs, never contacts a relay, and never reads a key.
         \\      --html / --html-dir / bare CLI map to a single target named "default".
         \\      Equivalent --target / --target-layout / --layout-rule permutations yield the
         \\      same config (targets sorted by name; rules canonicalized). No layout frontmatter.
@@ -1648,6 +1788,9 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
             } else {
                 std.debug.print("error: invalid option value\n", .{});
             }
+        },
+        error.UnknownNostrSubcommand => {
+            std.debug.print("error: unknown nostr subcommand (available: plan)\n", .{});
         },
         error.RSSMetadataRequired => {
             // `--rss` / `--rss-path` are mode flags; a missing value here
@@ -1996,6 +2139,63 @@ test "parse: explicit build and watch commands are stable aliases" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--format", "json" }));
 }
 
+test "parse: watch --serve and --port (preview server)" {
+    // `watch --serve` enables the loopback preview server with the default port.
+    var serve = try parseOptions(std.testing.allocator, &.{ "boris", "watch", "--serve" });
+    defer serve.deinit(std.testing.allocator);
+    try expect(serve.watch);
+    try expect(serve.serve);
+    try expect(serve.serve_port == null);
+
+    // `--port` implies `--serve` and parses a u16.
+    var port = try parseOptions(std.testing.allocator, &.{ "boris", "watch", "--port", "8123" });
+    defer port.deinit(std.testing.allocator);
+    try expect(port.serve);
+    try expectEqual(@as(u16, 8123), port.serve_port.?);
+
+    // `--watch --serve` (flag form) works too.
+    var flag = try parseOptions(std.testing.allocator, &.{ "boris", "--watch", "--serve", "--port", "0" });
+    defer flag.deinit(std.testing.allocator);
+    try expect(flag.serve);
+    try expectEqual(@as(u16, 0), flag.serve_port.?);
+
+    // Serve requires watch mode; duplicates are usage errors.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--serve" }));
+}
+
+test "parse: --target-profile selects the Oliver serialization profile (#448)" {
+    // Per-target XHTML on an explicit target.
+    var multi = try parseOptions(std.testing.allocator, &.{ "boris", "build", "--target", "site=dist/site", "--target-profile", "site=xhtml" });
+    defer multi.deinit(std.testing.allocator);
+    try expectEqual(@as(usize, 1), multi.targets.items.len);
+    try expectEqual(render.OutputProfile.xhtml, multi.targets.items[0].html_profile.?);
+
+    // On the synthetic "default" target, the profile is also surfaced on Options.
+    var def = try parseOptions(std.testing.allocator, &.{ "boris", "--html-dir", "dist", "--target-profile=default=xhtml" });
+    defer def.deinit(std.testing.allocator);
+    try expectEqual(render.OutputProfile.xhtml, def.html_profile.?);
+    try expectEqual(render.OutputProfile.xhtml, def.targets.items[0].html_profile.?);
+
+    // No profile → defaults to html (null overrides).
+    var plain = try parseOptions(std.testing.allocator, &.{"boris"});
+    defer plain.deinit(std.testing.allocator);
+    try expect(plain.html_profile == null);
+    try expect(plain.targets.items[0].html_profile == null);
+
+    // Unknown target, bad profile value, and duplicates are usage errors.
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "nope=xhtml" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "default=sgml" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "default" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "default=xhtml", "--target-profile", "default=xhtml" }));
+
+    // validate is the no-publication HTML path: like --theme and --layout-rule,
+    // the profile selector is honored (validation renders with it), not rejected.
+    var val = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--target-profile", "default=xhtml" });
+    defer val.deinit(std.testing.allocator);
+    try expectEqual(Command.validate, val.command);
+    try expectEqual(render.OutputProfile.xhtml, val.html_profile.?);
+}
+
 test "parse: init takes an optional target directory" {
     var bare = try parseOptions(std.testing.allocator, &.{ "boris", "init" });
     defer bare.deinit(std.testing.allocator);
@@ -2199,6 +2399,60 @@ test "parse: standard-site smoke validates its contract" {
     defer o.deinit(std.testing.allocator);
     try expectEqualStrings("smoke.json", o.smoke_out.?);
     try expectEqual(Mode.html, o.mode);
+}
+
+test "parse: nostr plan selects a profile and keeps content-scan overrides" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris", "nostr", "plan", "--profile", "profiles/site.json", "--input", "docs", "--quiet",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.nostr_plan, o.command);
+    try expectEqualStrings("profiles/site.json", o.profile_path.?);
+    // Unlike `plan`, this command compiles content, so the input overrides are
+    // meaningful; the HTML output override is not, and is rejected below.
+    try expectEqualStrings("docs", o.profile_input_override.?);
+    try expect(o.quiet);
+    try expect(!o.timings);
+}
+
+test "parse: nostr plan takes the cooklang and textile input overrides" {
+    var cook = try parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--cooklang" });
+    defer cook.deinit(std.testing.allocator);
+    try expectEqual(identity.InputFormat.cook, cook.profile_input_format_override.?);
+
+    var textile = try parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--textile" });
+    defer textile.deinit(std.testing.allocator);
+    try expectEqual(identity.InputFormat.textile, textile.profile_input_format_override.?);
+}
+
+test "parse: nostr has exactly one subcommand, and it needs a profile" {
+    // A missing or unknown subcommand is named, so nothing suggests that
+    // signing or publishing exists in this build.
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr" }));
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign" }));
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish" }));
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "--profile", "a" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan" }));
+}
+
+test "parse: nostr plan owns stdout and rejects every other selector" {
+    const rejected = [_][]const []const u8{
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--timings" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--html-dir", "dist" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--target", "public=dist" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--rss" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--llms" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--sitemap" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--rag" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--context" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--watch" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--incremental" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--format", "json" },
+    };
+    for (rejected) |args| {
+        try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, args));
+    }
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--profile", "b" }));
 }
 
 test "parse: --out selects IR mode" {

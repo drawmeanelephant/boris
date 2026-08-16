@@ -1103,6 +1103,60 @@ test "seam: control characters are refused" {
     defer freeResult(gpa, result);
 }
 
+test "seam: NUL bytes in recipe text are refused, never reaching output (oliver#56)" {
+    // A literal NUL (U+0000) in a step's text span. checkControlChars
+    // refuses c < 0x20 in author-controlled spans, so the seam's own line is
+    // stricter than Oliver's U+FFFD substitution: the NUL never reaches
+    // published output at all — the result carries a fatal diagnostic and
+    // empty markdown. Oliver's parser deliberately preserves NUL in payloads
+    // (docs/COOKLANG.md §4), so this exercises the refusal, not a parse
+    // filter.
+    const gpa = std.testing.allocator;
+    const result = try toMarkdown("Mix @flour{2%cup} and \x00 salt in #bowl.\n", gpa);
+    try std.testing.expect(!result.isOk());
+    defer freeResult(gpa, result);
+    try std.testing.expectEqual(@as(usize, 0), result.markdown.len);
+    try std.testing.expect(std.mem.indexOf(u8, result.diagnostic.?.message, "control characters") != null);
+}
+
+test "seam: scaling by a zero factor is error.InvalidScaleFactor, not a panic (oliver#55)" {
+    // oliver#55: the Cooklang scaling path used to divide by a zero
+    // numerator and panic. The collapsed pin returns error.InvalidScaleFactor
+    // for a zero numerator, zero denominator, and a zero servings target —
+    // Boris does not call scaleRecipe in production, but the seam's import
+    // surface is the pinned contract and must never crash on these inputs.
+    const gpa = std.testing.allocator;
+    const body = "Mix @flour{2%cup} and @salt{1%tsp} in #bowl for ~{5%min}.\n";
+    var parsed = try oliver_cooklang.cooklang.parse(gpa, body, .{});
+    defer parsed.deinit();
+
+    try std.testing.expectError(error.InvalidScaleFactor, oliver_cooklang.cooklang_scale.scaleRecipe(gpa, &parsed.recipe, .{ .factor = .{ .num = 0, .den = 2 } }));
+    try std.testing.expectError(error.InvalidScaleFactor, oliver_cooklang.cooklang_scale.scaleRecipe(gpa, &parsed.recipe, .{ .factor = .{ .num = 2, .den = 0 } }));
+    try std.testing.expectError(error.InvalidScaleFactor, oliver_cooklang.cooklang_scale.scaleRecipe(gpa, &parsed.recipe, .{ .servings = 0 }));
+}
+
+test "seam: NUL through oliver's cooklang_html renders as U+FFFD in both profiles (oliver#56)" {
+    // The seam refuses NUL before it can reach output, but Oliver's own
+    // cooklang_html renderer — reachable from the same pinned module — is the
+    // #56 subject: NUL must become U+FFFD (EF BF BD) under both HTML and
+    // XHTML profiles with no raw NUL byte in the fragment.
+    const gpa = std.testing.allocator;
+    const body = "Add @salt \x00 and @x{1\x00%g} to #pan\x00.\n";
+    var parsed = try oliver_cooklang.cooklang.parse(gpa, body, .{});
+    defer parsed.deinit();
+
+    for ([_]oliver_cooklang.OutputProfile{ .html, .xhtml }) |profile| {
+        var aw = std.Io.Writer.Allocating.init(gpa);
+        defer aw.deinit();
+        try oliver_cooklang.cooklang_html.render(gpa, &aw.writer, &parsed.recipe, .{ .profile = profile });
+        var out = aw.toArrayList();
+        defer out.deinit(gpa);
+
+        try std.testing.expect(std.mem.indexOfScalar(u8, out.items, 0) == null);
+        try std.testing.expect(std.mem.indexOf(u8, out.items, "\xEF\xBF\xBD") != null);
+    }
+}
+
 test "seam: an empty section name is refused" {
     const gpa = std.testing.allocator;
     const result = try toMarkdown("=\n\nMix it.\n", gpa);

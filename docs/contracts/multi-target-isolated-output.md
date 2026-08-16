@@ -19,15 +19,32 @@ Layout selection:
 --html-layout <PATH>           # global default (default: themes/boris/layouts/main.html)
 --target-layout <NAME>=<PATH>  # per-target override (NAME must match a --target or "default")
 --layout-rule <TARGET> <SELECTOR> <LAYOUT_PATH>  # repeatable page layout rules (HTML only)
+--target-profile <NAME>=<PROFILE>  # per-target serializer profile: html (default) or xhtml
 ```
 
+Serialization profile:
+- `--target-profile NAME=xhtml` renders the target with Oliver's XHTML
+  output profile — an XML-compatible serialization of the same normalized
+  document (see `oliver-renderer.md`). The default is `html` and is
+  byte-identical to pre-profile output.
+- The profile is a serializer switch, not a new document model: the layout
+  still owns the full-document wrapper, so an XHTML *document* requires the
+  layout template to emit the XML declaration + `<html
+  xmlns="http://www.w3.org/1999/xhtml">`; the page-body slot receives the
+  XHTML fragment.
+- **Fail-closed:** verbatim raw HTML (HTML blocks, inline raw HTML) in a
+  page's content is a hard build error on an XHTML target
+  (`error.RawHtmlNotXmlWellFormed`, surfaced with page/offset context in the
+  diagnostics surface). Flipping a target to XHTML requires a raw-HTML sweep
+  of its content first; the same bytes render fine under `html`.
+
 ### Constraints & Conflict Rules:
-1. **Implies HTML mode:** Providing `--target` or `--target-layout` automatically sets the build mode to `.html`.
+1. **Implies HTML mode:** Providing `--target`, `--target-layout`, or `--target-profile` automatically sets the build mode to `.html`.
 2. **Bare HTML / default target:** If no `--target` is specified, Boris synthesizes a single target named `"default"` with output directory `--html-dir` when provided, otherwise `"dist"`. This applies to bare `boris`, `--html`, and `--html-dir`.
 3. **Mutual Exclusivity:**
    - `--target` cannot be combined with `--html-dir`, since targets explicitly define their own output directories.
    - `--target` is mutually exclusive with `--out`, `--rag`, and `--rag-dir`.
-4. **Permitted Combinations:** `--html` is allowed alongside `--target` to explicitly declare HTML mode, but is redundant. `--html-layout` and `--target-layout` are HTML-only. `--target` may be combined with `--watch`, `--incremental`, and `--jobs` (global to all targets; `--watch` implies incremental).
+4. **Permitted Combinations:** `--html` is allowed alongside `--target` to explicitly declare HTML mode, but is redundant. `--html-layout` and `--target-layout` are HTML-only, and `--target-profile` selects the serializer profile (HTML-only values rejected). `--target` may be combined with `--watch`, `--incremental`, and `--jobs` (global to all targets; `--watch` implies incremental).
 5. **Global options:** `--watch`, `--incremental`, and `--jobs` apply globally to all targets.
 6. **Public sitemap URL:** `--sitemap` / `--sitemap-path` plus one unqualified
    `--site-url` is accepted only for a single target. More than one target is

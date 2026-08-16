@@ -6,10 +6,12 @@
 
 const std = @import("std");
 const github_pages = @import("github_pages.zig");
+const identity = @import("identity.zig");
 const layout_select = @import("layout_select.zig");
 const rss = @import("rss.zig");
 const sitemap = @import("sitemap.zig");
 const standard_site = @import("standard_site.zig");
+const nostr = @import("nostr.zig");
 const target = @import("target.zig");
 const theme = @import("theme.zig");
 
@@ -21,6 +23,7 @@ pub const max_targets: usize = 32;
 pub const max_array_items: usize = 256;
 pub const max_target_name_bytes: usize = 64;
 pub const max_site_text_bytes: usize = 1024;
+pub const max_nostr_articles: usize = 256;
 
 pub const Error = error{
     ProfileTooLarge,
@@ -53,6 +56,12 @@ pub const Error = error{
     OutputConflict,
     ReservedOutputRoot,
     AmbiguousHtmlOverride,
+    /// A `nostr` section is malformed: bad pubkey, relay, article id, or
+    /// budget. The protocol-level cause is reported by `nostr.Error`.
+    InvalidNostr,
+    /// Nostr publication needs the canonical page URL, which only the
+    /// publication location provides.
+    NostrRequiresPublication,
 } || std.mem.Allocator.Error;
 
 pub const InputFormat = enum { markdown, textile, cook };
@@ -113,6 +122,37 @@ pub const PublicationTargetPlan = union(enum) {
     }
 };
 
+/// Owned Nostr NIP-23 publication configuration.
+///
+/// Public configuration only: the *expected author* public key, the exact
+/// entity-id allowlist, the relay targets, and bounded delivery budgets. No
+/// secret ever enters this type — the private key belongs to a later signing
+/// slice, reads from a dedicated channel, and is never a profile field.
+pub const NostrPlan = struct {
+    enabled: bool = false,
+    /// Expected author x-only public key, 64 lowercase hex digits.
+    pubkey: []u8,
+    /// Exact entity ids selected for publication, sorted ascending and
+    /// deduplicated. Selection is an allowlist rather than a filter: putting an
+    /// article on the network is not something a glob should be able to do by
+    /// accident.
+    articles: [][]u8 = &.{},
+    /// Normalized relay targets, sorted bytewise. Never a default list:
+    /// where an article is published is the author's decision.
+    relays: [][]u8 = &.{},
+    timeout_ms: usize = nostr.default_timeout_ms,
+    retries: usize = 0,
+
+    fn deinit(self: *NostrPlan, allocator: std.mem.Allocator) void {
+        allocator.free(self.pubkey);
+        for (self.articles) |v| allocator.free(v);
+        if (self.articles.len > 0) allocator.free(self.articles);
+        for (self.relays) |v| allocator.free(v);
+        if (self.relays.len > 0) allocator.free(self.relays);
+        self.* = undefined;
+    }
+};
+
 pub const HtmlTargetPlan = struct {
     name: []u8,
     output: []u8,
@@ -151,6 +191,7 @@ pub const PublicationPlan = struct {
     ir: ?IrPlan = null,
     rag: ?RagPlan = null,
     context: ?ContextPlan = null,
+    nostr: ?NostrPlan = null,
 
     pub fn deinit(self: *PublicationPlan, allocator: std.mem.Allocator) void {
         allocator.free(self.input);
@@ -167,6 +208,7 @@ pub const PublicationPlan = struct {
             allocator.free(v.output);
             if (v.scope) |scope| allocator.free(scope);
         }
+        if (self.nostr) |*v| v.deinit(allocator);
         self.* = undefined;
     }
 };
@@ -314,7 +356,7 @@ fn dup(allocator: std.mem.Allocator, value: []const u8) Error![]u8 {
 
 fn parsePlan(allocator: std.mem.Allocator, value: std.json.Value) Error!PublicationPlan {
     const root = try object(value);
-    try only(root, &.{ "format", "schema_version", "input", "input_format", "site", "publication", "targets", "editions" });
+    try only(root, &.{ "format", "schema_version", "input", "input_format", "site", "publication", "targets", "editions", "nostr" });
     if (!std.mem.eql(u8, try string(try required(root, "format")), "boris-publication-profile")) return error.InvalidFormat;
     if ((try integer(try required(root, "schema_version"))) != 1) return error.InvalidSchemaVersion;
     var plan = PublicationPlan{ .input = try dup(allocator, if (field(root, "input")) |v| try checkedPath(v) else "content") };
@@ -324,7 +366,92 @@ fn parsePlan(allocator: std.mem.Allocator, value: std.json.Value) Error!Publicat
     if (field(root, "publication")) |v| plan.publication = try parsePublication(allocator, v);
     if (field(root, "targets")) |v| plan.targets = try parseTargets(allocator, v);
     if (field(root, "editions")) |v| try parseEditions(allocator, &plan, v);
+    if (field(root, "nostr")) |v| plan.nostr = try parseNostr(allocator, v);
     return plan;
+}
+
+/// Parse the `nostr` section: a NIP-23 long-form publication surface.
+///
+/// Every protocol judgement (pubkey grammar, relay grammar and normalization,
+/// relay ordering) is delegated to `nostr.zig`; this function owns only the
+/// JSON shape, the allowlist canonicalization, and the ownership transfer.
+fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPlan {
+    const obj = try object(value);
+    try only(obj, &.{ "enabled", "pubkey", "articles", "relays", "timeout_ms", "retries" });
+
+    const pubkey = try string(try required(obj, "pubkey"));
+    nostr.validatePubkey(pubkey) catch return error.InvalidNostr;
+
+    var out = NostrPlan{ .pubkey = try dup(allocator, pubkey) };
+    errdefer out.deinit(allocator);
+
+    if (field(obj, "enabled")) |v| out.enabled = try boolean(v);
+    out.articles = try parseNostrArticles(allocator, try required(obj, "articles"));
+    out.relays = try parseNostrRelays(allocator, try required(obj, "relays"));
+    if (field(obj, "timeout_ms")) |v| {
+        const n = try integer(v);
+        if (n < nostr.min_timeout_ms or n > nostr.max_timeout_ms) return error.InvalidNostr;
+        out.timeout_ms = n;
+    }
+    if (field(obj, "retries")) |v| {
+        const n = try integer(v);
+        if (n > nostr.max_retries) return error.InvalidNostr;
+        out.retries = n;
+    }
+    return out;
+}
+
+/// The selected entity ids, validated as ids, sorted ascending, duplicates
+/// refused. Sorting here (rather than at emission) is what makes the plan
+/// independent of the order the author happened to list them in.
+fn parseNostrArticles(allocator: std.mem.Allocator, value: std.json.Value) Error![][]u8 {
+    const values = try array(value);
+    if (values.len == 0) return error.InvalidNostr;
+    if (values.len > max_nostr_articles or values.len > max_array_items) return error.ArrayLimitExceeded;
+
+    var out = try allocator.alloc([]u8, values.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (out[0..initialized]) |v| allocator.free(v);
+        allocator.free(out);
+    }
+    for (values) |v| {
+        const id = try string(v);
+        if (!identity.validateEntityId(id)) return error.InvalidNostr;
+        out[initialized] = try dup(allocator, id);
+        initialized += 1;
+    }
+    std.mem.sort([]u8, out, {}, struct {
+        fn less(_: void, a: []u8, b: []u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.less);
+    var i: usize = 1;
+    while (i < out.len) : (i += 1) {
+        if (std.mem.eql(u8, out[i - 1], out[i])) return error.InvalidNostr;
+    }
+    return out;
+}
+
+fn parseNostrRelays(allocator: std.mem.Allocator, value: std.json.Value) Error![][]u8 {
+    const values = try array(value);
+    if (values.len == 0 or values.len > nostr.max_relays) return error.InvalidNostr;
+
+    var out = try allocator.alloc([]u8, values.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (out[0..initialized]) |v| allocator.free(v);
+        allocator.free(out);
+    }
+    for (values) |v| {
+        out[initialized] = nostr.normalizeRelayUrl(allocator, try string(v)) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.InvalidNostr;
+        };
+        initialized += 1;
+    }
+    nostr.sortRelays(out) catch return error.InvalidNostr;
+    return out;
 }
 
 fn parseInputFormat(value: std.json.Value) Error!InputFormat {
@@ -629,6 +756,13 @@ pub fn validatePlan(plan: *const PublicationPlan) Error!void {
             if (!std.mem.eql(u8, url, base_url)) return error.PublicationSiteMismatch;
         };
     }
+    if (plan.nostr) |nostr_plan| {
+        // Every article carries the canonical page URL in its `r`/`i` tags, and
+        // that URL must be the one that actually serves the page. Only the
+        // publication location establishes it, so a Nostr surface without one
+        // is a configuration error rather than a plan with guessed URLs.
+        if (nostr_plan.enabled and plan.publication == null) return error.NostrRequiresPublication;
+    }
     if (plan.ir) |e| try validateMachineRoot(plan, e.output);
     if (plan.rag) |e| try validateMachineRoot(plan, e.output);
     if (plan.context) |e| try validateMachineRoot(plan, e.output);
@@ -752,4 +886,96 @@ test "profile workspace is selected parent and has no discovery" {
     var workspace = try profileWorkspace(std.testing.allocator, "/tmp", "/work/project/boris.publication.json");
     defer workspace.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("/work/project", workspace.root);
+}
+
+// --- the `nostr` NIP-23 publication surface --------------------------------
+
+const nostr_prefix =
+    "{\"format\":\"boris-publication-profile\",\"schema_version\":1," ++
+    "\"publication\":{\"target\":\"github-pages\",\"base_url\":\"https://owner.github.io/boris\",\"origin\":\"https://owner.github.io\",\"base_path\":\"/boris\"}," ++
+    "\"targets\":[{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}],\"nostr\":";
+
+fn parseNostrProfile(section: []const u8) Error!PublicationRequest {
+    const source = try std.fmt.allocPrint(std.testing.allocator, "{s}{s}}}", .{ nostr_prefix, section });
+    defer std.testing.allocator.free(source);
+    return parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, .{});
+}
+
+const valid_pubkey = "\"a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919\"";
+
+test "nostr section normalizes selection and relays into the owned plan" {
+    var request = try parseNostrProfile(
+        "{\"enabled\":true,\"pubkey\":" ++ valid_pubkey ++
+            ",\"articles\":[\"guides/z\",\"articles/a\"]," ++
+            "\"relays\":[\"wss://relay.example.com/\",\"WSS://A.Relay.Example.com:443\"],\"timeout_ms\":250,\"retries\":2}",
+    );
+    defer request.deinit(std.testing.allocator);
+    const config = request.plan.nostr.?;
+    try std.testing.expect(config.enabled);
+    // Both lists are canonical, so profile order cannot change the plan bytes.
+    try std.testing.expectEqualStrings("articles/a", config.articles[0]);
+    try std.testing.expectEqualStrings("guides/z", config.articles[1]);
+    try std.testing.expectEqualStrings("wss://a.relay.example.com", config.relays[0]);
+    try std.testing.expectEqualStrings("wss://relay.example.com", config.relays[1]);
+    try std.testing.expectEqual(@as(usize, 250), config.timeout_ms);
+    try std.testing.expectEqual(@as(usize, 2), config.retries);
+}
+
+test "nostr section defaults are bounded and explicit" {
+    var request = try parseNostrProfile(
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+    );
+    defer request.deinit(std.testing.allocator);
+    const config = request.plan.nostr.?;
+    // Disabled unless asked: a profile that merely describes a surface must not
+    // become a publication surface by omission.
+    try std.testing.expect(!config.enabled);
+    try std.testing.expectEqual(nostr.default_timeout_ms, config.timeout_ms);
+    try std.testing.expectEqual(@as(usize, 0), config.retries);
+}
+
+test "nostr section fails closed on identity, selection, and relay defects" {
+    const cases = [_][]const u8{
+        // Pubkey grammar: wrong length, uppercase hex, non-hex.
+        "{\"pubkey\":\"abc\",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+        "{\"pubkey\":\"A695F6B60119D9521934A691347D9F78E8770B56DA16BB255EE286DDF9FDA919\",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+        // Empty selection, duplicate selection, unusable entity id.
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[],\"relays\":[\"wss://r.example.com\"]}",
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\",\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"/abs\"],\"relays\":[\"wss://r.example.com\"]}",
+        // Empty relay list, non-loopback ws://, duplicate after normalization.
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[]}",
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"ws://r.example.com\"]}",
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\",\"wss://r.example.com:443/\"]}",
+        // Budgets outside the documented bounds.
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"],\"timeout_ms\":1}",
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"],\"retries\":99}",
+    };
+    for (cases) |section| {
+        try std.testing.expectError(error.InvalidNostr, parseNostrProfile(section));
+    }
+}
+
+test "nostr section requires the closed key set and both required keys" {
+    try std.testing.expectError(error.UnknownKey, parseNostrProfile(
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"],\"nsec\":\"x\"}",
+    ));
+    try std.testing.expectError(error.MissingField, parseNostrProfile(
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"relays\":[\"wss://r.example.com\"]}",
+    ));
+    try std.testing.expectError(error.MissingField, parseNostrProfile(
+        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"]}",
+    ));
+    try std.testing.expectError(error.MissingField, parseNostrProfile(
+        "{\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+    ));
+}
+
+test "an enabled nostr surface requires a publication location" {
+    // Without a location there is no canonical URL, so `r`/`i` would have to be
+    // guessed. Refuse instead.
+    const source =
+        \\{"format":"boris-publication-profile","schema_version":1,"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}],"nostr":{"enabled":true,"pubkey":"a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919","articles":["a"],"relays":["wss://r.example.com"]}}
+    ;
+    try std.testing.expectError(error.NostrRequiresPublication, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, .{}));
 }
