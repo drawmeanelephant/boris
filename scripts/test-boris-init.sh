@@ -35,9 +35,18 @@ for f in \
     content/guides/publishing.md \
     themes/boris/layouts/main.html \
     themes/boris/assets/css/boris.css \
-    boris.json; do
+    boris.json \
+    standard-site.json; do
     [[ -f "$OUT/site/$f" ]] || fail "init did not write $f"
 done
+grep -q 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa' "$OUT/site/standard-site.json" \
+    || fail "Atmosphere starter DID is not the obvious fake placeholder"
+grep -q 'did:plc:ewvi7nxzyoun6zhxrhs64oiz' "$OUT/site/standard-site.json" \
+    && fail "Atmosphere starter reused the atproto.com fixture DID"
+grep -q 'bsky.social' "$OUT/site/standard-site.json" \
+    && fail "Atmosphere starter named bsky.social"
+grep -q '"pds"' "$OUT/site/standard-site.json" \
+    && fail "Atmosphere starter should omit pds so publish binds to discovery"
 pass "starter tree written"
 
 note "deterministic output"
@@ -57,6 +66,13 @@ cd "$OUT/site"
 "$ROOT/zig-out/bin/boris" plan --profile boris.json \
     >"$OUT/plan.json" 2>"$OUT/plan.stderr" || fail "starter profile did not plan"
 grep -q '"format": "boris-publication-plan"' "$OUT/plan.json" || fail "plan output is not a publication plan"
+"$ROOT/zig-out/bin/boris" standard-site plan --profile standard-site.json \
+    >"$OUT/standard-site-plan.json" 2>"$OUT/standard-site-plan.stderr" \
+    || fail "Atmosphere starter profile did not plan: $(head -3 "$OUT/standard-site-plan.stderr")"
+grep -q '"format": "boris-standard-site-plan"' "$OUT/standard-site-plan.json" \
+    || fail "Atmosphere plan output is not a standard-site plan"
+grep -q 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa' "$OUT/standard-site-plan.json" \
+    || fail "Atmosphere plan dropped the placeholder DID"
 pass "starter builds, validates, and plans"
 
 # --- refusal: never clobber an existing non-empty project ------------------
