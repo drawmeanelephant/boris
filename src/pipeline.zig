@@ -19,7 +19,7 @@ const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
 const cooklang_seam = @import("cooklang_seam.zig");
-const source_io = @import("source_io.zig");
+const source_provider = @import("source_provider.zig");
 const doclink = @import("doclink.zig");
 const target_mod = @import("target.zig");
 const timings = @import("timings.zig");
@@ -52,6 +52,8 @@ pub const CompileOptions = struct {
     input_format: identity.InputFormat = .markdown,
     /// Opt-in phase timing/counter recorder (`--timings`); null by default.
     timings: ?*timings.Recorder = null,
+    /// When null, `compile` opens a filesystem adapter on `content_root`.
+    sources: ?source_provider.Provider = null,
 };
 
 pub const PageEntry = graph_mod.Node;
@@ -181,10 +183,9 @@ fn findPage(nodes: []const PageEntry, id: []const u8) bool {
 }
 
 const DependencyResolver = struct {
-    io: Io,
     gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
-    content_dir: Io.Dir,
+    sources: source_provider.Provider,
     nodes: []const PageEntry,
     edges: *std.ArrayList(DependencyEdge),
     diagnostics: *std.ArrayList(diag.Diagnostic),
@@ -283,7 +284,7 @@ const DependencyResolver = struct {
             }
             if (self.scanned_sources.contains(hit.path)) continue;
 
-            const source = include_mod.readSourceAlloc(self.io, self.content_dir, hit.path, self.gpa) catch |err| switch (err) {
+            const source = self.sources.readInclude(hit.path, self.gpa) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => {
                     fail.set(hit.line, hit.column, hit.path, locus);
@@ -334,18 +335,16 @@ const DependencyResolver = struct {
 };
 
 fn resolveDependencies(
-    io: Io,
     gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
-    content_dir: Io.Dir,
+    sources: source_provider.Provider,
     input_format: identity.InputFormat,
     result: *Result,
 ) !void {
     var resolver: DependencyResolver = .{
-        .io = io,
         .gpa = gpa,
         .retain = retain,
-        .content_dir = content_dir,
+        .sources = sources,
         .nodes = result.pages.items,
         .edges = &result.edges,
         .diagnostics = &result.diagnostics,
@@ -353,7 +352,7 @@ fn resolveDependencies(
     defer resolver.deinit();
 
     for (result.pages.items) |page| {
-        const source = source_io.readPageAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+        const source = sources.readPage(page.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EIO,
@@ -424,11 +423,16 @@ pub fn populateDependencyIndexFormat(
     var diagnostics: std.ArrayList(diag.Diagnostic) = .empty;
     defer diagnostics.deinit(gpa);
 
-    var resolver: DependencyResolver = .{
+    var dir_adapter = source_provider.Dir{
         .io = io,
+        .dir = content_dir,
+        .input_format = input_format,
+        .owns_dir = false,
+    };
+    var resolver: DependencyResolver = .{
         .gpa = gpa,
         .retain = retain,
-        .content_dir = content_dir,
+        .sources = .{ .dir = &dir_adapter },
         .nodes = nodes,
         .edges = &edges,
         .diagnostics = &diagnostics,
@@ -436,7 +440,7 @@ pub fn populateDependencyIndexFormat(
     defer resolver.deinit();
 
     for (nodes) |page| {
-        const source = source_io.readPageAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+        const source = dir_adapter.readPage(page.source_path, gpa) catch |err| {
             std.debug.print("error: EIO: failed to read {s}: {s}\n", .{ page.source_path, @errorName(err) });
             return err;
         };
@@ -765,8 +769,38 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var scan_list = page_mod.PageList.init(gpa, retain);
     defer scan_list.deinit();
 
+    var dir_adapter: ?source_provider.Dir = null;
+    defer if (dir_adapter) |*d| d.close();
+    const sources = options.sources orelse blk: {
+        dir_adapter = source_provider.Dir.open(io, options.content_root, options.input_format) catch |err| switch (err) {
+            error.ContentDirMissing => {
+                try result.diagnostics.append(gpa, .{
+                    .severity = .error_,
+                    .code = .EIO,
+                    .message = try std.fmt.allocPrint(retain, "content root \"{s}\" not found or not a directory", .{options.content_root}),
+                    .remediation = try retain.dupe(u8, "Create the content directory or pass --input=DIR"),
+                });
+                result.failure = .io;
+                diag.sortDiagnostics(result.diagnostics.items);
+                return result;
+            },
+            else => {
+                try result.diagnostics.append(gpa, .{
+                    .severity = .error_,
+                    .code = .EIO,
+                    .message = try std.fmt.allocPrint(retain, "failed to open content root \"{s}\": {s}", .{ options.content_root, @errorName(err) }),
+                    .remediation = try retain.dupe(u8, "Check that the content directory is readable"),
+                });
+                result.failure = .io;
+                diag.sortDiagnostics(result.diagnostics.items);
+                return result;
+            },
+        };
+        break :blk source_provider.Provider{ .dir = &dir_adapter.? };
+    };
+
     if (options.timings) |t| t.start(.scan);
-    scanner.scan(io, .{ .content_root = options.content_root, .input_format = options.input_format }, &scan_list) catch |err| switch (err) {
+    sources.scan(&scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
@@ -842,24 +876,10 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var db = page_mod.PageDb.init(gpa, retain);
     defer db.deinit();
 
-    const cwd = Io.Dir.cwd();
-    var content_dir = cwd.openDir(io, options.content_root, .{}) catch |err| {
-        try result.diagnostics.append(gpa, .{
-            .severity = .error_,
-            .code = .EIO,
-            .message = try std.fmt.allocPrint(retain, "failed to open content root \"{s}\": {s}", .{ options.content_root, @errorName(err) }),
-            .remediation = try retain.dupe(u8, "Check that the content directory is readable"),
-        });
-        result.failure = .io;
-        diag.sortDiagnostics(result.diagnostics.items);
-        return result;
-    };
-    defer content_dir.close(io);
-
     // Per-file scratch: freed after each promote so no parser slice can leak.
     if (options.timings) |t| t.start(.parse);
     for (scan_list.items()) |disc| {
-        const source = source_io.readPageAlloc(io, content_dir, disc.source_path, gpa) catch |err| {
+        const source = sources.readPage(disc.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EIO,
@@ -1050,7 +1070,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     if (options.timings) |t| t.stop(.graph_validate);
     if (err_count == 0) {
         if (options.timings) |t| t.start(.dependency_resolve);
-        try resolveDependencies(io, gpa, retain, content_dir, options.input_format, &result);
+        try resolveDependencies(gpa, retain, sources, options.input_format, &result);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
         if (options.timings) |t| t.stop(.dependency_resolve);
@@ -1150,6 +1170,26 @@ fn readOutFile(io: Io, gpa: std.mem.Allocator, dir_path: []const u8, name: []con
     var dir = try cwd.openDir(io, dir_path, .{});
     defer dir.close(io);
     return try readFileAlloc(io, dir, name, gpa);
+}
+
+test "compileBundle-shaped memory provider needs no content directory" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const files = [_]source_provider.File{
+        .{ .path = "index.md", .bytes = "---\ntitle: Home\nstatus: published\n---\n# Home\n\n{{include includes/tip.md}}\n" },
+        .{ .path = "includes/tip.md", .bytes = "a tip\n" },
+    };
+    var mem = try source_provider.Memory.init(gpa, &files, .markdown);
+    defer mem.deinit();
+    var result = try compile(io, gpa, .{
+        .content_root = "memory://bundle",
+        .quiet = true,
+        .sources = .{ .memory = &mem },
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    try std.testing.expectEqual(@as(usize, 1), result.pages.items.len);
+    try std.testing.expectEqualStrings("index", result.pages.items[0].id);
 }
 
 test "e2e valid fixture builds three JSON artifacts" {

@@ -12,7 +12,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | If you are looking for… | Start here | Contract |
 |---|---|---|
 | Argv, commands, exit codes | `src/cli.zig`, `src/main.zig`, `src/init.zig` | [cli.md](contracts/cli.md) |
-| Discover pages | `src/scanner.zig`, `src/identity.zig`, `src/source_io.zig` | [scanner.md](contracts/scanner.md), [identity-and-paths.md](contracts/identity-and-paths.md) |
+| Discover pages | `src/scanner.zig`, `src/identity.zig`, `src/source_io.zig`, `src/source_provider.zig` | [scanner.md](contracts/scanner.md), [identity-and-paths.md](contracts/identity-and-paths.md), [source-provider.md](contracts/source-provider.md) |
 | Frontmatter and the page record | `src/parser.zig`, `src/page.zig` | [frontmatter.md](contracts/frontmatter.md) |
 | Graph, parents, edges | `src/graph.zig`, `src/dependency.zig`, `src/pipeline.zig` | [ir-schema.md](contracts/ir-schema.md) |
 | Wiki-links, includes, doc links | `src/wikilink.zig`, `src/include.zig`, `src/doclink.zig` | [includes-and-wiki-links.md](contracts/includes-and-wiki-links.md), [documentation-links.md](contracts/documentation-links.md) |

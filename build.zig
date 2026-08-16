@@ -488,6 +488,21 @@ pub fn build(b: *std.Build) void {
     const run_scanner_tests = b.addRunArtifact(scanner_tests);
     run_scanner_tests.setCwd(b.path("."));
 
+    const source_provider_mod = b.createModule(.{
+        .root_source_file = b.path("src/source_provider.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(source_provider_mod, oliver_mod);
+    const source_provider_tests = b.addTest(.{ .root_module = source_provider_mod });
+    const run_source_provider_tests = b.addRunArtifact(source_provider_tests);
+    run_source_provider_tests.setCwd(b.path("."));
+    const test_source_provider_step = b.step(
+        "test-source-provider",
+        "Run in-memory source-provider tests",
+    );
+    test_source_provider_step.dependOn(&run_source_provider_tests.step);
+
     // --- Frontmatter parser tests (milestone 5) ----------------------------
     const parser_mod = b.createModule(.{
         .root_source_file = b.path("src/parser.zig"),
@@ -658,6 +673,11 @@ pub fn build(b: *std.Build) void {
     });
     const run_pipeline_tests = b.addRunArtifact(pipeline_tests);
     run_pipeline_tests.setCwd(b.path("."));
+    const test_pipeline_step = b.step(
+        "test-pipeline",
+        "Run IR pipeline tests",
+    );
+    test_pipeline_step.dependOn(&run_pipeline_tests.step);
 
     // --- Publication profile parser + static planner (Slice 1) -----------
     const publication_profile_mod = b.createModule(.{
@@ -1670,6 +1690,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);
+    test_step.dependOn(&run_source_provider_tests.step);
     test_step.dependOn(&run_parser_tests.step);
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_cooklang_tests.step);
