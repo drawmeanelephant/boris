@@ -96,6 +96,23 @@ once frontmatter parses.
 
 The compiler does not repair source files or silently map unsupported metadata.
 
+## Nostr publication diagnostics
+
+The `nostr` family reports `ENOSTR*` codes. Content problems exit `1`;
+profile or invocation problems exit `2`; I/O problems exit `3`.
+
+| Code | Meaning | First action |
+|---|---|---|
+| `ENOSTRELIGIBILITY` | An allowlisted article cannot be published as NIP-23 (draft, non-Markdown, no title/summary/date, or an invalid `t` tag) | Fix the page or remove it from the profile's `articles` |
+| `ENOSTRMARKDOWN` | The article's Markdown carries a defect a relay client would show (raw HTML, hard-wrapped paragraphs, unresolved local links) | Fix the source |
+| `ENOSTRTIME` | The authored `published_at` does not convert to a Unix second count, `created_at` precedes `published_at`, or a changed article needs a strictly newer `created_at` than its prior event | Fix the date, or pass an explicit `--created-at` override |
+| `ENOSTRPLAN` | The corpus changed under the run, or a signer input is not a valid plan/prior artifact (wrong format/schema, `d` mismatch, digest mismatch, prior from another identity) | Regenerate the plan and re-sign |
+| `ENOSTRSIGN` | Signing refusal: malformed key, signer pubkey does not match the plan's expected author, or a signature fails to self-verify | Check the key and the plan's `pubkey` |
+| `ENOSTRRELAY` | Publish: a relay rejected the event, timed out, closed, errored, or demanded NIP-42 authentication | Inspect the per-relay evidence in the report; retry or reconfigure |
+
+See [[guides/nostr-publication|Nostr NIP-23 Publication]] for the workflow and
+exit-code semantics.
+
 ## Related pages
 
 - [[reference/frontmatter|Frontmatter Reference]] — accepted metadata

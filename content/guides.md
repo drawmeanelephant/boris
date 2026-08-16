@@ -18,5 +18,6 @@ Step-by-step guides for authoring, organizing, and publishing documentation with
 - [[guides/asides]] — Semantic callouts and constrained disclosure blocks
 - [[guides/search-and-ui]] — Compiler-owned rendered search and the browser UI
 - [[guides/rag-export]] — RAG corpus, JSON IR, AI Context Bundle, and `llms.txt` generation
+- [[guides/nostr-publication]] — Nostr NIP-23 publication: offline `plan → sign` then `publish`
 - [[guides/oliver-markdown]] — Tables, footnotes, definition lists, heading ids, and supported Markdown extensions
 - [[guides/migration]] — Moving from Hugo, Starlight, Astro, or a plain Markdown folder to Boris
