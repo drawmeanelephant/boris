@@ -576,8 +576,6 @@ fn queryField(url: []const u8, name: []const u8) ?[]const u8 {
 fn hasDpop(headers: []const transport.Header) bool {
     for (headers) |header| {
         if (std.ascii.eqlIgnoreCase(header.name, "dpop") and header.value.len > 0) return true;
-        // The XRPC client binds its DPoP proof into the Authorization header.
-        if (std.ascii.eqlIgnoreCase(header.name, "authorization") and std.mem.startsWith(u8, header.value, "DPoP ")) return true;
     }
     return false;
 }

@@ -463,6 +463,9 @@ components are not signed, as required by
 [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449).
 
 The `ath` claim is unpadded base64url SHA-256 over the exact access-token bytes.
+Protected-resource XRPC calls send RFC 9449's two-header shape:
+`Authorization: DPoP <access_token>` and `DPoP: <proof>`. The proof is never
+used as the Authorization token.
 Tokens are bounded to 16 KiB at this layer. DPoP nonces use the RFC header-value
 alphabet and are bounded to 1 KiB. These bounds are rejection rules, not
 truncation rules.

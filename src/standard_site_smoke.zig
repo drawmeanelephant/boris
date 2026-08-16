@@ -1049,10 +1049,7 @@ fn queryField(url: []const u8, name: []const u8) ?[]const u8 {
 
 fn hasDpop(headers: []const transport.Header) bool {
     for (headers) |header| {
-        // PAR and token exchange carry the proof in the `dpop` header; the
-        // XRPC client binds its proof into the `authorization: DPoP …` header.
         if (std.ascii.eqlIgnoreCase(header.name, "dpop") and header.value.len > 0) return true;
-        if (std.ascii.eqlIgnoreCase(header.name, "authorization") and std.mem.startsWith(u8, header.value, "DPoP ")) return true;
     }
     return false;
 }
