@@ -702,28 +702,46 @@ pub const Client = struct {
         // the client open.
         var header_buf: [16 * 1024]u8 = undefined;
         var header_len: usize = 0;
+        var empty_tls_reads: u8 = 0;
         while (std.mem.indexOf(u8, header_buf[0..header_len], "\r\n\r\n") == null) {
             if (header_len == header_buf.len) return error.BadHandshake;
-            var got = raceDeadline(self.io, self.limits.handshake_timeout_ms, readVecFn, .{ self.reader(), header_buf[header_len..] }) catch |err| switch (err) {
+            if (self.box.tls) |*tls| {
+                // std.crypto.tls.Client.decrypts into its own reader buffer
+                // and returns 0 from readVec. Copy exactly the pending
+                // cleartext so the next vtable call does not pull another
+                // record. A 0-byte read with an empty buffer is not EOF:
+                // TLS 1.3 NewSessionTicket and a partial ciphertext record
+                // both look like that (#552). Keep reading until application
+                // data, close_notify, or the deadline.
+                const pending = tls.reader.bufferedLen();
+                if (pending > 0) {
+                    const drain_len = @min(pending, header_buf.len - header_len);
+                    const got = raceDeadline(self.io, self.limits.handshake_timeout_ms, readVecFn, .{ self.reader(), header_buf[header_len..][0..drain_len] }) catch |err| switch (err) {
+                        error.Timeout => return error.HandshakeTimeout,
+                        else => return error.BadHandshake,
+                    };
+                    if (got == 0) return error.BadHandshake;
+                    empty_tls_reads = 0;
+                    header_len += got;
+                    continue;
+                }
+                if (tls.eof()) return error.Closed;
+            }
+            const got = raceDeadline(self.io, self.limits.handshake_timeout_ms, readVecFn, .{ self.reader(), header_buf[header_len..] }) catch |err| switch (err) {
                 error.Timeout => return error.HandshakeTimeout,
                 else => return error.BadHandshake,
             };
-            if (got == 0 and self.box.tls != null) {
-                // The TLS reader decrypts a record into its own buffer and
-                // returns 0; the cleartext is only delivered on the next
-                // call. Drain exactly the pending bytes so the call's copy
-                // fills the buffer and the reader does not eagerly decrypt
-                // the *next* record (which would block until the relay sends
-                // data it has no reason to send).
-                const pending = self.box.tls.?.reader.bufferedLen();
-                if (pending == 0) return error.BadHandshake;
-                const drain_len = @min(pending, header_buf.len - header_len);
-                got = raceDeadline(self.io, self.limits.handshake_timeout_ms, readVecFn, .{ self.reader(), header_buf[header_len..][0..drain_len] }) catch |err| switch (err) {
-                    error.Timeout => return error.HandshakeTimeout,
-                    else => return error.BadHandshake,
-                };
+            if (got == 0) {
+                // One or two empty reads are TLS 1.3 tickets / partial
+                // records. A tight 0-return without a blocking socket read
+                // must not spin past the deadline.
+                if (self.box.tls != null and empty_tls_reads < 8) {
+                    empty_tls_reads += 1;
+                    continue;
+                }
+                return error.BadHandshake;
             }
-            if (got == 0) return error.BadHandshake;
+            empty_tls_reads = 0;
             header_len += got;
         }
         const headers = header_buf[0..header_len];

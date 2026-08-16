@@ -913,6 +913,8 @@ fn runPublish(gpa: std.mem.Allocator, plan: []const u8, bundle: []const u8, tls:
 }
 
 test "tls: a real wss:// relay with a pinned self-signed CA accepts the event" {
+    // #552: the first TLS application read is often a 0-byte NewSessionTicket,
+    // not the 101. This test is the gate that the upgrade still completes.
     var relay = try TlsRelay.spawn();
     defer relay.deinit();
 
