@@ -32,7 +32,8 @@ dist/_boris/search/search-index.json
 
 The producer reads rendered HTML, not Markdown, IR, or RAG. It records page
 paths, titles, rendered headings and fragments, searchable prose, and code in
-the v1 `boris-rendered-search-index` format. Navigation, footers, executable
+the v1 `boris-rendered-search-index` format. Navigation, footers, layout
+`<header>`/`<aside>` chrome outside a declared content root, executable
 elements, and marked exclusions are not indexed.
 
 ## Normal build
@@ -72,10 +73,17 @@ A custom layout can identify the main searchable body and opt out regions:
 <footer data-boris-search-exclude>
   Do not index this footer.
 </footer>
+
+<aside data-boris-search-ignore>
+  Shared sidebar chrome.
+</aside>
 ```
 
-Without a marked root, the producer falls back to the first `<main>` and then
-the first `<body>`. Multiple marked roots fail closed.
+`data-boris-search-exclude`, `data-boris-search-ignore`, and
+`data-boris-noindex` are equivalent exclusion markers. Without a marked root,
+the producer falls back to the first `<main>`, then `<article>` or
+`role="main"`, then `<body>`. On the body/whole-document fallback, `<header>`
+and `<aside>` are skipped as layout chrome. Multiple marked roots fail closed.
 
 ## Browser UI
 

@@ -97,8 +97,15 @@ component, regular-file, and no-symlink rules. Duplicate entries fail closed.
 The preferred extraction root is one `<main data-boris-search-root>`. Multiple
 marked roots fail. With `--require-root-marker`, a missing marker fails;
 otherwise the producer falls back to the first `<main>`, then the first
-`<body>`. Navigation, footer, executable/non-visible elements, and
-`data-boris-search-exclude` regions are not indexed.
+`<article>` or `role="main"`, then the first `<body>`. Those marked or semantic
+content roots are declared roots: `<header>` and `<aside>` descendants stay
+searchable so authored asides and article headers remain indexed. When the
+producer falls back to `<body>` or the whole document, `<header>` and `<aside>`
+are treated as layout chrome and skipped. Navigation, footer,
+executable/non-visible elements, and regions marked
+`data-boris-search-exclude`, `data-boris-search-ignore`, or `data-boris-noindex`
+are never indexed. Nested markup inside an excluded region does not re-enter
+the index.
 
 Rendered entities (`amp`, `lt`, `gt`, `quot`, `apos`, `nbsp`, and numeric
 character references) are decoded before text is stored. ASCII whitespace is

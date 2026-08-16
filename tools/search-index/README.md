@@ -12,10 +12,13 @@ Long options accept either `--option value` or `--option=value`. Use
 `--pages-file=live-pages.txt` for an exact output-relative live-page list;
 otherwise lowercase `.html` files are discovered recursively. Use
 `--require-root-marker` to require `<main data-boris-search-root>` on every
-page. Without it, extraction falls back to the first `<main>`, then `<body>`.
+page. Without it, extraction falls back to the first `<main>`, then
+`<article>` or `role="main"`, then `<body>`.
 
-The extractor excludes navigation/footer, executable or hidden content, and
-explicit `data-boris-search-exclude` regions. Pages-file paths are normalized
+The extractor excludes navigation/footer, executable or hidden content,
+`<header>`/`<aside>` chrome when the root is a body/whole-document fallback,
+and explicit `data-boris-search-exclude`, `data-boris-search-ignore`, or
+`data-boris-noindex` regions. Pages-file paths are normalized
 and duplicate or symlinked entries fail closed. The output tree is excluded
 from recursive discovery, and published indexes use atomic replacement.
 Headings become ordered sections and retain their rendered `id` as the
