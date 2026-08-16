@@ -88,14 +88,16 @@ unless they carry a date.
 
 Login stores a `0600` document under
 `$HOME/.local/share/boris/sessions` (override with `--session-root`).
-`sessions` prints DIDs only. `logout --did` erases the local document; it
-does not revoke the app password or the PDS session. Storing an app-password
-session for a DID replaces any OAuth session for that DID, and the reverse.
+`sessions` prints `did flavor pds` (flavor is `oauth` or `app-password`).
+`logout --did` or `logout --handle` erases the local document; it does not
+revoke the app password or the PDS session. Storing an app-password session
+for a DID replaces any OAuth session for that DID, and the reverse.
 
-Publish and smoke reuse a stored session (OAuth first, then app-password)
-and only open a browser if nothing is stored. Against bsky.social that
-browser path will fail closed on the missing scope — log in with
-`--app-password` first.
+Publish reuses a stored session (OAuth first, then app-password) and only
+opens a browser if nothing is stored. Smoke requires a stored session and
+does not launch the browser: if none is stored it tells you to
+`login --app-password` first. Against bsky.social the browser path will
+fail closed on the missing scope.
 
 ## Honesty board
 
@@ -121,7 +123,7 @@ boris standard-site verify  --profile PATH [--dist DIR] [--out PATH]
 boris standard-site login   --app-password (--did DID | --handle HANDLE)
 boris standard-site login   --did DID          # browser OAuth (not bsky.social)
 boris standard-site sessions [--session-root PATH]
-boris standard-site logout  --did DID
+boris standard-site logout  (--did DID | --handle HANDLE)
 boris standard-site publish --profile PATH [--plan PATH] [--out PATH] [--prune]
-boris standard-site smoke   (--did DID | --handle HANDLE) [--namespace NAME] [--out PATH]
+boris standard-site smoke   (--did DID | --handle HANDLE) [--namespace NAME] [--surface-url URL] [--indexer URL] [--out PATH]
 ```

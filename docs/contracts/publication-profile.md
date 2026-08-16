@@ -55,7 +55,7 @@ The root has exactly these fields:
 | `input` | no | Content root, default `content` |
 | `input_format` | no | `markdown` (default), `textile`, or `cook` |
 | `site` | no | Closed `url`, `title`, `description` object |
-| `publication` | no | Closed publication-target declaration; currently `github-pages` only |
+| `publication` | no | Closed publication-target declaration; `github-pages` or `standard-site` |
 | `targets` | no | Closed HTML-target array |
 | `editions` | no | Closed `ir`, `rag`, `context` object |
 
@@ -64,10 +64,16 @@ closed fields are:
 
 | Field | Required | Meaning |
 |---|---|---|
-| `target` | yes | Exact string `github-pages` |
+| `target` | yes | Closed registry: exact string `github-pages` or `standard-site` |
 | `base_url` | yes | Normalized public URL, including the project-site path when applicable |
 | `origin` | yes | Normalized scheme and authority with no path |
 | `base_path` | yes | `/repo` for a project site, or the empty string for a root/custom-domain site |
+
+A `target` of `standard-site` also accepts the Standard.site fields `did`,
+`name`, `description`, `show_in_discover`, `include` / `exclude`, `prune`,
+and optional `pds`. Those fields and their constraints live in
+[`standard-site.md`](standard-site.md). They are not GitHub Pages fields
+and do not change this schema version.
 
 Boris normalizes trailing slashes, requires `base_url == origin + base_path`,
 and rejects origin/path contradictions. A `github.io` origin with a non-empty

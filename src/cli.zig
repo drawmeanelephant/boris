@@ -269,6 +269,11 @@ pub const ParseError = error{
     MissingStandardSiteSubcommand,
     // `boris standard-site <x>` where `<x>` is not a family member.
     UnknownStandardSiteSubcommand,
+    // Family-scoped required-flag errors so usage prints the family list
+    // instead of the global compiler help.
+    MissingStandardSiteProfile,
+    MissingStandardSiteIdentity,
+    ConflictingStandardSiteFlags,
     OutOfMemory,
 };
 
@@ -1309,58 +1314,60 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         // login, sessions, and logout. Compiler modes, targets, and projection
         // selectors have no meaning here, and `--timings` must not corrupt the
         // evidence stream on stdout. `publish` requires a profile and forbids
-        // `--did`; `login`/`logout` require `--did`; `sessions` forbids it.
+        // `--did`; `login`/`logout`/`smoke` require `--did` or `--handle`;
+        // `sessions` forbids both.
         if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or
             wants_sitemap or wants_rag or saw_no_rag or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or
             saw_rss_title or saw_rss_description or saw_rss_limit or saw_format or saw_report or saw_watch or saw_timings or
             saw_input or saw_textile or saw_cooklang or saw_rag_dir or saw_scope or saw_split_size or saw_bundles_only or saw_complete or
             saw_incremental or saw_jobs or saw_llms_path or saw_rss_path or saw_sitemap_path or saw_context_dir)
         {
-            return error.ConflictingFlags;
+            return error.ConflictingStandardSiteFlags;
         }
         // Smoke-only and verify-only flags have no meaning on the other
         // subcommands; reject them rather than silently ignoring them.
         const saw_smoke_only = saw_smoke_namespace or saw_smoke_surface_url or saw_smoke_indexer_origin;
         switch (standard_site_command) {
             .publish => {
-                if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
+                if (profile_path == null) return error.MissingStandardSiteProfile;
+                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist) return error.ConflictingStandardSiteFlags;
             },
             .plan => {
-                if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+                if (profile_path == null) return error.MissingStandardSiteProfile;
+                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingStandardSiteFlags;
             },
             .records => {
-                if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+                if (profile_path == null) return error.MissingStandardSiteProfile;
+                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingStandardSiteFlags;
             },
             .verify => {
-                if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+                if (profile_path == null) return error.MissingStandardSiteProfile;
+                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingStandardSiteFlags;
             },
             .login => {
-                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
+                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingStandardSiteFlags;
                 if (app_password) {
                     // App-password login takes exactly one identity: a DID or
                     // a handle (resolved to a DID).
-                    if (session_did == null and session_handle == null) return error.MissingValue;
-                    if (session_did != null and session_handle != null) return error.ConflictingFlags;
+                    if (session_did == null and session_handle == null) return error.MissingStandardSiteIdentity;
+                    if (session_did != null and session_handle != null) return error.ConflictingStandardSiteFlags;
                 } else {
-                    if (session_did == null) return error.MissingValue;
-                    if (session_handle != null) return error.ConflictingFlags;
+                    if (session_did == null) return error.MissingStandardSiteIdentity;
+                    if (session_handle != null) return error.ConflictingStandardSiteFlags;
                 }
             },
             .logout => {
-                if (session_did == null) return error.MissingValue;
-                if (session_handle != null or app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
+                if (session_did == null and session_handle == null) return error.MissingStandardSiteIdentity;
+                if (session_did != null and session_handle != null) return error.ConflictingStandardSiteFlags;
+                if (app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingStandardSiteFlags;
             },
             .sessions => {
-                if (saw_session_did or saw_session_handle or saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
+                if (saw_session_did or saw_session_handle or saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingStandardSiteFlags;
             },
             .smoke => {
-                if (session_did == null and session_handle == null) return error.MissingValue;
-                if (session_did != null and session_handle != null) return error.ConflictingFlags;
-                if (saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_verify_dist) return error.ConflictingFlags;
+                if (session_did == null and session_handle == null) return error.MissingStandardSiteIdentity;
+                if (session_did != null and session_handle != null) return error.ConflictingStandardSiteFlags;
+                if (saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_verify_dist) return error.ConflictingStandardSiteFlags;
             },
         }
         return .{
@@ -1814,7 +1821,7 @@ pub fn printUsage() void {
         \\  standard-site records Dump the full canonical record payloads offline (no network)
         \\  standard-site verify  Cross-check the built head links + well-known file offline (no network)
         \\  standard-site login  Authorize a DID or handle and persist the session
-        \\  standard-site sessions  List persisted sessions (DIDs only; no secrets)
+        \\  standard-site sessions  List persisted sessions (DID, flavor, PDS; no secrets)
         \\  standard-site logout  Remove a persisted session (secure erase; does not revoke)
         \\  standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
         \\  nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
@@ -1840,7 +1847,7 @@ pub fn printUsage() void {
         \\  --out PATH          Verify result artifact path (default: stdout)
         \\  standard-site login/logout options:
         \\  --did DID           AT Protocol DID to authorize (login) or forget (logout)
-        \\  --handle HANDLE     AT Protocol handle for login --app-password or smoke (resolved to a DID)
+        \\  --handle HANDLE     AT Protocol handle for login --app-password, logout, or smoke
         \\  --app-password      Opt-in app-password login (broad account write; never OAuth scope)
         \\  standard-site smoke options:
         \\  --did DID           Test identity DID (or use --handle)
@@ -1991,11 +1998,11 @@ pub fn printStandardSiteUsage() void {
         \\  login --app-password (--did DID | --handle HANDLE)
         \\                                         Opt-in app-password login (bsky.social path)
         \\  login --did DID                        Browser OAuth (not granted by bsky.social)
-        \\  sessions [--session-root PATH]         List stored DIDs (no secrets)
-        \\  logout --did DID                       Erase the local session (does not revoke)
+        \\  sessions [--session-root PATH]         List DID, flavor, PDS (no secrets)
+        \\  logout (--did DID | --handle HANDLE)   Erase the local session (does not revoke)
         \\  publish --profile PATH [--plan PATH] [--out PATH] [--prune]
         \\                                         One-shot publish from a stored session
-        \\  smoke (--did DID | --handle HANDLE) [--namespace NAME] [--out PATH]
+        \\  smoke (--did DID | --handle HANDLE) [--namespace NAME] [--surface-url URL] [--indexer URL] [--out PATH]
         \\                                         Live interop smoke (manual, never in CI)
         \\
         \\  --session-root PATH                    Override the 0600 session store
@@ -2065,6 +2072,15 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
         },
         error.UnknownStandardSiteSubcommand => {
             std.debug.print("error: unknown standard-site subcommand (try: plan, records, verify, login, sessions, logout, publish, smoke)\n", .{});
+        },
+        error.MissingStandardSiteProfile => {
+            std.debug.print("error: standard-site plan, records, verify, and publish require --profile PATH\n", .{});
+        },
+        error.MissingStandardSiteIdentity => {
+            std.debug.print("error: this standard-site command requires --did DID or --handle HANDLE\n", .{});
+        },
+        error.ConflictingStandardSiteFlags => {
+            std.debug.print("error: conflicting standard-site options\n", .{});
         },
         error.RSSMetadataRequired => {
             // `--rss` / `--rss-path` are mode flags; a missing value here
@@ -2564,15 +2580,15 @@ test "parse: standard-site publish validates its contract" {
     // The network family requires the explicit subcommand and a profile.
     try expectError(error.MissingStandardSiteSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "standard-site" }));
     try expectError(error.UnknownStandardSiteSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "bogus" }));
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish" }));
+    try expectError(error.MissingStandardSiteProfile, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--plan" }));
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--prune", "--prune" }));
     // Compiler mode / projection selectors are usage errors: publish never
     // runs as a side effect of build/validate/watch/plan flags.
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--rag" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--target", "public=dist" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--watch" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--timings" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--rag" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--target", "public=dist" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--watch" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--timings" }));
     var family_help = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "--help" });
     defer family_help.deinit(std.testing.allocator);
     try expect(family_help.help);
@@ -2592,9 +2608,9 @@ test "parse: standard-site plan emits the offline projection without network fla
     try expectEqualStrings("site.json", o.profile_path.?);
     try expectEqualStrings("plan.json", o.plan_out.?);
 
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--did", "d" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--prune" }));
+    try expectError(error.MissingStandardSiteProfile, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--did", "d" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--prune" }));
 }
 
 test "parse: standard-site records emits full record payloads offline" {
@@ -2605,9 +2621,9 @@ test "parse: standard-site records emits full record payloads offline" {
     try expectEqualStrings("site.json", o.profile_path.?);
     try expectEqualStrings("records.json", o.records_out.?);
 
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records", "--profile", "a", "--did", "d" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records", "--profile", "a", "--prune" }));
+    try expectError(error.MissingStandardSiteProfile, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records", "--profile", "a", "--did", "d" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records", "--profile", "a", "--prune" }));
 }
 
 test "parse: standard-site verify checks a built output dir offline" {
@@ -2624,10 +2640,10 @@ test "parse: standard-site verify checks a built output dir offline" {
     defer dflt.deinit(std.testing.allocator);
     try expectEqualStrings("dist", dflt.verify_dist);
 
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify", "--profile", "a", "--did", "d" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify", "--profile", "a", "--prune" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--dist", "x" }));
+    try expectError(error.MissingStandardSiteProfile, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify", "--profile", "a", "--did", "d" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify", "--profile", "a", "--prune" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--dist", "x" }));
 }
 
 test "parse: standard-site login requires a DID and persists the session root" {
@@ -2652,15 +2668,21 @@ test "parse: standard-site logout requires a DID and rejects compiler flags" {
     var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout", "--did", "did:plc:ewvi7nxzyoun6zhxrhs64oiz" });
     defer o.deinit(std.testing.allocator);
     try expectEqual(StandardSiteCommand.logout, o.standard_site_command);
+
+    var by_handle = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout", "--handle", "alice.bsky.social" });
+    defer by_handle.deinit(std.testing.allocator);
+    try expectEqualStrings("alice.bsky.social", by_handle.session_handle.?);
+    try expect(by_handle.session_did == null);
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout", "--did", "a", "--handle", "b" }));
     try expectEqualStrings("did:plc:ewvi7nxzyoun6zhxrhs64oiz", o.session_did.?);
 
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login" }));
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout" }));
+    try expectError(error.MissingStandardSiteIdentity, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login" }));
+    try expectError(error.MissingStandardSiteIdentity, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout" }));
     try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "extra" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--rag" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--profile", "p.json" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "sessions", "--did", "a" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--did", "d" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--rag" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--profile", "p.json" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "sessions", "--did", "a" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--did", "d" }));
 }
 
 test "parse: standard-site login --app-password takes exactly one of --did or --handle" {
@@ -2676,13 +2698,13 @@ test "parse: standard-site login --app-password takes exactly one of --did or --
     try expect(h.session_did == null);
     try expectEqualStrings("Alice.Example.COM", h.session_handle.?);
 
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password", "--did", "a", "--handle", "b" }));
+    try expectError(error.MissingStandardSiteIdentity, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password", "--did", "a", "--handle", "b" }));
     // The app-password flag is login-only.
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--app-password" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout", "--did", "a", "--app-password" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--app-password" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "sessions", "--app-password" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--app-password" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout", "--did", "a", "--app-password" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--app-password" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "sessions", "--app-password" }));
 }
 
 test "parse: standard-site smoke requires a DID and accepts its opt-in flags" {
@@ -2701,17 +2723,17 @@ test "parse: standard-site smoke requires a DID and accepts its opt-in flags" {
 }
 
 test "parse: standard-site smoke validates its contract" {
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke" }));
+    try expectError(error.MissingStandardSiteIdentity, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke" }));
     var handle = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--handle", "alice.bsky.social" });
     defer handle.deinit(std.testing.allocator);
     try expectEqualStrings("alice.bsky.social", handle.session_handle.?);
     try expect(handle.session_did == null);
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--handle", "b" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--profile", "p.json" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--plan", "plan.json" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--rag" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--namespace", "n" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--indexer", "i" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--handle", "b" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--profile", "p.json" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--plan", "plan.json" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--rag" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--namespace", "n" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--indexer", "i" }));
     // --out is the smoke result path here, never an IR mode selector.
     var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--out", "smoke.json" });
     defer o.deinit(std.testing.allocator);

@@ -221,8 +221,9 @@ optional, non-blocking lane.
 
 `boris standard-site login --did DID` authorizes the account in the browser
 and persists the DPoP-bound session under the user-scoped session root;
-`boris standard-site sessions` lists stored DIDs; `boris standard-site logout
---did DID` securely erases one session. All three honor `--session-root` as an
+`boris standard-site sessions` lists each stored DID with its credential
+flavor (`oauth` or `app-password`) and PDS origin; `boris standard-site logout
+(--did DID | --handle HANDLE)` securely erases one session. All three honor `--session-root` as an
 explicit root override. See [`atproto-sessions.md`](atproto-sessions.md) for
 the storage, refresh, rotation-safety, recovery, and threat model.
 

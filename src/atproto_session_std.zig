@@ -162,6 +162,18 @@ pub const Sessions = struct {
         self.store.deinitDidList(items);
     }
 
+    pub fn hasDocument(self: *Sessions, did: []const u8) Error!bool {
+        return self.store.exists(did);
+    }
+
+    pub fn listEntries(self: *Sessions) Error![]store_mod.ListedSession {
+        return self.store.listEntries();
+    }
+
+    pub fn deinitListEntries(self: *Sessions, items: []store_mod.ListedSession) void {
+        self.store.deinitListEntries(items);
+    }
+
     /// Rotate a stored session, or die. See the module comment for the
     /// fail-closed rules: a definitive rejection or an ambiguous failure both
     /// remove the stale document so the operator re-authorizes cleanly.

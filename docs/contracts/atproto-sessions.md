@@ -85,8 +85,10 @@ Access token, refresh token, DPoP key seed, and the Authorization Server
 nonce are the only secret fields. They are written only into the `0600`
 document; the in-memory wire bytes and the read-back buffers are zeroed with
 `secureZero` before free, and the session's `deinit` zeroes the key seed and
-refresh token. `list` and the `sessions` command render DIDs only, never
-tokens. Logs, diagnostics, evidence, and tests contain no live secret
+refresh token. `list` still enumerates DIDs only. The `sessions` command
+prints one line per DID: the DID, a closed flavor token (`oauth` or
+`app-password`), and the bound PDS origin — never tokens, nonces, or key
+material. Logs, diagnostics, evidence, and tests contain no live secret
 material; tests use deterministic fixture strings that are not valid tokens.
 
 ## Refresh and rotation
@@ -157,7 +159,7 @@ publication. `login`/`sessions`/`logout` report the same code on store errors.
 boris standard-site login --did DID [--session-root PATH]
 boris standard-site login --app-password (--did DID | --handle HANDLE) [--session-root PATH]
 boris standard-site sessions [--session-root PATH]
-boris standard-site logout --did DID [--session-root PATH]
+boris standard-site logout (--did DID | --handle HANDLE) [--session-root PATH]
 ```
 
 - `login` resolves the DID, runs the interactive one-shot OAuth flow, and
@@ -168,8 +170,12 @@ boris standard-site logout --did DID [--session-root PATH]
   authenticates with `com.atproto.server.createSession`, and persists the
   Bearer session. It is a sibling of the OAuth login, never a fallback within
   it.
-- `sessions` lists stored DIDs, one per line on stdout, in sorted order.
-- `logout` securely erases the stored document. It does **not** revoke the
+- `sessions` lists stored sessions, one line per DID, as
+  `did flavor pds-origin` in sorted DID order. Flavor is `oauth` or
+  `app-password`.
+- `logout` securely erases the stored document. `--handle` resolves the
+  same way login does and fails closed if the handle does not resolve. It
+  does **not** revoke the
   authorization-server session: the refresh token remains usable server-side
   until it expires or the server revokes it (see limitations below).
 
