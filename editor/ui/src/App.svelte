@@ -1254,11 +1254,11 @@
   {/if}
 </dialog>
 
-<dialog bind:this={resolutionDialog} onkeydown={handleResolutionKeydown} aria-labelledby="resolution-heading">
+<dialog bind:this={resolutionDialog} onkeydown={handleResolutionKeydown} onclose={() => { pendingResolution = null; }} aria-labelledby="resolution-heading">
   <h2 id="resolution-heading">Unsaved changes in {activePath}</h2>
   <p>{resolutionPrompt}</p>
   <div class="dialog-actions">
-    <button type="button" onclick={() => { pendingResolution = null; resolutionDialog.close(); }}>Cancel</button>
+    <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
     <button type="button" onclick={resolvePendingDiscard}>Discard &amp; {resolutionVerb}<kbd>Alt+D</kbd></button>
     <button type="button" class="primary" onclick={resolvePendingSave}>Save &amp; {resolutionVerb}<kbd>Alt+S</kbd></button>
   </div>
