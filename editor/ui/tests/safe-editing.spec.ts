@@ -1231,4 +1231,64 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     await expect(listbox).toBeHidden();
     await expect(filter).toHaveValue('guides');
   });
+
+  test('recovery banner: Tab + Enter runs Restore and Discard', async ({ page }) => {
+    await installApi(page, {
+      recovery: [
+        { path: 'content/index.md', content: '# Recovered draft\n', fingerprint: 'a'.repeat(64) },
+        { path: 'content/guides/getting-started.md', content: '# Recovered guide\n', fingerprint: 'a'.repeat(64) }
+      ]
+    });
+    const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+    await expect(recovery).toBeVisible();
+    const hint = recovery.locator('.key-hint');
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText('Tab');
+    await expect(hint).toContainText('Enter');
+
+    // Enter runs Discard: the snapshot's clear request fires and its row leaves the banner.
+    const discard = recovery.getByRole('button', { name: 'Discard recovery for content/guides/getting-started.md', exact: true });
+    const clearRequest = page.waitForRequest('**/api/recovery/clear');
+    await discard.focus();
+    await page.keyboard.press('Enter');
+    expect((await clearRequest).postDataJSON()).toMatchObject({ path: 'content/guides/getting-started.md' });
+    await expect(recovery.getByRole('button', { name: /getting-started/ })).toHaveCount(0);
+
+    // Enter runs Restore: the recovered content lands in the editor.
+    const restore = recovery.getByRole('button', { name: 'Restore content/index.md', exact: true });
+    await restore.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Recovered draft\n');
+    await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Recovered unsaved work for content/index.md.');
+  });
+
+  test('recovery banner: Enter on Restore while dirty routes through the resolution dialog', async ({ page }) => {
+    await installApi(page, {
+      recovery: [{ path: 'content/guides/getting-started.md', content: '# Recovered guide\n', fingerprint: 'a'.repeat(64) }]
+    });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+    await editor.fill('# Draft\n');
+    await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+    const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+    const restore = recovery.getByRole('button', { name: 'Restore content/guides/getting-started.md', exact: true });
+    await restore.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /Save & restore/ })).toContainText('Alt+S');
+    await expect(dialog.getByRole('button', { name: /Discard & restore/ })).toContainText('Alt+D');
+
+    // Alt+D discards the buffer without saving, then the recovered content is restored.
+    let saveRequests = 0;
+    page.on('request', request => {
+      if (request.url().includes('/api/files/save')) saveRequests += 1;
+    });
+    const openRequest = page.waitForRequest('**/api/files/open');
+    await page.keyboard.press('Alt+D');
+    expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/guides/getting-started.md' });
+    expect(saveRequests).toBe(0);
+    await expect(page.getByRole('textbox', { name: 'Source for content/guides/getting-started.md' })).toHaveValue('# Recovered guide\n');
+  });
 });
