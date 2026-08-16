@@ -399,6 +399,10 @@ fn renderPlan(gpa: std.mem.Allocator, options: Options, intentions: []const Inte
     try json_out.writeString(&out, gpa, options.location.base_path);
     try out.appendSlice(gpa, "\n  },\n  \"author\": {\n    \"expected_pubkey\": ");
     try json_out.writeString(&out, gpa, options.pubkey);
+    var npub_buf: [nostr.npub_max_len]u8 = undefined;
+    const npub = try nostr.encodeNpub(options.pubkey, &npub_buf);
+    try out.appendSlice(gpa, ",\n    \"npub\": ");
+    try json_out.writeString(&out, gpa, npub);
     try out.appendSlice(gpa, "\n  },\n  \"delivery\": {\n    \"relays\": [");
     for (options.relays, 0..) |relay, i| {
         if (i > 0) try out.appendSlice(gpa, ",");
@@ -415,7 +419,7 @@ fn renderPlan(gpa: std.mem.Allocator, options: Options, intentions: []const Inte
     try out.appendSlice(gpa, "\n  },\n  \"articles\": [");
     for (intentions, 0..) |intention, i| {
         if (i > 0) try out.appendSlice(gpa, ",");
-        try renderIntention(&out, gpa, intention);
+        try renderIntention(&out, gpa, intention, options.pubkey, options.relays);
     }
     if (intentions.len > 0) try out.appendSlice(gpa, "\n  ");
     try out.appendSlice(gpa, "]\n}\n");
@@ -430,7 +434,13 @@ fn writeDeliveryDigest(out: *std.ArrayList(u8), gpa: std.mem.Allocator, options:
     try json_out.writeString(out, gpa, &digest);
 }
 
-fn renderIntention(out: *std.ArrayList(u8), gpa: std.mem.Allocator, intention: Intention) !void {
+fn renderIntention(
+    out: *std.ArrayList(u8),
+    gpa: std.mem.Allocator,
+    intention: Intention,
+    pubkey: []const u8,
+    relays: []const []const u8,
+) !void {
     try out.appendSlice(gpa, "\n    {\n      \"entity_id\": ");
     try json_out.writeString(out, gpa, intention.entity_id);
     try out.appendSlice(gpa, ",\n      \"source_path\": ");
@@ -459,7 +469,15 @@ fn renderIntention(out: *std.ArrayList(u8), gpa: std.mem.Allocator, intention: I
     try json_out.writeString(out, gpa, &intention.intention_digest);
     try out.appendSlice(gpa, ",\n      \"created_at\": null,\n      \"created_at_policy\": ");
     try json_out.writeString(out, gpa, "signing-time");
-    try out.appendSlice(gpa, ",\n      \"event_id\": null,\n      \"signature\": null\n    }");
+    var naddr_buf: [nostr.naddr_max_len]u8 = undefined;
+    const naddr = try nostr.encodeNaddr(intention.entity_id, pubkey, nostr.kind_long_form, relays, &naddr_buf);
+    try out.appendSlice(gpa, ",\n      \"event_id\": null,\n      \"signature\": null,\n      \"naddr\": ");
+    try json_out.writeString(out, gpa, naddr);
+    try out.appendSlice(gpa, ",\n      \"naddr_uri\": ");
+    var uri_buf: [nostr.naddr_max_len + 6]u8 = undefined;
+    const uri = try std.fmt.bufPrint(&uri_buf, "nostr:{s}", .{naddr});
+    try json_out.writeString(out, gpa, uri);
+    try out.appendSlice(gpa, "\n    }");
 }
 
 // =============================================================================

@@ -85,6 +85,20 @@ pub fn validatePubkey(value: []const u8) Error!void {
     }
 }
 
+/// Decode a profile `nostr.pubkey`: 64 lowercase hex or a NIP-19 `npub`.
+/// Always returns owned 64-char lowercase hex. `npub` is display input only;
+/// the hex form is what the plan and the NIP-01 event carry.
+pub fn parseAuthorPubkey(allocator: std.mem.Allocator, raw: []const u8) Error![]u8 {
+    if (std.mem.startsWith(u8, raw, "npub1")) {
+        var key: [32]u8 = undefined;
+        if (!decodeNpub(raw, &key)) return error.InvalidPubkey;
+        const hex = std.fmt.bytesToHex(key, .lower);
+        return allocator.dupe(u8, &hex);
+    }
+    try validatePubkey(raw);
+    return allocator.dupe(u8, raw);
+}
+
 // =============================================================================
 // Relay targets
 // =============================================================================
@@ -633,6 +647,159 @@ pub fn decodeSecretKey(input: []const u8, out: *[32]u8) bool {
     return decodeNsec(trimmed, out);
 }
 
+/// A NIP-19 `npub` fits in 63 characters (hrp + separator + 52 data + 6 check).
+pub const npub_max_len: usize = 63;
+/// Addressable naddr with a 255-byte `d` and the maximum relay list.
+pub const naddr_max_len: usize = 2048;
+
+/// Decode a NIP-19 `npub` into a 32-byte x-only public key.
+pub fn decodeNpub(input: []const u8, out: *[32]u8) bool {
+    var payload: [32]u8 = undefined;
+    const n = decodeBech32(input, "npub", &payload) orelse return false;
+    if (n != 32) return false;
+    out.* = payload;
+    return true;
+}
+
+/// Encode a 64-char lowercase hex pubkey as a NIP-19 `npub`.
+pub fn encodeNpub(pubkey_hex: []const u8, out: []u8) Error![]const u8 {
+    try validatePubkey(pubkey_hex);
+    var raw: [32]u8 = undefined;
+    _ = std.fmt.hexToBytes(&raw, pubkey_hex) catch return error.InvalidPubkey;
+    return encodeBech32("npub", &raw, out);
+}
+
+/// Encode a NIP-23 address as a NIP-19 `naddr`.
+///
+/// TLV order is part of the plan's byte identity: `d` (0), author (2),
+/// kind (3), then each `wss://` relay (1) in the caller's already-sorted
+/// order. `ws://` loopback relays are omitted — they are not shareable.
+pub fn encodeNaddr(
+    d: []const u8,
+    pubkey_hex: []const u8,
+    kind: u32,
+    relays: []const []const u8,
+    out: []u8,
+) Error![]const u8 {
+    try validatePubkey(pubkey_hex);
+    if (d.len > 255) return error.InvalidPubkey;
+
+    var raw: [32]u8 = undefined;
+    _ = std.fmt.hexToBytes(&raw, pubkey_hex) catch return error.InvalidPubkey;
+
+    var tlv: [1024]u8 = undefined;
+    var n: usize = 0;
+    n = try appendTlv(&tlv, n, 0, d);
+    n = try appendTlv(&tlv, n, 2, &raw);
+    var kind_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &kind_bytes, kind, .big);
+    n = try appendTlv(&tlv, n, 3, &kind_bytes);
+    for (relays) |relay| {
+        if (!std.ascii.startsWithIgnoreCase(relay, "wss://")) continue;
+        if (relay.len > 255) continue;
+        n = try appendTlv(&tlv, n, 1, relay);
+    }
+    return encodeBech32("naddr", tlv[0..n], out);
+}
+
+fn appendTlv(buf: []u8, start: usize, typ: u8, value: []const u8) Error!usize {
+    if (value.len > 255) return error.InvalidPubkey;
+    const need = start + 2 + value.len;
+    if (need > buf.len) return error.InvalidPubkey;
+    buf[start] = typ;
+    buf[start + 1] = @intCast(value.len);
+    @memcpy(buf[start + 2 .. need], value);
+    return need;
+}
+
+/// BIP-173 bech32 encode (not bech32m). `out` must hold `hrp.len + 1 +
+/// ceil(payload.len * 8 / 5) + 6` bytes.
+fn encodeBech32(hrp: []const u8, payload: []const u8, out: []u8) Error![]const u8 {
+    var data: [1600]u5 = undefined;
+    var data_len: usize = 0;
+    var acc: u32 = 0;
+    var bits: u5 = 0;
+    for (payload) |byte| {
+        acc = (acc << 8) | byte;
+        bits += 8;
+        while (bits >= 5) {
+            bits -= 5;
+            if (data_len == data.len) return error.InvalidPubkey;
+            data[data_len] = @intCast((acc >> bits) & 0x1f);
+            data_len += 1;
+        }
+    }
+    if (bits > 0) {
+        if (data_len == data.len) return error.InvalidPubkey;
+        data[data_len] = @intCast((acc << (5 - bits)) & 0x1f);
+        data_len += 1;
+    }
+
+    var check: [1800]u5 = undefined;
+    var check_len = bech32HrpExpand(hrp, &check);
+    if (check_len + data_len + 6 > check.len) return error.InvalidPubkey;
+    @memcpy(check[check_len .. check_len + data_len], data[0..data_len]);
+    check_len += data_len;
+    @memset(check[check_len .. check_len + 6], 0);
+    check_len += 6;
+    const mod = bech32Polymod(check[0..check_len]) ^ 1;
+    var checksum: [6]u5 = undefined;
+    for (0..6) |i| {
+        checksum[i] = @intCast((mod >> @intCast(5 * (5 - i))) & 0x1f);
+    }
+
+    const encoded_len = hrp.len + 1 + data_len + 6;
+    if (encoded_len > out.len) return error.InvalidPubkey;
+    @memcpy(out[0..hrp.len], hrp);
+    out[hrp.len] = '1';
+    for (data[0..data_len], 0..) |v, i| {
+        out[hrp.len + 1 + i] = bech32_charset[v];
+    }
+    for (checksum, 0..) |v, i| {
+        out[hrp.len + 1 + data_len + i] = bech32_charset[v];
+    }
+    return out[0..encoded_len];
+}
+
+/// Decode a bech32 (not bech32m) string with `expected_hrp`. Returns the
+/// payload length, or null on any malformation.
+fn decodeBech32(input: []const u8, expected_hrp: []const u8, out: []u8) ?usize {
+    const sep = std.mem.indexOfScalar(u8, input, '1') orelse return null;
+    const hrp = input[0..sep];
+    if (hrp.len == 0 or !std.mem.eql(u8, hrp, expected_hrp)) return null;
+    const data = input[sep + 1 ..];
+    if (data.len < 6 or data.len > 1024) return null;
+
+    var values: [1024]u5 = undefined;
+    var check: [1100]u5 = undefined;
+    var check_len = bech32HrpExpand(hrp, &check);
+    if (check_len + data.len > check.len) return null;
+    for (data, 0..) |ch, i| {
+        const v = bech32CharValue(ch) orelse return null;
+        values[i] = v;
+        check[check_len + i] = v;
+    }
+    check_len += data.len;
+    if (bech32Polymod(check[0..check_len]) != 1) return null;
+
+    const payload = values[0 .. data.len - 6];
+    var acc: u32 = 0;
+    var bits: u5 = 0;
+    var out_len: usize = 0;
+    for (payload) |v| {
+        acc = (acc << 5) | v;
+        bits += 5;
+        if (bits >= 8) {
+            bits -= 8;
+            if (out_len == out.len) return null;
+            out[out_len] = @intCast((acc >> bits) & 0xff);
+            out_len += 1;
+        }
+    }
+    if (bits != 0 and (acc & ((@as(u32, 1) << bits) - 1)) != 0) return null;
+    return out_len;
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -827,6 +994,79 @@ test "digest: lowercase hex sha-256 of the exact bytes" {
     try testing.expectEqualStrings("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", &out);
     digestHex("abc", &out);
     try testing.expectEqualStrings("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", &out);
+}
+
+test "npub: official NIP-19 vectors encode and decode" {
+    // nostr-protocol/nips @ 656cecc7, 19.md
+    const hex_a = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d";
+    const npub_a = "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6";
+    const hex_b = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e";
+    const npub_b = "npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg";
+
+    var buf: [npub_max_len]u8 = undefined;
+    try testing.expectEqualStrings(npub_a, try encodeNpub(hex_a, &buf));
+    try testing.expectEqualStrings(npub_b, try encodeNpub(hex_b, &buf));
+
+    var key: [32]u8 = undefined;
+    try testing.expect(decodeNpub(npub_a, &key));
+    try testing.expectEqualStrings(hex_a, &std.fmt.bytesToHex(key, .lower));
+    try testing.expect(decodeNpub(npub_b, &key));
+    try testing.expectEqualStrings(hex_b, &std.fmt.bytesToHex(key, .lower));
+}
+
+test "npub: profile input accepts npub and stores hex" {
+    const hex = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e";
+    const npub = "npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg";
+    const from_npub = try parseAuthorPubkey(testing.allocator, npub);
+    defer testing.allocator.free(from_npub);
+    const from_hex = try parseAuthorPubkey(testing.allocator, hex);
+    defer testing.allocator.free(from_hex);
+    try testing.expectEqualStrings(hex, from_npub);
+    try testing.expectEqualStrings(hex, from_hex);
+    try testing.expectError(error.InvalidPubkey, parseAuthorPubkey(testing.allocator, "npub1not-a-key"));
+    try testing.expectError(error.InvalidPubkey, parseAuthorPubkey(testing.allocator, "A" ** 64));
+}
+
+test "naddr: TLV order is d, author, kind, then wss relays; ws is omitted" {
+    const hex = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d";
+    var buf: [naddr_max_len]u8 = undefined;
+    const encoded = try encodeNaddr(
+        "articles/first",
+        hex,
+        kind_long_form,
+        &.{ "wss://a.relay.example.com", "ws://127.0.0.1:7447", "wss://relay.example.com" },
+        &buf,
+    );
+    try testing.expect(std.mem.startsWith(u8, encoded, "naddr1"));
+
+    var payload: [512]u8 = undefined;
+    const n = decodeBech32(encoded, "naddr", &payload) orelse return error.TestUnexpectedResult;
+    var i: usize = 0;
+    // 0: d
+    try testing.expectEqual(@as(u8, 0), payload[i]);
+    try testing.expectEqual(@as(u8, "articles/first".len), payload[i + 1]);
+    try testing.expectEqualStrings("articles/first", payload[i + 2 .. i + 2 + "articles/first".len]);
+    i += 2 + "articles/first".len;
+    // 2: author
+    try testing.expectEqual(@as(u8, 2), payload[i]);
+    try testing.expectEqual(@as(u8, 32), payload[i + 1]);
+    var author: [32]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&author, hex);
+    try testing.expectEqualSlices(u8, &author, payload[i + 2 .. i + 34]);
+    i += 34;
+    // 3: kind 30023
+    try testing.expectEqual(@as(u8, 3), payload[i]);
+    try testing.expectEqual(@as(u8, 4), payload[i + 1]);
+    try testing.expectEqual(@as(u32, kind_long_form), std.mem.readInt(u32, payload[i + 2 ..][0..4], .big));
+    i += 6;
+    // 1: only wss relays, in caller order
+    try testing.expectEqual(@as(u8, 1), payload[i]);
+    try testing.expectEqualStrings("wss://a.relay.example.com", payload[i + 2 .. i + 2 + payload[i + 1]]);
+    i += 2 + payload[i + 1];
+    try testing.expectEqual(@as(u8, 1), payload[i]);
+    try testing.expectEqualStrings("wss://relay.example.com", payload[i + 2 .. i + 2 + payload[i + 1]]);
+    i += 2 + payload[i + 1];
+    try testing.expectEqual(n, i);
 }
 
 test "nsec: the NIP-19 test vector decodes to its hex secret" {

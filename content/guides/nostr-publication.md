@@ -61,9 +61,14 @@ Publish
 }
 ```
 
-`pubkey` is NIP-01 hex, not `npub`. `articles` is an exact entity-id
+`pubkey` is 64 lowercase hex **or** a NIP-19 `npub1…`. The plan always
+stores hex and also emits `author.npub`. `articles` is an exact entity-id
 allowlist. Relays normalize to `wss://` and dedupe. Unknown keys fail in
 the profile parser.
+
+Each planned article carries `naddr` and `naddr_uri`. Paste `naddr` into a
+Nostr client to open the long-form article. The address is
+`(30023, pubkey, id)` and does not change when you edit the page.
 
 ## Sign {#sign}
 
