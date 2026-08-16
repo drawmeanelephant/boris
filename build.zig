@@ -390,6 +390,38 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "oliver", .module = oliver_mod }},
     });
 
+    // #301 M0: Oliver + render.zig for wasm32-freestanding. Same seam, no
+    // host I/O. The object is the compile-only gate (ATProto pattern). The
+    // two executables are instantiable modules for import-scan + invoke.
+    const oliver_wasm_safe_dep = b.dependency("oliver", .{
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+    });
+    const oliver_wasm_small_dep = b.dependency("oliver", .{
+        .target = freestanding_target,
+        .optimize = .ReleaseSmall,
+    });
+    const render_freestanding_mod = b.createModule(.{
+        .root_source_file = b.path("src/render.zig"),
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+        .imports = &.{.{ .name = "oliver", .module = oliver_wasm_safe_dep.module("oliver") }},
+    });
+    const render_freestanding = b.addObject(.{
+        .name = "render-freestanding",
+        .root_module = render_freestanding_mod,
+    });
+    const check_render_freestanding = b.step(
+        "check-render-freestanding",
+        "Compile the Oliver render seam for wasm32-freestanding",
+    );
+    check_render_freestanding.dependOn(&render_freestanding.step);
+
+    const render_wasm_safe = addRenderWasm(b, freestanding_target, .ReleaseSafe, oliver_wasm_safe_dep.module("oliver"), "boris-render");
+    const render_wasm_small = addRenderWasm(b, freestanding_target, .ReleaseSmall, oliver_wasm_small_dep.module("oliver"), "boris-render-small");
+    b.installArtifact(render_wasm_safe);
+    b.installArtifact(render_wasm_small);
+
     // bitcoin-core/secp256k1, pinned at v0.8.0 in build.zig.zon (#492/#495).
     // Compiled from source (schnorrsig + extrakeys modules; precomputed
     // tables ship in-tree, so there is no configure or generator step) and
@@ -986,6 +1018,30 @@ pub fn build(b: *std.Build) void {
         "Run Oliver-backed Markdown rendering seam tests",
     );
     test_render_step.dependOn(&run_render_tests.step);
+    test_render_step.dependOn(check_render_freestanding);
+
+    const render_wasm_opts = b.addOptions();
+    render_wasm_opts.addOptionPath("wasm_path", render_wasm_safe.getEmittedBin());
+    render_wasm_opts.addOptionPath("wasm_small_path", render_wasm_small.getEmittedBin());
+    const render_wasm_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/render_wasm_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "oliver", .module = oliver_mod },
+            .{ .name = "build_options", .module = render_wasm_opts.createModule() },
+        },
+    });
+    const render_wasm_tests = b.addTest(.{ .root_module = render_wasm_test_mod });
+    const run_render_wasm_tests = b.addRunArtifact(render_wasm_tests);
+    run_render_wasm_tests.setCwd(b.path("."));
+    const test_render_wasm_step = b.step(
+        "test-render-wasm",
+        "Run wasm32-freestanding Oliver render import-scan and native/Wasm goldens",
+    );
+    test_render_wasm_step.dependOn(check_render_freestanding);
+    test_render_wasm_step.dependOn(&run_render_wasm_tests.step);
+    test_render_step.dependOn(test_render_wasm_step);
 
     // --- Experimental HTML assemble + whiteboard compile (milestone 9) -----
     // Not on the default IR/RAG CLI path; tests only.
@@ -1654,6 +1710,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_aside_tests.step);
     test_step.dependOn(&run_rag_tests.step);
     test_step.dependOn(&run_render_tests.step);
+    test_step.dependOn(test_render_wasm_step);
     test_step.dependOn(&run_assemble_tests.step);
     test_step.dependOn(&run_theme_tests.step);
     test_step.dependOn(&run_content_asset_tests.step);
@@ -1696,6 +1753,29 @@ pub fn build(b: *std.Build) void {
 /// because a relative `@import("render.zig")` resolves in the importing
 /// module's context. Oliver is a pure Zig library: no libc, no host tools, no
 /// global state, nothing to pre-build.
+fn addRenderWasm(
+    b: *std.Build,
+    freestanding_target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    oliver: *std.Build.Module,
+    name: []const u8,
+) *std.Build.Step.Compile {
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/render_wasm.zig"),
+        .target = freestanding_target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "oliver", .module = oliver }},
+    });
+    const exe = b.addExecutable(.{
+        .name = name,
+        .root_module = root,
+    });
+    exe.entry = .disabled;
+    exe.rdynamic = true;
+    exe.export_memory = true;
+    return exe;
+}
+
 fn linkOliver(mod: *std.Build.Module, oliver: *std.Build.Module) void {
     mod.addImport("oliver", oliver);
 }

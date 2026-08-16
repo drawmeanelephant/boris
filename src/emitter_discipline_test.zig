@@ -146,6 +146,9 @@ const modules = [_]Module{
     } } },
 
     .{ .name = "render.zig", .class = .other },
+    .{ .name = "render_wasm.zig", .class = .other },
+    .{ .name = "render_wasm_test.zig", .class = .other },
+    .{ .name = "wasm_image.zig", .class = .other },
     .{ .name = "artifact_invariants.zig", .class = .other },
     .{ .name = "aside.zig", .class = .other },
     .{ .name = "assemble.zig", .class = .other },
