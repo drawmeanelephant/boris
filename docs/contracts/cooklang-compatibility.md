@@ -305,9 +305,10 @@ carries one, and is `null` for pages that do not. Schema:
 Two properties are contractual:
 
 **Quantities are strings.** Cooklang admits `2`, `1/2`, `1.5`, `1-2` and bare
-words like `some`. Converting to a number would either reject valid recipes or
-silently round them, so the compiler keeps what the author wrote and leaves
-arithmetic to a consumer. Scaling is not in this slice.
+words like `some`. Converting them to numbers in the IR would either reject
+valid recipes or silently round them, so `graph.json` keeps what the author
+wrote. Scaling is a separate, compiler-owned operation over those strings
+(see [Scaling](#scaling)); the editor must not invent local arithmetic.
 
 **References are never merged.** Each list holds one entry per reference in
 authored order. Merging two `@flour` references means adding `200%g` to `1%cup`,
@@ -316,6 +317,46 @@ shopping list can group these; a consumer that wants fidelity has it.
 
 `recipeRef` is an entity id, joinable against `nodes[].id`, so a consumer can
 follow a sub-recipe without re-parsing an ingredient name.
+
+## Scaling
+
+Scaling is defined over the authored amount **string**, not over a numeric IR
+field. Source `.cook` files stay canonical. The operation lives in
+`src/recipe_scale.zig` and is specified here.
+
+### Classification
+
+After trimming ASCII spaces and tabs, an amount is exactly one of:
+
+| Class | Forms |
+|---|---|
+| `empty` | `""` |
+| `scalable` | unsigned integer (`2`, `400`); fraction `a/b` with `b ≠ 0` (`1/2`); decimal `a.b` (`1.5`); mixed number `a b/c` (`1 1/2`) |
+| `fixed` | everything else, including ranges (`1-2`), words (`some`, `a pinch`), and `1/0` |
+
+Decimals require a single `.` and only digits on each side that is present.
+Leading zeros are allowed (`02` is the integer 2). No other forms are scalable.
+
+### Operation
+
+A factor uses the same scalable forms. Zero and a zero denominator are invalid.
+
+- **Ingredients and cookware:** scalable amounts are multiplied by the factor
+  as exact rationals and emitted as a reduced integer or `num/den` fraction.
+  Fixed and empty amounts are copied verbatim.
+- **Timers:** never scaled. Cooking time is not linear with yield. The
+  authored amount is copied even when it would classify as scalable.
+- Units, names, preparations, and `recipeRef` are never rewritten.
+- References are still not merged.
+
+The scaled view is not written into `graph.json` and does not bump
+`schemaVersion`. A CLI that prints that view is a later slice.
+
+Schema for one scaled amount:
+
+```json
+{ "class": "scalable", "original": "1/2", "scaled": "1" }
+```
 
 ## IR version selection
 

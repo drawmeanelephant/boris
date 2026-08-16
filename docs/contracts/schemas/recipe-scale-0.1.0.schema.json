@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://drawmeanelephant.github.io/boris/schemas/recipe-scale-0.1.0.schema.json",
+  "title": "Boris recipe-scale amount (0.1.0)",
+  "description": "One scaled Cooklang amount string. The prose contract in cooklang-compatibility.md remains normative. graph.json is not rewritten.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["class", "original", "scaled"],
+  "properties": {
+    "class": {
+      "type": "string",
+      "enum": ["empty", "scalable", "fixed"]
+    },
+    "original": {
+      "type": "string",
+      "description": "Authored amount text, unchanged."
+    },
+    "scaled": {
+      "type": "string",
+      "description": "Reduced integer or num/den when class is scalable; otherwise identical to original."
+    }
+  }
+}

@@ -500,6 +500,17 @@ pub fn build(b: *std.Build) void {
     const run_cooklang_tests = b.addRunArtifact(cooklang_tests);
     run_cooklang_tests.setCwd(b.path("."));
 
+    const recipe_scale_mod = b.createModule(.{
+        .root_source_file = b.path("src/recipe_scale.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const recipe_scale_tests = b.addTest(.{
+        .root_module = recipe_scale_mod,
+    });
+    const run_recipe_scale_tests = b.addRunArtifact(recipe_scale_tests);
+    run_recipe_scale_tests.setCwd(b.path("."));
+
     // Black-box regression for seam warning printing: the load-time
     // validation pass is the only printer, so plain and incremental HTML
     // builds (and the IR path) each emit every structural warning exactly
@@ -1605,6 +1616,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_parser_tests.step);
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_cooklang_tests.step);
+    test_step.dependOn(&run_recipe_scale_tests.step);
     test_step.dependOn(&cooklang_incremental_run.step);
     test_step.dependOn(&init_run.step);
     test_step.dependOn(&reference_theme_run.step);

@@ -778,7 +778,7 @@
 <style>body{font:16px/1.45 ui-serif,Georgia,serif;margin:1.5rem;color:#17201d}h1{font-size:1.6rem}table{width:100%;border-collapse:collapse;margin:0 0 1.25rem}th,td{text-align:left;padding:.35rem .4rem;border-bottom:1px solid #ccd6cf}p.note{color:#53625c;font-size:.9rem}</style>
 </head><body>
 <h1>${escapeHtml(title)}</h1>
-<p class="note">Read-only Boris recipe facet. Quantities are author strings. Scaling is not a Boris contract (issue 554).</p>
+<p class="note">Read-only Boris recipe facet. Quantities are author strings. This editor does not scale them (issue 554).</p>
 <h2>Ingredients</h2>
 <table><thead><tr><th>Name</th><th>Quantity</th><th>Preparation / recipe</th></tr></thead><tbody>
 ${rows(recipe.ingredients.map(item => ({ name: item.name, qty: quantityLabel(item.quantity), extra: item.recipeRef ? `recipe ${item.recipeRef}` : item.preparation })))}
@@ -1774,11 +1774,11 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
           <div class="problems-heading">
             <div>
               <h3 id="recipe-heading">Recipe</h3>
-              <p>Read-only Boris <code>recipe</code> facet. Source remains the <code>.cook</code> file. Scaling is not available.</p>
+              <p>Read-only Boris <code>recipe</code> facet. Source remains the <code>.cook</code> file. This editor does not scale quantities.</p>
             </div>
             <button type="button" onclick={printRecipe}>Print this recipe</button>
           </div>
-          <p class="fallback-notice">Boris has no scaling contract. Quantities stay author strings. See issue 554.</p>
+          <p class="fallback-notice">Quantities stay author strings. Boris classifies them as empty, scalable, or fixed and can scale the scalable ones as exact rationals. This editor does not run that operation. See issue 554.</p>
           <h4>Ingredients</h4>
           <table class="recipe-table">
             <thead><tr><th>Name</th><th>Quantity</th><th>Preparation</th><th>Recipe reference</th></tr></thead>
