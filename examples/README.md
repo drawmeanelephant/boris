@@ -19,20 +19,12 @@ second theme attic.
 | [`journal-site`](journal-site/) | [`themes/journal`](../themes/journal/) | Terminal diary |
 | [`ledger-site`](ledger-site/) | [`themes/ledger`](../themes/ledger/) | Dense node pages |
 | [`reading-site`](reading-site/) | [`themes/reading`](../themes/reading/) | `:lang` typesetting specimens |
-| [`studies-site`](studies-site/) | `semantic` / `columns` / `service` / `engineering` / `civic` / `tokens` | One corpus; swap `--theme` |
+| [`studies-site`](studies-site/) | `semantic` / `columns` / `service` / `engineering` / `civic` / `tokens` / `corporate` / `minimal` | One corpus; swap `--theme` |
 
 Each site README has the exact `boris` invocation. Keep generated trees under
 ignored `test-output/` or `.zig-cache/`.
 
-## Not yet first-class
-
-These trees stay here. They do not meet [`themes/README.md`](../themes/README.md).
-
-| Tree | Why it stays |
-|---|---|
-| `prototype-corporate` / `prototype-minimalist` | Visual research. Dead buttons and `#` nav. |
-
-The framework studies do not vendor those projects. If a future theme ships
+The shipped themes do not vendor other projects. If a future theme ships
 upstream CSS, it must record version, license, and the URL of the current
 release next to the file.
 

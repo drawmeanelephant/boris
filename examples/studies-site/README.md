@@ -5,7 +5,7 @@ Swap `--theme` to compare them. The CSS is original; the names do not
 claim those projects.
 
 ```bash
-THEME=semantic   # or columns, service, engineering, civic, tokens
+THEME=semantic   # or columns, service, engineering, civic, tokens, corporate, minimal
 
 ./zig-out/bin/boris \
   --input examples/studies-site/content \
