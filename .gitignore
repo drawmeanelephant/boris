@@ -10,6 +10,7 @@ zig-cache/
 *.a
 *.o
 /dist/
+/.tmp/
 /packages/
 /rag/
 /rag1/

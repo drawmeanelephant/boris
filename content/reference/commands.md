@@ -5,10 +5,21 @@ status: published
 tags: [reference, cli, commands]
 ---
 
-# Command Reference
+<p class="eyebrow">CLI</p>
 
-The public CLI has six commands. With no command, Boris runs `build` and
-publishes an HTML site under `dist/`.
+# Command Reference {#command-reference}
+
+<Aside kind="note">
+
+This page is lookup. For which command to run first, see
+[[guides/cli-and-modes|CLI & Output Modes]] and
+[[guides/publishing|Publishing Targets]].
+
+</Aside>
+
+The public CLI has six core commands plus the `standard-site` family. With no
+command, Boris runs `build` and publishes an HTML site under `dist/` — the
+default target, not the only one.
 
 ## Commands at a glance
 
@@ -20,6 +31,7 @@ publishes an HTML site under `dist/`.
 | `check` | Report graph and dependency health after validation | No |
 | `impact ID` | Report transitive dependents of a page or source endpoint | No |
 | `plan --profile PATH` | Normalize a publication profile without publishing | No |
+| `standard-site …` | Atmosphere plan / records / login / publish / smoke / logout | Depends on the subcommand |
 
 ## Basic usage
 
@@ -168,6 +180,25 @@ the result.
 to standard output. It does not discover content, validate a graph, or publish
 an output. `--input`, `--textile`, and `--html-dir` can provide the supported
 profile overrides; execution and projection flags are rejected.
+
+## Standard.site family
+
+```bash
+./zig-out/bin/boris standard-site
+./zig-out/bin/boris standard-site plan --profile profiles/standard-site.json
+./zig-out/bin/boris standard-site records --profile profiles/standard-site.json
+./zig-out/bin/boris standard-site login --app-password --handle YOU.test.bsky.social
+./zig-out/bin/boris standard-site publish --profile profiles/standard-site.json --did did:plc:…
+./zig-out/bin/boris standard-site logout --did did:plc:…
+```
+
+Offline `plan` / `records` / `verify` need no credentials. Live publish
+against bsky.social uses `login --app-password`, not browser OAuth. App
+passwords grant broad account write — use a dedicated test identity. See
+[[guides/publishing#standard-site|Publishing Targets]].
+
+GitHub Pages is not a `boris pages` verb. It is the official Actions
+workflow plus `plan --profile` for the normalized location.
 
 ## Exit codes {#exit-codes}
 

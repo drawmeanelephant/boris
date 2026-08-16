@@ -5,9 +5,22 @@ status: published
 tags: [guides, themes, layouts, css]
 ---
 
-# Themes & Layouts
+<p class="eyebrow">Presentation</p>
+
+# Themes & Layouts {#themes-and-layouts}
 
 Boris layouts are plain HTML files with marker tokens. This guide explains how to use an existing theme, create your own layout, and manage CSS assets.
+
+> A theme is trusted static HTML and copied bytes. It is not a component
+> runtime, and it is not allowed to invent a second Markdown parser.
+
+<Aside kind="note" id="css-eats-dom">
+
+The default theme styles asides, details, definition lists, footnotes,
+tables, blockquotes, strikethrough, and content-local images. Write those
+constructs if you want the CSS to have something to hold.
+
+</Aside>
 
 ## What a theme is
 
@@ -142,7 +155,15 @@ Build separate output directories in one command using `--target`:
 
 Each target is isolated — it has its own output directory, layout, and asset set. This lets you publish different presentations of the same content tree in one build.
 
+<Details summary="What a layout is not">
+
+No loops. No conditionals. No expressions. No MDX. Ten closed slots plus
+`{{asset-url}}`. If you wanted Jinja, you wanted a different compiler.
+
+</Details>
+
 ## Next steps
 
 - [[guides/search-and-ui|Search & Browser UI]] — adding search to your custom layout
+- [[guides/oliver-markdown|Markdown Showcase]] — the body constructs your CSS should expect
 - [[reference/commands|Command Reference]] — all `--theme`, `--layout-rule`, and `--target` flags

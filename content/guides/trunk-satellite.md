@@ -5,10 +5,22 @@ status: published
 tags: [guides, graph, hierarchy]
 ---
 
-# Trunk & Satellite — Content Hierarchy
+<p class="eyebrow">Graph</p>
+
+# Trunk & Satellite — Content Hierarchy {#trunk-satellite}
 
 The `parent` field gives Boris an explicit site hierarchy. It is a graph edge,
-not a display label or a directory convention.
+not a display label or a directory convention. Hosted targets and machine
+projections consume the same frozen hierarchy — see
+[[guides/publishing|Publishing Targets]].
+
+<Aside kind="note">
+
+Directory layout is a convenience for humans. Navigation is not inferred
+from folders. If you wanted implicit hierarchy, you wanted a different
+compiler.
+
+</Aside>
 
 ## The two roles
 
@@ -73,6 +85,13 @@ surface.
 When moving a page, update the `parent` value and any wiki-links that should
 follow it, then run `validate` and a normal build. `impact ID` is useful before a
 large rename because it lists transitive dependents without rewriting source.
+
+<Details summary="What is not a graph node">
+
+`&lt;Aside&gt;` and `&lt;Details&gt;` stay in document order. They do not
+get entity ids, parents, or nav entries. A callout is not a page.
+
+</Details>
 
 See [[reference/relationships|Relationships]] for parent edges, wiki-links,
 includes, and semantic relations as separate concepts.

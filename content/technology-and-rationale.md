@@ -5,7 +5,11 @@ status: published
 tags: [architecture, zig, rationale]
 ---
 
-# Technology & Rationale
+<p class="eyebrow">Architecture</p>
+
+# Technology & Rationale {#technology}
+
+{{include includes/identity.md}}
 
 Boris makes specific, deliberate technical choices. This page explains what those choices are, why they were made, and what they mean for you as someone running the tool.
 
@@ -20,9 +24,12 @@ In-Process Markdown Rendering
 Fail-Loud Graph Freeze
 : Parent relationships, supported wiki-links, and transclusion includes are validated before a new publication is committed.
 
+[^arena]: Per-page arena allocation frees rendering scratch after each page publish. Durable PageDb metadata is retained for the run.
+[^cabi]: A native Zig library call renders Markdown in-process, without a subprocess.
+
 ## Why Zig?
 
-Boris is written in Zig 0.16. Zig was chosen for three properties that matter directly to a documentation compiler:
+Boris is written in Zig 0.16. Zig was chosen for three properties that matter directly to a publication compiler:
 
 **Deterministic per-page scratch.** Zig has no garbage collector, and Boris
 controls its rendering scratch with a per-page arena that is reset after each
@@ -89,6 +96,4 @@ If each output format used a different content model, they would drift. Boris so
 | Closed frontmatter grammar | Every key has a defined meaning; rejections are diagnostic |
 | No required client JS runtime | Works everywhere; no build toolchain needed |
 | Single-source multi-output | Same graph model per mode; align by generating from one revision |
-
-[^arena]: Per-page arena allocation frees rendering scratch after each page publish. Durable `PageDb` metadata is retained for the run. Process RSS is not claimed.
-[^cabi]: A native Zig library call renders markdown in-process, without child processes or a separate renderer executable.
+| Publication registry | HTML `dist/` default; Pages and Standard.site verified; no silent merge of targets |

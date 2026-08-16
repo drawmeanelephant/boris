@@ -2,41 +2,53 @@
 
 **The Content Exit Hatch**
 
-Boris is a deterministic documentation compiler and static-site generator. It
-turns Markdown into a validated static site, then can export the same content
-graph as JSON IR, RAG, an AI Context Bundle, `llms.txt`, or RSS 2.0. HTML
-builds can also publish a deterministic XML sitemap.
+Boris is a graph-native publication compiler. It turns Markdown into a
+validated content graph, then publishes that graph to one or more contracted
+targets. HTML `dist/` is the default target, not the whole product.
 
-Write content locally. Build with one native binary. Get output you can inspect,
-serve, archive, or hand to another tool.
+Write content locally. Build with one native binary. Inspect the output. Ship
+it to a static host, to GitHub Pages, to Standard.site, or to a machine
+projection — from the same frozen graph.
 
-[Authoring spine](docs/authoring-spine.md) · [Migration guide](docs/MIGRATION.md) · [Architecture](docs/) · [Contracts](docs/contracts/) · [Status](docs/STATUS.md) · [GitHub Pages](docs/github-pages.md) · [Standard.site](docs/standard-site.md)
+[Authoring spine](docs/authoring-spine.md) ·
+[Status](docs/STATUS.md) ·
+[Contracts](docs/contracts/) ·
+[GitHub Pages](docs/github-pages.md) ·
+[Standard.site](docs/standard-site.md) ·
+[Migration](docs/MIGRATION.md)
 
 ## What Boris does
 
 ```text
-Markdown + frontmatter
+Markdown + closed frontmatter
           │
           ▼
- discover → validate graph → render
+ discover → validate graph → freeze
           │
-          ├── HTML site          (--html-dir or dist/, optional --sitemap)
-          ├── JSON IR            (--out)
-          ├── RAG corpus         (--rag)
-          ├── AI Context Bundle  (--context)
-          ├── llms.txt map       (--llms)
-          └── RSS 2.0 feed       (--rss)
+          ├── HTML site                 (default: dist/)
+          ├── GitHub Pages              (verified target)
+          ├── Standard.site / AT Proto  (verified target)
+          ├── JSON IR                   (--out)
+          ├── RAG / Context / llms.txt  (--rag / --context / --llms)
+          └── RSS 2.0 / XML sitemap     (--rss / --sitemap)
 ```
 
-The content model is deliberately understandable: **Trunks** are root pages,
+The content model is deliberately small: **Trunks** are root pages,
 **Satellites** are explicitly parented non-root pages (including nested parent
 chains), and in-page `Aside`/`Details` blocks stay in document order. Broken
 parents, wiki-links, headings, includes, and cycles fail with diagnostics
 instead of quietly producing a broken site.
 
+Publication is a **registry**, not a shell recipe. GitHub Pages and
+Standard.site are verified targets. Nostr is an open program, not a target
+yet. The local [Boris Editor](content/guides/editor.md) is a compiler-backed
+authoring surface, not a second product.
+
 ## Features
 
-- Native Markdown through the pinned **Oliver** library (Zig, in-process).
+- Native Markdown through the pinned **Oliver** library (Zig, in-process):
+  CommonMark, GFM tables, heading ids/IAL, footnotes, definition lists,
+  strikethrough.
 - Deterministic HTML output with trusted static layouts and copied assets.
 - Validated Trunk/Satellite navigation and graph-aware breadcrumbs/children.
 - Closed, explicit frontmatter rather than unrestricted YAML or executable MDX.
@@ -46,7 +58,10 @@ instead of quietly producing a broken site.
 - Deterministic RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports from the same tree.
 - Deterministic staged XML sitemap for one public HTML target.
 - First-class GitHub Pages publication identity and an official verified Actions workflow.
-- Standard.site / AT Protocol publication: offline plan + explicit login/publish/smoke. The first-tester path against bsky.social is an app password, not browser OAuth.
+- Standard.site / AT Protocol publication: offline plan + explicit login/publish/smoke.
+  The first-tester path against bsky.social is an app password, not browser OAuth.
+- Target-local evidence chain: artifacts → checks → claims → Touch Atlas → Proof Pack.
+- Local Boris Editor: schema-aware completion, compiler-backed problems, live preview.
 - Standalone migration labs for Astro/Starlight, WordPress, Instagram, Obsidian,
   Notion, and related source shapes.
 
@@ -60,8 +75,8 @@ structure is wrong, and several machine-readable outputs without maintaining a
 second content model.
 
 Boris is not trying to replace every SSG. It is for people who want a small,
-inspectable compiler, graph-aware documentation, and a useful hand-off to AI
-tools without requiring a Node runtime to publish the site.
+inspectable compiler, graph-aware documentation, and more than one honest
+place to put the result — without requiring a Node runtime to publish the site.
 
 ## Quick start
 
@@ -80,9 +95,10 @@ zig build
 The sample content is compiled to `dist/`. Open `dist/index.html` or serve the
 directory with any static file server.
 
-New to authoring? The [authoring spine](docs/authoring-spine.md) is the
-six-step teaching path from `boris init` to a published, verified site;
-it links into the contracts instead of duplicating them.
+That is the whole default path. New to authoring? The
+[authoring spine](docs/authoring-spine.md) is the teaching path from
+`boris init` to a published, verified site. It names the publish targets
+without pretending they are the first command.
 
 Useful first commands:
 
@@ -101,8 +117,11 @@ Useful first commands:
 ./zig-out/bin/boris validate --quiet             # HTML source/config preflight; no output
 ./zig-out/bin/boris check                      # graph-health report
 ./zig-out/bin/boris impact getting-started    # dependency impact report
+./zig-out/bin/boris plan --profile boris.json  # normalized publication declaration
 zig build test
 ```
+
+### Publication targets (not the default path)
 
 The repository’s GitHub Pages publication path is documented in
 [`docs/github-pages.md`](docs/github-pages.md). It uses the native Boris
@@ -114,6 +133,15 @@ separate, explicit family: `boris standard-site`. First testers should start
 at [`docs/standard-site.md`](docs/standard-site.md). Offline plan/verify
 need no credentials; live publish against bsky.social uses
 `login --app-password`, not the browser OAuth path.
+
+The local editor is a separate binary:
+
+```bash
+zig build --build-file editor/build.zig
+./editor/zig-out/bin/boris-editor . \
+  --boris ./zig-out/bin/boris \
+  --ui-dir editor/ui/dist
+```
 
 ### Add a page
 
@@ -179,7 +207,7 @@ larger than the target fails without replacing an existing export. See the
 
 | Command | Output | Best for |
 | --- | --- | --- |
-| `boris` | HTML under `dist/` | Publishing a static site |
+| `boris` | HTML under `dist/` | Default static-site target |
 | `boris validate` | None | Compiler-authoritative HTML source/configuration preflight |
 | `boris --sitemap --site-url URL` | HTML plus `sitemap.xml` | Crawler URL discovery |
 | `boris --out .boris` | JSON IR | Build tools and inspection |
@@ -188,6 +216,8 @@ larger than the target fails without replacing an existing export. See the
 | `boris --context` | Context Bundle | Provenance-rich agent context |
 | `boris --llms` | `llms.txt` | Lightweight machine discovery |
 | `boris --rss` | RSS 2.0 XML | Recent documentation updates |
+| `boris plan --profile PATH` | Normalized declaration JSON | Inspect a publication target before publishing |
+| `boris standard-site …` | Atmosphere records | Standard.site / AT Protocol target |
 
 The machine exports are separate output modes from the same source tree; they
 do not silently merge into one opaque build product. Sitemap is the exception
@@ -240,8 +270,8 @@ trees, identify relationships and unsupported constructs, materialize reviewed
 themes, and produce manual-review reports. They do not add Astro, Node, or an
 MDX runtime to Boris core.
 
-Start with [`docs/MIGRATION.md`](docs/MIGRATION.md), then review the dogfood
-examples under [`docs/dogfood/`](docs/dogfood/).
+Start with [`docs/MIGRATION.md`](docs/MIGRATION.md). Current lab state is
+the Labs table in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## AI and OpenAI Build Week
 
@@ -259,14 +289,19 @@ reviewed or uploaded to an LLM when useful.
 
 - [x] Deterministic HTML, JSON IR, graph validation, and native Oliver Markdown.
 - [x] Incremental/watch builds, bounded jobs, multi-target output, and assets.
-- [x] RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports.
+- [x] RAG, Context Bundle, `llms.txt`, RSS 2.0, and XML sitemap exports.
+- [x] GitHub Pages verified target and official Actions workflow.
+- [x] Standard.site / AT Protocol first-tester path (app-password on bsky.social).
+- [x] Publication evidence chain (artifacts, checks, claims, Touch Atlas, Proof Pack).
+- [x] Local Boris Editor (compiler-backed authoring).
 - [x] Migration labs and real-site dogfood evidence.
-- [x] v0.7.0 release and migration-lab theme/link evidence.
-- [x] v0.8.1 candidate packaging and source-RAG upload ergonomics.
-- [ ] Relationship inventory and archive-layout dogfood.
-- [ ] Real-theme materialization and controlled migration benchmarks.
-- [ ] Broader migration fixtures for Astro/Starlight and WordPress.
-- [ ] Explicit metadata/provenance namespace for custom source fields.
+- [x] v0.8.1 candidate packaging (untagged; 200+ changelog fragments queued).
+- [ ] Archive-layout browser review and any evidence-gated presentation fixes.
+- [ ] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)).
+- [ ] Nostr NIP-23 publication target ([#454](https://github.com/drawmeanelephant/boris/issues/454)).
+- [ ] Cloudflare container / Wasm embedding ([#300](https://github.com/drawmeanelephant/boris/issues/300) / [#301](https://github.com/drawmeanelephant/boris/issues/301)).
+
+Current phase and known gaps live in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Honest limitations
 
@@ -277,16 +312,24 @@ reviewed or uploaded to an LLM when useful.
 - Ordinary Markdown links are not a complete site-wide link checker.
 - Migration labs are bounded aids, not universal importers.
 - Cross-platform byte identity and speed claims require measured evidence.
+- Standard.site browser OAuth is implemented but unusable on bsky.social
+  (`site.standard.authFull` is not granted). Use an app password.
+- Production HTML does not yet emit Standard.site verification surfaces.
 
 ## Project map
 
-- [`docs/STATUS.md`](docs/STATUS.md) — current phase and known gaps
+- [`docs/STATUS.md`](docs/STATUS.md) — identity, current phase, and known gaps
+- [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) — where `src/` clusters live
 - [`docs/contracts/`](docs/contracts/) — normative behavior
+- [`docs/authoring-spine.md`](docs/authoring-spine.md) — init → publish → verify
 - [`docs/MIGRATION.md`](docs/MIGRATION.md) — migration workflow
+- [`docs/github-pages.md`](docs/github-pages.md) — Pages target
+- [`docs/standard-site.md`](docs/standard-site.md) — Atmosphere target
 - [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) — release checks
 - [`tools/migration-lab/`](tools/migration-lab/) — standalone migration tools
 - [`tools/source-rag/`](tools/source-rag/) — source-code RAG exporter
 - [`tools/content-audit/`](tools/content-audit/) — standalone deterministic source-content audit tool
+- [`editor/`](editor/) — local compiler-backed editor
 - [`examples/`](examples/) — themes and dogfood fixtures
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 

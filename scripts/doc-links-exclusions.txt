@@ -13,17 +13,6 @@
 # an exclusion is a deliberate, reviewed act rather than a silent widening
 # of the guard's blind spot.
 
-# tree docs/boris/ — generated per-module evidence code map (the "code map"
-#   of issue #394): its surface/evidence/review packs use fixture-name
-#   "links" (boris-source-1.md, INDEX.md, dest, path, href) that describe
-#   hypothetical test files, not navigable documentation.
-tree docs/boris/*
-
-# tree docs/tools/ — generated tool evidence packs (migration-lab and the
-#   other standalone tools): the same fixture-placeholder "links" as
-#   docs/boris/, in the same generated format.
-tree docs/tools/*
-
 # tree docs/contracts/fixtures/*/content/* — fixture INPUT data (test
 #   corpora like archive-layout-audit and emoji-kitchen-prototype): their
 #   links are expected site pages or hostile test values, not documentation.

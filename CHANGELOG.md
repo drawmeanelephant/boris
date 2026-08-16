@@ -147,9 +147,7 @@ packs, and calibrated zero-dependency theme examples.
   [source-RAG tool guide](tools/source-rag/README.md).
 - Added Milligram-inspired and modern corporate Stitch-calibrated theme
   prototypes with slot mappings, manual-review notes, and deterministic
-  manifests. See the [Milligram calibration report](docs/dogfood/STITCH_MILLIGRAM_CALIBRATION.md),
-  [corporate calibration report](docs/dogfood/STITCH_CORPORATE_CALIBRATION.md),
-  and [theme examples](examples/).
+  manifests. See the [theme examples](examples/).
 
 ### Docs
 
@@ -175,12 +173,11 @@ Tag `v0.5.1` remains at the certified PR #127 merge commit.
 - Filed migration lab normalizes legacy `parentEntry` / `parent_entry` to
   canonical `parent` under `--out` only, with conflict/invalid human review and
   full provenance — product grammar stays closed
-  ([frontmatter contract](/docs/contracts/frontmatter.md),
-  [dogfood report](/docs/dogfood/filed-parent-key-normalize.md)).
+  ([frontmatter contract](/docs/contracts/frontmatter.md)).
 - Improved Starlight component-mapping parser in standalone migration
   laboratory. Translates custom MDX tags (Tabs, TabItem, Aside, Card, Steps,
   Badge, Icon, LinkCard) to their Boris fallback visual equivalents. Links:
-  [Starlight calibration report](/docs/dogfood/starlight-calibration-milestone.md).
+  [migration-lab README](/tools/migration-lab/README.md).
 
 ### Changed
 
@@ -194,7 +191,6 @@ Tag `v0.5.1` remains at the certified PR #127 merge commit.
 - Starlight migration-lab resolves proven relative and public Markdown images
   into page `{stem}.assets/` (F-L1); missing or escape paths fail loud with
   `EASSET`. Links: [migration-lab README](/tools/migration-lab/README.md),
-  [archive layout audit](/docs/dogfood/filed-fyi-archive-layout-audit.md),
   [image-path fixture](/tools/migration-lab/fixtures/image-path-starlight/README.md).
 
 ### Docs
@@ -204,9 +200,7 @@ Tag `v0.5.1` remains at the certified PR #127 merge commit.
   page-local image asset, absolute links/metadata, Broside/:::note/Limerick
   hard page) with conversion/unmapped/asset/route reports and a next-importer
   recommendation. No product code changes; not full-site conversion.
-  Links: [representative slice report](/docs/dogfood/filed-fyi-v051-representative-slice.md),
-  [prior adoption pass](/docs/dogfood/filed-fyi-adoption-pass.md),
-  [migration guide](/docs/MIGRATION.md).
+  Links: [migration guide](/docs/MIGRATION.md).
 - Align the v0.5.1 tag, status, release gate, changelog, RAG default-mode
   contract, and judge path with the released product; remove stale archive
   pointers and clarify the polished reference-theme link. Links:
@@ -217,15 +211,13 @@ Tag `v0.5.1` remains at the certified PR #127 merge commit.
   dogfood fixtures; missing/escape still fail loud with `EASSET`; F-L2 Unicode
   asset-filename sanitization remains separate and non-blocking. No product
   code changes.
-  Links: [archive layout audit](/docs/dogfood/filed-fyi-archive-layout-audit.md),
-  [migration-lab README](/tools/migration-lab/README.md),
+  Links: [migration-lab README](/tools/migration-lab/README.md),
   [image-path fixture](/tools/migration-lab/fixtures/image-path-starlight/README.md).
 - Record independent post-merge verification that Starlight **F-L1** image-path
   migration remains **CLOSED** on `main` (dogfood fixture compiles, migration-lab
   tests and release gate green); F-L2 stays separate and non-blocking. No product
   code changes.
-  Links: [archive layout audit](/docs/dogfood/filed-fyi-archive-layout-audit.md),
-  [project status](/docs/STATUS.md).
+  Links: [project status](/docs/STATUS.md).
 - Align product/compiler/RAG metadata, release gate, status, and sample content
   for the v0.5.2 cut (IR remains `0.2.0`).
 

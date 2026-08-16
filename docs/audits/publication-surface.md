@@ -7,10 +7,10 @@ Audited integration revision: `afterparty` at `577eb21`
 Product state described by the repository: v0.8.1 candidate; base IR schema
 `0.2.0`
 
-This audit records Boris's current publishing surface before a publication
-profile is implemented. It does not make the proposal in
-[`../design/publication-profile.md`](../design/publication-profile.md)
-normative, and it does not change product behavior.
+This audit records Boris's publishing surface as of 2026-07-29, before the
+profile parser shipped. The implemented surface is now
+[`../contracts/publication-profile.md`](../contracts/publication-profile.md).
+The audit text below is historical and does not change product behavior.
 
 ## Executive conclusion
 

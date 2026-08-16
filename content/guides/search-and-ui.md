@@ -5,7 +5,9 @@ status: published
 tags: [guides, search, ui]
 ---
 
-# Search & Browser UI
+<p class="eyebrow">Rendered search</p>
+
+# Search & Browser UI {#search-and-ui}
 
 Rendered-site search is part of the normal HTML publication path. The compiler
 extracts the committed HTML page set into one deterministic search artifact and
@@ -96,6 +98,16 @@ The default consumer checks the artifact format and schema, scores heading,
 prose, and code matches, and constructs page-relative result links. `/` focuses
 the search field and `Escape` clears it. With JavaScript disabled, the regular
 navigation, breadcrumbs, and page content still work.
+
+Producer
+: Reads committed HTML. Not Markdown, not IR, not RAG.
+
+Consumer
+: Theme-owned. The default layout ships a small script. Custom layouts
+  must bring their own.
+
+Fallback
+: No JavaScript still has nav, breadcrumbs, and the page body.
 
 ## Hosting assumptions
 

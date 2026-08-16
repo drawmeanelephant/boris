@@ -169,7 +169,7 @@ fn printUsage() void {
         \\OPTIONS:
         \\  --repo <path>          Repository root path (default: .)
         \\  --source-root <path>   Source root relative to repo (default: src)
-        \\  --dossier-root <path>  Dossier claim root relative to repo (default: docs/boris/src)
+        \\  --dossier-root <path>  Optional dossier claim root (default: docs/boris/src; missing dir skipped)
         \\  --json <path>          Output JSON inventory path (default: zig-out/docs-maintenance/inventory.json)
         \\  --markdown <path>      Output Markdown summary path (default: zig-out/docs-maintenance/summary.md)
         \\  -h, --help             Display this help message

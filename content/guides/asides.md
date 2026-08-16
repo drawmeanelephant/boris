@@ -5,9 +5,14 @@ status: published
 tags: [guides, asides, components]
 ---
 
-# Asides & Admonitions
+<p class="eyebrow">Components</p>
+
+# Asides & Admonitions {#asides}
 
 Boris supports semantic callout blocks called **Asides**. Use them to draw attention to important information without breaking prose flow.
+
+> `> [!NOTE]` is a blockquote with a costume. It is not an Aside. The
+> five kinds below are the whole allowlist.
 
 ## Syntax
 

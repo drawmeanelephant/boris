@@ -5,7 +5,8 @@ normative contract instead of restating it; if this page and a contract seem
 to disagree, the contract wins (see the [rules of use](contracts/README.md#rules-of-use)).
 
 This is the shortest honest path from a blank directory to a published,
-verified Boris site. Six steps, each about a screen of guidance, grounded in
+verified Boris site. HTML `dist/` is the default target; hosted targets are
+named in step 5. Six steps, each about a screen of guidance, grounded in
 the starter tree that `boris init` writes; step 7 then adds the Boris Editor,
 the compiler-backed surface where steps 2–4 happen:
 
@@ -83,18 +84,24 @@ Schema-aware themes: the completion index's `layout_slots` enum
 ## 5. Publish
 
 Publishing is profile → normalized plan → location validation, not a shell
-recipe. `boris.json` declares one public target; `boris plan --profile
-boris.json` shows the normalized declaration before anything is published.
+recipe. HTML `dist/` is the default *target*, not the only one. `boris.json`
+declares one public target from the registry; `boris plan --profile boris.json`
+shows the normalized declaration before anything is published.
+
+A first-time author should do this, in this order:
+
+1. `boris --quiet` — ship a local `dist/` you can open and inspect.
+2. Host that tree as static files, **or** use the official
+   [GitHub Pages](github-pages.md) workflow when you want the first verified
+   hosted target (location identity, inventory-only upload, retained evidence).
+3. Reach for [Standard.site](standard-site.md) only when you mean to publish
+   Atmosphere records. That is a second verified target (`boris standard-site`),
+   not a replacement for the HTML site. First testers on bsky.social use the
+   app-password path, not browser OAuth.
 
 For a hosted site, the deployment URL is publication truth: `base_url`,
 `origin`, and `base_path` must agree or the build fails closed
-(`EPUBLICATIONLOCATION`). The official GitHub Pages workflow implements the
-full verified target — resolve the location, validate every URL projection
-against it, upload only inventory-verified files.
-
-Atmosphere publication is a separate, explicit family (`boris standard-site`).
-It does not replace the HTML site. First testers on bsky.social should use
-the app-password path in [Standard.site](standard-site.md), not browser OAuth.
+(`EPUBLICATIONLOCATION`). Nostr is an open program, not a step on this trail.
 
 - Contracts: [publication profile](contracts/publication-profile.md) ·
   [publication plan](contracts/publication-plan.md) ·
@@ -173,8 +180,9 @@ The newcomer path this spine guarantees:
 2. Write one page with closed frontmatter (step 2) and one wiki-link (step 3)
 3. `boris --quiet` — the site builds or fails with an actionable diagnostic
 4. Edit the starter layout's slots (step 4) and rebuild
-5. `boris plan --profile boris.json`, then publish via the GitHub Pages
-   workflow (step 5)
+5. `boris plan --profile boris.json`, then publish the local `dist/` (or the
+   GitHub Pages workflow). Standard.site is a second, explicit target — not
+   step one.
 6. `boris validate` before and `boris check` after (step 6)
 
 Nothing in that path requires reading a compiler module. The contracts

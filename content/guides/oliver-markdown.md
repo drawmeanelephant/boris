@@ -5,7 +5,9 @@ status: published
 tags: [markdown, showcase, oliver]
 ---
 
-# Markdown Showcase
+<p class="eyebrow">Oliver</p>
+
+# Markdown Showcase {#markdown-showcase}
 
 Boris renders page bodies with **Oliver**, a freestanding Zig markup library
 pinned by content hash in `build.zig.zon` and consumed natively through

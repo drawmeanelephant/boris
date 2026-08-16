@@ -35,7 +35,10 @@ USAGE:
 OPTIONS:
   --repo <path>          Repository root path (default: .)
   --source-root <path>   Source root relative to repo (default: src)
-  --dossier-root <path>  Dossier claim root relative to repo (default: docs/boris/src)
+  --dossier-root <path>  Optional dossier claim root (default: docs/boris/src).
+                         The product no longer ships a dossier tree; a missing
+                         directory is skipped. Use this flag for a local
+                         analysis tree if you have one.
   --json <path>          Output JSON inventory path (default: zig-out/docs-maintenance/inventory.json)
   --markdown <path>      Output Markdown summary path (default: zig-out/docs-maintenance/summary.md)
   -h, --help             Display this help message

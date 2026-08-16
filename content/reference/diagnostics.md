@@ -5,7 +5,16 @@ status: published
 tags: [reference, errors, diagnostics]
 ---
 
-# Diagnostics & Troubleshooting
+<p class="eyebrow">Failures</p>
+
+# Diagnostics & Troubleshooting {#diagnostics}
+
+<Aside kind="tip">
+
+Start with `boris validate`. Use `check` only when you want graph-health
+policy after the graph is already valid.
+
+</Aside>
 
 Boris reports deterministic diagnostics with an error code, source path, and
 location where one is available. Content and graph failures use exit `1`;

@@ -64,8 +64,9 @@ This routing exception does not relax product policy.
 
 ## Boris boundaries
 
-**Boris is a Zig documentation compiler:** Markdown in → validated graph → HTML
-site by default, with optional JSON IR and RAG. It is not a Node SSG stack.
+**Boris is a graph-native publication compiler:** Markdown in → validated
+Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the
+**default target**, not the whole product. It is not a Node SSG stack.
 
 - Zig **0.16+** is the product core. Markdown is **Oliver**, a pinned Zig
   library consumed natively in-process—not a subprocess or JavaScript pipeline.
@@ -74,9 +75,23 @@ site by default, with optional JSON IR and RAG. It is not a Node SSG stack.
   legacy `parentEntry` and `parent_entry` are unknown keys (`EFRONTMATTER`).
 - Favor a shippable `dist/` site, fail-loud validated graph, and measured claims.
   The normal pipeline is discover/scan → parse → Oliver render → compile → assemble →
-  optional RAG export. Consult [`docs/STATUS.md`](docs/STATUS.md) for the current
-  surface and [`docs/ARCHITECTURE-DIRECTION.md`](docs/ARCHITECTURE-DIRECTION.md)
-  for future direction.
+  optional projection or target publish. Consult [`docs/STATUS.md`](docs/STATUS.md)
+  for the current surface and
+  [`docs/ARCHITECTURE-DIRECTION.md`](docs/ARCHITECTURE-DIRECTION.md) for future
+  direction.
+- **Publication targets are a registry**, not a surprise. GitHub Pages and
+  Standard.site are verified targets (`boris plan`, `boris standard-site`).
+  Nostr is an open program. Do not treat either shipped target as “not real
+  because the README used to mention only `dist/`.”
+- **The editor is a product surface.** `editor/` is a local, compiler-backed
+  authoring host. It does not own parsing, the graph, validation, rendering, or
+  publication. Do not invent a parallel editor pipeline.
+- **Migration labs and source-RAG tools are standalone.** They live in the repo
+  story and are not compiled into the `boris` runtime. Do not widen author
+  grammar from a lab finding.
+- Product identity is recorded in [`docs/STATUS.md`](docs/STATUS.md) (issue
+  [#538](https://github.com/drawmeanelephant/boris/issues/538)): **publisher
+  platform**, not “bookseller with annexes” and not “two products, one repo.”
 
 ## Non-negotiable architecture
 
@@ -124,3 +139,7 @@ Use [`README.md`](README.md) for outcomes and CLI, [`docs/contracts/`](docs/cont
 for normative behavior, [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) for ship
 checks, and [`docs/STATUS.md`](docs/STATUS.md) for current scope. Do not copy
 contracts into policy; open the source of truth.
+
+Need to find a module? [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) is the
+hallway. Contracts and `src/` remain authority. Do not recreate a
+per-function prose twin of the compiler.

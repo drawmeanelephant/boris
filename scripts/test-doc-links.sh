@@ -12,8 +12,8 @@
 # Skipped by design: fenced code blocks and inline code spans (code is not
 # navigation) and external protocols (http/https/mailto/ftp/file). Whole-tree
 # and link-level exclusions live in scripts/doc-links-exclusions.txt, with a
-# comment per entry — see that file for why docs/boris/, docs/tools/, and
-# fixture test data are excluded and which links are archival by intent.
+# comment per entry — see that file for why fixture test data are excluded
+# and which links are archival by intent.
 #
 # NOTE: bash 3.2 compatibility is deliberate (macOS /bin/bash); no
 # associative arrays, no bash-4+isms — a vacuous pass would defeat the guard.

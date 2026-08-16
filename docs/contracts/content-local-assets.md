@@ -187,8 +187,8 @@ slice is stricter and more explicit:
    `{{asset-url …}}`.
 
 Migration labs may inventory “content-local” files for authors; the product
-compiler only publishes the sibling-tree contract above. See
-[`docs/designs/content-local-assets-astro-starlight.md`](../designs/content-local-assets-astro-starlight.md).
+compiler only publishes the sibling-tree contract above. Author workflow:
+[`docs/MIGRATION.md`](../MIGRATION.md).
 
 ---
 

@@ -5,11 +5,21 @@ status: published
 tags: [guides, authoring, search]
 ---
 
-# Building Pages
+<p class="eyebrow">Authoring</p>
+
+# Building Pages {#building-pages}
 
 Pages are Markdown files under `content/`. Their paths, frontmatter, parent
 chains, and supported references determine both the published URL and the
 navigation tree.
+
+<Aside kind="tip" id="write-like-this-site">
+
+This site is the specimen. If you want every Oliver construct in one place,
+open [[guides/oliver-markdown|the Markdown showcase]]. If you want to
+*publish* what you wrote, open [[guides/publishing|Publishing Targets]].
+
+</Aside>
 
 ## Create a page
 
@@ -88,6 +98,23 @@ Includes are expanded before Markdown rendering, are not standalone pages, and
 remain literal inside fenced code. Missing fragments and include cycles fail
 the build.
 
+Entity id
+: Path relative to `content/` without the extension, unless `id` overrides it.
+
+Wiki-link
+: `[[entity-id]]` or `[[entity-id#heading|label]]`. Validated. Broken is
+  exit `1`.
+
+Include
+: `{{include includes/name.md}}`. Expanded before Oliver. Not a page.
+
+<Aside kind="warning" id="no-parent-entry">
+
+`parentEntry` and `parent_entry` are not aliases. They are unknown keys.
+The compiler says `EFRONTMATTER` and stops. That is the feature.
+
+</Aside>
+
 ## Status and publication metadata
 
 `status` may be `draft`, `published`, or `archived`. Draft pages are excluded
@@ -117,6 +144,8 @@ host if you want the browser search UI to fetch its index.
 
 ## Next steps
 
+- [[guides/oliver-markdown|Markdown Showcase]] — every construct this compiler will actually render.
+- [[guides/publishing|Publishing Targets]] — local `dist/`, Pages, Standard.site.
 - [[guides/themes-and-layouts|Themes & Layouts]] — customize HTML output.
 - [[guides/search-and-ui|Search & Browser UI]] — understand rendered search.
 - [[reference/commands|Command Reference]] — exact flags and exit codes.
