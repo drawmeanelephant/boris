@@ -80,7 +80,10 @@ A custom layout can identify the main searchable body and opt out regions:
 ```
 
 `data-boris-search-exclude`, `data-boris-search-ignore`, and
-`data-boris-noindex` are equivalent exclusion markers. Without a marked root,
+`data-boris-noindex` are equivalent exclusion markers. Example framework
+themes use that marker on in-main TOC and sidebar rails so repeated kickers
+are not indexed; authored asides inside `{{content}}` stay searchable.
+Without a marked root,
 the producer falls back to the first `<main>`, then `<article>` or
 `role="main"`, then `<body>`. On the body/whole-document fallback, `<header>`
 and `<aside>` are skipped as layout chrome. Multiple marked roots fail closed.
