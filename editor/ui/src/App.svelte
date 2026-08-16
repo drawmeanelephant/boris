@@ -161,6 +161,7 @@
   let undoStack: string[] = [];
   let redoStack: string[] = [];
   let recoveryTimer: ReturnType<typeof setInterval> | undefined;
+  let hostTimer: ReturnType<typeof setInterval> | undefined;
   let conflict: BufferResponse | null = null;
   let deletedConflict = false;
   let conflictDialog: HTMLDialogElement;
@@ -371,8 +372,9 @@
       } else {
         editorStatus = 'Project files are available, but recovery snapshots could not be loaded.';
       }
+      startHostWatch();
     } catch {
-      connection = 'Local host unavailable. Restart boris-editor.';
+      noteHostUnavailable();
       compiler = 'Boris version unavailable.';
       project = 'Project status unavailable.';
     }
@@ -605,6 +607,7 @@
   function hostErrorLabel(code: string | undefined): string {
     if (code === 'payload_too_large') return 'the file exceeds the 8 MiB editor bound';
     if (code === 'too_many_files') return 'the project has more than 50,000 author-owned files';
+    if (code === 'host_unavailable') return 'the editor host stopped; restart boris-editor';
     if (code === 'boris_unavailable') return 'the Boris binary is not available; restart the editor';
     if (code === 'invalid_boris_version') return 'the Boris version string is not usable';
     if (code === 'unsupported_boris_artifact') return 'a generated Boris artifact is stale or unsupported; rebuild it';
@@ -872,7 +875,12 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       if (activePath) void clearRecovery(activePath);
       return;
     }
-    if (!recoveryTimer) recoveryTimer = setInterval(() => void snapshotBuffer(), 3000);
+    if (!recoveryTimer) {
+      // Snapshot on first dirty so a host or tab death before the 3s tick
+      // is not silent loss. Later edits stay periodic until pagehide.
+      void snapshotBuffer();
+      recoveryTimer = setInterval(() => void snapshotBuffer(), 3000);
+    }
   }
 
   function stopRecoveryTimer() {
@@ -880,12 +888,43 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     recoveryTimer = undefined;
   }
 
-  async function snapshotBuffer() {
+  function startHostWatch() {
+    if (hostTimer) return;
+    hostTimer = setInterval(() => void watchHost(), 5000);
+  }
+
+  async function watchHost() {
+    const result = await api<Health>('/api/health');
+    if (!result.response.ok) noteHostUnavailable();
+  }
+
+  function noteHostUnavailable() {
+    const next = 'Local host unavailable. Restart boris-editor.';
+    if (connection === next) return;
+    connection = next;
+    editorStatus = 'The editor host stopped. Restart boris-editor and open the new launch URL. Unsaved work is kept only if a recovery snapshot was written.';
+  }
+
+  async function snapshotBuffer(options: RequestInit = {}) {
     if (!activePath || content === baseline) return;
     const result = await api<ErrorResponse>('/api/recovery/snapshot', {
-      method: 'POST', body: JSON.stringify({ path: activePath, content, fingerprint })
+      method: 'POST',
+      body: JSON.stringify({ path: activePath, content, fingerprint }),
+      ...options
     });
+    if ((result.data as ErrorResponse).error === 'host_unavailable') {
+      noteHostUnavailable();
+      return;
+    }
     if (!result.response.ok) editorStatus = `Unsaved changes in ${activePath}; recovery snapshot failed.`;
+  }
+
+  function flushRecovery() {
+    void snapshotBuffer({ keepalive: true });
+  }
+
+  function handleVisibility() {
+    if (document.visibilityState === 'hidden') flushRecovery();
   }
 
   async function saveFile(recreate = false, replacementFingerprint = fingerprint): Promise<boolean> {
@@ -930,6 +969,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
         readOnly = true;
         editorStatus = `${activePath} is read-only. Nothing was written.`;
       } else {
+        if (error.error === 'host_unavailable') noteHostUnavailable();
         editorStatus = `Save failed for ${activePath}: ${hostErrorLabel(error.error)}. Your buffer remains unsaved.`;
       }
       return false;
@@ -1365,7 +1405,12 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   <meta name="description" content="Local, compiler-backed Boris authoring environment" />
 </svelte:head>
 
-<svelte:window onkeydown={handleShortcut} onbeforeunload={warnUnsaved} />
+<svelte:window
+  onkeydown={handleShortcut}
+  onbeforeunload={warnUnsaved}
+  onpagehide={flushRecovery}
+  onvisibilitychange={handleVisibility}
+/>
 
 <header>
   <a class="skip-link" href="#workspace" onclick={(event) => {

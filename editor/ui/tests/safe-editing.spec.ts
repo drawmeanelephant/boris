@@ -272,17 +272,15 @@ test('semantic shell and file tree expose stable keyboard and voice names', asyn
 
 test('source editing, undo, redo, and explicit save work without a pointer', async ({ page }) => {
   await installApi(page);
-  await page.clock.install();
   const file = page.getByRole('button', { name: 'content/index.md', exact: true });
   await file.focus();
   await page.keyboard.press('Enter');
 
   const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
   await expect(editor).toHaveValue('# Home\n');
+  const recoveryRequest = page.waitForRequest('**/api/recovery/snapshot');
   await editor.fill('# Draft\n');
   await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
-  const recoveryRequest = page.waitForRequest('**/api/recovery/snapshot');
-  await page.clock.fastForward(3000);
   expect((await recoveryRequest).postDataJSON()).toMatchObject({
     path: 'content/index.md', content: '# Draft\n', fingerprint: 'a'.repeat(64)
   });
@@ -2506,4 +2504,34 @@ test('command palette caps unfiltered files and finds the rest by filter (#418 M
   await palette.getByRole('combobox', { name: 'Filter commands' }).press('Enter');
   await expect(palette).toBeHidden();
   await expect(page.getByRole('textbox', { name: 'Source for content/p249.md' })).toBeVisible();
+});
+
+test('hiding the tab flushes the latest unsaved buffer (#418 M11)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const first = page.waitForRequest('**/api/recovery/snapshot');
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# First\n');
+  expect((await first).postDataJSON()).toMatchObject({ content: '# First\n' });
+
+  const flush = page.waitForRequest(request =>
+    request.url().includes('/api/recovery/snapshot')
+    && (request.postDataJSON() as { content?: string }).content === '# Later\n'
+  );
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Later\n');
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  expect((await flush).postDataJSON()).toMatchObject({
+    path: 'content/index.md', content: '# Later\n', fingerprint: 'a'.repeat(64)
+  });
+});
+
+test('a dead editor host is named and tells you to restart (#418 M11)', async ({ page }) => {
+  await installApi(page);
+  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor/0.1.0.');
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.route('**/api/recovery/snapshot', route => route.abort());
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# After crash\n');
+  await expect(page.getByRole('status', { name: 'Connection status' }))
+    .toContainText('Local host unavailable. Restart boris-editor.');
+  await expect(page.getByRole('status', { name: 'Editing status' }))
+    .toContainText('The editor host stopped');
 });
