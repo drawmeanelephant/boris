@@ -168,7 +168,7 @@ vocabularies, for editors, agents, and CI:
 
 | Step | Closed vocabulary | Machine twin |
 |---|---|---|
-| 2 — frontmatter | the eight keys | [`boris-frontmatter-1.schema.json`](contracts/schemas/boris-frontmatter-1.schema.json) |
+| 2 — frontmatter | the closed keys, including the `servings` exception | [`boris-frontmatter-1.schema.json`](contracts/schemas/boris-frontmatter-1.schema.json) |
 | 3 & 4 — graph and layout | entity ids, parent targets, relation kinds, layout slots | `completion.json` ([`boris-completion-1.schema.json`](contracts/schemas/boris-completion-1.schema.json)) |
 
 `completion.json` is emitted alongside the IR artifact set on a successful

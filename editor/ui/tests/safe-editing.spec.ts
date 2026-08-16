@@ -98,7 +98,8 @@ function authoringPayload(withGraph = true, entities: CompletionEntity[] = [
         tags: { type: 'array', maxItems: 32 },
         relations: { type: 'array', maxItems: 128 },
         published_at: { type: ['string', 'null'] },
-        summary: { type: ['string', 'null'], maxLength: 1024 }
+        summary: { type: ['string', 'null'], maxLength: 1024 },
+        servings: { type: ['string', 'null'], maxLength: 64 }
       }
     },
     completion: withGraph ? {

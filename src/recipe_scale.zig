@@ -64,6 +64,22 @@ pub fn classify(amount: []const u8) Class {
     return Class.fromOliver(oliver.cooklang.classifyQuantity(amount));
 }
 
+/// Target serving count for `--servings N`. Positive integer, no units.
+pub fn parseServingsTarget(text: []const u8) ScaleError!u32 {
+    if (text.len == 0 or text[0] < '1' or text[0] > '9') return error.InvalidFactor;
+    for (text) |c| {
+        if (c < '0' or c > '9') return error.InvalidFactor;
+    }
+    return std.fmt.parseInt(u32, text, 10) catch return error.InvalidFactor;
+}
+
+/// `factor = target / current`, reduced. Missing current is the caller's
+/// job to default to 1 before calling.
+pub fn factorFromServings(current: u32, target: u32) ScaleError!Factor {
+    if (current == 0 or target == 0) return error.InvalidFactor;
+    return (Factor{ .num = target, .den = current }).reduce();
+}
+
 /// Parse a scale factor. Accepts the same scalable forms as amounts.
 /// Zero and a zero denominator are invalid.
 pub fn parseFactor(text: []const u8) ScaleError!Factor {
@@ -184,6 +200,16 @@ test "timers are never scaled" {
 }
 
 test "factors reject zero and junk" {
+    try std.testing.expectEqual(@as(u32, 4), try parseServingsTarget("4"));
+    try std.testing.expectError(error.InvalidFactor, parseServingsTarget("0"));
+    try std.testing.expectError(error.InvalidFactor, parseServingsTarget("4 servings"));
+    const doubled = try factorFromServings(2, 4);
+    try std.testing.expectEqual(@as(u64, 2), doubled.num);
+    try std.testing.expectEqual(@as(u64, 1), doubled.den);
+    const halved = try factorFromServings(4, 2);
+    try std.testing.expectEqual(@as(u64, 1), halved.num);
+    try std.testing.expectEqual(@as(u64, 2), halved.den);
+
     try std.testing.expectError(error.InvalidFactor, parseFactor("0"));
     try std.testing.expectError(error.InvalidFactor, parseFactor("0/1"));
     try std.testing.expectError(error.InvalidFactor, parseFactor("1-2"));

@@ -24,8 +24,10 @@ Markdown would be unqueryable.
 Cooklang metadata *is* YAML front matter delimited by `---`, which is already
 the Boris frontmatter grammar. The adapter therefore never sees metadata:
 `parser.zig` splits frontmatter from the original source bytes first, and only
-the body is adapted. `id`, `title`, `parent`, `tags` and semantic relations
-behave exactly as they do for a Markdown page.
+the body is adapted. `id`, `title`, `parent`, `tags`, semantic relations, and
+the closed `servings` exception behave exactly as they do for a Markdown page.
+`serves` and `yield` are input aliases for `servings`; every other Cooklang
+metadata name stays `EFRONTMATTER`. See [frontmatter.md](frontmatter.md).
 
 ## Activation and discovery
 
@@ -355,10 +357,12 @@ A factor uses the same scalable forms. Zero and a zero denominator are invalid.
 The scaled view is not written into `graph.json` and does not bump
 `schemaVersion`. `boris recipe-scale --input DIR --id PAGE --factor TEXT`
 prints that view as a `boris-recipe-scale` JSON document on stdout
-(and `--out PATH` when given). `--cooklang` is required for a `.cook`
-tree, same family rule as `build`. Zero or unparsable factors are a
-usage error. A missing page, a refused Cooklang tree, or an overflowing
-amount is a content error.
+(and `--out PATH` when given). `--servings N` is the same command with
+`factor = N / current`, where `current` is the page's `servings` count
+or `1` when the key is absent. `--factor` and `--servings` are exclusive.
+`--cooklang` is required for a `.cook` tree, same family rule as `build`.
+Zero or unparsable factors / serving counts are a usage error. A missing
+page, a refused Cooklang tree, or an overflowing amount is a content error.
 
 Schema for one scaled amount:
 

@@ -13,7 +13,7 @@ boris check [--input DIR] [--format human|json] [--report PATH] [--fail-on-unref
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 boris watch [build options]
 boris plan --profile PATH [plan overrides]
-boris recipe-scale --input DIR --id PAGE --factor TEXT [--cooklang] [--out PATH]
+boris recipe-scale --input DIR --id PAGE (--factor TEXT | --servings N) [--cooklang] [--out PATH]
 ```
 
 ## Commands

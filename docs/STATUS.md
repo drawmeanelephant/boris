@@ -126,6 +126,7 @@ zig build test
 ./zig-out/bin/boris --incremental --jobs 4 --quiet
 ./zig-out/bin/boris plan --profile boris.json
 ./zig-out/bin/boris recipe-scale --input DIR --id PAGE --factor TEXT --cooklang
+./zig-out/bin/boris recipe-scale --input DIR --id PAGE --servings N --cooklang
 ./zig-out/bin/boris nostr plan --profile PATH
 # echo -n '<hex-or-nsec>' | ./zig-out/bin/boris nostr sign --plan PLAN --key-stdin --out BUNDLE
 # ./zig-out/bin/boris nostr publish --plan PLAN --bundle BUNDLE --out REPORT
@@ -181,7 +182,7 @@ The release audit found these follow-ups:
 |---|---|
 | Subprocess Markdown rendering | Oliver is consumed as a native Zig module (never a subprocess). |
 | Node/React/Astro/Next as the compiler | Boris itself is the Zig compiler. |
-| Full YAML frontmatter or arbitrary MDX | The author grammar and registered components are intentionally closed. |
+| Full YAML frontmatter or arbitrary MDX | The author grammar and registered components are intentionally closed. `servings` / `serves` / `yield` are the one Cooklang-convention exception ([frontmatter.md](contracts/frontmatter.md)); they are not a crack for other YAML keys. |
 | Embedded HTTP server as product architecture | Serve generated `dist/` with any ordinary static host. The editor host is a local authoring surface, not a public app server. |
 | Universal migration conversion | Migration labs are review-first, bounded developer tools. |
 | Speed or cross-OS-byte-identity claims | Measure the specific workload and platform first. |

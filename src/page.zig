@@ -36,6 +36,9 @@ pub const max_title_bytes: usize = 512;
 /// Max UTF-8 bytes for a frontmatter RSS summary.
 pub const max_summary_bytes: usize = 1024;
 
+/// Max UTF-8 bytes for a frontmatter `servings` / `serves` / `yield` value.
+pub const max_servings_bytes: usize = 64;
+
 /// Max UTF-8 **bytes** for one tag token (after quote strip).
 pub const max_tag_bytes: usize = 64;
 
@@ -112,6 +115,36 @@ pub const SemanticRelation = struct {
     target: []const u8,
 };
 
+/// Parsed Cooklang-convention serving count.
+///
+/// Author keys `servings`, `serves`, and `yield` collapse to this one field.
+/// `count` is the leading positive integer; `authored` is the raw value
+/// (so `15 cups worth` keeps its units text).
+pub const Servings = struct {
+    count: u32,
+    authored: []const u8,
+};
+
+/// True for the closed Cooklang serving-count aliases. Every other Cooklang
+/// metadata name (`source`, `author`, `course`, …) stays an unknown key.
+pub fn isServingsKey(key: []const u8) bool {
+    return std.mem.eql(u8, key, "servings") or
+        std.mem.eql(u8, key, "serves") or
+        std.mem.eql(u8, key, "yield");
+}
+
+/// Leading positive integer, optionally a space/tab and units (`2`,
+/// `15 cups worth`). Rejects `0`, leading zeros, fractions, and decimals.
+pub fn parseServingsValue(value: []const u8) error{BadServings}!u32 {
+    if (value.len == 0 or value[0] < '1' or value[0] > '9') return error.BadServings;
+    var end: usize = 1;
+    while (end < value.len and value[end] >= '0' and value[end] <= '9') end += 1;
+    const count = std.fmt.parseInt(u32, value[0..end], 10) catch return error.BadServings;
+    if (count == 0) return error.BadServings;
+    if (end < value.len and value[end] != ' ' and value[end] != '\t') return error.BadServings;
+    return count;
+}
+
 /// Parsed frontmatter fields as **views into the source buffer**.
 ///
 /// Lifetime is tied to the `source` slice passed to `parser.parse`. Do **not**
@@ -128,6 +161,8 @@ pub const FrontmatterView = struct {
     published_at: ?[]const u8 = null,
     /// Optional short plain-text description for future projections and RSS.
     summary: ?[]const u8 = null,
+    /// Optional serving count from `servings` / `serves` / `yield`.
+    servings: ?Servings = null,
     /// Tag token slices into source; only `tags[0..tag_count]` is defined.
     tags: [max_tag_count][]const u8 = undefined,
     tag_count: usize = 0,
@@ -244,6 +279,8 @@ pub const DurablePage = struct {
     status: ?Status = null,
     published_at: ?[]const u8 = null,
     summary: ?[]const u8 = null,
+    /// Cooklang convention count; not written into graph.json.
+    servings: ?Servings = null,
     /// Retain-owned tag strings (may be empty slice).
     tags: []const []const u8 = &.{},
     /// Retain-owned semantic relation targets (IR 0.3 when emitted).
@@ -376,6 +413,10 @@ pub const PageDb = struct {
             .status = meta.status,
             .published_at = try self.dupeOpt(meta.published_at),
             .summary = try self.dupeOpt(meta.summary),
+            .servings = if (meta.servings) |s| .{
+                .count = s.count,
+                .authored = try self.retain.dupe(u8, s.authored),
+            } else null,
             .tags = tags_owned,
             .relations = relations_owned,
             .recipe = recipe,

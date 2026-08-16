@@ -244,13 +244,18 @@ fn printTimingsReport(io: Io, gpa: std.mem.Allocator, recorder: *const timings.R
 /// Read, normalize, validate, and declare one explicitly selected profile.
 /// This path intentionally stops before content discovery or any publisher.
 /// Materialize a deterministic starter site into `opts.init_dir` (default ".").
+fn findRecipeScalePage(result: *const pipeline.Result, page_id: []const u8) ?*const pipeline.PageEntry {
+    for (result.pages.items) |*page| {
+        if (std.mem.eql(u8, page.id, page_id)) return page;
+    }
+    return null;
+}
+
 /// Derived Cooklang scale view. Compiles the selected tree, scales one page,
 /// and writes JSON to stdout (and `--out` when given). Never rewrites `.cook`
 /// or `graph.json`.
 pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     const page_id = opts.recipe_scale_id orelse return .usage;
-    const factor_text = opts.recipe_scale_factor orelse return .usage;
-    const factor = recipe_scale.parseFactor(factor_text) catch return .usage;
 
     var result = pipeline.compile(io, gpa, .{
         .content_root = opts.input_dir,
@@ -270,7 +275,23 @@ pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         };
     }
 
-    const bytes = recipe_scale_view.renderFromCompile(gpa, &result, page_id, factor) catch |err| switch (err) {
+    const page = findRecipeScalePage(&result, page_id) orelse {
+        std.debug.print("error: recipe page not found: {s}\n", .{page_id});
+        return .content_error;
+    };
+
+    var servings_view: ?recipe_scale_view.ServingsScale = null;
+    const factor = if (opts.recipe_scale_factor) |factor_text|
+        recipe_scale.parseFactor(factor_text) catch return .usage
+    else blk: {
+        const target_count = recipe_scale.parseServingsTarget(opts.recipe_scale_servings orelse return .usage) catch return .usage;
+        const current = if (page.servings) |s| s.count else 1;
+        const authored = if (page.servings) |s| s.authored else null;
+        servings_view = .{ .current = current, .target = target_count, .authored = authored };
+        break :blk recipe_scale.factorFromServings(current, target_count) catch return .usage;
+    };
+
+    const bytes = recipe_scale_view.renderFromCompile(gpa, &result, page_id, factor, servings_view) catch |err| switch (err) {
         error.PageNotFound => {
             std.debug.print("error: recipe page not found: {s}\n", .{page_id});
             return .content_error;

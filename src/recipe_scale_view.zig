@@ -13,15 +13,22 @@ const recipe_scale = @import("recipe_scale.zig");
 pub const format_name = "boris-recipe-scale";
 pub const schema_version = "0.1.0";
 
+pub const ServingsScale = struct {
+    current: u32,
+    target: u32,
+    authored: ?[]const u8,
+};
+
 /// Scale one compiled page into the contracted view document.
 pub fn renderFromCompile(
     gpa: std.mem.Allocator,
     result: *const pipeline.Result,
     page_id: []const u8,
     factor: recipe_scale.Factor,
+    servings: ?ServingsScale,
 ) ![]u8 {
     const page = findPage(result, page_id) orelse return error.PageNotFound;
-    return render(gpa, page.id, page.recipe, factor);
+    return render(gpa, page.id, page.recipe, factor, servings);
 }
 
 fn findPage(result: *const pipeline.Result, page_id: []const u8) ?*const pipeline.PageEntry {
@@ -36,6 +43,7 @@ pub fn render(
     page_id: []const u8,
     recipe: cooklang_seam.Recipe,
     factor: recipe_scale.Factor,
+    servings: ?ServingsScale,
 ) ![]u8 {
     var owned: std.ArrayList(recipe_scale.ScaledAmount) = .empty;
     defer {
@@ -65,6 +73,20 @@ pub fn render(
     try buf.appendSlice(gpa, ", \"den\": ");
     try writeU64(&buf, gpa, factor.den);
     try buf.appendSlice(gpa, " },\n");
+    if (servings) |s| {
+        try json_out.indent(&buf, gpa, 1);
+        try buf.appendSlice(gpa, "\"servings\": { \"current\": ");
+        try writeU64(&buf, gpa, s.current);
+        try buf.appendSlice(gpa, ", \"target\": ");
+        try writeU64(&buf, gpa, s.target);
+        try buf.appendSlice(gpa, ", \"authored\": ");
+        if (s.authored) |authored| {
+            try json_out.writeString(&buf, gpa, authored);
+        } else {
+            try json_out.writeNull(&buf, gpa);
+        }
+        try buf.appendSlice(gpa, " },\n");
+    }
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"page\": ");
     try json_out.writeString(&buf, gpa, page_id);
@@ -194,15 +216,43 @@ test "carbonara doubled matches the contracted golden" {
     try std.testing.expect(compiled.ok);
 
     const factor = try recipe_scale.parseFactor("2");
-    const first = try renderFromCompile(gpa, &compiled, "carbonara", factor);
+    const first = try renderFromCompile(gpa, &compiled, "carbonara", factor, null);
     defer gpa.free(first);
-    const second = try renderFromCompile(gpa, &compiled, "carbonara", factor);
+    const second = try renderFromCompile(gpa, &compiled, "carbonara", factor, null);
     defer gpa.free(second);
     try std.testing.expectEqualStrings(first, second);
 
     const golden = try std.Io.Dir.cwd().readFileAlloc(io, "docs/contracts/fixtures/cooklang-compatibility/expected/recipe-scale-carbonara-x2.json", gpa, .limited(64 * 1024));
     defer gpa.free(golden);
     try std.testing.expectEqualStrings(golden, first);
+}
+
+test "carbonara --servings 4 matches the contracted golden" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var compiled = try pipeline.compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/content",
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer compiled.deinit();
+    try std.testing.expect(compiled.ok);
+
+    const page = findPage(&compiled, "carbonara") orelse return error.PageNotFound;
+    try std.testing.expectEqual(@as(u32, 2), page.servings.?.count);
+    const factor = try recipe_scale.factorFromServings(page.servings.?.count, 4);
+    const servings = ServingsScale{
+        .current = page.servings.?.count,
+        .target = 4,
+        .authored = page.servings.?.authored,
+    };
+    const bytes = try renderFromCompile(gpa, &compiled, "carbonara", factor, servings);
+    defer gpa.free(bytes);
+
+    const golden = try std.Io.Dir.cwd().readFileAlloc(io, "docs/contracts/fixtures/cooklang-compatibility/expected/recipe-scale-carbonara-servings-4.json", gpa, .limited(64 * 1024));
+    defer gpa.free(golden);
+    try std.testing.expectEqualStrings(golden, bytes);
 }
 
 test "missing page is a view error, not a rewrite" {
@@ -218,7 +268,7 @@ test "missing page is a view error, not a rewrite" {
     try std.testing.expect(compiled.ok);
 
     const factor = try recipe_scale.parseFactor("2");
-    try std.testing.expectError(error.PageNotFound, renderFromCompile(gpa, &compiled, "missing", factor));
+    try std.testing.expectError(error.PageNotFound, renderFromCompile(gpa, &compiled, "missing", factor, null));
 }
 
 test "fixed amounts and timers stay put in the view" {
@@ -238,7 +288,7 @@ test "fixed amounts and timers stay put in the view" {
         },
     };
 
-    const bytes = try render(gpa, "fixed", recipe, factor);
+    const bytes = try render(gpa, "fixed", recipe, factor, null);
     defer gpa.free(bytes);
 
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"original\": \"some\", \"scaled\": \"some\"") != null);
