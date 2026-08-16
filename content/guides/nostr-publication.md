@@ -23,8 +23,9 @@ boris nostr publish --plan PLAN.json --bundle BUNDLE.json     # online
 
 A bare `boris --quiet` never needs a key, a relay, or the network. A
 failed Nostr run never invalidates a committed `dist/`. This is a CLI
-family, **not** a verified target: no location adapter, no Proof Pack,
-no live-smoke gate. See [[guides/publishing|Publishing Targets]].
+family, **not** a verified target, on purpose: relays are not a host.
+No location adapter, no Proof Pack, no live-smoke gate. See
+[[guides/publishing|Publishing Targets]].
 
 </Aside>
 

@@ -170,7 +170,8 @@ optional Pages observer is a separate, explicitly bounded contract.
 ## What is not a target {#not-a-target}
 
 Nostr NIP-23
-: Shipped CLI. Not in the verified-target registry. See
+: Shipped CLI. Stays off the verified-target registry on purpose:
+  relays are not a host. See
   [[guides/nostr-publication|Nostr NIP-23 Publication]].
 
 Cloudflare Pages / Vercel / Netlify

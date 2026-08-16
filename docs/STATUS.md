@@ -78,7 +78,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | GitHub Pages | **Shipped and verified** — normalized project/root/custom-domain identity, exact public artifact boundary, retained target-local evidence, optional bounded post-deploy observer. Operator path: [`github-pages.md`](github-pages.md). |
 | Standard.site / AT Protocol | **Shipped for first testers** — offline plan/records/verify, opt-in app-password login, one-shot publish, recorded passing bsky.social live smoke. Browser OAuth is implemented; bsky.social does not grant `site.standard.authFull` (exit 6). Operator path: [`standard-site.md`](standard-site.md). |
 | Publication evidence | **Done** — artifacts → checks → claims → Touch Atlas → Proof Pack, staged, deterministic. |
-| Nostr NIP-23 | **CLI shipped, not a verified target** — `boris nostr plan` / `sign` / `publish` (BIP-340, bounded RFC-6455, per-relay verdict). Plan emits NIP-19 `naddr` / `npub`. `boris --profile` emits `nostr:naddr` alternate links on eligible pages. Recorded first-tester live-smoke fixture (optional evidence, not a gate). No location adapter, no Proof Pack, no live-smoke gate. Guide: [`content/guides/nostr-publication.md`](../content/guides/nostr-publication.md). |
+| Nostr NIP-23 | **CLI shipped; stays off the verified-target seam** — `boris nostr plan` / `sign` / `publish` (BIP-340, bounded RFC-6455, per-relay verdict). Plan emits NIP-19 `naddr` / `npub`. `boris --profile` emits `nostr:naddr` alternate links on eligible pages. Recorded first-tester live-smoke fixture (optional evidence, not a gate). Relays are not a host, so there is no location adapter, Proof Pack, or live-smoke gate. Guide: [`content/guides/nostr-publication.md`](../content/guides/nostr-publication.md). |
 
 ### Editor
 
@@ -105,6 +105,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Cloudflare Containers (#300) | Open. Native Boris behind a Worker. Not a static rehost. |
 | Freestanding Wasm (#301) | Open. Compiler-shaped embedding bet. |
 | Doctor | **Internal kernel only** — `src/doctor.zig` audits a rendered snapshot. No public `boris doctor` command. The old design note was retired; this row is the remaining card. |
+| Nostr verified-target extras ([#584](https://github.com/drawmeanelephant/boris/issues/584)) | Location adapter / registry membership **declined**. Proof Pack and a live-smoke **gate** stay parked unless a product reason appears. |
 
 ### Common commands
 
@@ -151,7 +152,7 @@ context, test-throughput audit) is **done**. It is not relisted as upcoming.
 | 4 | Migration-guide review findings | **Evidence complete — review remains** | Review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
 | 5 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 6 | Standard.site HTML verify emit | **Shipped [#569](https://github.com/drawmeanelephant/boris/pull/569)** | `boris --profile` emits verification surfaces from the HTML build. |
-| 7 | Nostr as a verified target | **CLI shipped; verified-target work remains [#454](https://github.com/drawmeanelephant/boris/issues/454)** | plan/sign/publish exist. Recorded first-tester fixture is [#583](https://github.com/drawmeanelephant/boris/issues/583). Location adapter, Proof Pack, and live-smoke **gate** remain [#584](https://github.com/drawmeanelephant/boris/issues/584) and are not implied. |
+| 7 | Nostr as a verified target | **Decided — stays off the seam** | Location adapter / registry membership declined. See [`publication-platforms.md`](contracts/publication-platforms.md). Proof Pack and a live-smoke **gate** stay parked on [#584](https://github.com/drawmeanelephant/boris/issues/584) and are not implied. |
 | 8 | Cloudflare embedding | **Open [#300](https://github.com/drawmeanelephant/boris/issues/300) / [#301](https://github.com/drawmeanelephant/boris/issues/301)** | Container-backed native builds and freestanding Wasm. Outside the static-target matrix. |
 
 ## Release bookkeeping
