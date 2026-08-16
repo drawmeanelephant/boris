@@ -49,8 +49,8 @@ boris standard-site login --app-password --handle YOU.test.bsky.social
 # 4. Optional interop proof (writes two namespaced records, reads them back, deletes them)
 boris standard-site smoke --handle YOU.test.bsky.social --out smoke.json
 
-# 5. Publish the real site
-boris standard-site publish --profile profiles/standard-site.json --did did:plc:…
+# 5. Publish the real site (the DID and PDS come from the profile)
+boris standard-site publish --profile profiles/standard-site.json
 
 # 6. Forget the local session (does not revoke the app password at the PDS)
 boris standard-site logout --did did:plc:…
