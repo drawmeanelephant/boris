@@ -108,14 +108,17 @@ are never indexed. Nested markup inside an excluded region does not re-enter
 the index.
 
 Rendered entities (`amp`, `lt`, `gt`, `quot`, `apos`, `nbsp`, and numeric
-character references) are decoded before text is stored. ASCII whitespace is
-collapsed to one U+0020 and trimmed at both ends. Other UTF-8 text is preserved;
+character references) are decoded before title, heading, fragment, text, or
+code is stored. ASCII whitespace is collapsed to one U+0020 and trimmed at
+both ends. Table cells (`td`/`th`) and `<br>`/`<hr>` are word separators in
+`text`, so adjacent cells do not concatenate. Other UTF-8 text is preserved;
 there is no case folding, stemming, punctuation removal, or language-specific
 normalization. Code is kept in `code` rather than merged into `text`.
 
 Sections retain document order. Text before the first heading is level zero;
 each `h1`–`h6` begins the next section. An explicit heading `id` is copied as
-`fragment`; absent ids use the current ASCII slug behavior (lowercase ASCII
+`fragment` after the same entity decode, so the fragment matches the live DOM
+id; absent ids use the current ASCII slug behavior (lowercase ASCII
 alphanumerics separated by single dashes). Documents are sorted by canonical
 `path` using bytewise ordering. The producer emits documents and sections in
 that order and emits the fixed v1 keys in a stable order.

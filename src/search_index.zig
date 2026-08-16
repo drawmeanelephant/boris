@@ -171,7 +171,33 @@ fn normalize(a: std.mem.Allocator, raw: []const u8) ![]u8 {
     return out.toOwnedSlice(a);
 }
 fn isBlock(n: []const u8) bool {
-    return std.mem.eql(u8, n, "p") or std.mem.eql(u8, n, "div") or std.mem.eql(u8, n, "li") or std.mem.eql(u8, n, "section") or std.mem.eql(u8, n, "article") or std.mem.eql(u8, n, "blockquote") or std.mem.eql(u8, n, "pre") or std.mem.eql(u8, n, "details") or std.mem.eql(u8, n, "summary");
+    return std.ascii.eqlIgnoreCase(n, "p") or
+        std.ascii.eqlIgnoreCase(n, "div") or
+        std.ascii.eqlIgnoreCase(n, "li") or
+        std.ascii.eqlIgnoreCase(n, "section") or
+        std.ascii.eqlIgnoreCase(n, "article") or
+        std.ascii.eqlIgnoreCase(n, "blockquote") or
+        std.ascii.eqlIgnoreCase(n, "pre") or
+        std.ascii.eqlIgnoreCase(n, "details") or
+        std.ascii.eqlIgnoreCase(n, "summary") or
+        std.ascii.eqlIgnoreCase(n, "table") or
+        std.ascii.eqlIgnoreCase(n, "thead") or
+        std.ascii.eqlIgnoreCase(n, "tbody") or
+        std.ascii.eqlIgnoreCase(n, "tfoot") or
+        std.ascii.eqlIgnoreCase(n, "tr") or
+        std.ascii.eqlIgnoreCase(n, "td") or
+        std.ascii.eqlIgnoreCase(n, "th");
+}
+
+fn isBreak(n: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(n, "br") or std.ascii.eqlIgnoreCase(n, "hr");
+}
+
+fn decodeNormalize(a: std.mem.Allocator, raw: []const u8) ![]u8 {
+    var decoded: std.ArrayList(u8) = .empty;
+    defer decoded.deinit(a);
+    try appendDecoded(&decoded, a, raw);
+    return normalize(a, decoded.items);
 }
 fn slugify(a: std.mem.Allocator, text: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -248,9 +274,9 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
                     heading = true;
                     heading_marked = attrValue(txt, "data-boris-search-title") != null;
                     level = n[1] - '0';
-                    if (attrValue(txt, "id")) |id| try sections.items[sections.items.len - 1].fragment.appendSlice(a, id);
+                    if (attrValue(txt, "id")) |id| try appendDecoded(&sections.items[sections.items.len - 1].fragment, a, id);
                 } else if (std.ascii.eqlIgnoreCase(n, "code") or std.ascii.eqlIgnoreCase(n, "pre")) code_depth += 1;
-                if (isBlock(n)) try sections.items[sections.items.len - 1].prose.append(a, ' ');
+                if (isBlock(n) or isBreak(n)) try sections.items[sections.items.len - 1].prose.append(a, ' ');
             }
         } else if (excluded > 0) excluded -= 1 else if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6' and heading) {
             heading = false;
@@ -270,7 +296,7 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
             const s = std.mem.indexOfScalarPos(u8, html, ti, '<') orelse break;
             const t = tagAt(html, s) orelse break;
             if (!t.closing and std.ascii.eqlIgnoreCase(t.name, "title")) if (matchingRange(html, s, "title")) |r| {
-                title = try normalize(a, html[r.start..r.end]);
+                title = try decodeNormalize(a, html[r.start..r.end]);
                 break;
             };
             ti = t.end + 1;
@@ -668,6 +694,27 @@ test "search index JSON stays byte-deterministic" {
     const second = try writeJson(std.testing.allocator, &.{b});
     defer std.testing.allocator.free(second);
     try std.testing.expectEqualStrings(first, second);
+}
+
+test "table cells and breaks stay separate searchable words" {
+    const html = "<main data-boris-search-root><h1>Targets</h1>" ++
+        "<table><tr><th>Arch</th><td>arm64</td></tr><tr><td>x86</td><td>riscv</td></tr></table>" ++
+        "<p>line<br>break</p></main>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "Arch arm64") != null);
+    try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "x86 riscv") != null);
+    try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "arm64x86") == null);
+    try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "line break") != null);
+}
+
+test "title fallback and heading fragments decode entities" {
+    const html = "<html><head><title>Foo &amp; Bar</title></head>" ++
+        "<main data-boris-search-root><h2 id=\"a&#38;b\">Later</h2><p>body</p></main></html>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Foo & Bar", d.title);
+    try std.testing.expectEqualStrings("a&b", d.sections[0].fragment);
 }
 
 test "writeJson escapes control characters so the index stays parseable" {
