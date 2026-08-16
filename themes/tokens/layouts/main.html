@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en" data-layout="main">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tokens</title>
+    <link rel="stylesheet" href="{{asset-url assets/css/tokens.css}}">
+      {{head}}
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="op-header"><div class="op-container op-header__inner"><div><p class="op-kicker">Fluid tokens</p><p class="op-brand">Tokens</p></div><div class="op-nav" aria-label="Site navigation">{{nav}}</div></div></header>
+    <main id="main-content" class="op-container op-grid" data-boris-search-root>
+      <article class="op-card op-article"><div class="op-breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</div><header><h1 class="op-title">{{title}}</h1>{{metadata}}</header><div class="op-prose">{{content}}</div><section class="op-card op-card--nested" aria-labelledby="children-heading"><h2 id="children-heading">In this section</h2>{{children}}</section>
+        {{relations}}
+        {{backlinks}}</article>
+      <aside class="op-sidebar" aria-label="On this page" data-boris-search-exclude><div class="op-card"><p class="op-kicker">On this page</p>{{toc}}</div></aside>
+    </main>
+    <footer class="op-footer">{{footer}}</footer>
+  </body>
+</html>
