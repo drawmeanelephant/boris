@@ -58,6 +58,7 @@ per topic:
 | Source paths and entity IDs | [identity-and-paths.md](identity-and-paths.md) |
 | Discovery / scanning | [scanner.md](scanner.md) |
 | In-memory / filesystem source provider | [source-provider.md](source-provider.md) |
+| In-memory / filesystem artifact sink | [artifact-sink.md](artifact-sink.md) |
 | Parent / graph validation (Trunk / Satellite) | [ir-schema.md](ir-schema.md) (graph section); `parent` field shape in [frontmatter.md](frontmatter.md) |
 | JSON IR (manifest, graph, build-report) | [ir-schema.md](ir-schema.md) |
 | Diagnostics | [diagnostics.md](diagnostics.md) |
