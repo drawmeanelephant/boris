@@ -285,6 +285,37 @@ fn connectStream(io: Io, address: Io.net.IpAddress) Io.net.IpAddress.ConnectErro
     return address.connect(io, .{ .mode = .stream, .protocol = .tcp });
 }
 
+fn connectHost(io: Io, host: Io.net.HostName, port: u16) Io.net.HostName.ConnectError!Io.net.Stream {
+    return host.connect(io, port, .{ .mode = .stream, .protocol = .tcp });
+}
+
+/// Connect to a parsed target. IP literals stay on `IpAddress.connect` so
+/// the mock-relay `127.0.0.1` / `[::1]` path is unchanged; anything else is
+/// a hostname and is looked up.
+fn connectTarget(io: Io, target: Target, timeout_ms: u32) (error{ Timeout, ResolveFailed, ConnectFailed })!Io.net.Stream {
+    if (Io.net.IpAddress.resolve(io, target.host, target.port)) |address| {
+        return raceDeadline(io, timeout_ms, connectStream, .{ io, address }) catch |err| switch (err) {
+            error.Timeout => return error.Timeout,
+            else => return error.ConnectFailed,
+        };
+    } else |_| {}
+
+    const host_name = Io.net.HostName.init(target.host) catch return error.ResolveFailed;
+    return raceDeadline(io, timeout_ms, connectHost, .{ io, host_name, target.port }) catch |err| switch (err) {
+        error.Timeout => return error.Timeout,
+        error.UnknownHostName,
+        error.ResolvConfParseFailed,
+        error.InvalidDnsARecord,
+        error.InvalidDnsAAAARecord,
+        error.InvalidDnsCnameRecord,
+        error.NameServerFailure,
+        error.NoAddressReturned,
+        error.DetectingNetworkConfigurationFailed,
+        => return error.ResolveFailed,
+        else => return error.ConnectFailed,
+    };
+}
+
 fn readSliceShortFn(self: *Client, buffer: []u8) Io.Reader.ShortError!usize {
     return self.reader().readSliceShort(buffer);
 }
@@ -492,9 +523,14 @@ pub const Client = struct {
 
         // The relay contract guarantees normalized URLs, but the client still
         // parses them so a future caller cannot smuggle an odd target through.
-        const address: Io.net.IpAddress = Io.net.IpAddress.resolve(io, target.host, target.port) catch return error.ResolveFailed;
-        const stream = raceDeadline(io, limits.handshake_timeout_ms, connectStream, .{ io, address }) catch |err| switch (err) {
+        //
+        // Zig 0.16 `IpAddress.resolve` parses IP *literals* only (IPv4, then
+        // IPv6 with OS scope lookup). It is not a hostname resolver. Named
+        // relays (`wss://relay.example.org`, `ws://localhost`) must go
+        // through `HostName.connect` (DNS lookup + try addresses). #545.
+        const stream = connectTarget(io, target, limits.handshake_timeout_ms) catch |err| switch (err) {
             error.Timeout => return error.HandshakeTimeout,
+            error.ResolveFailed => return error.ResolveFailed,
             else => return error.ConnectFailed,
         };
         // The stream is closed by `deinit` once the Client owns it; until then a
@@ -1077,4 +1113,35 @@ test "target: ws is refused for a non-loopback host" {
     try testing.expect(!isLoopbackHost("relay.example.org"));
     try testing.expect(isLoopbackHost("127.0.0.1"));
     try testing.expect(isLoopbackHost("localhost"));
+}
+
+test "connect: a hostname is not an IP literal (#545)" {
+    // Documents the Zig 0.16 trap: IpAddress.resolve parses literals only.
+    try testing.expectError(error.ParseFailed, Io.net.IpAddress.resolve(testing.io, "relay.example.org", 443));
+    _ = try Io.net.HostName.init("relay.example.org");
+    _ = try Io.net.HostName.init("localhost");
+}
+
+test "connect: localhost is looked up rather than ResolveFailed (#545)" {
+    const result = Client.connect(testing.io, testing.allocator, "ws://localhost:1", .{
+        .handshake_timeout_ms = 500,
+        .read_timeout_ms = 500,
+    });
+    if (result) |ok| {
+        var client = ok;
+        client.deinit();
+        return error.UnexpectedConnect;
+    } else |err| switch (err) {
+        error.ConnectFailed, error.HandshakeTimeout => {},
+        else => return err,
+    }
+}
+
+test "connect: an unknown hostname is ResolveFailed, not a hang (#545)" {
+    try testing.expectError(error.ResolveFailed, Client.connect(
+        testing.io,
+        testing.allocator,
+        "wss://no-such-relay.invalid",
+        .{ .handshake_timeout_ms = 2_000, .read_timeout_ms = 500 },
+    ));
 }

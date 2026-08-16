@@ -480,6 +480,11 @@ signature must verify.
   port/path. `ws://` is refused for any non-loopback host (`localhost`,
   `127.0.0.1`, `[::1]`): plaintext WebSocket is a loopback/test convenience
   only.
+- Named hosts are resolved with `Io.net.HostName` (DNS lookup, then connect
+  to the returned addresses). `Io.net.IpAddress.resolve` parses IP literals
+  only and is not a hostname resolver; using it for `wss://relay.example.org`
+  is `ResolveFailed` (#545). IP literals (`127.0.0.1`, `[::1]`) stay on the
+  literal path so mock-relay fixtures are unchanged.
 - `wss://` uses `std.crypto.tls` with explicit hostname verification and a
   real CA bundle (system roots).
 - The opening handshake is validated exactly: status `101`, `Upgrade:
