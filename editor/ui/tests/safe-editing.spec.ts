@@ -1150,28 +1150,32 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     expect(deleteRequests).toBe(1);
   });
 
-  test('Esc-reopen contract: every dialog and the palette resets state and fires no stale requests', async ({ page }) => {
+  test('reopen contract: closing each dialog via Esc or pointer resets state and fires no stale requests', async ({ page }) => {
     await installApi(page);
     await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
     await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
 
-    type EscReopenCase = {
+    type ReopenCase = {
       name: string;
       mock: MockOptions;
       staleRequest: RegExp;
-      // Matching requests the Esc→reopen window may legitimately fire: 0 for triggerless
+      // Matching requests the close→reopen window may legitimately fire: 0 for triggerless
       // reopens, 1 for the conflict dialogs whose only reopen path is pressing Save again.
       expectedRequests: number;
       open: (page: Page) => Promise<void>;
       prime?: (page: Page) => Promise<void>;
+      // The pointer close for surfaces with a Cancel/Keep-editing affordance; the command
+      // palette has none (its only dismissals are Esc and running an action), so it runs
+      // only the Esc variant.
+      pointerClose?: (page: Page) => Promise<void>;
       reopen: (page: Page) => Promise<void>;
-      assertAfterEsc: (page: Page) => Promise<void>;
+      assertAfterClose: (page: Page) => Promise<void>;
       assertReset: (page: Page) => Promise<void>;
     };
 
     let paletteTotal = 0;
 
-    const surfaces: EscReopenCase[] = [
+    const surfaces: ReopenCase[] = [
       {
         name: 'create dialog',
         mock: {},
@@ -1182,8 +1186,9 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
           await page.getByRole('dialog', { name: 'Create file' })
             .getByRole('textbox', { name: 'New file path' }).fill('content/posts/');
         },
+        pointerClose: async page => { await page.getByRole('dialog', { name: 'Create file' }).getByRole('button', { name: /Cancel/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'Create file', exact: true }).click(); },
-        assertAfterEsc: async page => { await expect(page.getByRole('dialog', { name: 'Create file' })).toBeHidden(); },
+        assertAfterClose: async page => { await expect(page.getByRole('dialog', { name: 'Create file' })).toBeHidden(); },
         assertReset: async page => {
           const input = page.getByRole('dialog', { name: 'Create file' }).getByRole('textbox', { name: 'New file path' });
           await expect(input).toHaveValue('content/new-page.md');
@@ -1200,8 +1205,9 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
           await page.getByRole('dialog', { name: 'Rename file' })
             .getByRole('textbox', { name: 'New file path' }).fill('content/posts/renamed.md');
         },
+        pointerClose: async page => { await page.getByRole('dialog', { name: 'Rename file' }).getByRole('button', { name: /Cancel/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'Rename file', exact: true }).click(); },
-        assertAfterEsc: async page => { await expect(page.getByRole('dialog', { name: 'Rename file' })).toBeHidden(); },
+        assertAfterClose: async page => { await expect(page.getByRole('dialog', { name: 'Rename file' })).toBeHidden(); },
         assertReset: async page => {
           const input = page.getByRole('dialog', { name: 'Rename file' }).getByRole('textbox', { name: 'New file path' });
           await expect(input).toHaveValue('content/index.md');
@@ -1217,8 +1223,9 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
         prime: async page => {
           await expect(page.getByRole('dialog', { name: 'Delete file' }).getByRole('button', { name: /Delete content\/index\.md/ })).toBeFocused();
         },
+        pointerClose: async page => { await page.getByRole('dialog', { name: 'Delete file' }).getByRole('button', { name: /Cancel/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'Delete file', exact: true }).click(); },
-        assertAfterEsc: async page => { await expect(page.getByRole('dialog', { name: 'Delete file' })).toBeHidden(); },
+        assertAfterClose: async page => { await expect(page.getByRole('dialog', { name: 'Delete file' })).toBeHidden(); },
         assertReset: async page => {
           await expect(page.getByRole('dialog', { name: 'Delete file' }).getByRole('button', { name: /Delete content\/index\.md/ })).toBeFocused();
         }
@@ -1236,7 +1243,7 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
           await expect(dialog.getByRole('listbox', { name: 'Boris commands' }).getByRole('option')).toHaveCount(2);
         },
         reopen: async page => { await page.keyboard.press('Control+K'); },
-        assertAfterEsc: async page => { await expect(page.getByRole('dialog', { name: 'Commands' })).toBeHidden(); },
+        assertAfterClose: async page => { await expect(page.getByRole('dialog', { name: 'Commands' })).toBeHidden(); },
         assertReset: async page => {
           const dialog = page.getByRole('dialog', { name: 'Commands' });
           const input = dialog.getByRole('combobox', { name: 'Filter commands' });
@@ -1258,8 +1265,9 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
           await page.getByRole('button', { name: 'boris.json', exact: true }).click();
           await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toBeVisible();
         },
+        pointerClose: async page => { await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Cancel', exact: true }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'boris.json', exact: true }).click(); },
-        assertAfterEsc: async page => {
+        assertAfterClose: async page => {
           await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toBeHidden();
           await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Draft\n');
           await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
@@ -1283,8 +1291,9 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
         prime: async page => {
           await expect(page.getByRole('dialog', { name: 'External changes detected' }).getByRole('button', { name: /Replace disk version/ })).toBeFocused();
         },
+        pointerClose: async page => { await page.getByRole('dialog', { name: 'External changes detected' }).getByRole('button', { name: /Keep editing/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'Save file', exact: true }).click(); },
-        assertAfterEsc: async page => {
+        assertAfterClose: async page => {
           await expect(page.getByRole('dialog', { name: 'External changes detected' })).toBeHidden();
           await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
           await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
@@ -1309,8 +1318,9 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
         prime: async page => {
           await expect(page.getByRole('dialog', { name: 'File deleted outside Boris Editor' }).getByRole('button', { name: /Re-create file/ })).toBeFocused();
         },
+        pointerClose: async page => { await page.getByRole('dialog', { name: 'File deleted outside Boris Editor' }).getByRole('button', { name: /Keep editing/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'Save file', exact: true }).click(); },
-        assertAfterEsc: async page => {
+        assertAfterClose: async page => {
           await expect(page.getByRole('dialog', { name: 'File deleted outside Boris Editor' })).toBeHidden();
           await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
           await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
@@ -1324,28 +1334,38 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
       }
     ];
 
+    const variants: Array<{ name: string; close: (surface: ReopenCase, page: Page) => Promise<void> }> = [
+      { name: 'Esc', close: async (_surface, page) => { await page.keyboard.press('Escape'); } },
+      { name: 'pointer close', close: async (surface, page) => { await surface.pointerClose!(page); } }
+    ];
+
+    // Surface-major so the clean-state dialogs (create/rename/delete/palette) always run
+    // before the rows that leave the buffer dirty (resolution, conflict, deleted conflict).
     for (const surface of surfaces) {
-      await test.step(surface.name, async () => {
-        await page.unrouteAll({ behavior: 'ignoreErrors' });
-        await installApi(page, surface.mock);
-        await surface.open(page);
-        await surface.prime?.(page);
+      for (const variant of variants) {
+        if (!surface.pointerClose && variant.name === 'pointer close') continue;
+        await test.step(`${surface.name} — ${variant.name}`, async () => {
+          await page.unrouteAll({ behavior: 'ignoreErrors' });
+          await installApi(page, surface.mock);
+          await surface.open(page);
+          await surface.prime?.(page);
 
-        let requests = 0;
-        const onRequest = (request: Request) => {
-          if (surface.staleRequest.test(request.url())) requests += 1;
-        };
-        page.on('request', onRequest);
+          let requests = 0;
+          const onRequest = (request: Request) => {
+            if (surface.staleRequest.test(request.url())) requests += 1;
+          };
+          page.on('request', onRequest);
 
-        await page.keyboard.press('Escape');
-        await surface.assertAfterEsc(page);
-        await surface.reopen(page);
-        await surface.assertReset(page);
-        expect(requests).toBe(surface.expectedRequests);
+          await variant.close(surface, page);
+          await surface.assertAfterClose(page);
+          await surface.reopen(page);
+          await surface.assertReset(page);
+          expect(requests).toBe(surface.expectedRequests);
 
-        page.off('request', onRequest);
-        await page.keyboard.press('Escape');
-      });
+          page.off('request', onRequest);
+          await page.keyboard.press('Escape');
+        });
+      }
     }
   });
 
