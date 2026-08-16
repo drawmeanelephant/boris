@@ -118,6 +118,7 @@ profile or invocation problems exit `2`; I/O problems exit `3`.
 | `ENOSTRPLAN` | The corpus changed under the run, a signer/publish input is not a valid plan/prior/bundle, or a bundle's article set does not match the plan | Regenerate the plan and re-sign |
 | `ENOSTRSIGN` | Signing refusal: malformed key, signer pubkey does not match the plan's expected author, or a signature fails to self-verify | Check the key and the plan's `pubkey` |
 | `ENOSTRRELAY` | Publish: a relay rejected the event, timed out, closed, errored, or demanded NIP-42 authentication | Inspect the per-relay evidence in the report; retry or reconfigure |
+| `ENOSTRHEAD` | HTML build: an eligible Nostr article's layout omits `{{head}}`, so the `nostr:naddr` alternate link cannot be emitted | Add `{{head}}` inside the layout `<head>` |
 
 See [[guides/nostr-publication|Nostr NIP-23 Publication]] for the workflow and
 exit-code semantics.

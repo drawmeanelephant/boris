@@ -680,6 +680,17 @@ pub fn build(b: *std.Build) void {
     run_nostr_plan_tests.setCwd(b.path("."));
     test_nostr_step.dependOn(&run_nostr_plan_tests.step);
 
+    const nostr_emit_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr_emit.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(nostr_emit_mod, oliver_mod);
+    const nostr_emit_tests = b.addTest(.{ .root_module = nostr_emit_mod });
+    const run_nostr_emit_tests = b.addRunArtifact(nostr_emit_tests);
+    run_nostr_emit_tests.setCwd(b.path("."));
+    test_nostr_step.dependOn(&run_nostr_emit_tests.step);
+
     // --- Nostr BIP-340 signing slice (#495) --------------------------------
     const nostr_keys_mod = b.createModule(.{
         .root_source_file = b.path("src/nostr_keys.zig"),
@@ -1605,6 +1616,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_publication_plan_tests.step);
     test_step.dependOn(&run_nostr_tests.step);
     test_step.dependOn(&run_nostr_plan_tests.step);
+    test_step.dependOn(&run_nostr_emit_tests.step);
     test_step.dependOn(&run_nostr_keys_tests.step);
     test_step.dependOn(&run_nostr_sign_tests.step);
     test_step.dependOn(&run_doctor_tests.step);

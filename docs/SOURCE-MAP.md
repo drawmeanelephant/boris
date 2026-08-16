@@ -26,7 +26,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | Publication profile / plan / evidence | `src/publication_profile.zig`, `src/publication_plan.zig`, `src/artifact_inventory.zig`, `src/publication_checks.zig`, `src/publication_claims.zig`, `src/publication_touches.zig`, `src/publication_proof_pack.zig` | [publication-profile.md](contracts/publication-profile.md) through [publication-proof-pack.md](contracts/publication-proof-pack.md) |
 | GitHub Pages | `src/github_pages.zig` | [github-pages.md](github-pages.md) |
 | Standard.site / AT Protocol | `src/standard_site*.zig`, `src/atproto_*.zig` | [standard-site.md](standard-site.md), [contracts/standard-site.md](contracts/standard-site.md) |
-| Nostr NIP-23 | `src/nostr.zig`, `src/nostr_plan.zig`, `src/nostr_sign.zig`, `src/nostr_publish.zig`, `src/nostr_keys.zig`, `src/ws_client.zig` | [nostr-publication.md](contracts/nostr-publication.md) |
+| Nostr NIP-23 | `src/nostr.zig`, `src/nostr_plan.zig`, `src/nostr_sign.zig`, `src/nostr_publish.zig`, `src/nostr_keys.zig`, `src/nostr_emit.zig`, `src/ws_client.zig` | [nostr-publication.md](contracts/nostr-publication.md) |
 | Diagnostics | `src/diag.zig`, `src/diagnostic.zig` | [diagnostics.md](contracts/diagnostics.md) |
 | Graph health | `src/intelligence.zig` | [documentation-intelligence.md](contracts/documentation-intelligence.md) |
 | Doctor | `src/doctor.zig` | Internal snapshot kernel only. No public `boris doctor` command. |

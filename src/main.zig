@@ -33,6 +33,7 @@ const timings = @import("timings.zig");
 const identity = @import("identity.zig");
 const standard_site = @import("standard_site.zig");
 const standard_site_emit = @import("standard_site_emit.zig");
+const nostr_emit = @import("nostr_emit.zig");
 const standard_site_reconcile = @import("standard_site_reconcile.zig");
 const standard_site_publish = @import("standard_site_publish.zig");
 const html_body = @import("html_body.zig");
@@ -1049,6 +1050,17 @@ const HtmlVerification = struct {
     }
 };
 
+/// Owns the publication profile so the Nostr head config's slices stay alive
+/// for the HTML compile.
+const HtmlNostr = struct {
+    request: publication_profile.PublicationRequest,
+    config: nostr_emit.HeadConfig,
+
+    fn deinit(self: *HtmlNostr, gpa: std.mem.Allocator) void {
+        self.request.deinit(gpa);
+    }
+};
+
 /// When `--profile` names a Standard.site target, build the offline
 /// projection and surfaces so the HTML compile can emit verification
 /// artifacts. A missing profile, or a GitHub Pages profile, is a no-op.
@@ -1116,6 +1128,66 @@ fn loadHtmlVerification(
             .projection = &bundle.proj.projection,
         };
     }
+    return .success;
+}
+
+/// When `--profile` names an enabled `nostr` section, keep the parsed
+/// profile so HTML compile can emit `nostr:naddr` alternate links. A
+/// missing profile, or a disabled/absent section, is a no-op.
+fn loadHtmlNostr(
+    io: Io,
+    gpa: std.mem.Allocator,
+    opts: Options,
+    out: *?HtmlNostr,
+) ExitCode {
+    const profile_path = opts.profile_path orelse return .success;
+    const profile_bytes = Io.Dir.cwd().readFileAlloc(
+        io,
+        profile_path,
+        gpa,
+        .limited(publication_profile.max_profile_bytes + 1),
+    ) catch |err| switch (err) {
+        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
+        else => {
+            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(profile_bytes);
+
+    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
+        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(cwd_path);
+    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
+        return reportPublicationPlanConfigError(err);
+    };
+    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+        .jobs = opts.jobs,
+        .incremental = opts.incremental,
+        .quiet = opts.quiet,
+    }) catch |err| {
+        return reportPublicationPlanConfigError(err);
+    };
+
+    const nostr_cfg = request.plan.nostr orelse {
+        request.deinit(gpa);
+        return .success;
+    };
+    if (!nostr_cfg.enabled) {
+        request.deinit(gpa);
+        return .success;
+    }
+
+    out.* = .{
+        .request = request,
+        .config = .{
+            .pubkey = nostr_cfg.pubkey,
+            .articles = nostr_cfg.articles,
+            .relays = nostr_cfg.relays,
+        },
+    };
     return .success;
 }
 
@@ -2483,6 +2555,12 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
     if (verify_code != .success) return verify_code;
     const verification: ?*const standard_site_emit.VerificationContext = if (html_verification) |*bundle| &bundle.vctx else null;
 
+    var html_nostr: ?HtmlNostr = null;
+    defer if (html_nostr) |*bundle| bundle.deinit(gpa);
+    const nostr_code = loadHtmlNostr(io, gpa, opts, &html_nostr);
+    if (nostr_code != .success) return nostr_code;
+    const nostr_head: ?*const nostr_emit.HeadConfig = if (html_nostr) |*bundle| &bundle.config else null;
+
     if (opts.targets.items.len > 0) {
         compile.compileHtmlSiteMulti(io, gpa, opts.targets.items, .{
             .content_root = opts.input_dir,
@@ -2498,6 +2576,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .timings = recorder,
             .diagnostics = collector_ptr,
             .standard_site_verification = verification,
+            .nostr_head = nostr_head,
         }) catch |err| {
             const code = mapHtmlError(err, opts.targets.items, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);
@@ -2526,6 +2605,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .timings = recorder,
             .diagnostics = collector_ptr,
             .standard_site_verification = verification,
+            .nostr_head = nostr_head,
         }) catch |err| {
             const code = mapHtmlError(err, &.{}, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);

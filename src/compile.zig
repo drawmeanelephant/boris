@@ -65,6 +65,7 @@ const github_pages = @import("github_pages.zig");
 const sitemap = @import("sitemap.zig");
 const standard_site = @import("standard_site.zig");
 const standard_site_emit = @import("standard_site_emit.zig");
+const nostr_emit = @import("nostr_emit.zig");
 const link_audit = @import("link_audit.zig");
 const publication_location = @import("publication_location.zig");
 const artifact_inventory = @import("artifact_inventory.zig");
@@ -320,6 +321,10 @@ pub const CompileOptions = struct {
     /// owns the pointed-to projection and surfaces, which must outlive the
     /// compile run.
     standard_site_verification: ?*const standard_site_emit.VerificationContext = null,
+    /// Opt-in Nostr `nostr:naddr` alternate links (#571). When set, eligible
+    /// allowlisted pages emit one link into the compiler-owned `{{head}}`
+    /// slot. The caller owns the pointed-to config for the compile run.
+    nostr_head: ?*const nostr_emit.HeadConfig = null,
     /// Allow the output link audit to accept literal `.md`/`.mdx` hrefs that the
     /// pre-render rewriter deliberately leaves in place (see
     /// docs/contracts/documentation-links.md). Off by default; suppresses only
@@ -572,6 +577,8 @@ pub const RenderOptions = struct {
     /// slot. Set automatically from `CompileOptions.standard_site_verification`
     /// by `renderAndPublishPage`; the validation path sets it explicitly.
     verification: ?*const standard_site.VerificationSurfaces = null,
+    /// Nostr head config for the same slot. Composed after Standard.site.
+    nostr_head: ?*const nostr_emit.HeadConfig = null,
 };
 
 /// Render one page through the canonical prepublication body and layout-slot
@@ -661,10 +668,23 @@ fn renderPageSlots(
 
     // Compiler-owned head output. The layout opts in via the closed `{{head}}`
     // slot; absence (or an ineligible page) leaves the slot empty so nothing
-    // silently claims document verification.
+    // silently claims document verification. Standard.site and Nostr compose
+    // when both are configured.
     if (layout.has_head) {
-        if (render_opts.verification) |surfaces| {
-            slots.head = try standard_site_emit.documentHeadFragment(arena, surfaces, page.entity_id);
+        const ss = if (render_opts.verification) |surfaces|
+            try standard_site_emit.documentHeadFragment(arena, surfaces, page.entity_id)
+        else
+            "";
+        const nostr_bytes = if (render_opts.nostr_head) |cfg|
+            try nostr_emit.pageHeadFragment(arena, cfg, page)
+        else
+            "";
+        if (ss.len == 0) {
+            slots.head = nostr_bytes;
+        } else if (nostr_bytes.len == 0) {
+            slots.head = ss;
+        } else {
+            slots.head = try std.fmt.allocPrint(arena, "{s}{s}", .{ ss, nostr_bytes });
         }
     }
 
@@ -693,6 +713,9 @@ pub fn renderAndPublishPage(
     var render_opts = render_opts_in;
     if (options.standard_site_verification) |ctx| {
         render_opts.verification = ctx.surfaces;
+    }
+    if (options.nostr_head) |cfg| {
+        render_opts.nostr_head = cfg;
     }
     const slots = try renderPageSlots(
         io,
@@ -2114,6 +2137,7 @@ fn validatePrepublicationTarget(
                 .theme = theme_bundle,
                 .page_assets = &content_assets.pages[page_index],
                 .verification = if (options.standard_site_verification) |ctx| ctx.surfaces else null,
+                .nostr_head = options.nostr_head,
             },
         );
 
@@ -2297,6 +2321,27 @@ fn compilePagesInner(
                 .code = .EVERIFICATIONHEAD,
                 .message = msg,
                 .remediation = "Add {{head}} inside the layout <head> so eligible pages can emit site.standard.document links",
+                .source_path = page_sel_paths[i],
+                .id = p.entity_id,
+            });
+        }
+    }
+
+    if (options.nostr_head) |cfg| {
+        for (db.items(), 0..) |p, i| {
+            if (page_layouts[i].has_head) continue;
+            if (!nostr_emit.pageEligible(cfg, &p)) continue;
+            const msg = try std.fmt.allocPrint(
+                gpa,
+                "Nostr publication is configured but selected layout omits the compiler-owned {{head}} slot; page '{s}' cannot emit its nostr:naddr alternate link",
+                .{p.entity_id},
+            );
+            defer gpa.free(msg);
+            appendHtmlDiagnostic(&options, .{
+                .severity = .warning,
+                .code = .ENOSTRHEAD,
+                .message = msg,
+                .remediation = "Add {{head}} inside the layout <head> so eligible Nostr articles can emit their naddr link",
                 .source_path = page_sel_paths[i],
                 .id = p.entity_id,
             });

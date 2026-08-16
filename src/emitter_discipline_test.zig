@@ -227,6 +227,7 @@ const modules = [_]Module{
     .{ .name = "link_audit.zig", .class = .other },
     .{ .name = "main.zig", .class = .other },
     .{ .name = "nostr.zig", .class = .other },
+    .{ .name = "nostr_emit.zig", .class = .other },
     .{ .name = "nostr_keys.zig", .class = .other },
     .{
         .name = "nostr_plan.zig",
