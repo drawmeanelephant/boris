@@ -1206,6 +1206,38 @@ pub fn build(b: *std.Build) void {
     const run_package_tests = b.addRunArtifact(package_tests);
     run_package_tests.setCwd(b.path("."));
 
+    // Hosted job runner (Cloudflare Containers #300). Separate exe; not
+    // linked into `boris`. Exec's the installed native binary once.
+    const job_runner_mod = b.createModule(.{
+        .root_source_file = b.path("src/job_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const job_runner_exe = b.addExecutable(.{
+        .name = "boris-job-runner",
+        .root_module = job_runner_mod,
+    });
+    b.installArtifact(job_runner_exe);
+
+    const job_runner_run = b.addRunArtifact(job_runner_exe);
+    job_runner_run.setCwd(b.path("."));
+    job_runner_run.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        job_runner_run.addArgs(args);
+    }
+    const job_runner_step = b.step(
+        "job-runner",
+        "Run boris-job-runner (hosted archive → native boris)",
+    );
+    job_runner_step.dependOn(&job_runner_run.step);
+
+    const job_runner_tests = b.addTest(.{
+        .root_module = job_runner_mod,
+    });
+    const run_job_runner_tests = b.addRunArtifact(job_runner_tests);
+    run_job_runner_tests.setCwd(b.path("."));
+    run_job_runner_tests.step.dependOn(b.getInstallStep());
+
     // --- Dependency & Cache tests (Milestone P2.1 & P2.3) ------------------
     const include_mod = b.createModule(.{
         .root_source_file = b.path("src/include.zig"),
@@ -1666,6 +1698,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_fuzz_tests.step);
     test_step.dependOn(&run_source_rag_tests.step);
     test_step.dependOn(&run_package_tests.step);
+    test_step.dependOn(&run_job_runner_tests.step);
     test_step.dependOn(&run_dependency_tests.step);
     test_step.dependOn(&run_intelligence_tests.step);
     test_step.dependOn(&run_cache_tests.step);

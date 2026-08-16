@@ -22,6 +22,7 @@ jobs:
       migration_lab: ${{ steps.filter.outputs.migration_lab }}
       standalone_tools: ${{ steps.filter.outputs.standalone_tools }}
       testdata_generator: ${{ steps.filter.outputs.testdata_generator }}
+      job_runner: ${{ steps.filter.outputs.job_runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +46,11 @@ jobs:
               - 'src/search_index.zig'
             testdata_generator:
               - 'tools/testdata-generator/**'
+            job_runner:
+              - 'src/job_runner.zig'
+              - 'examples/cloudflare-container/**'
+              - 'docs/contracts/cloudflare-container-runner.md'
+              - 'scripts/test-job-runner-image.sh'
 
   build-and-test:
     name: build-and-test (${{ matrix.os }})
@@ -228,6 +234,24 @@ jobs:
       - name: Bounded companion tests
         run: zig build --build-file tools/testdata-generator/build.zig test
 
+  job-runner-image:
+    name: job-runner image smoke (Linux)
+    needs: changes
+    if: needs.changes.outputs.job_runner == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Image smoke
+        run: bash scripts/test-job-runner-image.sh
+
   # Dedicated content-audit lane covering tools/content-audit/** and the root
   # build.zig content-audit wiring. Unlike the path-gated tool lanes above,
   # this one runs unconditionally on both OSes: the audit parser is a
@@ -302,6 +326,7 @@ jobs:
       - migration-lab-test
       - standalone_tools_test
       - testdata_generator_test
+      - job-runner-image
       - content-audit-test
       - release-html-smoke
     runs-on: ubuntu-latest
@@ -315,6 +340,7 @@ jobs:
           migration_lab_test="${{ needs.migration-lab-test.result }}"
           standalone_tools_test="${{ needs.standalone_tools_test.result }}"
           testdata_generator_test="${{ needs.testdata_generator_test.result }}"
+          job_runner_image="${{ needs.job-runner-image.result }}"
           content_audit_test="${{ needs.content-audit-test.result }}"
           release_html_smoke="${{ needs.release-html-smoke.result }}"
           echo "build-and-test result: ${build_and_test}"
@@ -323,6 +349,7 @@ jobs:
           echo "migration-lab-test result: ${migration_lab_test}"
           echo "standalone-tools-test result: ${standalone_tools_test}"
           echo "testdata-generator-test result: ${testdata_generator_test}"
+          echo "job-runner-image result: ${job_runner_image}"
           echo "content-audit-test result: ${content_audit_test}"
           echo "release-html-smoke result: ${release_html_smoke}"
           test "${build_and_test}" = "success"
@@ -332,6 +359,7 @@ jobs:
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
           test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
           test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"
+          test "${job_runner_image}" = "success" || test "${job_runner_image}" = "skipped"
           # Content-audit must actually succeed: no skipped/unobserved escape.
           test "${content_audit_test}" = "success"
           # Same for the release smoke: it is the only guard against a release-only

@@ -178,7 +178,9 @@ Cloudflare Pages / Vercel / Netlify
 : Waiting or “never proactive.” Adapter-shaped. No recipe in this guide.
 
 Cloudflare Containers / Wasm
-: Compiler-shaped bets, not deployer adapters.
+: Compiler-shaped bets, not deployer adapters. Containers have an official
+  hosted-runner example (`boris-job-runner`); they are still not a
+  verified target. Operator path: `docs/cloudflare-container.md`.
 
 The editor
 : An authoring surface. It can run `Build HTML`. It is not a publication

@@ -25,7 +25,7 @@ projections. HTML `dist/` is the **default target**, not the whole product.
 | Evidence chain | `artifacts.json` → `checks.json` → `claims.json` → `touches.json` → Proof Pack. |
 | Editor | In-tree authoring surface. Compiler-backed. Not a second stack. |
 | Labs | Standalone migration and source-RAG tools. In the repo story. Not runtime dependencies. |
-| Parked | Cloudflare Containers (#300) and freestanding Wasm (#301). Open cards, not shipped targets. |
+| Parked | Freestanding Wasm (#301). Open card, not a shipped target. Cloudflare Containers (#300) now has an official hosted-runner example; it is still not a verified target. |
 
 This is not “a bookseller with a few extras in the basement.” It is also not
 two products sharing a git remote. One compiler, several targets, one graph.
@@ -102,7 +102,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Card | State |
 |---|---|
-| Cloudflare Containers (#300) | Open. Native Boris behind a Worker. Not a static rehost. |
+| Cloudflare Containers (#300) | **Example runner shipped.** `boris-job-runner` execs native `boris` once (`--once` / `--listen`). Official Worker+Container example under `examples/cloudflare-container/`. Not a verified target. |
 | Freestanding Wasm (#301) | Open. Compiler-shaped embedding bet. |
 | Doctor | **Internal kernel only** — `src/doctor.zig` audits a rendered snapshot. No public `boris doctor` command. The old design note was retired; this row is the remaining card. |
 | Nostr verified-target extras ([#584](https://github.com/drawmeanelephant/boris/issues/584)) | Location adapter / registry membership **declined**. Proof Pack and a live-smoke **gate** stay parked unless a product reason appears. |
@@ -114,6 +114,7 @@ zig build
 zig build test
 ./scripts/release-gate.sh
 
+./zig-out/bin/boris-job-runner --once --archive IN.tar --result-json OUT.json
 ./zig-out/bin/boris --quiet                         # HTML → dist/
 ./zig-out/bin/boris validate --quiet                # prepublication validation; no output
 ./zig-out/bin/boris --out .boris --quiet            # IR only
@@ -154,7 +155,7 @@ context, test-throughput audit) is **done**. It is not relisted as upcoming.
 | 5 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 6 | Standard.site HTML verify emit | **Shipped [#569](https://github.com/drawmeanelephant/boris/pull/569)** | `boris --profile` emits verification surfaces from the HTML build. |
 | 7 | Nostr as a verified target | **Decided — stays off the seam** | Location adapter / registry membership declined. See [`publication-platforms.md`](contracts/publication-platforms.md). Proof Pack and a live-smoke **gate** stay parked on [#584](https://github.com/drawmeanelephant/boris/issues/584) and are not implied. |
-| 8 | Cloudflare embedding | **Open [#300](https://github.com/drawmeanelephant/boris/issues/300) / [#301](https://github.com/drawmeanelephant/boris/issues/301)** | Container-backed native builds and freestanding Wasm. Outside the static-target matrix. |
+| 8 | Cloudflare embedding | **Runner example shipped [#300](https://github.com/drawmeanelephant/boris/issues/300); Wasm still open [#301](https://github.com/drawmeanelephant/boris/issues/301)** | Hosted `boris-job-runner` + Worker example. Not in `publication.target`. Wasm remains the freestanding embedding bet. |
 
 ## Release bookkeeping
 
@@ -216,6 +217,7 @@ The release audit found these follow-ups:
 | [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration-lab commands |
 | [`tools/search-index/README.md`](../tools/search-index/README.md) | Rendered search tool |
 | [`docs/github-pages.md`](github-pages.md) | GitHub Pages setup, location model, workflow, and evidence boundary |
+| [`docs/cloudflare-container.md`](cloudflare-container.md) | Hosted runner + Cloudflare Containers example (not a target) |
 | [`docs/standard-site.md`](standard-site.md) | Standard.site first-tester path |
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
 | [`AGENTS.md`](../AGENTS.md) | Repository policy and agent constraints |

@@ -37,6 +37,13 @@ BASE_ID="$(sed -n 's/^pub const compiler_id = "\([^"]*\)".*/\1/p' src/pipeline.z
 [[ "$BASE_ID" == boris/[0-9]*\.[0-9]*\.[0-9]* ]] \
   || fail "unexpected base id shape from src/pipeline.zig: '$BASE_ID'"
 
+# Hosted runner id tracks the same product version (issue #300).
+PRODUCT_VERSION="$(sed -n 's/^pub const boris_version = "\([^"]*\)".*/\1/p' src/pipeline.zig | head -1)"
+RUNNER_VERSION="$(sed -n 's/^pub const runner_version = "\([^"]*\)".*/\1/p' src/job_runner.zig | head -1)"
+[[ -n "$PRODUCT_VERSION" ]] || fail "could not derive boris_version from src/pipeline.zig"
+[[ "$RUNNER_VERSION" == "$PRODUCT_VERSION" ]] \
+  || fail "job_runner.runner_version '$RUNNER_VERSION' != pipeline.boris_version '$PRODUCT_VERSION'"
+
 # --- Version query ---------------------------------------------------------
 note "boris --version and -V print exactly the base compiler id on stdout"
 for flag in --version -V; do

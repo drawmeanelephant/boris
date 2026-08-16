@@ -1,0 +1,16 @@
+{
+  "name": "boris-cloudflare-container",
+  "private": true,
+  "type": "module",
+  "description": "Official Cloudflare Worker host for boris-job-runner. Not a publication target.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.0.28"
+  },
+  "devDependencies": {
+    "wrangler": "^4.28.0"
+  }
+}

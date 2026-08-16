@@ -221,6 +221,7 @@ const modules = [_]Module{
     .{ .name = "incremental_scale_smoke_test.zig", .class = .other },
     .{ .name = "intelligence.zig", .class = .other },
     .{ .name = "ir_schema_conformance_test.zig", .class = .other },
+    .{ .name = "job_runner.zig", .class = .other },
     .{ .name = "json_out.zig", .class = .other },
     .{ .name = "layout_select.zig", .class = .other },
     .{ .name = "layout_select_hostile_test.zig", .class = .other },

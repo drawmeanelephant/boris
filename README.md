@@ -344,7 +344,8 @@ reviewed or uploaded to an LLM when useful.
 - [ ] Archive-layout browser review and any evidence-gated presentation fixes.
 - [ ] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)).
 - [x] Nostr NIP-23 CLI (`plan` / `sign` / `publish`). Not a verified target.
-- [ ] Cloudflare container / Wasm embedding ([#300](https://github.com/drawmeanelephant/boris/issues/300) / [#301](https://github.com/drawmeanelephant/boris/issues/301)).
+- [x] Cloudflare container hosted runner ([#300](https://github.com/drawmeanelephant/boris/issues/300)). Example only; not a verified target.
+- [ ] Freestanding Wasm embedding ([#301](https://github.com/drawmeanelephant/boris/issues/301)).
 
 Current phase and known gaps live in [`docs/STATUS.md`](docs/STATUS.md).
 
