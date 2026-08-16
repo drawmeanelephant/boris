@@ -262,13 +262,9 @@ function analyze(template, script, bodies) {
         const kind = surfaceKind(surface);
         if (kind === 'combobox') comboboxes.add(surface);
         if (kind === 'banner') banners.add(surface);
-        // A dialog showing an Alt+<key> hint is the resolution dialog; note
-        // its resolve actions (the buttons carrying those hints) for the
-        // stale-pending check.
-        if (kind === 'dialog' && /^Alt\+/.test(token)) {
-          surface._isResolution = true;
-          if (button) (surface._resolutionCallees ??= []).push(onclickCallee(button._raw ?? ''));
-        }
+        // Resolution dialogs are identified later by their Save & / Discard &
+        // buttons. Conflict dialogs also carry Alt+ hints (Alt+L / Alt+D), so
+        // an Alt+ token alone is not enough to mark this surface.
       }
       surfaces.push({
         kind: surface ? surfaceKind(surface) : null,
@@ -413,12 +409,14 @@ function analyze(template, script, bodies) {
   // to null, and each resolve function nulls it before proceeding, so a stale
   // Save & switch/run/rebuild/restore can never fire after the dialog closes.
   for (const dialog of dialogs) {
-    if (!dialog._isResolution) continue;
+    const buttons = dialog._dialogButtons ?? [];
+    const resolveButtons = buttons.filter(button => /^(Save|Discard) &/.test(button.text.replaceAll('&amp;', '&')));
+    if (resolveButtons.length === 0) continue;
     const closeValue = attrValue(dialog._raw ?? '', 'onclose');
     if (closeValue === null || !closeValue.includes('pendingResolution') || !closeValue.includes('= null')) {
       problems.push(`resolution dialog at line ${dialog._line ?? '?'} does not clear pendingResolution on close: add an onclose handler assigning it to null so Esc cannot leave a stale action`);
     }
-    for (const callee of new Set((dialog._resolutionCallees ?? []).filter(Boolean))) {
+    for (const callee of new Set(resolveButtons.map(button => button.callee).filter(Boolean))) {
       const body = bodies.get(callee) ?? '';
       if (!body.includes('pendingResolution = null')) {
         problems.push(`resolution dialog ${callee} does not clear pendingResolution before proceeding, so a stale Save & action could fire after the dialog closes`);
@@ -432,12 +430,12 @@ function analyze(template, script, bodies) {
   // external-change state can never survive the dialog.
   for (const dialog of dialogs) {
     const buttons = dialog._dialogButtons ?? [];
-    if (!buttons.some(button => button.text === 'Load disk version')) continue; // not the conflict dialog
+    if (!buttons.some(button => button.text.startsWith('Load disk version'))) continue; // not the conflict dialog
     const closeValue = attrValue(dialog._raw ?? '', 'onclose');
     if (closeValue === null || !closeValue.includes('conflict') || !(closeValue.includes('= null') || closeValue.includes('= false'))) {
       problems.push(`conflict dialog at line ${dialog._line ?? '?'} does not clear the conflict state on close: add an onclose handler assigning conflict (and deletedConflict) to null/false so Keep editing and Esc cannot leave stale state`);
     }
-    const load = buttons.find(button => button.text === 'Load disk version');
+    const load = buttons.find(button => button.text.startsWith('Load disk version'));
     if (!load.callee) {
       problems.push(`conflict dialog Load disk version button at line ${dialog._line ?? '?'} does not call a named handler`);
       continue;
@@ -457,7 +455,7 @@ function analyze(template, script, bodies) {
   // explicit clears in the two action handlers themselves.
   for (const dialog of dialogs) {
     const buttons = dialog._dialogButtons ?? [];
-    if (!buttons.some(button => button.text === 'Load disk version')) continue; // not the conflict dialog
+    if (!buttons.some(button => button.text.startsWith('Load disk version'))) continue; // not the conflict dialog
     for (const label of ['Discard changes', 'Re-create file']) {
       const button = buttons.find(b => b.text.startsWith(label));
       if (!button) {
