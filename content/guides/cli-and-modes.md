@@ -5,7 +5,9 @@ status: published
 tags: [cli, guides]
 ---
 
-# CLI & Output Modes
+<p class="eyebrow">Commands</p>
+
+# CLI & Output Modes {#cli-and-modes}
 
 Boris has one native CLI with explicit command and projection boundaries. Use
 this page to choose a command; use the [[reference/commands|Command Reference]]
@@ -30,6 +32,9 @@ check` is graph-health analysis, not an alias for validation.
 | `boris impact ID` | Which pages or source endpoints depend on this id? | Nothing, unless `--report` is supplied |
 | `boris plan --profile PATH` | What normalized publication declaration does this profile describe? | JSON declaration on stdout |
 | `boris standard-site …` | Atmosphere plan / records / login / publish / smoke | Depends on the subcommand |
+
+> Pick the command that matches the question. `validate` is not `check`.
+> `plan` does not publish. `standard-site` is a family, not the default path.
 
 `watch` is HTML-only. The compatibility flag `--watch` and `build --watch`
 remain accepted. `check` and `impact` operate only after the graph is valid;

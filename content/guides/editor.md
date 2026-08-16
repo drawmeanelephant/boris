@@ -5,7 +5,9 @@ status: published
 tags: [guides, editor, authoring, completion, preview]
 ---
 
-# Boris Editor: compiler-backed authoring
+<p class="eyebrow">Authoring surface</p>
+
+# Boris Editor: compiler-backed authoring {#boris-editor}
 
 The Boris Editor is a local, browser-served authoring environment for Boris
 projects. It is not another Markdown tool with its own opinions about meaning:
@@ -189,6 +191,14 @@ HMR, CSS injection, watcher, or typing-triggered build.
 When a capability is missing, the editor says so instead of guessing — the
 authoring hints, problem labels, and preview states are honest about their
 source and confidence.
+
+<Details summary="The editor is not a second compiler">
+
+It does not own frontmatter grammar, Markdown, the graph, or publication.
+Boris and Oliver stay the authorities. Saving is explicit. There is no
+autosave.
+
+</Details>
 
 ---
 

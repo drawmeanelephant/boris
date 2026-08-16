@@ -24,17 +24,19 @@ stay scannable on purpose.
 
 | Feature | Why the site uses it | Boundary | Shown live on |
 |---|---|---|---|
-| `&lt;Aside&gt;` callouts | Short, semantic warnings and tips | Constrained kinds; no nesting | [[index]], [[guides/publishing]], [[guides/asides]] |
-| `&lt;Details&gt;` disclosures | Optional depth without leaving the page | Required plain `summary`; no nesting | [[index#product-shape]], [[guides/publishing]] |
+| `&lt;Aside&gt;` callouts | Short, semantic warnings and tips | Constrained kinds; no nesting | almost every guide; all five kinds on [[guides/asides]] |
+| `&lt;Details&gt;` disclosures | Optional depth without leaving the page | Required plain `summary`; no nesting | [[index]], [[guides/publishing]], [[guides/migration]], [[comparison]] |
 | Wiki-links | Stable cross-page graph references | Entity ids and optional rendered heading fragments | everywhere a page name appears |
 | Include directives | Shared source prose | Fragments under `content/includes/`; fences stay literal | `identity.md`, `publish-first.md`, `shared-tip.md` |
-| Tables | Compact comparisons and reference data | Oliver GFM tables; theme supplies presentation | [[index#opinions-table]], [[guides/publishing#which-target]] |
-| Footnotes | Method notes without interrupting the main argument | Oliver footnote refs + section | [[index#footnotes]] |
-| Definition lists | Glossary-style term/definition pairs | Oliver definition lists | [[index#glossary]], [[guides]] |
-| Heading IAL | Stable custom anchors and classes | Oliver heading attributes; TOC reads rendered ids | [[index#gallery-ial]] |
+| Tables | Compact comparisons and reference data | Oliver GFM tables; theme supplies presentation | [[index]], [[guides/publishing]], [[reference/commands]] |
+| Footnotes | Method notes without interrupting the main argument | Oliver footnote refs + section | [[index#footnotes]], [[comparison]], [[technology-and-rationale]] |
+| Definition lists | Glossary-style term/definition pairs | Oliver definition lists | [[index#glossary]], [[guides]], [[guides/rag-export]], [[reference/relationships]] |
+| Heading IAL | Stable custom anchors and classes | Oliver heading attributes; TOC reads rendered ids | [[index#gallery-ial]], `.eyebrow` / `.hero-heading` on landings |
 | GFM strikethrough | Mark retired phrasing in place | Two tildes only | [[index#inline-craft]] |
 | Nested lists | Procedures and hierarchies | CommonMark tight/loose rules | [[index#lists]] |
-| Block quotes | Short pull quotes, not callouts | Nested `>` is a quote, not an Aside | [[index#inline-craft]] |
+| Block quotes | Short pull quotes, not callouts | Nested `>` is a quote, not an Aside | [[index#inline-craft]], [[guides/themes-and-layouts]], [[guides/asides]] |
+| Content-local images | Viewport specimens | Sibling `{stem}.assets/` rewrite | [[index#viewport-specimens]] |
+| Theme presentation hooks | Eyebrow, action row, edition cards | Trusted raw HTML classes in the default theme | [[index]] |
 | Rendered search index | Searchable output for the default site | Compiler-owned JSON artifact; browser consumer is theme-owned | every default HTML build |
 
 ## Product boundaries

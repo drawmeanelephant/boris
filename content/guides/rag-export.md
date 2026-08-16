@@ -3,45 +3,86 @@ title: AI & Machine Outputs
 parent: guides/overview
 status: published
 tags: [guides, rag, ai, ir, llms]
+summary: Machine projections share the frozen graph with HTML. They are separate invocations, not a second content model.
 ---
 
-# AI & Machine Outputs (RAG, IR, Context, llms.txt)
+<p class="eyebrow">Projections</p>
 
-Boris is built from the ground up for both human readers and AI agents. From a single validated content graph, Boris emits native machine formats without web scraping or HTML parsing.
+# AI & Machine Outputs {#machine-outputs}
 
-<Aside kind="info">
+HTML `dist/` is the default target. These commands are **other exits** from
+the same frozen graph — not a scrape of the HTML, and not a second authoring
+model.
 
-Machine exports share the same frozen, validated Trunk/Satellite graph model as
-HTML. They are separate invocations, so generate the editions from the same
-source revision when you need them aligned.
+<Aside kind="info" id="same-revision">
+
+Generate the editions from the same source revision when you need them
+aligned. Emitting RAG does not prove IR, and neither proves a live deploy.
 
 </Aside>
 
----
+## What to run {#what-to-run}
 
-## Native Machine Export Modes
+| Projection | Flag | Default tree | Consumer |
+| :--- | :--- | :--- | :--- |
+| JSON IR | `--out DIR` | `.boris/` | Tools, graph inspect |
+| Working RAG | `--rag` | `rag/` | Bounded LLM uploads |
+| Complete RAG | `--rag --complete` | `rag/` | Full-corpus retrieval |
+| Context Bundle | `--context` | `context/` | One-shot agent context |
+| `llms.txt` | `--llms` | `llms.txt` | Crawler / LLM discovery |
+| RSS 2.0 | `--rss` | `rss.xml` | Recent-update feed |
 
-| Export Mode | Command Flag | Output Location | Target Consumer |
-|---|---|---|---|
-| **JSON IR** | `--out <dir>` | chosen `--out` directory | Programmatic tools, graph analyzers, documentation linters |
-| **RAG Corpus** | `--rag --rag-dir <dir>` | chosen `--rag-dir` directory | Retrieval pipelines and vector database indexers |
-| **AI Context Bundle** | `--context --context-dir <dir>` | chosen `--context-dir` directory | Single-pass prompt context windows |
-| **`llms.txt` Index** | `--llms --llms-path <path>` | chosen `--llms-path` | Lightweight machine discovery |
+Working context
+: Default `--rag`. Bounded `working-N.md` packs of verbatim site documents
+  plus a `manifest.json` sidecar that is **not** for upload. Never the
+  `docs/rag/system` corpus.
 
----
+Complete corpus
+: `--rag --complete`. System + per-page + graph + catalog. Rejects
+  `--scope`. Complete means the entire validated tree.
 
-## Machine Export Specimen
+RSS
+: Its own projection. Needs `--site-url`, `--rss-title`, and
+  `--rss-description`. Eligible pages need `published_at` and `summary`.
 
-Here is how a source page is represented across the 4 native machine export formats:
+<Aside kind="tip" id="working-not-system">
 
-### 1. Source Markdown (`content/guides/asides.md`)
+If you wanted the `docs/rag/system` teaching corpus, you wanted
+`--rag --complete`. The default working pack is the *site*, on purpose.
+
+</Aside>
+
+## Commands {#commands}
+
+```bash
+./zig-out/bin/boris --out .boris --quiet
+./zig-out/bin/boris --rag --quiet
+./zig-out/bin/boris --rag --complete --quiet
+./zig-out/bin/boris --context --quiet
+./zig-out/bin/boris --llms --quiet
+./zig-out/bin/boris --rss \
+  --site-url https://docs.example/ \
+  --rss-title "Example Docs" \
+  --rss-description "Recent updates" \
+  --quiet
+```
+
+Scoped working context still validates the full graph, then keeps the
+subtree, its parents, and one-hop neighbors:
+
+```bash
+./zig-out/bin/boris --rag --scope guides --rag-dir ./uploads/rag
+```
+
+`--split-size` is a byte target (default `262144`), not a token estimate.
+Whole documents are not split just to meet it.
+
+## What an Aside becomes {#aside-export}
+
+Source authoring stays PascalCase. RAG *export* uses `:::kind`. Do not type
+`:::` in `content/`.
+
 ```markdown
----
-title: Asides & Admonitions
-parent: guides/overview
-status: published
-summary: Short source summaries are optional unless published_at is set.
----
 <Aside kind="tip">
 
 Use `boris validate` before publishing.
@@ -49,112 +90,22 @@ Use `boris validate` before publishing.
 </Aside>
 ```
 
-### 2. JSON IR Record (`dist/.boris/manifest.json`)
-```json
-{
-  "entity_id": "guides/asides",
-  "title": "Asides & Admonitions",
-  "parent": "guides/overview",
-  "status": "published"
-}
-```
-
-### 3. RAG Corpus Record (`dist/rag/catalog.jsonl`)
-```json
-{"entity_id":"guides/asides","title":"Asides & Admonitions","path":"content/pages/guides/asides.md","status":"published"}
-```
-
-### 4. RAG Body Representation (`dist/rag/content/pages/guides/asides.md`)
-```markdown
+```text
 :::tip
 Use `boris validate` before publishing.
 :::
 ```
 
-### 5. `llms.txt` Entry (`dist/llms.txt`)
-```text
-  - [Asides & Admonitions](/guides/asides.html): Semantic callout blocks in Boris
-```
+<Details summary="IR, RAG, and llms.txt are not one artifact">
 
----
+`--out` is IR. `--rag` is RAG. `--llms` is a discovery file. Putting them
+under `dist/` in a script is an operational choice, not a compiler merge.
+See [[reference/outputs|Outputs & Artifacts]] for the trees.
 
-## 1. JSON Intermediate Representation (IR)
+</Details>
 
-The JSON IR exports a typed, versioned graph snapshot of your entire documentation suite.
+## Next
 
-```bash
-./zig-out/bin/boris --out dist/.boris
-```
-
-### Artifacts generated in `dist/.boris/`:
-- `manifest.json` — Build metadata, compiler version, base IR schema version (`0.2.0`), page list.
-- `graph.json` — Directed graph of page parent relationships and wiki-link edges.
-- `build-report.json` — Build timing, total pages, and validation status.
-
----
-
-## 2. RAG Corpus Export
-
-The RAG exporter writes clean, frontmatter-enriched Markdown files with a JSONL catalog and graph maps.
-
-```bash
-./zig-out/bin/boris --rag --rag-dir dist/rag
-```
-
-### Advanced RAG Flags:
-- **Scoped Export:** Export only a subset branch:
-  ```bash
-  ./zig-out/bin/boris --rag --scope guides --rag-dir dist/rag
-  ```
-- **Size Splitting:** Split large corpora into provider-friendly chunks (e.g. 2MB max per bundle):
-  ```bash
-  ./zig-out/bin/boris --rag --split-size 2000000 --rag-dir dist/rag
-  ```
-
----
-
-## 3. AI Context Bundle
-
-Combines all pages into a single cohesive Markdown document optimized for LLM context windows.
-
-```bash
-./zig-out/bin/boris --context --context-dir dist/context
-```
-
-### Generated Files:
-- `bundle.md` — All published pages merged in canonical entity-ID order with clear section headers.
-- `manifest.json` — Schema specifications, provenance digest, page and relationship counts, and artifact paths.
-
----
-
-## 4. Standard `llms.txt`
-
-Generates a hierarchical Markdown index conforming to the `llms.txt` standard for AI crawlers:
-
-```bash
-./zig-out/bin/boris --llms --llms-path dist/llms.txt
-```
-
----
-
-## Complete Multi-Output Generation Script
-
-To generate HTML and all 4 machine formats cleanly in one scripted workflow against one source revision:
-
-```bash
-# HTML site; the compiler emits the rendered search artifact for this build.
-./zig-out/bin/boris build --theme examples/prototype-corporate --html-dir dist --quiet
-
-# Machine artifacts, each from the same source revision.
-./zig-out/bin/boris build --rag --rag-dir dist/rag --quiet
-./zig-out/bin/boris build --out dist/.boris --quiet
-./zig-out/bin/boris build --llms --llms-path dist/llms.txt --quiet
-./zig-out/bin/boris build --context --context-dir dist/context --quiet
-```
-
----
-
-## Next Steps
-
-- [[reference/outputs|Outputs Specification]] — Detailed JSON schemas for IR, RAG, and Context Bundles.
-- [[reference/commands|CLI Reference]] — Full list of flags for all machine output modes.
+- [[reference/outputs|Outputs & Artifacts]]
+- [[reference/commands|Command Reference]]
+- [[guides/publishing|Publishing Targets]]

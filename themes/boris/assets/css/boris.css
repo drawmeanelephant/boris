@@ -81,12 +81,22 @@ main h2 { margin-top: 2.75rem; font-size: clamp(1.4rem, 3vw, 2rem); }
 main h3 { margin-top: 1.75rem; }
 main a { color: var(--accent-ink); text-decoration-thickness: 0.08em; text-underline-offset: 0.14em; }
 main a:hover { color: var(--accent); }
-main img { max-width: 100%; height: auto; }
+main img { max-width: 100%; height: auto; border-radius: 0.45rem; border: 1px solid var(--line); }
 main table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 main th, main td { min-width: 9rem; padding: 0.65rem 0.8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 main th { background: color-mix(in srgb, var(--accent) 9%, Canvas); }
 main pre { overflow-x: auto; padding: 1rem; border-radius: 0.65rem; background: color-mix(in srgb, CanvasText 9%, Canvas); }
 main code { font-size: 0.92em; }
+main hr { border: 0; border-top: 1px solid var(--line); margin: 2.25rem 0; }
+main del { color: var(--muted); text-decoration-thickness: 0.12em; }
+main dl { margin: 1.25rem 0; }
+main dt { margin-top: 0.85rem; color: var(--accent-ink); font-weight: 750; }
+main dd { margin: 0.2rem 0 0 1.1rem; }
+main .showcase-heading, main .hero-heading { letter-spacing: -0.03em; }
+.footnotes { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); font-size: 0.88rem; color: var(--muted); }
+.footnotes ol { margin: 0; padding-left: 1.25rem; }
+.footnote-ref { font-size: 0.75em; }
+.footnote-backref { text-decoration: none; }
 
 .admonition { margin: 1.25rem 0; padding: 0.75rem 1rem; border-left: 4px solid #888; border-radius: 0.5rem; background: color-mix(in srgb, Canvas 92%, CanvasText 8%); }
 .admonition__title { margin: 0 0 0.35rem; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; opacity: 0.75; text-transform: uppercase; }

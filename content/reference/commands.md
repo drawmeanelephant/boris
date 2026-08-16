@@ -5,7 +5,17 @@ status: published
 tags: [reference, cli, commands]
 ---
 
-# Command Reference
+<p class="eyebrow">CLI</p>
+
+# Command Reference {#command-reference}
+
+<Aside kind="note">
+
+This page is lookup. For which command to run first, see
+[[guides/cli-and-modes|CLI & Output Modes]] and
+[[guides/publishing|Publishing Targets]].
+
+</Aside>
 
 The public CLI has six core commands plus the `standard-site` family. With no
 command, Boris runs `build` and publishes an HTML site under `dist/` — the

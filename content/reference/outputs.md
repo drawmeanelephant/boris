@@ -5,7 +5,17 @@ status: published
 tags: [reference, outputs, ir, rag, search]
 ---
 
-# Outputs & Artifacts
+<p class="eyebrow">Artifacts</p>
+
+# Outputs & Artifacts {#outputs}
+
+<Aside kind="info">
+
+HTML `dist/` is the default target. IR, RAG, Context, `llms.txt`, and RSS
+are separate invocations. Evidence under `_boris/proof/` is publication
+of files, not a deployment claim.
+
+</Aside>
 
 Boris compiles one validated source tree into separate projections. A normal
 HTML build is the default; machine exports are selected explicitly. Generated

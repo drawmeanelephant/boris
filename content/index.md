@@ -5,14 +5,18 @@ tags: [home, zig, publication]
 summary: Graph-native publication compiler. HTML dist/ is the default target, not the whole product.
 ---
 
+<p class="eyebrow">Publisher platform</p>
+
 # One compiler. Many targets. One graph. {#one-compiler .hero-heading}
 
 {{include includes/identity.md}}
 
-[[getting-started|Get started]] ·
-[[guides/publishing|Publish]] ·
-[[guides/oliver-markdown|Watch Oliver work]] ·
-[[reference/commands|Open the reference]]
+<p class="home-actions">
+<a href="getting-started.html">Get started</a>
+<a href="guides/publishing.html">Publish</a>
+<a href="guides/oliver-markdown.html">Watch Oliver work</a>
+<a href="reference/commands.html">Open the reference</a>
+</p>
 
 <Aside kind="info" id="default-path">
 
@@ -78,6 +82,13 @@ Markdown + closed frontmatter
 | Machine packs | Projections | [[guides/rag-export|AI & Machine Outputs]] |
 | The syntax this page is flexing | Oliver | [[guides/oliver-markdown|Markdown Showcase]] |
 
+<div class="edition-grid">
+<div class="edition-card"><span class="edition-card__tag">Default</span><h3>HTML <code>dist/</code></h3><p>The first command. Inspectable files. Any static host.</p></div>
+<div class="edition-card"><span class="edition-card__tag">Target</span><h3>GitHub Pages</h3><p>Verified hosted shop window. Inventory-only upload.</p></div>
+<div class="edition-card"><span class="edition-card__tag">Target</span><h3>Standard.site</h3><p>Atmosphere records. App password on bsky.social.</p></div>
+<div class="edition-card"><span class="edition-card__tag">Projection</span><h3>IR / RAG / RSS</h3><p>Same frozen graph. Separate invocations. No silent merge.</p></div>
+</div>
+
 <Aside kind="tip" id="stranger-command">
 
 A stranger reading only this page should run `zig build && boris --quiet`,
@@ -100,6 +111,15 @@ Living status: the repository [`docs/STATUS.md`](https://github.com/drawmeanelep
 file. Contracts still win if this page and a contract disagree.
 
 </Details>
+
+## What the default site actually looks like {#viewport-specimens}
+
+Markdown images here are content-local. Boris rewrites them onto the published
+sibling asset tree before Oliver sees the page.
+
+![Boris documentation on a desktop viewport](index.assets/desktop.png)
+![Boris documentation on a mobile viewport](index.assets/mobile.png)
+![Rendered-site search open in the default layout](index.assets/search_open.png)
 
 ## Oliver, used like we meant it {#oliver-flex}
 

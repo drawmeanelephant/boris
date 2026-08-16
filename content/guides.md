@@ -5,6 +5,8 @@ status: published
 tags: [guides]
 ---
 
+<p class="eyebrow">Guides</p>
+
 # User Guides {#user-guides}
 
 Step-by-step guides for authoring, organizing, and publishing with Boris.

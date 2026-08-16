@@ -6,6 +6,8 @@ tags: [guides, publication, pages, standard-site]
 summary: HTML dist/ is the default target. GitHub Pages and Standard.site are verified. Nostr is not a target yet.
 ---
 
+<p class="eyebrow">Targets</p>
+
 # Publishing Targets {#publishing-targets}
 
 {{include includes/identity.md}}

@@ -5,9 +5,19 @@ status: published
 tags: [guides, migration]
 ---
 
-# Migrating to Boris
+<p class="eyebrow">Labs</p>
+
+# Migrating to Boris {#migrating}
 
 Boris does not auto-convert other site generator formats. Instead, it provides **review-first tooling** that helps you understand your existing content before porting it manually or incrementally. This guide explains the recommended workflow.
+
+<Aside kind="warning" id="not-universal">
+
+The labs are standalone developer tools. They do not add Astro, Node, or an
+MDX runtime to Boris. A green lab report is not a claim that the converted
+tree is done.
+
+</Aside>
 
 ## Why review-first?
 
@@ -83,7 +93,9 @@ status: published
 ---
 ```
 
-Rendered revision: {--sidebar_position: 3--} is removed, {~~parentEntry~>parent~~} is renamed to `parent`, and {++tags: [deployment, ops]++} is added.
+Critic markup is **not** rendered in Boris — those braces stay literal.
+The specimen above is a fenced example of the *edit you make by hand*,
+not a live revision view.
 
 ### Shortcode to Aside Conversion
 
@@ -131,8 +143,17 @@ relationships fail loudly rather than becoming partial navigation.
 - **Auto-generated sidebar config** — Navigation is derived from the validated graph. There is no sidebar config file.
 - **Template inheritance beyond layouts** — Boris layouts are single HTML files with marker tokens, not a Jinja/Nunjucks-style inheritance system.
 
+<Details summary="What the labs will not invent">
+
+They will not pick a `parent` for you. They will not emit `relations`.
+They will not accept `parentEntry` in the product compiler. Review the
+report, then write closed frontmatter yourself.
+
+</Details>
+
 ## Next steps
 
 - [[guides/building-pages|Building Pages]] — Boris's authoring model
+- [[guides/publishing|Publishing Targets]] — after a slice compiles
 - [[reference/frontmatter|Frontmatter Reference]] — accepted keys
 - [[guides/overview|Content Model]] — understanding the graph-based hierarchy

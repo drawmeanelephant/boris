@@ -5,6 +5,8 @@ tags: [setup, quickstart, cli]
 summary: Build Boris, preflight the sample, publish dist/, then choose a hosted target if you want one.
 ---
 
+<p class="eyebrow">Onboarding</p>
+
 # Getting Started with Boris {#getting-started}
 
 {{include includes/identity.md}}

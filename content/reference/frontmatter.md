@@ -5,7 +5,16 @@ status: published
 tags: [reference, frontmatter]
 ---
 
-# Frontmatter Reference
+<p class="eyebrow">Grammar</p>
+
+# Frontmatter Reference {#frontmatter}
+
+<Aside kind="warning">
+
+Unknown keys fail closed. `parentEntry` is not an alias. It is an
+`EFRONTMATTER` error.
+
+</Aside>
 
 Boris frontmatter is a small, closed, line-oriented grammar. It is not general
 YAML: unknown keys, nested mappings, multiline values, comments, and unsupported

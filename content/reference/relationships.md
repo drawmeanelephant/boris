@@ -5,7 +5,21 @@ status: published
 tags: [reference, graph]
 ---
 
-# Relationships
+<p class="eyebrow">Graph edges</p>
+
+# Relationships {#relationships}
+
+Parent
+: Navigation and breadcrumbs. One direct parent, or a Trunk.
+
+Wiki-link
+: Reader-facing, graph-checked.
+
+Include
+: Source reuse. Not a page.
+
+Relation
+: Semantic metadata. Not a parent and not a build dependency.
 
 Boris distinguishes the relationships that organize a site from the ones that
 reuse source or point a reader elsewhere. Keeping them explicit makes broken

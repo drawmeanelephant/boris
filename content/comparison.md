@@ -5,7 +5,9 @@ status: published
 tags: [rationale, comparison, architecture]
 ---
 
-# Why Boris? (Comparison & Rationale)
+<p class="eyebrow">Why this compiler</p>
+
+# Why Boris? (Comparison & Rationale) {#why-boris}
 
 {{include includes/identity.md}}
 
@@ -25,7 +27,7 @@ without Node.js, npm dependencies, or JavaScript runtime build steps.
 
 ## Boris vs. Other Approaches
 
-| Feature / Goal | Plain Markdown / Wiki | JS Frameworks (Docusaurus, Astro) | Boris Documentation Compiler |
+| Feature / Goal | Plain Markdown / Wiki | JS Frameworks (Docusaurus, Astro) | Boris |
 | :--- | :---: | :---: | :--- |
 | **Build Runtime** | None (Raw files) | Node.js / npm | **Single native Zig binary** |
 | **Build Execution** | N/A | Subprocess / Node pipelines | **In-process native renderer**[^speed] |
@@ -75,6 +77,15 @@ Uncompiled Markdown folders in git repositories lack navigation menus, breadcrum
 </Aside>
 
 ---
+
+<Details summary="What we are not claiming">
+
+Speed. Cross-OS byte identity. That a successful `dist/` was deployed.
+That Standard.site browser OAuth works on bsky.social. Measure the
+workload. Read [[guides/publishing|Publishing Targets]] for the honest
+target list.
+
+</Details>
 
 ## Next Steps
 

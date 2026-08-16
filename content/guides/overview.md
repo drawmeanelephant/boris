@@ -5,7 +5,9 @@ status: published
 tags: [guides, architecture, pipeline]
 ---
 
-# Content Model & Pipeline
+<p class="eyebrow">Pipeline</p>
+
+# Content Model & Pipeline {#content-model}
 
 {{include includes/identity.md}}
 
@@ -89,7 +91,15 @@ The shared authority sequence is easier to understand as four responsibilities:
 This is why a successful `validate` proves source/configuration prepublication
 validity but does not prove a later output write, deployment, accessibility, or
 prose-quality result. The exact boundary is in the
-[validation contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/validation.md).
+[validation contract](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/validation.md).
+
+<Details summary="HTML is the default target, not the whole pipeline">
+
+The same freeze feeds GitHub Pages, Standard.site, IR, RAG, Context,
+`llms.txt`, RSS, and sitemap. Pick the exit. Do not assume one command
+wrote all of them.
+
+</Details>
 
 ## Same source, separate projections
 
