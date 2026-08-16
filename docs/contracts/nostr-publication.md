@@ -486,7 +486,11 @@ signature must verify.
   is `ResolveFailed` (#545). IP literals (`127.0.0.1`, `[::1]`) stay on the
   literal path so mock-relay fixtures are unchanged.
 - `wss://` uses `std.crypto.tls` with explicit hostname verification and a
-  real CA bundle (system roots).
+  real CA bundle (system roots). A 0-byte TLS read with an empty
+  application buffer is not a failed upgrade: TLS 1.3 post-handshake
+  messages (`NewSessionTicket`) and a partial ciphertext record both
+  surface that way. The client keeps reading until application data,
+  `close_notify`, or the deadline (#552).
 - The opening handshake is validated exactly: status `101`, `Upgrade:
   websocket`, `Connection: Upgrade`, and `Sec-WebSocket-Accept` computed over
   the client key + `258EAFA5-E914-47DA-95CA-C5AB0DC85B11`.
