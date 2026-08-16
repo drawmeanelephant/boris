@@ -59,15 +59,23 @@ pack docs/contracts/fixtures/missing-parent/content "$OUT/poisoned.tar"
 
 run_once() {
   local archive="$1" json="$2"
-  docker run --rm \
+  local cid
+  # Write the result inside the container (/tmp is world-writable) and copy
+  # it out. Do not override --entrypoint: the image already starts
+  # boris-job-runner, and extra args replace CMD.
+  cid="$(docker create \
     --network none \
-    --memory 1g --cpus 0.25 \
     -e BORIS_BIN=/usr/local/bin/boris \
     -v "$archive:/in.tar:ro" \
-    -v "$OUT:/out" \
-    --entrypoint /usr/local/bin/boris-job-runner \
     boris-job-runner:test \
-    --once --archive /in.tar --result-json /out/"$(basename "$json")" --work-root /tmp/boris-jobs
+    --once --boris /usr/local/bin/boris --archive /in.tar --result-json /tmp/result.json --work-root /tmp/boris-jobs)"
+  set +e
+  docker start -a "$cid"
+  local rc=$?
+  set -e
+  docker cp "$cid:/tmp/result.json" "$json" 2>/dev/null || true
+  docker rm -f "$cid" >/dev/null
+  return "$rc"
 }
 
 note "valid fixture through the image"

@@ -869,7 +869,8 @@ fn printUsage() void {
 
 fn parseCli(args: []const []const u8) !Cli {
     var cli: Cli = .{};
-    var i: usize = 1;
+    // Some hosts (docker --entrypoint) put the first flag in argv[0].
+    var i: usize = if (args.len > 0 and std.mem.startsWith(u8, args[0], "-")) 0 else 1;
     while (i < args.len) : (i += 1) {
         const a = args[i];
         if (std.mem.eql(u8, a, "-h") or std.mem.eql(u8, a, "--help")) return error.Help;
@@ -1239,6 +1240,13 @@ test "validateArchivePath rejects traversal and accepts fixture paths" {
     try std.testing.expectError(error.PathTraversal, validateArchivePath("a//b"));
     try std.testing.expectEqualStrings("content/index.md", try validateArchivePath("content/index.md"));
     try std.testing.expectEqualStrings("content/guides/intro.md", try validateArchivePath("./content/guides/intro.md"));
+}
+
+test "parseCli treats argv0 as a flag when it starts with a dash" {
+    const cli = try parseCli(&.{ "--once", "--archive", "in.tar", "--command", "validate" });
+    try std.testing.expect(cli.once);
+    try std.testing.expectEqual(Command.validate, cli.command);
+    try std.testing.expectEqualStrings("in.tar", cli.archive_path.?);
 }
 
 test "validateJobId" {
