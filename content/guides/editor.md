@@ -174,7 +174,8 @@ approximate** because Boris locates them on adapted Markdown.
 Open a file under `themes/` to see the closed layout-slot vocabulary next to
 the buffer. **Build HTML** or **Validate project** now read Boris's HTML
 `--report`, so layout errors (`ELAYOUT*`) and layout winners
-(`ILAYOUTSELECTED`, including fallback) show in Problems.
+(`ILAYOUTSELECTED`) show in Problems. Fallback winners appear when the
+target has layout rules and a page missed them.
 
 Preview can be constrained to 375px, 768px, or 1440px. The accessibility
 notes next to the frame are a review aid, not a certification.
