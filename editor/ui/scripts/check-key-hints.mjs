@@ -18,11 +18,12 @@
 // Beyond the hints, the state machines behind them are checked: the
 // combobox input must reopen the list on focus/input after Esc closes it,
 // the command palette's aria-expanded must track paletteItems while every
-// option's Enter handler guards on the enabled state, and the resolution
+// option's Enter handler guards on the enabled state, the resolution
 // dialog must clear its pending action on every close (an onclose handler
 // assigning pendingResolution to null) with each resolve function nulling
-// it before proceeding, so a stale Save & action can never fire after the
-// dialog closes.
+// it before proceeding, and the conflict dialog must clear its conflict
+// state on every close (an onclose assigning conflict/deletedConflict)
+// with the Load disk version handler clearing conflict before closing.
 //
 // This keeps the e2e conformance sweep from having to grow by hand: a new
 // hint without a matching handler fails CI here first.
@@ -319,14 +320,22 @@ function analyze(template, script, bodies) {
       }
     }
     if (elem.name === 'button') {
+      const info = {
+        callee: onclickCallee(tag.raw),
+        text: template.slice(tag.end, template.indexOf('</button>', tag.end)).trim(),
+      };
       for (let s = stack.length - 1; s >= 0; s--) {
         const e = stack[s];
         if (e.attrs.classes.includes('recovery-banner')) {
           e._hasButton = true;
-          (e._buttons ??= []).push({
-            callee: onclickCallee(tag.raw),
-            text: template.slice(tag.end, template.indexOf('</button>', tag.end)).trim(),
-          });
+          (e._buttons ??= []).push(info);
+          break;
+        }
+      }
+      for (let s = stack.length - 1; s >= 0; s--) {
+        const e = stack[s];
+        if (e.name === 'dialog') {
+          (e._dialogButtons ??= []).push(info);
           break;
         }
       }
@@ -396,6 +405,30 @@ function analyze(template, script, bodies) {
       if (!body.includes('pendingResolution = null')) {
         problems.push(`resolution dialog ${callee} does not clear pendingResolution before proceeding, so a stale Save & action could fire after the dialog closes`);
       }
+    }
+  }
+
+  // The conflict dialog's state must be cleared on every close (Keep
+  // editing, Esc, and programmatic closes all fire onclose), and the Load
+  // disk version handler must clear conflict before closing so stale
+  // external-change state can never survive the dialog.
+  for (const dialog of dialogs) {
+    const buttons = dialog._dialogButtons ?? [];
+    if (!buttons.some(button => button.text === 'Load disk version')) continue; // not the conflict dialog
+    const closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    if (closeValue === null || !closeValue.includes('conflict') || !(closeValue.includes('= null') || closeValue.includes('= false'))) {
+      problems.push(`conflict dialog at line ${dialog._line ?? '?'} does not clear the conflict state on close: add an onclose handler assigning conflict (and deletedConflict) to null/false so Keep editing and Esc cannot leave stale state`);
+    }
+    const load = buttons.find(button => button.text === 'Load disk version');
+    if (!load.callee) {
+      problems.push(`conflict dialog Load disk version button at line ${dialog._line ?? '?'} does not call a named handler`);
+      continue;
+    }
+    const body = bodies.get(load.callee) ?? '';
+    const nullAt = body.indexOf('conflict = null');
+    const closeAt = body.indexOf('.close()');
+    if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
+      problems.push(`conflict dialog Load disk version handler (${load.callee}) must clear conflict (conflict = null) before closing the dialog`);
     }
   }
 
@@ -787,6 +820,60 @@ const FIXTURES = [
 <dialog bind:this={resolutionDialog} onkeydown={h} onclose={() => { pendingResolution = null; }}>
   <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
   <button type="button" onclick={resolvePendingSave}>Save &amp; switch<kbd>Alt+S</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog clearing state on close and in Load disk version passes',
+    expect: 0,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog without an onclose state clear fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog Load disk version clearing after close fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflictDialog.close();
+    conflict = null;
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
 </dialog>`,
   },
 ];

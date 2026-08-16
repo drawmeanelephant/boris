@@ -1223,7 +1223,7 @@
   </div>
 </main>
 
-<dialog bind:this={conflictDialog} onkeydown={handleDialogKeydown} aria-labelledby="conflict-heading">
+<dialog bind:this={conflictDialog} onkeydown={handleDialogKeydown} onclose={() => { conflict = null; deletedConflict = false; }} aria-labelledby="conflict-heading">
   <h2 id="conflict-heading">{deletedConflict ? 'File deleted outside Boris Editor' : 'External changes detected'}</h2>
   {#if deletedConflict}
     <p>{activePath} no longer exists on disk. Your unsaved version is still in the editor.</p>
