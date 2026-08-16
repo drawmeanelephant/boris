@@ -37,6 +37,8 @@ section { min-height: 11rem; padding: 1.5rem; background: #fff; border: 1px soli
 .project-pane, .source-pane, .problems-pane { min-height: 32rem; }
 .file-actions, .source-actions, .dialog-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
 .file-actions { margin: 1.25rem 0; }
+.file-filter { margin-bottom: 0.85rem; }
+.file-filter p { margin: 0.45rem 0 0; color: #53625c; }
 .file-tree { max-height: 22rem; overflow: auto; border-top: 1px solid #d8e0da; }
 .file-tree ul { margin: 0; padding: 0.75rem 0; list-style: none; }
 .file-tree button { width: 100%; min-height: 2.35rem; padding: 0.4rem 0.55rem; border: 0; text-align: left; overflow-wrap: anywhere; }

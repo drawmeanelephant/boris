@@ -12,6 +12,8 @@
   };
   type FileEntry = { path: string };
   type FileList = { files: FileEntry[] };
+  const visibleFileLimit = 200;
+  const unfilteredPaletteEntryLimit = 50;
   type BufferResponse = {
     status: 'opened' | 'saved' | 'created' | 'conflict';
     path: string;
@@ -149,6 +151,7 @@
   let previewState = 'Preview is not running.';
   let previewData: PreviewState | null = null;
   let files: FileEntry[] = [];
+  let fileQuery = '';
   let snapshots: RecoverySnapshot[] = [];
   let activePath = '';
   let content = '';
@@ -224,8 +227,23 @@
     return 'Save or discard the changes before rebuilding the preview?';
   })();
   $: resolutionVerb = pendingResolution?.action === 'open' ? 'switch' : pendingResolution?.action === 'command' ? 'run' : pendingResolution?.action === 'restore' ? 'restore' : 'rebuild';
+  $: matchingFiles = (() => {
+    const needle = fileQuery.trim().toLocaleLowerCase();
+    return needle ? files.filter(file => file.path.toLocaleLowerCase().includes(needle)) : files;
+  })();
+  $: visibleFiles = (() => {
+    const capped = matchingFiles.slice(0, visibleFileLimit);
+    if (activePath && !capped.some(file => file.path === activePath)) {
+      const active = files.find(file => file.path === activePath);
+      if (active) return [active, ...capped];
+    }
+    return capped;
+  })();
+  $: fileTreeStatus = fileTreeAnnouncement(files.length, matchingFiles.length, visibleFiles.length, fileQuery);
   $: paletteItems = (() => {
-    const items: PaletteItem[] = [
+    const needle = paletteQuery.trim().toLocaleLowerCase();
+    const items: PaletteItem[] = [];
+    const commands: PaletteItem[] = [
       { kind: 'create' }, { kind: 'rename' }, { kind: 'delete' },
       { kind: 'save' },
       { kind: 'command', mode: 'validate' },
@@ -239,15 +257,27 @@
       { kind: 'parent' },
       { kind: 'impact-here' }
     ];
-    for (const node of graphPayload?.graph?.nodes ?? []) items.push({ kind: 'entity', id: node.id });
-    for (const file of files) items.push({ kind: 'open', path: file.path });
-    const needle = paletteQuery.trim().toLocaleLowerCase();
-    return needle
-      ? items.filter(item =>
-        paletteItemLabel(item).toLocaleLowerCase().includes(needle) ||
-        paletteItemDetail(item).toLocaleLowerCase().includes(needle)
-      )
-      : items;
+    for (const item of commands) {
+      if (paletteItemMatches(item, needle)) items.push(item);
+    }
+    const entryCap = needle ? visibleFileLimit : unfilteredPaletteEntryLimit;
+    let entities = 0;
+    for (const node of graphPayload?.graph?.nodes ?? []) {
+      const item: PaletteItem = { kind: 'entity', id: node.id };
+      if (!paletteItemMatches(item, needle)) continue;
+      items.push(item);
+      entities += 1;
+      if (entities >= entryCap) break;
+    }
+    let opens = 0;
+    for (const file of files) {
+      const item: PaletteItem = { kind: 'open', path: file.path };
+      if (!paletteItemMatches(item, needle)) continue;
+      items.push(item);
+      opens += 1;
+      if (opens >= entryCap) break;
+    }
+    return items;
   })();
   $: paletteEnabled = new Map<string, boolean>(
     paletteItems.map(item => {
@@ -1057,6 +1087,24 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     deleteDialog.querySelector<HTMLButtonElement>('.dialog-actions .danger')?.focus();
   }
 
+  function fileTreeAnnouncement(total: number, matched: number, shown: number, query: string): string {
+    if (total === 0) return '';
+    const needle = query.trim();
+    if (needle) {
+      if (matched === 0) return `No project files match “${needle}”.`;
+      if (matched > shown) return `Showing ${shown} of ${matched} project files matching “${needle}”. Filter further to find the rest.`;
+      return `${matched} project file${matched === 1 ? ' matches' : 's match'} “${needle}”.`;
+    }
+    if (matched > visibleFileLimit) return `Showing ${shown} of ${total} project files. Filter to find the rest.`;
+    return '';
+  }
+
+  function paletteItemMatches(item: PaletteItem, needle: string): boolean {
+    if (!needle) return true;
+    return paletteItemLabel(item).toLocaleLowerCase().includes(needle)
+      || paletteItemDetail(item).toLocaleLowerCase().includes(needle);
+  }
+
   function paletteItemLabel(item: PaletteItem): string {
     if (item.kind === 'create') return 'Create file';
     if (item.kind === 'rename') return 'Rename file';
@@ -1371,12 +1419,23 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       <button type="button" disabled={!activePath || dirty} onclick={openRenameDialog}>Rename file</button>
       <button type="button" class="danger" disabled={!activePath || dirty} onclick={openDeleteDialog}>Delete file</button>
     </div>
+    {#if files.length > 0}
+      <div class="file-filter">
+        <label for="file-filter">Filter project files</label>
+        <input id="file-filter" bind:value={fileQuery} />
+        {#if fileTreeStatus}
+          <p role="status" aria-label="Project files status" aria-live="polite">{fileTreeStatus}</p>
+        {/if}
+      </div>
+    {/if}
     <nav class="file-tree" aria-label="Project files">
       {#if files.length === 0}
         <p>No author-owned project files found.</p>
+      {:else if visibleFiles.length === 0}
+        <p>No project files match the filter.</p>
       {:else}
         <ul>
-          {#each files as file (file.path)}
+          {#each visibleFiles as file (file.path)}
             <li>
               <button
                 type="button"
