@@ -13,11 +13,19 @@ pub fn render(allocator: std.mem.Allocator, io: Io, project_root: []const u8) ![
 
 fn renderPayload(allocator: std.mem.Allocator, graph_bytes: ?[]const u8) ![]u8 {
     var graph: ?contracts.Document = null;
-    if (graph_bytes) |bytes| graph = contracts.readGraph(allocator, bytes) catch return error.UnsupportedArtifact;
+    var unsupported = false;
+    if (graph_bytes) |bytes| {
+        graph = contracts.readGraph(allocator, bytes) catch |err| switch (err) {
+            error.InvalidJson, error.InvalidRoot, error.MissingField, error.InvalidField, error.UnknownFormat, error.UnsupportedSchemaVersion, error.InvalidDiagnostic => blk: {
+                unsupported = true;
+                break :blk null;
+            },
+        };
+    }
     defer if (graph) |*document| document.deinit();
     return std.json.Stringify.valueAlloc(allocator, .{
         .graph = if (graph) |document| document.parsed.value else null,
-        .graph_status = if (graph != null) "ready" else "build_required",
+        .graph_status = if (graph != null) "ready" else if (unsupported) "unsupported" else "build_required",
     }, .{});
 }
 
@@ -60,6 +68,9 @@ test "graph remains optional until Boris publishes graph.json" {
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"graph\":null") != null);
 }
 
-test "unsupported graph.json is not rewritten" {
-    try std.testing.expectError(error.UnsupportedArtifact, renderPayload(std.testing.allocator, "{\"schemaVersion\":\"9.9.9\"}"));
+test "unsupported graph.json stays null and names the rebuild path" {
+    const bytes = try renderPayload(std.testing.allocator, "{\"schemaVersion\":\"9.9.9\"}");
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"graph_status\":\"unsupported\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"graph\":null") != null);
 }

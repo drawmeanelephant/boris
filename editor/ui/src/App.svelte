@@ -6,7 +6,10 @@
     editor_id: string;
     project: { content: boolean; default_layout: boolean; publication_profile: boolean; input_mode?: 'markdown' | 'cooklang' | 'textile' | 'mixed' | 'empty' };
   };
-  type Version = { compiler_id: string };
+  type Version = {
+    compiler_id: string;
+    supported?: { completion?: number[]; ir?: string[]; publication_plan?: number[]; frontmatter?: number[] };
+  };
   type FileEntry = { path: string };
   type FileList = { files: FileEntry[] };
   type BufferResponse = {
@@ -98,7 +101,7 @@
     findings_total: number;
     claims_total: number;
   };
-  type PublicationPayload = { profiles: PublicationProfile[]; proof: PublicationProof | null };
+  type PublicationPayload = { profiles: PublicationProfile[]; proof: PublicationProof | null; proof_status?: 'ready' | 'absent' | 'unsupported' };
   type CommandResult = {
     mode: CommandMode;
     exit_code: number | null;
@@ -115,7 +118,7 @@
   type JsonSchemaProperty = { type?: string | string[]; enum?: Array<string | null>; maxLength?: number; maxItems?: number; pattern?: string; items?: JsonSchemaProperty };
   type CompletionEntity = { id: string; title: string | null; parent: string | null; role: string; status: string | null; tags: string[]; relations: Array<{ kind: string; target: string }> };
   type CompletionIndex = { format: string; schema_version: number; compiler_id: string; frozen: boolean; entities: CompletionEntity[]; relation_kinds: string[]; parent_targets: string[]; layout_slots: string[] };
-  type AuthoringPayload = { frontmatter_schema: { title: string; properties: Record<string, JsonSchemaProperty> }; completion: CompletionIndex | null; completion_status: 'ready' | 'build_required' };
+  type AuthoringPayload = { frontmatter_schema: { title: string; properties: Record<string, JsonSchemaProperty> }; completion: CompletionIndex | null; completion_status: 'ready' | 'build_required' | 'unsupported' };
   type CompletionKind = 'frontmatter_key' | 'status' | 'entity' | 'wiki_link' | 'parent' | 'relation_kind' | 'relation_target' | 'layout_slot';
   type Suggestion = { value: string; insert: string; detail: string };
   type PreviewState = { phase: 'idle' | 'running' | 'success' | 'failed' | 'stale'; generation: number; exit_code: number | null; used_stderr_fallback: boolean; message: string; preview_url: string };
@@ -135,7 +138,7 @@
     schemaVersion: string; frozen: boolean; nodes: GraphNode[]; edges: GraphEdge[];
     reverseIndex: Array<{ target: GraphEndpoint; incomingEdges: number[] }>; nav: GraphNav[];
   };
-  type GraphPayload = { graph: GraphDocument | null; graph_status: 'ready' | 'build_required' };
+  type GraphPayload = { graph: GraphDocument | null; graph_status: 'ready' | 'build_required' | 'unsupported' };
   type GraphLink = { label: string; path: string; kind: string };
 
   let connection = 'Connecting to the local host…';
@@ -314,7 +317,7 @@
       }
       const health = healthResult.data;
       connection = `Connected to ${health.editor_id}.`;
-      compiler = `Compiler: ${versionResult.data.compiler_id}`;
+      compiler = versionLabel(versionResult.data);
       inputMode = health.project.input_mode ?? 'empty';
       project = health.project.content
         ? `Project found${health.project.publication_profile ? ' with boris.json' : ''}${inputMode === 'cooklang' ? '; Cooklang tree (--cooklang)' : inputMode === 'textile' ? '; Textile tree (--textile)' : ''}.`
@@ -420,8 +423,18 @@
     if (mode === 'html_build' || mode === 'plan') await refreshPublication();
   }
 
+  function versionLabel(version: Version): string {
+    const ir = version.supported?.ir;
+    const range = ir && ir.length > 0 ? `; IR ${ir[0]}${ir.length > 1 ? `–${ir[ir.length - 1]}` : ''}` : '';
+    return `Compiler: ${version.compiler_id}${range}`;
+  }
+
   function setAuthoring(payload: AuthoringPayload) {
     authoring = payload;
+    if (payload.completion_status === 'unsupported') {
+      authoringStatus = 'completion.json is stale or unsupported. Build diagnostics to replace it. Frontmatter schema remains available.';
+      return;
+    }
     authoringStatus = payload.completion
       ? `Boris completion index ready from ${payload.completion.compiler_id}.`
       : 'Frontmatter schema ready. Build diagnostics to create graph completion data.';
@@ -435,6 +448,10 @@
 
   function setGraph(payload: GraphPayload) {
     graphPayload = payload;
+    if (payload.graph_status === 'unsupported') {
+      graphStatus = 'graph.json is stale or unsupported. Build diagnostics to replace it.';
+      return;
+    }
     graphStatus = payload.graph
       ? `Boris graph ready (${payload.graph.nodes.length} pages).`
       : 'Build diagnostics to create the Boris graph.';
@@ -455,6 +472,10 @@
     }
     if (!payload.profiles.some(profile => profile.path === selectedProfile)) {
       selectedProfile = payload.profiles[0].path;
+    }
+    if (payload.proof_status === 'unsupported') {
+      publicationStatus = 'Local Proof Pack is stale or unsupported. Build HTML to replace it.';
+      return;
     }
     publicationStatus = payload.proof
       ? `Local Proof Pack present for target ${payload.proof.target} (${payload.proof.overall_presentation_status}).`

@@ -78,6 +78,14 @@ if printf '%s' "$files" | grep -Eq 'dist/index.html|\.boris/graph.json'; then
   exit 1
 fi
 
+# Planted "{}" graph.json is stale, not a 502. Profiles still load.
+graph="$(api_get /api/graph)"
+printf '%s' "$graph" | grep -q '"graph_status":"unsupported"'
+printf '%s' "$graph" | grep -q '"graph":null'
+version="$(api_get /api/version)"
+printf '%s' "$version" | grep -q '"compiler_id":"boris/'
+printf '%s' "$version" | grep -q '"publication_plan"'
+
 opened="$(api_post /api/files/open '{"path":"content/index.md"}')"
 [[ "$(printf '%s' "$opened" | code_of)" == "200" ]]
 fingerprint="$(printf '%s' "$opened" | body_of | fingerprint_of)"
