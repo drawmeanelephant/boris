@@ -110,3 +110,16 @@ tree. `CompileConfig` is closed: first cut is Markdown IR only
 Native CLI still calls `pipeline.compile` / `pipeline.run` through the
 filesystem adapters. `compileBundle` is an additional entry, not a second
 parser or graph.
+
+---
+
+## M4 — HTML through the sink
+
+`CompileConfig.html = true` adds Oliver HTML after a successful IR
+compile. Layout bytes come from the source bundle (`layout_path`, default
+`layouts/main.html`). Pages are rendered sequentially (`jobs` stays 1)
+through the same `renderPageSlots` / assemble splice as the CLI, then
+emitted to the artifact sink.
+
+Failed graph/content validation still emits no HTML. Incremental cache,
+`--jobs`, sitemap, search, and evidence stay native-CLI.

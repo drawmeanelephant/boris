@@ -7,6 +7,7 @@
 const std = @import("std");
 const Io = std.Io;
 const pipeline = @import("pipeline.zig");
+const compile_mod = @import("compile.zig");
 const source_provider = @import("source_provider.zig");
 const artifact_sink = @import("artifact_sink.zig");
 const identity = @import("identity.zig");
@@ -14,9 +15,12 @@ const diag = @import("diag.zig");
 
 pub const SourceFile = source_provider.File;
 
-/// Closed first-cut embed profile: IR only.
+/// Closed embed profile. First cut is Markdown IR; `html` adds Oliver HTML
+/// through the same graph freeze and assemble splice.
 pub const CompileConfig = struct {
     input_format: identity.InputFormat = .markdown,
+    html: bool = false,
+    layout_path: []const u8 = "layouts/main.html",
 };
 
 pub const Compilation = struct {
@@ -59,6 +63,26 @@ pub fn compileBundle(
         .sources = .{ .memory = &sources },
         .sink = .{ .memory = &sink },
     });
+    if (result.ok and config.html) {
+        var html_result = result;
+        _ = compile_mod.compileHtmlToSink(io, gpa, .{
+            .content_root = "",
+            .dist_dir = "",
+            .layout_path = config.layout_path,
+            .quiet = true,
+            .input_format = config.input_format,
+            .sources = .{ .memory = &sources },
+            .sink = .{ .memory = &sink },
+        }) catch |err| {
+            html_result.deinit();
+            sink.deinit();
+            return err;
+        };
+        return .{
+            .result = html_result,
+            .artifacts = sink,
+        };
+    }
     return .{
         .result = result,
         .artifacts = sink,
@@ -176,4 +200,55 @@ test "compileBundle of the valid fixture matches filesystem page ids" {
     try testing.expectEqualStrings("guides/intro", compilation.result.pages.items[0].id);
     try testing.expectEqualStrings("guides/intro-tips", compilation.result.pages.items[1].id);
     try testing.expectEqualStrings("index", compilation.result.pages.items[2].id);
+}
+
+const embed_layout =
+    \\<!DOCTYPE html><html><head><title>{{title}}</title></head><body>{{content}}</body></html>
+;
+
+test "compileBundle html emits Oliver pages through the sink" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    const files = [_]SourceFile{
+        .{ .path = "index.md", .bytes = home_md },
+        .{ .path = "includes/tip.md", .bytes = tip_md },
+        .{ .path = "layouts/main.html", .bytes = embed_layout },
+    };
+    var compilation = try compileBundle(io, gpa, &files, .{ .html = true });
+    defer compilation.deinit();
+    try testing.expect(compilation.ok());
+    const html = compilation.artifacts.get("index.html") orelse return error.MissingHtml;
+    try testing.expect(std.mem.indexOf(u8, html, "<h1 id=\"home\">Home</h1>") != null);
+    try testing.expect(std.mem.indexOf(u8, html, "a tip") != null);
+    try testing.expect(compilation.artifacts.get("manifest.json") != null);
+}
+
+test "compileBundle html copies page-sibling and theme assets from the bundle" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    const files = [_]SourceFile{
+        .{ .path = "index.md", .bytes = "---\ntitle: Home\nstatus: published\n---\n# Home\n" },
+        .{ .path = "layouts/main.html", .bytes = embed_layout },
+        .{ .path = "index.assets/logo.svg", .bytes = "<svg/>\n" },
+        .{ .path = "themes/demo/assets/site.css", .bytes = "body{}\n" },
+    };
+    var compilation = try compileBundle(io, gpa, &files, .{ .html = true });
+    defer compilation.deinit();
+    try testing.expect(compilation.ok());
+    try testing.expectEqualStrings("<svg/>\n", compilation.artifacts.get("index.assets/logo.svg").?);
+    try testing.expectEqualStrings("body{}\n", compilation.artifacts.get("themes/demo/assets/site.css").?);
+}
+
+test "compileBundle html is withheld when graph validation fails" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    const files = [_]SourceFile{
+        .{ .path = "orphan.md", .bytes = "---\ntitle: Orphan\nparent: missing\n---\n# Orphan\n" },
+        .{ .path = "layouts/main.html", .bytes = embed_layout },
+    };
+    var compilation = try compileBundle(io, gpa, &files, .{ .html = true });
+    defer compilation.deinit();
+    try testing.expect(!compilation.ok());
+    try testing.expect(compilation.artifacts.get("index.html") == null);
+    try testing.expect(compilation.artifacts.get("orphan.html") == null);
 }
