@@ -213,7 +213,8 @@ git diff --check
 ./zig-out/bin/boris standard-site login  --did did:plc:...            # OAuth
 ./zig-out/bin/boris standard-site login  --app-password --did did:plc:...   # or --handle
 ./zig-out/bin/boris standard-site publish --profile <profile.json> --did did:plc:...
-./zig-out/bin/boris standard-site smoke  --did did:plc:... [--surface-url ...] [--out ...]
+./zig-out/bin/boris standard-site              # family usage
+./zig-out/bin/boris standard-site smoke  (--did DID | --handle HANDLE) [--out ...]
 ```
 
 Golden fixtures live under `docs/contracts/fixtures/publication-plan/` and the

@@ -2,8 +2,9 @@
 
 **Status:** normative command-routing contract for the v0.8 afterparty line.
 
-Boris exposes six stable top-level commands. A missing command is equivalent to
-`build` for backwards compatibility.
+Boris exposes the stable top-level commands below. A missing command is
+equivalent to `build` for backwards compatibility. The `standard-site`
+family is an additional explicit network family, not a build mode.
 
 ```text
 boris build [build options]
@@ -24,6 +25,18 @@ boris plan --profile PATH [plan overrides]
 | `impact ID` | Emit the transitive dependents of a page or source endpoint | Nothing unless `--report` is supplied |
 | `watch` | Run an HTML build, then rebuild after debounced source/layout changes | HTML output selected by build options |
 | `plan` | Parse and normalize one publication profile without executing it | Nothing; normalized declaration JSON is written to stdout |
+| `standard-site <subcommand>` | Explicit Standard.site family (plan / records / verify / login / sessions / logout / publish / smoke) | Plan/records/verify/evidence/smoke artifacts only when `--out` is given; login writes a `0600` session document under the session root |
+
+`boris standard-site` with no subcommand is a usage error (exit 2) that
+prints the family list, not the full compiler help. `boris standard-site
+--help` / `-h` prints the same family list and exits 0. First testers
+should start at the non-normative [operator path](../standard-site.md).
+Against bsky.social the working live path is
+`login --app-password`; browser OAuth fails closed because that provider
+does not grant `site.standard.authFull`. `smoke` accepts `--did` or
+`--handle`. See [standard-site.md](standard-site.md),
+[atproto-sessions.md](atproto-sessions.md), and
+[atproto-live-smoke.md](atproto-live-smoke.md).
 
 `watch` is the command spelling for local development. The existing
 `build --watch` / bare `--watch` form remains accepted as a compatibility alias

@@ -12,7 +12,7 @@ offline test matrix, which remains authoritative.
 ## Invocation
 
 ```text
-boris standard-site smoke --did DID \
+boris standard-site smoke (--did DID | --handle HANDLE) \
     [--namespace NAME] [--surface-url URL] [--indexer URL] \
     [--out PATH] [--session-root PATH]
 ```

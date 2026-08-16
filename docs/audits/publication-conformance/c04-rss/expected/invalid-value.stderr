@@ -10,11 +10,11 @@ Modes:
   check               Read-only graph health report (findings do not fail by default)
   impact <ID>         Read-only transitive impact report for a page
   plan                Emit a normalized publication plan (no publication)
-  standard-site publish  One-shot Standard.site publish (OAuth + reconcile; never implicit)
+  standard-site publish  One-shot Standard.site publish (stored session + reconcile; never implicit)
   standard-site plan    Emit the deterministic Standard.site plan offline (no network)
   standard-site records Dump the full canonical record payloads offline (no network)
   standard-site verify  Cross-check the built head links + well-known file offline (no network)
-  standard-site login  Authorize a DID and persist the session for later publishes
+  standard-site login  Authorize a DID or handle and persist the session
   standard-site sessions  List persisted sessions (DIDs only; no secrets)
   standard-site logout  Remove a persisted session (secure erase; does not revoke)
   standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
@@ -39,10 +39,10 @@ Modes:
   --out PATH          Verify result artifact path (default: stdout)
   standard-site login/logout options:
   --did DID           AT Protocol DID to authorize (login) or forget (logout)
-  --handle HANDLE     AT Protocol handle for `login --app-password` (resolved to a DID)
+  --handle HANDLE     AT Protocol handle for login --app-password or smoke (resolved to a DID)
   --app-password      Opt-in app-password login (broad account write; never OAuth scope)
   standard-site smoke options:
-  --did DID           Test identity DID (required)
+  --did DID           Test identity DID (or use --handle)
   --namespace NAME    Unique rkey namespace prefix (default: clock-derived)
   --surface-url URL   Served verification-surface origin to check (optional)
   --indexer URL       Indexer/AppView origin observed non-normatively (optional)
@@ -151,6 +151,7 @@ Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
 Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
       `boris validate` observes the selected HTML target configuration but writes no artifacts.
       `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
+      `boris standard-site` (no subcommand) prints the Standard.site family list.
       `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
       it never signs, never contacts a relay, and never reads a key.
       --html / --html-dir / bare CLI map to a single target named "default".

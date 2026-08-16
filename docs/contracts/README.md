@@ -42,7 +42,7 @@ is **not** proof that every surface is the default CLI product.
 | Publication Touch Atlas | **Implemented first slice** — deterministic `touches.json` relationship index derived exclusively from the three existing evidence reports; see [publication-touches.md](publication-touches.md) |
 | Publication Proof Pack | **Implemented first slice** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed evidence; see [publication-proof-pack.md](publication-proof-pack.md) |
 | Publication platform model | **Documented** — normative verified-target model, adapter seam, and platform deployment matrix; GitHub Pages is the shipped verified target; see [publication-platforms.md](publication-platforms.md) |
-| AT Protocol OAuth core | **Implemented foundation** — host-independent crypto, DID/handle discovery, one-shot PAR/callback/token state, and hardened native HTTP/DNS/loopback/browser boundaries; no session persistence or publication yet; see [atproto-oauth.md](atproto-oauth.md) |
+| AT Protocol / Standard.site publication | **Implemented** — offline projection, persistent OAuth and app-password sessions, one-shot publish, and opt-in live smoke. bsky.social testers use `login --app-password`; OAuth fails closed there because the provider does not grant `site.standard.authFull`. Operator path: [standard-site.md](../standard-site.md). Contracts: [standard-site.md](standard-site.md), [atproto-app-password.md](atproto-app-password.md), [atproto-sessions.md](atproto-sessions.md), [atproto-live-smoke.md](atproto-live-smoke.md), [atproto-oauth.md](atproto-oauth.md). |
 
 ## Canonical ownership (one document per topic)
 
@@ -87,6 +87,11 @@ per topic:
 | Publication Proof Pack | [publication-proof-pack.md](publication-proof-pack.md) |
 | Publication platform model / deployment matrix | [publication-platforms.md](publication-platforms.md) |
 | AT Protocol OAuth core and host-capability boundary | [atproto-oauth.md](atproto-oauth.md) |
+| Standard.site target (records, rkeys, plan, publish) | [standard-site.md](standard-site.md) |
+| Standard.site app-password login | [atproto-app-password.md](atproto-app-password.md) |
+| Standard.site persistent sessions | [atproto-sessions.md](atproto-sessions.md) |
+| Standard.site live smoke | [atproto-live-smoke.md](atproto-live-smoke.md) |
+| Standard.site operator path (non-normative) | [../standard-site.md](../standard-site.md) |
 | Astro plan-only migration intake | [astro-import-plan.md](astro-import-plan.md) |
 | Astro initial-create migration apply | [astro-import-apply.md](astro-import-apply.md) |
 

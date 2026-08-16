@@ -92,9 +92,14 @@ For a hosted site, the deployment URL is publication truth: `base_url`,
 full verified target — resolve the location, validate every URL projection
 against it, upload only inventory-verified files.
 
+Atmosphere publication is a separate, explicit family (`boris standard-site`).
+It does not replace the HTML site. First testers on bsky.social should use
+the app-password path in [Standard.site](standard-site.md), not browser OAuth.
+
 - Contracts: [publication profile](contracts/publication-profile.md) ·
   [publication plan](contracts/publication-plan.md) ·
   [GitHub Pages](github-pages.md) ·
+  [Standard.site](standard-site.md) ·
   [publication platform model](contracts/publication-platforms.md)
 
 ## 6. Verify

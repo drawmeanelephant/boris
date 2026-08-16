@@ -114,8 +114,8 @@ pub const Options = struct {
     /// DID for `standard-site login` / `standard-site logout` (required by
     /// both; forbidden elsewhere in the family).
     session_did: ?[]const u8 = null,
-    /// Handle for `standard-site login --app-password` (alternative to
-    /// `--did`; resolves to the DID via DNS/HTTPS).
+    /// Handle for `standard-site login --app-password` or `smoke`
+    /// (alternative to `--did`; resolves to the DID via DNS/HTTPS).
     session_handle: ?[]const u8 = null,
     /// Select the opt-in app-password credential path for `standard-site
     /// login` (never a fallback inside the OAuth flow).
@@ -248,6 +248,11 @@ pub const ParseError = error{
     // Named separately so the message can list what does exist rather than
     // reporting a bare unknown positional.
     UnknownNostrSubcommand,
+    // `boris standard-site` with no subcommand: print the family list, not
+    // "unexpected argument: standard-site".
+    MissingStandardSiteSubcommand,
+    // `boris standard-site <x>` where `<x>` is not a family member.
+    UnknownStandardSiteSubcommand,
     OutOfMemory,
 };
 
@@ -431,30 +436,41 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     } else if (i < args.len and std.mem.eql(u8, args[i], "standard-site")) {
         command = .standard_site;
         i += 1;
-        // The network family has four explicit subcommands. A missing or
-        // unknown subcommand is a usage error, never a silent fallback.
-        if (i >= args.len) return error.UnexpectedPositional;
-        if (std.mem.eql(u8, args[i], "publish")) {
+        // The network family has explicit subcommands. A missing or unknown
+        // subcommand is a usage error, never a silent fallback. `--help` /
+        // `-h` here is family help (exit 0), not a missing subcommand.
+        if (i >= args.len) return error.MissingStandardSiteSubcommand;
+        if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
+            // Leave the flag for the shared help short-circuit so exit 0
+            // stays identical to every other `--help`.
+        } else if (std.mem.eql(u8, args[i], "publish")) {
             standard_site_command = .publish;
             standard_site_publish = true;
+            i += 1;
         } else if (std.mem.eql(u8, args[i], "plan")) {
             standard_site_command = .plan;
+            i += 1;
         } else if (std.mem.eql(u8, args[i], "records")) {
             standard_site_command = .records;
+            i += 1;
         } else if (std.mem.eql(u8, args[i], "verify")) {
             standard_site_command = .verify;
+            i += 1;
         } else if (std.mem.eql(u8, args[i], "login")) {
             standard_site_command = .login;
+            i += 1;
         } else if (std.mem.eql(u8, args[i], "sessions")) {
             standard_site_command = .sessions;
+            i += 1;
         } else if (std.mem.eql(u8, args[i], "logout")) {
             standard_site_command = .logout;
+            i += 1;
         } else if (std.mem.eql(u8, args[i], "smoke")) {
             standard_site_command = .smoke;
+            i += 1;
         } else {
-            return error.UnexpectedPositional;
+            return error.UnknownStandardSiteSubcommand;
         }
-        i += 1;
         if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) return error.UnexpectedPositional;
     }
     while (i < args.len) : (i += 1) {
@@ -493,6 +509,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
                 .version = !wants_help,
                 .quiet = quiet,
                 .timings = saw_timings,
+                .command = command,
                 .mode = .ir,
                 .input_dir = input_dir,
                 .out_dir = out_dir,
@@ -1180,8 +1197,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
                 if (saw_session_did or saw_session_handle or saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
             },
             .smoke => {
-                if (session_did == null) return error.MissingValue;
-                if (session_handle != null or saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_verify_dist) return error.ConflictingFlags;
+                if (session_did == null and session_handle == null) return error.MissingValue;
+                if (session_did != null and session_handle != null) return error.ConflictingFlags;
+                if (saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_verify_dist) return error.ConflictingFlags;
             },
         }
         return .{
@@ -1630,11 +1648,11 @@ pub fn printUsage() void {
         \\  check               Read-only graph health report (findings do not fail by default)
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
-        \\  standard-site publish  One-shot Standard.site publish (OAuth + reconcile; never implicit)
+        \\  standard-site publish  One-shot Standard.site publish (stored session + reconcile; never implicit)
         \\  standard-site plan    Emit the deterministic Standard.site plan offline (no network)
         \\  standard-site records Dump the full canonical record payloads offline (no network)
         \\  standard-site verify  Cross-check the built head links + well-known file offline (no network)
-        \\  standard-site login  Authorize a DID and persist the session for later publishes
+        \\  standard-site login  Authorize a DID or handle and persist the session
         \\  standard-site sessions  List persisted sessions (DIDs only; no secrets)
         \\  standard-site logout  Remove a persisted session (secure erase; does not revoke)
         \\  standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
@@ -1659,10 +1677,10 @@ pub fn printUsage() void {
         \\  --out PATH          Verify result artifact path (default: stdout)
         \\  standard-site login/logout options:
         \\  --did DID           AT Protocol DID to authorize (login) or forget (logout)
-        \\  --handle HANDLE     AT Protocol handle for `login --app-password` (resolved to a DID)
+        \\  --handle HANDLE     AT Protocol handle for login --app-password or smoke (resolved to a DID)
         \\  --app-password      Opt-in app-password login (broad account write; never OAuth scope)
         \\  standard-site smoke options:
-        \\  --did DID           Test identity DID (required)
+        \\  --did DID           Test identity DID (or use --handle)
         \\  --namespace NAME    Unique rkey namespace prefix (default: clock-derived)
         \\  --surface-url URL   Served verification-surface origin to check (optional)
         \\  --indexer URL       Indexer/AppView origin observed non-normatively (optional)
@@ -1771,11 +1789,48 @@ pub fn printUsage() void {
         \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
         \\      `boris validate` observes the selected HTML target configuration but writes no artifacts.
         \\      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
+        \\      `boris standard-site` (no subcommand) prints the Standard.site family list.
         \\      `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
         \\      it never signs, never contacts a relay, and never reads a key.
         \\      --html / --html-dir / bare CLI map to a single target named "default".
         \\      Equivalent --target / --target-layout / --layout-rule permutations yield the
         \\      same config (targets sorted by name; rules canonicalized). No layout frontmatter.
+        \\
+    , .{});
+}
+
+/// Focused usage for the `standard-site` family. `boris standard-site` with
+/// no subcommand, an unknown subcommand, or `standard-site --help` prints
+/// this instead of the full compiler help.
+pub fn printStandardSiteUsage() void {
+    std.debug.print(
+        \\Boris Standard.site — Atmosphere publication (explicit; never implicit)
+        \\
+        \\Usage: boris standard-site <command> [options]
+        \\
+        \\Offline (no network, no credentials):
+        \\  plan     --profile PATH [--out PATH]   Deterministic record projection
+        \\  records  --profile PATH [--out PATH]   Full canonical record payloads
+        \\  verify   --profile PATH [--dist DIR] [--out PATH]
+        \\                                         Check head links + well-known file
+        \\
+        \\Auth and live:
+        \\  login --app-password (--did DID | --handle HANDLE)
+        \\                                         Opt-in app-password login (bsky.social path)
+        \\  login --did DID                        Browser OAuth (not granted by bsky.social)
+        \\  sessions [--session-root PATH]         List stored DIDs (no secrets)
+        \\  logout --did DID                       Erase the local session (does not revoke)
+        \\  publish --profile PATH [--plan PATH] [--out PATH] [--prune]
+        \\                                         One-shot publish from a stored session
+        \\  smoke (--did DID | --handle HANDLE) [--namespace NAME] [--out PATH]
+        \\                                         Live interop smoke (manual, never in CI)
+        \\
+        \\  --session-root PATH                    Override the 0600 session store
+        \\
+        \\First testers: see docs/standard-site.md. App passwords grant broad
+        \\account write — use a dedicated test identity. OAuth against
+        \\bsky.social fails closed (exit 6): the provider does not grant
+        \\site.standard.authFull.
         \\
     , .{});
 }
@@ -1831,6 +1886,12 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
         },
         error.UnknownNostrSubcommand => {
             std.debug.print("error: unknown nostr subcommand (available: plan)\n", .{});
+        },
+        error.MissingStandardSiteSubcommand => {
+            std.debug.print("error: standard-site requires a subcommand (try: plan, records, verify, login, sessions, logout, publish, smoke)\n", .{});
+        },
+        error.UnknownStandardSiteSubcommand => {
+            std.debug.print("error: unknown standard-site subcommand (try: plan, records, verify, login, sessions, logout, publish, smoke)\n", .{});
         },
         error.RSSMetadataRequired => {
             // `--rss` / `--rss-path` are mode flags; a missing value here
@@ -1974,7 +2035,11 @@ pub fn execute(opts: Options, runner: anytype) ExitCode {
         return .success;
     }
     if (opts.help) {
-        runner.printHelp();
+        if (opts.command == .standard_site) {
+            printStandardSiteUsage();
+        } else {
+            runner.printHelp();
+        }
         return .success;
     }
     return runner.run(opts);
@@ -2315,8 +2380,8 @@ test "parse: standard-site publish selects the family and its options" {
 
 test "parse: standard-site publish validates its contract" {
     // The network family requires the explicit subcommand and a profile.
-    try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "standard-site" }));
-    try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "bogus" }));
+    try expectError(error.MissingStandardSiteSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "standard-site" }));
+    try expectError(error.UnknownStandardSiteSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "bogus" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--plan" }));
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--prune", "--prune" }));
@@ -2326,6 +2391,10 @@ test "parse: standard-site publish validates its contract" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--target", "public=dist" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--watch" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--timings" }));
+    var family_help = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "--help" });
+    defer family_help.deinit(std.testing.allocator);
+    try expect(family_help.help);
+    try expectEqual(Command.standard_site, family_help.command);
     // --out is the evidence path here, never an IR mode selector.
     var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--out", "ev.json" });
     defer o.deinit(std.testing.allocator);
@@ -2427,7 +2496,7 @@ test "parse: standard-site login --app-password takes exactly one of --did or --
 
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password", "--did", "a", "--handle", "b" }));
-    // The app-password flag is login-only, and --handle is login-only.
+    // The app-password flag is login-only.
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--app-password" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout", "--did", "a", "--app-password" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--app-password" }));
@@ -2451,6 +2520,11 @@ test "parse: standard-site smoke requires a DID and accepts its opt-in flags" {
 
 test "parse: standard-site smoke validates its contract" {
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke" }));
+    var handle = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--handle", "alice.bsky.social" });
+    defer handle.deinit(std.testing.allocator);
+    try expectEqualStrings("alice.bsky.social", handle.session_handle.?);
+    try expect(handle.session_did == null);
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--handle", "b" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--profile", "p.json" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--plan", "plan.json" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--rag" }));

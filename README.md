@@ -10,7 +10,7 @@ builds can also publish a deterministic XML sitemap.
 Write content locally. Build with one native binary. Get output you can inspect,
 serve, archive, or hand to another tool.
 
-[Authoring spine](docs/authoring-spine.md) · [Migration guide](docs/MIGRATION.md) · [Architecture](docs/) · [Contracts](docs/contracts/) · [Status](docs/STATUS.md) · [GitHub Pages](docs/github-pages.md)
+[Authoring spine](docs/authoring-spine.md) · [Migration guide](docs/MIGRATION.md) · [Architecture](docs/) · [Contracts](docs/contracts/) · [Status](docs/STATUS.md) · [GitHub Pages](docs/github-pages.md) · [Standard.site](docs/standard-site.md)
 
 ## What Boris does
 
@@ -46,6 +46,7 @@ instead of quietly producing a broken site.
 - Deterministic RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports from the same tree.
 - Deterministic staged XML sitemap for one public HTML target.
 - First-class GitHub Pages publication identity and an official verified Actions workflow.
+- Standard.site / AT Protocol publication: offline plan + explicit login/publish/smoke. The first-tester path against bsky.social is an app password, not browser OAuth.
 - Standalone migration labs for Astro/Starlight, WordPress, Instagram, Obsidian,
   Notion, and related source shapes.
 
@@ -107,6 +108,12 @@ The repository’s GitHub Pages publication path is documented in
 [`docs/github-pages.md`](docs/github-pages.md). It uses the native Boris
 compiler, keeps proof reports in a retained evidence artifact, and uploads
 only the exact public files declared by the target inventory.
+
+Atmosphere publication (Standard.site records on an AT Protocol PDS) is a
+separate, explicit family: `boris standard-site`. First testers should start
+at [`docs/standard-site.md`](docs/standard-site.md). Offline plan/verify
+need no credentials; live publish against bsky.social uses
+`login --app-password`, not the browser OAuth path.
 
 ### Add a page
 
