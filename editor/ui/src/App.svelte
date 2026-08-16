@@ -343,6 +343,7 @@
       project = 'Project status unavailable.';
       return;
     }
+    const started = Date.now();
     try {
       const [healthResult, versionResult, filesResult, authoringResult, graphResult, previewResult, publicationResult] = await Promise.all([
         api<Health>('/api/health'),
@@ -357,7 +358,7 @@
         throw new Error('host request failed');
       }
       const health = healthResult.data;
-      connection = `Connected to ${health.editor_id}.`;
+      connection = `Connected to ${health.editor_id}. Opened project in ${elapsedLabel(started)}.`;
       compiler = versionLabel(versionResult.data);
       inputMode = health.project.input_mode ?? 'empty';
       project = health.project.content
@@ -413,12 +414,15 @@
       await requestResolution({ action: 'open', target: path });
       return false;
     }
+    const started = Date.now();
+    editorStatus = `Opening ${path}…`;
     const result = await api<BufferResponse | ErrorResponse>('/api/files/open', {
       method: 'POST', body: JSON.stringify({ path })
     });
     if (result.response.ok) {
       const buffer = result.data as BufferResponse;
-      loadBuffer(buffer, buffer.read_only ? `Opened ${path} read-only.` : `Opened ${path}.`);
+      const wait = elapsedLabel(started);
+      loadBuffer(buffer, buffer.read_only ? `Opened ${path} read-only. (${wait})` : `Opened ${path}. (${wait})`);
       return true;
     } else {
       editorStatus = `Could not open ${path}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
@@ -440,6 +444,7 @@
       return;
     }
     commandRunning = true;
+    const started = Date.now();
     commandStatus = `Running ${commandLabel(mode)}…`;
     const body = mode === 'impact'
       ? { mode, impact_id: impactId.trim() }
@@ -455,7 +460,7 @@
       return;
     }
     commandResult = result.data as CommandResult;
-    commandStatus = `${commandLabel(mode)} finished: ${failureLabel(commandResult.failure_class, commandResult.exit_code)}.`;
+    commandStatus = `${commandLabel(mode)} finished: ${failureLabel(commandResult.failure_class, commandResult.exit_code)}. (${elapsedLabel(started)})`;
     if (commandResult.failure_class === 'terminated') {
       commandStatus += ' Run the same command again when Boris is ready.';
     }
@@ -490,6 +495,7 @@
   }
 
   async function refreshAuthoring() {
+    authoringStatus = 'Refreshing Boris completion…';
     const result = await api<AuthoringPayload>('/api/authoring');
     if (result.response.ok) setAuthoring(result.data);
     else authoringStatus = 'The Boris build succeeded, but completion.json could not be adapted.';
@@ -507,6 +513,7 @@
   }
 
   async function refreshGraph() {
+    graphStatus = 'Refreshing the Boris graph…';
     const result = await api<GraphPayload>('/api/graph');
     if (result.response.ok) setGraph(result.data);
     else graphStatus = 'The Boris build succeeded, but graph.json could not be adapted.';
@@ -548,10 +555,13 @@
       return;
     }
     if (previewData) previewData = { ...previewData, phase: 'running' };
+    const started = Date.now();
     previewState = reason === 'save' ? 'Saved. Boris preview build is running…' : 'Boris preview build is running…';
     const result = await api<PreviewState | ErrorResponse>('/api/preview/rebuild', { method: 'POST', body: '{}' });
-    if (result.response.ok) setPreview(result.data as PreviewState);
-    else previewState = `Preview host failed: ${(result.data as ErrorResponse).error ?? 'request failed'}. Existing output is not current.`;
+    if (result.response.ok) {
+      setPreview(result.data as PreviewState);
+      previewState = `${previewState} (${elapsedLabel(started)})`;
+    } else previewState = `Preview host failed: ${(result.data as ErrorResponse).error ?? 'request failed'}. Existing output is not current.`;
   }
 
   function completionSuggestions(payload: AuthoringPayload | null, kind: CompletionKind, query: string): Suggestion[] {
@@ -612,6 +622,10 @@
       impact: 'Run impact',
       plan: 'Run publication plan'
     } satisfies Record<CommandMode, string>)[mode];
+  }
+
+  function elapsedLabel(started: number): string {
+    return `${((Date.now() - started) / 1000).toFixed(1)}s`;
   }
 
   function hostErrorLabel(code: string | undefined): string {
@@ -1017,7 +1031,9 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     // Capture before saveInFlight disables Save file; otherwise the conflict
     // dialog would remember <body> and Esc could not restore the trigger (#462).
     const trigger = document.activeElement;
+    const started = Date.now();
     saveInFlight = true;
+    editorStatus = `Saving ${activePath}…`;
     try {
       const result = await api<BufferResponse | ErrorResponse>('/api/files/save', {
         method: 'POST',
@@ -1025,7 +1041,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       });
       if (result.response.ok) {
         const buffer = result.data as BufferResponse;
-        loadBuffer(buffer, `Saved ${activePath}.`);
+        loadBuffer(buffer, `Saved ${activePath}. (${elapsedLabel(started)})`);
         snapshots = snapshots.filter(snapshot => snapshot.path !== activePath);
         conflict = null;
         deletedConflict = false;

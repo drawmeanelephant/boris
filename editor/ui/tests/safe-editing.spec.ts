@@ -2595,3 +2595,63 @@ test('a clean buffer reloads when disk changes outside the editor (#418 M11)', a
     .toContainText('Loaded external changes to content/index.md.');
   await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
 });
+
+test('opening the project names how long connect took (#418 M11)', async ({ page }) => {
+  await installApi(page);
+  await expect(page.getByRole('status', { name: 'Connection status' }))
+    .toContainText('Opened project in');
+});
+
+test('opening and saving a file name the wait and elapsed time (#418 M11)', async ({ page }) => {
+  await installApi(page);
+  await page.route('**/api/files/open', async route => {
+    const { path } = route.request().postDataJSON() as { path: string };
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'opened', path, content: '# Home\n',
+        fingerprint: 'a'.repeat(64), read_only: false
+      })
+    });
+  });
+  await page.route('**/api/files/save', async route => {
+    const body = route.request().postDataJSON() as { path: string; content: string };
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'saved', path: body.path, content: body.content,
+        fingerprint: 'c'.repeat(64), read_only: false
+      })
+    });
+  });
+  const opening = page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opening content/index.md');
+  await opening;
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opened content/index.md.');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('s)');
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Wait\n');
+  const saving = page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saving content/index.md');
+  await saving;
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/index.md.');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('s)');
+});
+
+test('a Boris command names the running wait and elapsed time (#418 M11)', async ({ page }) => {
+  await installApi(page);
+  await page.route('**/api/commands/run', async route => {
+    const { mode } = route.request().postDataJSON() as { mode: string };
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(commandResult(mode))
+    });
+  });
+  const running = page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Running Validate project');
+  await running;
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validate project finished: Success');
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('s)');
+});
