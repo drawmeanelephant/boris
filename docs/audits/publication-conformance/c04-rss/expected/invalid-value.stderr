@@ -10,6 +10,7 @@ Modes:
   check               Read-only graph health report (findings do not fail by default)
   impact <ID>         Read-only transitive impact report for a page
   plan                Emit a normalized publication plan (no publication)
+  recipe-scale        Print a derived Cooklang scale view (no rewrite)
   standard-site publish  One-shot Standard.site publish (stored session + reconcile; never implicit)
   standard-site plan    Emit the deterministic Standard.site plan offline (no network)
   standard-site records Dump the full canonical record payloads offline (no network)
@@ -108,6 +109,9 @@ Options:
   --report PATH        Write an analysis report instead of stdout
   --fail-on-unreferenced Make check fail when it reports unreferenced pages
   --profile PATH       Selected publication profile for `plan`
+  --id PAGE            Recipe page entity id (`recipe-scale`; required)
+  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; required)
+  --out PATH           Scaled-view JSON path (`recipe-scale`; default: stdout only)
   --plan PATH          Plan artifact to sign (`nostr sign`)
   --key-stdin          Read the hex/nsec secret key once from stdin (`nostr sign`)
   --out PATH           Signed-event bundle output path (`nostr sign`; default: stdout)
@@ -161,6 +165,8 @@ Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
 Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
       `boris validate` observes the selected HTML target configuration but writes no artifacts.
       `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
+      `boris recipe-scale --input DIR --id PAGE --factor TEXT` prints a derived
+      scaled view on stdout; it never rewrites .cook or graph.json.
       `boris standard-site` (no subcommand) prints the Standard.site family list.
       `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
       it never signs, never contacts a relay, and never reads a key.

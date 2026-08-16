@@ -48,6 +48,8 @@ const atproto_transport_std = @import("atproto_transport_std.zig");
 const atproto_interactive_std = @import("atproto_interactive_std.zig");
 const atproto_session_std = @import("atproto_session_std.zig");
 const standard_site_smoke = @import("standard_site_smoke.zig");
+const recipe_scale = @import("recipe_scale.zig");
+const recipe_scale_view = @import("recipe_scale_view.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
@@ -173,6 +175,8 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
         runNostrPublish(io, gpa, opts)
     else if (opts.command == .init)
         runInit(io, gpa, opts)
+    else if (opts.command == .recipe_scale)
+        runRecipeScale(io, gpa, opts)
     else if (opts.command == .validate)
         runValidate(io, gpa, opts, recorder_ptr)
     else if (opts.command == .check or opts.command == .impact)
@@ -240,6 +244,68 @@ fn printTimingsReport(io: Io, gpa: std.mem.Allocator, recorder: *const timings.R
 /// Read, normalize, validate, and declare one explicitly selected profile.
 /// This path intentionally stops before content discovery or any publisher.
 /// Materialize a deterministic starter site into `opts.init_dir` (default ".").
+/// Derived Cooklang scale view. Compiles the selected tree, scales one page,
+/// and writes JSON to stdout (and `--out` when given). Never rewrites `.cook`
+/// or `graph.json`.
+pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const page_id = opts.recipe_scale_id orelse return .usage;
+    const factor_text = opts.recipe_scale_factor orelse return .usage;
+    const factor = recipe_scale.parseFactor(factor_text) catch return .usage;
+
+    var result = pipeline.compile(io, gpa, .{
+        .content_root = opts.input_dir,
+        .quiet = true,
+        .input_format = opts.input_format,
+    }) catch |err| {
+        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+
+    if (!result.ok) {
+        pipeline.printDiagnostics(gpa, result.diagnostics.items, opts.quiet) catch return .io_error;
+        return switch (result.failure) {
+            .io => .io_error,
+            .content, .none => .content_error,
+        };
+    }
+
+    const bytes = recipe_scale_view.renderFromCompile(gpa, &result, page_id, factor) catch |err| switch (err) {
+        error.PageNotFound => {
+            std.debug.print("error: recipe page not found: {s}\n", .{page_id});
+            return .content_error;
+        },
+        error.AmountOverflow => {
+            std.debug.print("error: scaled amount overflow for {s}\n", .{page_id});
+            return .content_error;
+        },
+        else => {
+            std.debug.print("error: unable to render scaled view: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(bytes);
+
+    if (opts.recipe_scale_out) |path| {
+        Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = bytes }) catch |err| {
+            std.debug.print("error: failed to write scaled view {s}: {s}\n", .{ path, @errorName(err) });
+            return .io_error;
+        };
+    }
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    stdout_writer.interface.writeAll(bytes) catch |err| {
+        std.debug.print("error: unable to write scaled view: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    stdout_writer.interface.flush() catch |err| {
+        std.debug.print("error: unable to flush scaled view: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    return .success;
+}
+
 pub fn runInit(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     const target_dir = opts.init_dir orelse ".";
     return @enumFromInt(init_mod.run(io, gpa, target_dir, opts.quiet));

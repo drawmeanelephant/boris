@@ -267,6 +267,14 @@ const modules = [_]Module{
     .{ .name = "publication_proof_pack_fixture_test.zig", .class = .other },
     .{ .name = "recipe_scale.zig", .class = .other },
     .{
+        .name = "recipe_scale_view.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "derived recipe-scale view; amounts go through json_out",
+        } },
+        .source = @embedFile("recipe_scale_view.zig"),
+    },
+    .{
         .name = "rss.zig",
         .class = .{ .emitter = .{
             .encoder = .sink,
