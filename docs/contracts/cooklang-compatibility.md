@@ -321,8 +321,9 @@ follow a sub-recipe without re-parsing an ingredient name.
 ## Scaling
 
 Scaling is defined over the authored amount **string**, not over a numeric IR
-field. Source `.cook` files stay canonical. The operation lives in
-`src/recipe_scale.zig` and is specified here.
+field. Source `.cook` files stay canonical. Classification and exact-rational
+rewrite are Oliver's public string API (oliver#77); `src/recipe_scale.zig` is
+the Boris wrapper and adds the timer lock. The grammar below is that API.
 
 ### Classification
 
@@ -331,19 +332,21 @@ After trimming ASCII spaces and tabs, an amount is exactly one of:
 | Class | Forms |
 |---|---|
 | `empty` | `""` |
-| `scalable` | unsigned integer (`2`, `400`); fraction `a/b` with `b ≠ 0` (`1/2`); decimal `a.b` (`1.5`); mixed number `a b/c` (`1 1/2`) |
-| `fixed` | everything else, including ranges (`1-2`), words (`some`, `a pinch`), and `1/0` |
+| `scalable` | unsigned integer with no leading zero (`2`, `400`); fraction `a/b` with `b ≠ 0` (`1/2`, spaces around `/` allowed); decimal `a.b` (`1.5`); mixed number `a b/c` where `c ≠ 0` and `b < c` (`1 1/2`) |
+| `fixed` | everything else, including ranges (`1-2`), words (`some`, `a pinch`), `1/0`, leading zeros (`02`), improper mixed numbers (`1 3/2`), and a leading `=` (`=1`) |
 
 Decimals require a single `.` and only digits on each side that is present.
-Leading zeros are allowed (`02` is the integer 2). No other forms are scalable.
+No other forms are scalable.
 
 ### Operation
 
 A factor uses the same scalable forms. Zero and a zero denominator are invalid.
 
 - **Ingredients and cookware:** scalable amounts are multiplied by the factor
-  as exact rationals and emitted as a reduced integer or `num/den` fraction.
-  Fixed and empty amounts are copied verbatim.
+  as exact rationals. A whole result emits an integer; a decimal-family source
+  whose reduced denominator is `2^a·5^b` emits a terminating decimal
+  (`1.5 × 3 = 4.5`); otherwise a reduced `num/den`. Overflow leaves the
+  authored amount unchanged. Fixed and empty amounts are copied verbatim.
 - **Timers:** never scaled. Cooking time is not linear with yield. The
   authored amount is copied even when it would classify as scalable.
 - Units, names, preparations, and `recipeRef` are never rewritten.

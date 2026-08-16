@@ -4,15 +4,14 @@
     .fingerprint = 0x6cd378330da76efc, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        // Oliver pin (shared). oliver#39 merged (c0b3d2b): the Markdown
-        // renderer extensions (heading auto-ids, IALs, footnotes, definition
-        // lists, GFM strikethrough) and the Cooklang stack now share one
-        // revision, so the former `.oliver_cooklang` split pin collapsed back
-        // into `.oliver`. See docs/contracts/oliver-renderer.md for the pin
+        // Oliver pin (shared). oliver#77 merged (d742494): public Cooklang
+        // string-quantity classify/scale and mixed numbers, on the same
+        // revision that already carries the Markdown renderer extensions
+        // (oliver#39). See docs/contracts/oliver-renderer.md for the pin
         // table.
         .oliver = .{
-            .url = "https://github.com/drawmeanelephant/oliver/archive/c0b3d2b683f0cecf2181b22a800908619e56d0d7.tar.gz",
-            .hash = "oliver-0.0.0-LOsZkAe_HwD1k4BLmgWJcT9AI3AopaxmZwjc2gx-23pz",
+            .url = "https://github.com/drawmeanelephant/oliver/archive/d74249415975d652654e521b7abea40c85b13255.tar.gz",
+            .hash = "oliver-0.0.0-LOsZkBCwIgDvYwuL75BY2DBWzhUvfeliKZ7vQlKfi5-I",
         },
         .secp256k1 = .{
             .url = "git+https://github.com/bitcoin-core/secp256k1#6e2c8bc4ecdc6e71dbe7a368f360d8d453ce435d",

@@ -505,6 +505,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    linkOliver(recipe_scale_mod, oliver_mod);
     const recipe_scale_tests = b.addTest(.{
         .root_module = recipe_scale_mod,
     });
