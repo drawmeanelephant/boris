@@ -139,3 +139,8 @@ Use [`README.md`](README.md) for outcomes and CLI, [`docs/contracts/`](docs/cont
 for normative behavior, [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) for ship
 checks, and [`docs/STATUS.md`](docs/STATUS.md) for current scope. Do not copy
 contracts into policy; open the source of truth.
+
+[`docs/boris/src/`](docs/boris/) is a frozen analytical dossier (four pages
+per old module). It is not current, not complete (44 of 103 `src/*.zig`
+files), and not authority. Do not rewrite it function-by-function and do
+not treat a sentence there as implementation truth.

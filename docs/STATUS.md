@@ -218,3 +218,4 @@ The release audit found these follow-ups:
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
 | [`AGENTS.md`](../AGENTS.md) | Repository policy and agent constraints |
 | [`content/`](../content/) | Compiled public documentation site (Oliver-rendered) |
+| [`docs/boris/`](boris/) | Stale per-module source dossier (44/103 `src/*.zig` files). Not product docs. Not a contract. Do not “complete” it. |
