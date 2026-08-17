@@ -37,7 +37,12 @@ zig build -Doptimize=ReleaseSafe
 EX="$ROOT/examples/cloudflare-container"
 mkdir -p "$EX/bin"
 cp zig-out/bin/boris zig-out/bin/boris-job-runner "$EX/bin/"
-trap 'rm -rf "$EX/bin"' EXIT
+# The image ships the default theme so a content-only source archive can
+# build: boris resolves `themes/boris` against the process cwd (`/`).
+rm -rf "$EX/themes"
+mkdir -p "$EX/themes"
+cp -R "$ROOT/themes/boris" "$EX/themes/boris"
+trap 'rm -rf "$EX/bin" "$EX/themes"' EXIT
 
 note "docker build"
 docker build -f "$EX/Dockerfile" -t boris-job-runner:parity "$EX"
