@@ -57,6 +57,7 @@ const FsIdentity = struct {
     ino: u64,
 
     fn fromStat(st: Io.File.Stat) FsIdentity {
+        if (@TypeOf(st.inode) == void) return .{ .ino = 0 };
         return .{ .ino = @intCast(st.inode) };
     }
 };
@@ -166,14 +167,14 @@ pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out
         if (st.kind != .file) continue;
 
         // entry.path is relative to content_dir; invalidated on next next().
-        try registerPage(retain, out, entry.path);
+        try registerDiscoveredPage(retain, out, entry.path);
     }
 
     // Deterministic order independent of filesystem enumeration.
     page_mod.sortPages(out.pages.items);
 }
 
-fn registerPage(retain: std.mem.Allocator, out: *PageList, walk_path: []const u8) ScanError!void {
+pub fn registerDiscoveredPage(retain: std.mem.Allocator, out: *PageList, walk_path: []const u8) ScanError!void {
     // Canonicalize first so identity derivation sees a stable form.
     const source_path = identity.canonicalize(retain, walk_path) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,

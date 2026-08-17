@@ -110,7 +110,8 @@ Options:
   --fail-on-unreferenced Make check fail when it reports unreferenced pages
   --profile PATH       Selected publication profile for `plan`
   --id PAGE            Recipe page entity id (`recipe-scale`; required)
-  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; required)
+  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; exclusive with --servings)
+  --servings N         Target serving count (`recipe-scale`; exclusive with --factor)
   --out PATH           Scaled-view JSON path (`recipe-scale`; default: stdout only)
   --plan PATH          Plan artifact to sign (`nostr sign`)
   --key-stdin          Read the hex/nsec secret key once from stdin (`nostr sign`)
@@ -166,7 +167,8 @@ Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JS
       `boris validate` observes the selected HTML target configuration but writes no artifacts.
       `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
       `boris recipe-scale --input DIR --id PAGE --factor TEXT` prints a derived
-      scaled view on stdout; it never rewrites .cook or graph.json.
+      scaled view on stdout; `--servings N` is the same view with
+      factor = N / current (missing current is 1). Never rewrites .cook or graph.json.
       `boris standard-site` (no subcommand) prints the Standard.site family list.
       `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
       it never signs, never contacts a relay, and never reads a key.

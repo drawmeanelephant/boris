@@ -205,6 +205,8 @@
   let completionQuery = '';
   let selectedSuggestion = 0;
   let completionOpen = false;
+  let copiedPacketKey = '';
+  let copiedPacketTimer: ReturnType<typeof setTimeout> | undefined;
   let paletteQuery = '';
   let paletteSelection = 0;
   let lastDialogTrigger: HTMLElement | null = null;
@@ -891,13 +893,35 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     return lineStart + codeUnits;
   }
 
+  function packetCopyKey(problem: Problem): string {
+    return `${problem.code ?? ''}\0${problem.source_path ?? ''}\0${problem.line ?? ''}\0${problem.column ?? ''}\0${problem.packet}`;
+  }
+
+  function packetCopyLabel(problem: Problem): string {
+    return `Copy packet for ${problem.code ?? 'unstructured Boris output'} at ${problem.source_path ?? 'project'}`;
+  }
+
   async function copyDiagnosticPacket(problem: Problem) {
     try {
       await navigator.clipboard.writeText(problem.packet);
       commandStatus = `Copied diagnostic packet for ${problem.code ?? 'unstructured Boris output'}.`;
+      copiedPacketKey = packetCopyKey(problem);
+      if (copiedPacketTimer !== undefined) clearTimeout(copiedPacketTimer);
+      copiedPacketTimer = setTimeout(() => {
+        copiedPacketKey = '';
+        copiedPacketTimer = undefined;
+      }, 1500);
     } catch {
       commandStatus = 'Could not copy the diagnostic packet. Clipboard access was denied.';
     }
+  }
+
+  async function changeCompletionKind() {
+    completionQuery = '';
+    selectedSuggestion = 0;
+    completionOpen = true;
+    await tick();
+    document.getElementById('completion-query')?.focus();
   }
 
   function problemLocationLabel(problem: Problem | AnalysisFinding): string {
@@ -1672,7 +1696,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
         <div class="completion-controls">
           <div>
             <label for="completion-kind">Completion category</label>
-            <select id="completion-kind" bind:value={completionKind} onchange={() => { completionQuery = ''; selectedSuggestion = 0; completionOpen = true; }}>
+            <select id="completion-kind" bind:value={completionKind} onchange={() => { void changeCompletionKind(); }}>
               <option value="frontmatter_key">Frontmatter key</option>
               <option value="status">Status value</option>
               <option value="entity">Entity id</option>
@@ -2085,8 +2109,8 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
                   {#if problem.source_path}
                     <button type="button" onclick={() => navigateToProblem(problem)}>Go to {problemLocationLabel(problem)}</button>
                   {/if}
-                  <button type="button" onclick={() => copyDiagnosticPacket(problem)}>
-                    Copy packet for {problem.code ?? 'unstructured Boris output'} at {problem.source_path ?? 'project'}
+                  <button type="button" aria-label={packetCopyLabel(problem)} onclick={() => copyDiagnosticPacket(problem)}>
+                    {copiedPacketKey === packetCopyKey(problem) ? 'Copied!' : packetCopyLabel(problem)}
                   </button>
                 </div>
               </li>

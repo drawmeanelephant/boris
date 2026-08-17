@@ -406,6 +406,7 @@ pub fn parse(source: []const u8) ParseResult {
     var saw_status = false;
     var saw_published_at = false;
     var saw_summary = false;
+    var saw_servings = false;
     var saw_tags = false;
     var saw_relations = false;
     var field_count: usize = 0;
@@ -556,6 +557,18 @@ pub fn parse(source: []const u8) ParseResult {
             saw_summary = true;
             if (value.len > max_summary_bytes) return fail(.EFRONTMATTER, line_no, col, "summary exceeds maximum length");
             doc.meta.summary = value;
+        } else if (page_mod.isServingsKey(key)) {
+            if (saw_servings) {
+                return fail(.EFRONTMATTER, line_no, col, "duplicate servings field (servings, serves, and yield are the same key)");
+            }
+            saw_servings = true;
+            if (value.len > page_mod.max_servings_bytes) {
+                return fail(.EFRONTMATTER, line_no, col, "servings exceeds maximum length");
+            }
+            const count = page_mod.parseServingsValue(value) catch {
+                return fail(.EFRONTMATTER, line_no, col, "servings must be a positive integer, optionally followed by a space and units");
+            };
+            doc.meta.servings = .{ .count = count, .authored = value };
         } else {
             // Closed key set — including legacy parentEntry / parent_entry.
             return fail(.EFRONTMATTER, line_no, col, "unsupported frontmatter key");
@@ -813,6 +826,34 @@ test "parse: duplicate key is EFRONTMATTER" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
+}
+
+test "parse: servings aliases collapse to one count" {
+    const servings = parse("---\nservings: 2\n---\n");
+    try std.testing.expect(servings.isOk());
+    try std.testing.expectEqual(@as(u32, 2), servings.doc.meta.servings.?.count);
+    try std.testing.expectEqualStrings("2", servings.doc.meta.servings.?.authored);
+
+    const units = parse("---\nyield: 15 cups worth\n---\n");
+    try std.testing.expect(units.isOk());
+    try std.testing.expectEqual(@as(u32, 15), units.doc.meta.servings.?.count);
+    try std.testing.expectEqualStrings("15 cups worth", units.doc.meta.servings.?.authored);
+
+    const serves = parse("---\nserves: 6\n---\n");
+    try std.testing.expect(serves.isOk());
+    try std.testing.expectEqual(@as(u32, 6), serves.doc.meta.servings.?.count);
+
+    const both = parse("---\nservings: 2\nserves: 4\n---\n");
+    try std.testing.expect(!both.isOk());
+    try std.testing.expect(both.category().? == .EFRONTMATTER);
+
+    const zero = parse("---\nservings: 0\n---\n");
+    try std.testing.expect(!zero.isOk());
+    const many = parse("---\nservings: many\n---\n");
+    try std.testing.expect(!many.isOk());
+    const source = parse("---\nsource: https://example.org/recipe\n---\n");
+    try std.testing.expect(!source.isOk());
+    try std.testing.expect(source.category().? == .EFRONTMATTER);
 }
 
 test "parse: unknown key is EFRONTMATTER" {

@@ -694,6 +694,250 @@ pub fn writeAfterCommit(
     atomic.replace(io) catch return error.ChecksWriteFailed;
 }
 
+pub const Payload = struct {
+    path: []const u8,
+    bytes: []const u8,
+};
+
+fn lookupPayload(payloads: []const Payload, path: []const u8) ?[]const u8 {
+    for (payloads) |payload| {
+        if (std.mem.eql(u8, payload.path, path)) return payload.bytes;
+    }
+    return null;
+}
+
+/// Build the checks report from inventory JSON and in-memory payload bytes.
+/// Same checker set as `writeAfterCommit`; no host directory is opened.
+pub fn renderFromPayloads(
+    gpa: std.mem.Allocator,
+    target: []const u8,
+    inventory_bytes: []const u8,
+    payloads: []const Payload,
+) Error![]u8 {
+    var report_arena = std.heap.ArenaAllocator.init(gpa);
+    defer report_arena.deinit();
+    const report_gpa = report_arena.allocator();
+
+    var inventory = artifact_inventory.parse(report_gpa, inventory_bytes, target) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidInventory,
+    };
+    defer inventory.deinit();
+
+    const inventory_binding = InventoryBinding{
+        .bytes = inventory_bytes.len,
+        .sha256 = cache.hexDigest(cache.hashBytes(inventory_bytes)),
+    };
+
+    var findings: std.ArrayList(doctor.Finding) = .empty;
+    defer findings.deinit(report_gpa);
+    var page_paths: std.ArrayList([]const u8) = .empty;
+    defer page_paths.deinit(report_gpa);
+    var route_paths: std.ArrayList([]const u8) = .empty;
+    defer route_paths.deinit(report_gpa);
+    var search_record_index: ?usize = null;
+    for (inventory.records, 0..) |record, index| {
+        if (record.status != .committed) continue;
+        try route_paths.append(report_gpa, record.path);
+        if (record.kind == .html_page) try page_paths.append(report_gpa, record.path);
+        if (record.kind == .rendered_search) {
+            if (search_record_index != null) return error.MultipleRenderedSearchArtifacts;
+            search_record_index = index;
+        }
+    }
+
+    var analysis_builder = doctor.TargetAnalysisBuilder.init(report_gpa, .{
+        .target_name = target,
+        .pages = &.{},
+        .expected_page_paths = page_paths.items,
+        .intended_route_paths = route_paths.items,
+        .search_page_paths = page_paths.items,
+    }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.CheckerExecutionFailed,
+    };
+    defer if (!analysis_builder.finished) analysis_builder.deinit();
+
+    var committed_count: usize = 0;
+    var checked_count: usize = 0;
+    var missing_count: usize = 0;
+    var search_checked = false;
+    var search_payload: ?[]const u8 = null;
+    const integrity_offset = findings.items.len;
+
+    for (inventory.records) |record| {
+        if (record.status != .committed) continue;
+        committed_count += 1;
+        const payload = lookupPayload(payloads, record.path) orelse {
+            missing_count += 1;
+            try appendArtifactFinding(
+                &findings,
+                report_gpa,
+                .ARTIFACT_MISSING,
+                target,
+                record,
+                "committed artifact file is missing",
+                "a regular file beneath the target root",
+            );
+            continue;
+        };
+        checked_count += 1;
+        const digest = cache.hexDigest(cache.hashBytes(payload));
+
+        if (payload.len != record.bytes) {
+            var observed_buffer: [64]u8 = undefined;
+            var expected_buffer: [64]u8 = undefined;
+            const observed = std.fmt.bufPrint(&observed_buffer, "{d} bytes", .{payload.len}) catch unreachable;
+            const expected = std.fmt.bufPrint(&expected_buffer, "{d} bytes", .{record.bytes}) catch unreachable;
+            try appendArtifactFinding(&findings, report_gpa, .ARTIFACT_SIZE_MISMATCH, target, record, observed, expected);
+        }
+        if (!std.mem.eql(u8, &digest, &record.sha256)) {
+            try appendArtifactFinding(
+                &findings,
+                report_gpa,
+                .ARTIFACT_DIGEST_MISMATCH,
+                target,
+                record,
+                &digest,
+                &record.sha256,
+            );
+        }
+
+        if (record.kind == .html_page) {
+            analysis_builder.addPage(record.path, payload) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return error.CheckerExecutionFailed,
+            };
+        } else if (record.kind == .rendered_search) {
+            search_payload = payload;
+            search_checked = true;
+        }
+    }
+
+    const integrity_findings = findings.items.len - integrity_offset;
+    const integrity_coverage: Coverage = if (missing_count > 0) .incomplete else .complete;
+    const integrity_check = Check{
+        .id = "artifact-integrity",
+        .eligible = true,
+        .ran = true,
+        .status = if (integrity_coverage == .incomplete)
+            .incomplete
+        else if (integrity_findings > 0)
+            .failed
+        else
+            .passed,
+        .coverage = integrity_coverage,
+        .scope = .{
+            .subject_statuses = &committed_statuses,
+            .subject_kinds = &no_kinds,
+            .subject_sha256 = try scopeDigest(report_gpa, &inventory, &committed_statuses, &no_kinds),
+            .supporting_statuses = &no_statuses,
+            .supporting_kinds = &no_kinds,
+            .supporting_sha256 = emptyDigest(),
+        },
+        .counts = .{ .eligible = committed_count, .checked = checked_count, .findings = integrity_findings },
+        .finding_offset = integrity_offset,
+    };
+
+    const search_input: doctor.SearchInput = if (search_record_index == null)
+        .not_configured
+    else if (search_checked)
+        .{ .selected = search_payload.? }
+    else
+        .selected_missing;
+    var analysis = analysis_builder.finish(search_input) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.CheckerExecutionFailed,
+    };
+    defer analysis.deinit();
+
+    const html_offset = findings.items.len;
+    const html_findings = appendFilteredFindings(&findings, report_gpa, analysis.findings, .html) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.CheckerExecutionFailed,
+    };
+    const html_coverage_value = doctor.coverageFor(&analysis, "rendered_html") catch return error.CheckerExecutionFailed;
+    const html_coverage: Coverage = switch (html_coverage_value.status) {
+        .checked => .complete,
+        .incomplete => .incomplete,
+        .not_configured, .not_in_scope => .complete,
+    };
+    const html_check = Check{
+        .id = "rendered-html",
+        .eligible = true,
+        .ran = true,
+        .status = completedStatus(html_coverage, findings.items[html_offset..][0..html_findings]),
+        .coverage = html_coverage,
+        .scope = .{
+            .subject_statuses = &committed_statuses,
+            .subject_kinds = &html_page_kinds,
+            .subject_sha256 = try scopeDigest(report_gpa, &inventory, &committed_statuses, &html_page_kinds),
+            .supporting_statuses = &committed_statuses,
+            .supporting_kinds = &no_kinds,
+            .supporting_sha256 = try scopeDigest(report_gpa, &inventory, &committed_statuses, &no_kinds),
+        },
+        .counts = .{ .eligible = page_paths.items.len, .checked = page_paths.items.len - analysis_builder.missing_expected_pages, .findings = html_findings },
+        .finding_offset = html_offset,
+    };
+
+    const search_offset = findings.items.len;
+    var search_check: Check = undefined;
+    if (search_record_index == null) {
+        search_check = .{
+            .id = "rendered-search",
+            .eligible = false,
+            .ran = false,
+            .status = .not_applicable,
+            .coverage = .not_applicable,
+            .scope = .{
+                .subject_statuses = &committed_statuses,
+                .subject_kinds = &rendered_search_kinds,
+                .subject_sha256 = emptyDigest(),
+                .supporting_statuses = &committed_statuses,
+                .supporting_kinds = &html_page_kinds,
+                .supporting_sha256 = try scopeDigest(report_gpa, &inventory, &committed_statuses, &html_page_kinds),
+            },
+            .counts = .{ .eligible = 0, .checked = 0, .findings = 0 },
+            .finding_offset = search_offset,
+        };
+    } else {
+        const search_findings = appendFilteredFindings(&findings, report_gpa, analysis.findings, .search) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.CheckerExecutionFailed,
+        };
+        const search_coverage_value = doctor.coverageFor(&analysis, "artifact.search") catch return error.CheckerExecutionFailed;
+        const search_coverage: Coverage = switch (search_coverage_value.status) {
+            .checked => .complete,
+            .incomplete => .incomplete,
+            .not_configured, .not_in_scope => .incomplete,
+        };
+        search_check = .{
+            .id = "rendered-search",
+            .eligible = true,
+            .ran = true,
+            .status = completedStatus(search_coverage, findings.items[search_offset..][0..search_findings]),
+            .coverage = search_coverage,
+            .scope = .{
+                .subject_statuses = &committed_statuses,
+                .subject_kinds = &rendered_search_kinds,
+                .subject_sha256 = try scopeDigest(report_gpa, &inventory, &committed_statuses, &rendered_search_kinds),
+                .supporting_statuses = &committed_statuses,
+                .supporting_kinds = &html_page_kinds,
+                .supporting_sha256 = try scopeDigest(report_gpa, &inventory, &committed_statuses, &html_page_kinds),
+            },
+            .counts = .{ .eligible = 1, .checked = if (search_checked) 1 else 0, .findings = search_findings },
+            .finding_offset = search_offset,
+        };
+    }
+
+    const checks = [_]Check{ integrity_check, html_check, search_check };
+    const report = writeReport(report_gpa, target, inventory_binding, &inventory, &checks, findings.items) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.NoSpaceLeft => unreachable,
+    };
+    return gpa.dupe(u8, report);
+}
+
 test "scope digests use canonical records and distinguish the empty set" {
     const gpa = std.testing.allocator;
     const digest = cache.hexDigest(cache.hashBytes("page"));

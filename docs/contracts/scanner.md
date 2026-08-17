@@ -21,7 +21,7 @@
 
 | Input | Meaning |
 |-------|---------|
-| `content_root` | Directory to walk (CLI `--input`, default `content`) |
+| `content_root` | Directory to walk (CLI `--input`, default `content`). The [source provider](source-provider.md) memory adapter enumerates an in-memory path list with the same discovery rules and does not open a host directory. |
 | `input_format` | Whole-tree page family: Markdown by default; Textile only with `--textile`; Cooklang only with `--cooklang` |
 | long-lived retain allocator | Owns all strings on discovered records |
 | list allocator | Owns the flat list spine and temporary walk state |

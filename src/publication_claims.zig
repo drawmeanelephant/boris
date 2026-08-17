@@ -1136,6 +1136,55 @@ pub fn writeAfterChecks(
     atomic.replace(io) catch return error.ClaimsWriteFailed;
 }
 
+/// Derive the claims report from committed inventory and checks bytes.
+/// Same derivation as `writeAfterChecks`; no host directory is opened.
+pub fn renderFromBytes(
+    gpa: std.mem.Allocator,
+    target: []const u8,
+    inventory_bytes: []const u8,
+    checks_bytes: []const u8,
+) Error![]u8 {
+    var report_arena = std.heap.ArenaAllocator.init(gpa);
+    defer report_arena.deinit();
+    const report_gpa = report_arena.allocator();
+
+    var inventory_input = std.Io.Reader.fixed(inventory_bytes);
+    var inventory = artifact_inventory.parseStream(report_gpa, &inventory_input, target) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidArtifactsReport,
+    };
+    defer inventory.deinit();
+    const artifact_binding = FileBinding{
+        .bytes = inventory_bytes.len,
+        .sha256 = cache.hexDigest(cache.hashBytes(inventory_bytes)),
+    };
+
+    var checks_input = std.Io.Reader.fixed(checks_bytes);
+    const parsed_checks = try parseChecksStream(report_gpa, &checks_input, target);
+    const checks_binding = FileBinding{
+        .bytes = checks_bytes.len,
+        .sha256 = cache.hexDigest(cache.hashBytes(checks_bytes)),
+    };
+
+    if (parsed_checks.artifact_binding.bytes != artifact_binding.bytes or
+        !std.mem.eql(u8, &parsed_checks.artifact_binding.sha256, &artifact_binding.sha256))
+        return error.StaleChecksBinding;
+    if (parsed_checks.artifact_count != inventory.records.len) return error.StaleChecksBinding;
+
+    const report = writeReport(
+        report_gpa,
+        target,
+        artifact_binding,
+        &inventory,
+        checks_binding,
+        &parsed_checks,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.NoSpaceLeft => unreachable,
+    };
+    return gpa.dupe(u8, report);
+}
+
 test "derivation maps every check status to the mechanical claim vocabulary" {
     const cases = [_]struct {
         status: []const u8,

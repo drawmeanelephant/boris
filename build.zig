@@ -390,6 +390,64 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "oliver", .module = oliver_mod }},
     });
 
+    // #301 M0: Oliver + render.zig for wasm32-freestanding. Same seam, no
+    // host I/O. The object is the compile-only gate (ATProto pattern). The
+    // two executables are instantiable modules for import-scan + invoke.
+    const oliver_wasm_safe_dep = b.dependency("oliver", .{
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+    });
+    const oliver_wasm_small_dep = b.dependency("oliver", .{
+        .target = freestanding_target,
+        .optimize = .ReleaseSmall,
+    });
+    const render_freestanding_mod = b.createModule(.{
+        .root_source_file = b.path("src/render.zig"),
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+        .imports = &.{.{ .name = "oliver", .module = oliver_wasm_safe_dep.module("oliver") }},
+    });
+    const render_freestanding = b.addObject(.{
+        .name = "render-freestanding",
+        .root_module = render_freestanding_mod,
+    });
+    const check_render_freestanding = b.step(
+        "check-render-freestanding",
+        "Compile the Oliver render seam for wasm32-freestanding",
+    );
+    check_render_freestanding.dependOn(&render_freestanding.step);
+
+    const render_wasm_safe = addRenderWasm(b, freestanding_target, .ReleaseSafe, oliver_wasm_safe_dep.module("oliver"), "boris-render");
+    const render_wasm_small = addRenderWasm(b, freestanding_target, .ReleaseSmall, oliver_wasm_small_dep.module("oliver"), "boris-render-small");
+    b.installArtifact(render_wasm_safe);
+    b.installArtifact(render_wasm_small);
+
+    // compileBundle pulls std.Io, which cannot compile for wasm32-freestanding
+    // in Zig 0.16. wasm32-wasi is the product module target; hosts must stub
+    // WASI imports and the memory compile path must not invoke them.
+    const embed_wasi_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .wasi,
+    });
+    const oliver_wasi_safe = b.dependency("oliver", .{
+        .target = embed_wasi_target,
+        .optimize = .ReleaseSafe,
+    });
+    const oliver_wasi_small = b.dependency("oliver", .{
+        .target = embed_wasi_target,
+        .optimize = .ReleaseSmall,
+    });
+    const embed_wasm_safe = addEmbedWasm(b, embed_wasi_target, .ReleaseSafe, oliver_wasi_safe.module("oliver"), "boris-embed");
+    const embed_wasm_small = addEmbedWasm(b, embed_wasi_target, .ReleaseSmall, oliver_wasi_small.module("oliver"), "boris-embed-small");
+    b.installArtifact(embed_wasm_safe);
+    b.installArtifact(embed_wasm_small);
+    const check_embed_wasm = b.step(
+        "check-embed-wasm",
+        "Compile compileBundle for wasm32-freestanding",
+    );
+    check_embed_wasm.dependOn(&embed_wasm_safe.step);
+    check_embed_wasm.dependOn(&embed_wasm_small.step);
+
     // bitcoin-core/secp256k1, pinned at v0.8.0 in build.zig.zon (#492/#495).
     // Compiled from source (schnorrsig + extrakeys modules; precomputed
     // tables ship in-tree, so there is no configure or generator step) and
@@ -455,6 +513,35 @@ pub fn build(b: *std.Build) void {
     });
     const run_scanner_tests = b.addRunArtifact(scanner_tests);
     run_scanner_tests.setCwd(b.path("."));
+
+    const source_provider_mod = b.createModule(.{
+        .root_source_file = b.path("src/source_provider.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(source_provider_mod, oliver_mod);
+    const source_provider_tests = b.addTest(.{ .root_module = source_provider_mod });
+    const run_source_provider_tests = b.addRunArtifact(source_provider_tests);
+    run_source_provider_tests.setCwd(b.path("."));
+    const test_source_provider_step = b.step(
+        "test-source-provider",
+        "Run in-memory source-provider tests",
+    );
+    test_source_provider_step.dependOn(&run_source_provider_tests.step);
+
+    const artifact_sink_mod = b.createModule(.{
+        .root_source_file = b.path("src/artifact_sink.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const artifact_sink_tests = b.addTest(.{ .root_module = artifact_sink_mod });
+    const run_artifact_sink_tests = b.addRunArtifact(artifact_sink_tests);
+    run_artifact_sink_tests.setCwd(b.path("."));
+    const test_artifact_sink_step = b.step(
+        "test-artifact-sink",
+        "Run in-memory artifact-sink tests",
+    );
+    test_artifact_sink_step.dependOn(&run_artifact_sink_tests.step);
 
     // --- Frontmatter parser tests (milestone 5) ----------------------------
     const parser_mod = b.createModule(.{
@@ -545,10 +632,25 @@ pub fn build(b: *std.Build) void {
     );
     test_boris_init_step.dependOn(&init_run.step);
 
-    // Layout-rule precedence guard (#400): the reference-theme example must
-    // select identical layouts under both rule declaration orders (fixed
-    // precedence: id > glob specificity > role > fallback) and publish the
-    // documented assets.
+    // Watch + preview-server lifecycle (#392): the watch coordinator must
+    // serve the built tree over loopback, rebuild on content change, push an
+    // SSE reload event to connected clients, and shut down cleanly on SIGTERM
+    // (the accept thread must unblock — the Linux accept-wake fix from #482
+    // lives exactly here, and this black-box script is the one end-to-end
+    // guard for the served-tree + SSE + shutdown contract).
+    const watch_serve_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-watch-serve-lifecycle.sh",
+    });
+    watch_serve_run.setCwd(b.path("."));
+    watch_serve_run.has_side_effects = true;
+    watch_serve_run.step.dependOn(b.getInstallStep());
+    const test_watch_serve_step = b.step(
+        "test-watch-serve-lifecycle",
+        "Run the watch --serve start/rebuild/SSE/shutdown lifecycle guard",
+    );
+    test_watch_serve_step.dependOn(&watch_serve_run.step);
+
     // XHTML output profile evidence (#448, acceptance criterion 5): Boris
     // content must publish a page under the XHTML profile that an independent
     // XML parser (xmllint/libxml2, else python3 ElementTree) accepts, and the
@@ -626,6 +728,26 @@ pub fn build(b: *std.Build) void {
     });
     const run_pipeline_tests = b.addRunArtifact(pipeline_tests);
     run_pipeline_tests.setCwd(b.path("."));
+    const test_pipeline_step = b.step(
+        "test-pipeline",
+        "Run IR pipeline tests",
+    );
+    test_pipeline_step.dependOn(&run_pipeline_tests.step);
+
+    const embed_mod = b.createModule(.{
+        .root_source_file = b.path("src/embed.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(embed_mod, oliver_mod);
+    const embed_tests = b.addTest(.{ .root_module = embed_mod });
+    const run_embed_tests = b.addRunArtifact(embed_tests);
+    run_embed_tests.setCwd(b.path("."));
+    const test_embed_step = b.step(
+        "test-embed",
+        "Run in-memory compileBundle tests",
+    );
+    test_embed_step.dependOn(&run_embed_tests.step);
 
     // --- Publication profile parser + static planner (Slice 1) -----------
     const publication_profile_mod = b.createModule(.{
@@ -986,6 +1108,53 @@ pub fn build(b: *std.Build) void {
         "Run Oliver-backed Markdown rendering seam tests",
     );
     test_render_step.dependOn(&run_render_tests.step);
+    test_render_step.dependOn(check_render_freestanding);
+
+    const render_wasm_opts = b.addOptions();
+    render_wasm_opts.addOptionPath("wasm_path", render_wasm_safe.getEmittedBin());
+    render_wasm_opts.addOptionPath("wasm_small_path", render_wasm_small.getEmittedBin());
+    const render_wasm_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/render_wasm_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "oliver", .module = oliver_mod },
+            .{ .name = "build_options", .module = render_wasm_opts.createModule() },
+        },
+    });
+    const render_wasm_tests = b.addTest(.{ .root_module = render_wasm_test_mod });
+    const run_render_wasm_tests = b.addRunArtifact(render_wasm_tests);
+    run_render_wasm_tests.setCwd(b.path("."));
+    const test_render_wasm_step = b.step(
+        "test-render-wasm",
+        "Run wasm32-freestanding Oliver render import-scan and native/Wasm goldens",
+    );
+    test_render_wasm_step.dependOn(check_render_freestanding);
+    test_render_wasm_step.dependOn(&run_render_wasm_tests.step);
+    test_render_step.dependOn(test_render_wasm_step);
+
+    const embed_wasm_opts = b.addOptions();
+    embed_wasm_opts.addOptionPath("wasm_path", embed_wasm_safe.getEmittedBin());
+    embed_wasm_opts.addOptionPath("wasm_small_path", embed_wasm_small.getEmittedBin());
+    const embed_wasm_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/embed_wasm_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "oliver", .module = oliver_mod },
+            .{ .name = "build_options", .module = embed_wasm_opts.createModule() },
+        },
+    });
+    linkOliver(embed_wasm_test_mod, oliver_mod);
+    const embed_wasm_tests = b.addTest(.{ .root_module = embed_wasm_test_mod });
+    const run_embed_wasm_tests = b.addRunArtifact(embed_wasm_tests);
+    run_embed_wasm_tests.setCwd(b.path("."));
+    const test_embed_wasm_step = b.step(
+        "test-embed-wasm",
+        "Run wasm32-freestanding compileBundle ABI import-scan and invoke",
+    );
+    test_embed_wasm_step.dependOn(check_embed_wasm);
+    test_embed_wasm_step.dependOn(&run_embed_wasm_tests.step);
 
     // --- Experimental HTML assemble + whiteboard compile (milestone 9) -----
     // Not on the default IR/RAG CLI path; tests only.
@@ -1646,6 +1815,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);
+    test_step.dependOn(&run_source_provider_tests.step);
+    test_step.dependOn(&run_artifact_sink_tests.step);
     test_step.dependOn(&run_parser_tests.step);
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_cooklang_tests.step);
@@ -1655,6 +1826,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&reference_theme_run.step);
     test_step.dependOn(&version_pin_run.step);
     test_step.dependOn(&run_pipeline_tests.step);
+    test_step.dependOn(&run_embed_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_github_pages_tests.step);
     test_step.dependOn(&github_pages_artifact_run.step);
@@ -1686,6 +1858,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_aside_tests.step);
     test_step.dependOn(&run_rag_tests.step);
     test_step.dependOn(&run_render_tests.step);
+    test_step.dependOn(test_render_wasm_step);
+    test_step.dependOn(test_embed_wasm_step);
     test_step.dependOn(&run_assemble_tests.step);
     test_step.dependOn(&run_theme_tests.step);
     test_step.dependOn(&run_content_asset_tests.step);
@@ -1716,6 +1890,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&doc_links_run.step);
     test_step.dependOn(&github_pages_audit_test.step);
     test_step.dependOn(&xhtml_evidence_run.step);
+    test_step.dependOn(&watch_serve_run.step);
 
     const test_harness_step = b.step(
         "test-harness",
@@ -1729,6 +1904,52 @@ pub fn build(b: *std.Build) void {
 /// because a relative `@import("render.zig")` resolves in the importing
 /// module's context. Oliver is a pure Zig library: no libc, no host tools, no
 /// global state, nothing to pre-build.
+fn addEmbedWasm(
+    b: *std.Build,
+    freestanding_target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    oliver: *std.Build.Module,
+    name: []const u8,
+) *std.Build.Step.Compile {
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/embed_wasm.zig"),
+        .target = freestanding_target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "oliver", .module = oliver }},
+    });
+    const exe = b.addExecutable(.{
+        .name = name,
+        .root_module = root,
+    });
+    exe.entry = .disabled;
+    exe.rdynamic = true;
+    exe.export_memory = true;
+    return exe;
+}
+
+fn addRenderWasm(
+    b: *std.Build,
+    freestanding_target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    oliver: *std.Build.Module,
+    name: []const u8,
+) *std.Build.Step.Compile {
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/render_wasm.zig"),
+        .target = freestanding_target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "oliver", .module = oliver }},
+    });
+    const exe = b.addExecutable(.{
+        .name = name,
+        .root_module = root,
+    });
+    exe.entry = .disabled;
+    exe.rdynamic = true;
+    exe.export_memory = true;
+    return exe;
+}
+
 fn linkOliver(mod: *std.Build.Module, oliver: *std.Build.Module) void {
     mod.addImport("oliver", oliver);
 }

@@ -18,6 +18,7 @@ const cooklang_seam = @import("cooklang_seam.zig");
 const diag = @import("diag.zig");
 const content_asset = @import("content_asset.zig");
 const doclink = @import("doclink.zig");
+const source_provider = @import("source_provider.zig");
 
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
@@ -33,7 +34,14 @@ pub const Options = struct {
     /// default; `.xhtml` renders XML-compatible output and fails closed on
     /// verbatim raw HTML (`error.RawHtmlNotXmlWellFormed`).
     output_profile: render.OutputProfile = .html,
+    /// When set, include expansion reads through this provider instead of `content_dir`.
+    sources: ?source_provider.Provider = null,
 };
+
+fn readIncludeFromProvider(ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) include_mod.IncludeError![]u8 {
+    const provider: *source_provider.Provider = @ptrCast(@alignCast(ptr));
+    return provider.readInclude(path, allocator);
+}
 
 fn sourceLineAt(source: []const u8, offset: usize) u32 {
     var line: u32 = 1;
@@ -289,9 +297,15 @@ fn prepareBody(
     const fail_line_base = include_mod.frontmatterLineBase(source, parsed.doc.body_offset);
 
     var include_fail: include_mod.FailInfo = .{ .line_base = fail_line_base };
-    const expanded = include_mod.expandIncludes(
+    var provider_storage = options.sources;
+    const include_reader: ?include_mod.IncludeReader = if (provider_storage) |*p| .{
+        .ptr = @ptrCast(p),
+        .readFn = readIncludeFromProvider,
+    } else null;
+    const expanded = include_mod.expandIncludesWithReader(
         io,
         content_dir,
+        include_reader,
         gpa,
         arena,
         with_doc_links,

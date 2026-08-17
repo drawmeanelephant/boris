@@ -57,6 +57,8 @@ per topic:
 | XML sitemap for HTML | [xml-sitemap.md](xml-sitemap.md) |
 | Source paths and entity IDs | [identity-and-paths.md](identity-and-paths.md) |
 | Discovery / scanning | [scanner.md](scanner.md) |
+| In-memory / filesystem source provider | [source-provider.md](source-provider.md) |
+| In-memory / filesystem artifact sink | [artifact-sink.md](artifact-sink.md) |
 | Parent / graph validation (Trunk / Satellite) | [ir-schema.md](ir-schema.md) (graph section); `parent` field shape in [frontmatter.md](frontmatter.md) |
 | JSON IR (manifest, graph, build-report) | [ir-schema.md](ir-schema.md) |
 | Diagnostics | [diagnostics.md](diagnostics.md) |
@@ -65,6 +67,7 @@ per topic:
 | `llms.txt` export | [llms-txt.md](llms-txt.md) |
 | Aside / components | [components.md](components.md) |
 | Markdown rendering (Oliver) | [oliver-renderer.md](oliver-renderer.md) |
+| Freestanding embedding (`compileBundle`, Wasm ABI, Worker host) | [embedding.md](embedding.md) |
 | HTML output (default CLI) | [html-output.md](html-output.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |

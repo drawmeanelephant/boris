@@ -146,7 +146,11 @@ const modules = [_]Module{
     } } },
 
     .{ .name = "render.zig", .class = .other },
+    .{ .name = "render_wasm.zig", .class = .other },
+    .{ .name = "render_wasm_test.zig", .class = .other },
+    .{ .name = "wasm_image.zig", .class = .other },
     .{ .name = "artifact_invariants.zig", .class = .other },
+    .{ .name = "artifact_sink.zig", .class = .other },
     .{ .name = "aside.zig", .class = .other },
     .{ .name = "assemble.zig", .class = .other },
     .{
@@ -192,6 +196,10 @@ const modules = [_]Module{
     .{ .name = "diagnostic.zig", .class = .other },
     .{ .name = "doclink.zig", .class = .other },
     .{ .name = "doctor.zig", .class = .other },
+    .{ .name = "embed.zig", .class = .other },
+    .{ .name = "embed_evidence.zig", .class = .other },
+    .{ .name = "embed_wasm.zig", .class = .other },
+    .{ .name = "embed_wasm_test.zig", .class = .other },
     .{ .name = "emitter_discipline_test.zig", .class = .other },
     .{ .name = "emitter_hostile_test.zig", .class = .other },
     .{ .name = "encode.zig", .class = .other },
@@ -289,6 +297,7 @@ const modules = [_]Module{
     .{ .name = "scanner.zig", .class = .other },
     .{ .name = "site_url.zig", .class = .other },
     .{ .name = "source_io.zig", .class = .other },
+    .{ .name = "source_provider.zig", .class = .other },
     .{ .name = "standard_site.zig", .class = .{ .emitter = .{
         .encoder = .json_out,
         .note = "deterministic Standard.site projection plan; publication and document payloads delegate to json_out",

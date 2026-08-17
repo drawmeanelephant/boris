@@ -270,7 +270,7 @@ test "the published recipe-scale view schema matches a freshly rendered view" {
     try std.testing.expect(compiled.ok);
 
     const factor = try recipe_scale.parseFactor("2");
-    const bytes = try recipe_scale_view.renderFromCompile(gpa, &compiled, "carbonara", factor);
+    const bytes = try recipe_scale_view.renderFromCompile(gpa, &compiled, "carbonara", factor, null);
     defer gpa.free(bytes);
 
     const schema_bytes = try readAlloc(io, Io.Dir.cwd(), "docs/contracts/schemas/recipe-scale-view-0.1.0.schema.json", gpa);
@@ -345,7 +345,7 @@ test "conformance validator actually rejects drift" {
     try std.testing.expectError(error.SchemaViolation, vb.validate(bounded.value, too_many.value, "probe"));
 }
 
-/// JSON view of parsed frontmatter: all eight closed keys, null where absent.
+/// JSON view of parsed frontmatter: the closed key set, null where absent.
 /// This is the shape `boris-frontmatter-1.schema.json` describes; editors
 /// convert parsed frontmatter source to it before validating.
 fn frontmatterJsonView(arena: std.mem.Allocator, m: parser.FrontmatterView) !std.json.Value {
@@ -370,6 +370,7 @@ fn frontmatterJsonView(arena: std.mem.Allocator, m: parser.FrontmatterView) !std
 
     try obj.put(arena, "published_at", if (m.published_at) |v| .{ .string = v } else .null);
     try obj.put(arena, "summary", if (m.summary) |v| .{ .string = v } else .null);
+    try obj.put(arena, "servings", if (m.servings) |s| .{ .string = s.authored } else .null);
     return .{ .object = obj };
 }
 

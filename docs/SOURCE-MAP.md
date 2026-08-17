@@ -12,17 +12,21 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | If you are looking for… | Start here | Contract |
 |---|---|---|
 | Argv, commands, exit codes | `src/cli.zig`, `src/main.zig`, `src/init.zig` | [cli.md](contracts/cli.md) |
-| Discover pages | `src/scanner.zig`, `src/identity.zig`, `src/source_io.zig` | [scanner.md](contracts/scanner.md), [identity-and-paths.md](contracts/identity-and-paths.md) |
+| Discover pages | `src/scanner.zig`, `src/identity.zig`, `src/source_io.zig`, `src/source_provider.zig` | [scanner.md](contracts/scanner.md), [identity-and-paths.md](contracts/identity-and-paths.md), [source-provider.md](contracts/source-provider.md) |
 | Frontmatter and the page record | `src/parser.zig`, `src/page.zig` | [frontmatter.md](contracts/frontmatter.md) |
 | Graph, parents, edges | `src/graph.zig`, `src/dependency.zig`, `src/pipeline.zig` | [ir-schema.md](contracts/ir-schema.md) |
 | Wiki-links, includes, doc links | `src/wikilink.zig`, `src/include.zig`, `src/doclink.zig` | [includes-and-wiki-links.md](contracts/includes-and-wiki-links.md), [documentation-links.md](contracts/documentation-links.md) |
 | Aside / Details | `src/aside.zig` | [components.md](contracts/components.md) |
 | Oliver render | `src/render.zig` | [oliver-renderer.md](contracts/oliver-renderer.md) |
+| Freestanding render Wasm | `src/render_wasm.zig`, `src/wasm_image.zig` | [embedding.md](contracts/embedding.md) |
+| In-memory compileBundle | `src/embed.zig`, `src/embed_evidence.zig` | [embedding.md](contracts/embedding.md) |
+| compileBundle Wasm ABI | `src/embed_wasm.zig` | [embedding.md](contracts/embedding.md) |
+| Cloudflare Worker host example | `hosts/cloudflare-worker/` | [embedding.md](contracts/embedding.md) |
 | Cooklang recipe scale | `src/recipe_scale.zig`, `src/recipe_scale_view.zig` | [cooklang-compatibility.md](contracts/cooklang-compatibility.md), [cli.md](contracts/cli.md) |
 | HTML body, nav, TOC, assemble | `src/html_body.zig`, `src/html_nav.zig`, `src/html_toc.zig`, `src/assemble.zig`, `src/compile.zig` | [html-output.md](contracts/html-output.md) |
 | Themes, layouts, assets | `src/theme.zig`, `src/layout_select.zig`, `src/content_asset.zig` | [templating-and-themes.md](contracts/templating-and-themes.md), [content-local-assets.md](contracts/content-local-assets.md) |
 | Incremental / watch / jobs | `src/cache.zig`, `src/watch.zig`, `src/timings.zig` | [watch-mode.md](contracts/watch-mode.md), [parallel-rendering.md](contracts/parallel-rendering.md) |
-| IR / RAG / Context / llms.txt | `src/ir_emit.zig`, `src/rag.zig`, `src/rag_emit.zig`, `src/context.zig`, `src/llms.zig` | [ir-schema.md](contracts/ir-schema.md), [rag-export.md](contracts/rag-export.md), [context-bundle.md](contracts/context-bundle.md), [llms-txt.md](contracts/llms-txt.md) |
+| IR / RAG / Context / llms.txt | `src/ir_emit.zig`, `src/rag.zig`, `src/rag_emit.zig`, `src/context.zig`, `src/llms.zig`, `src/artifact_sink.zig` | [ir-schema.md](contracts/ir-schema.md), [rag-export.md](contracts/rag-export.md), [context-bundle.md](contracts/context-bundle.md), [llms-txt.md](contracts/llms-txt.md), [artifact-sink.md](contracts/artifact-sink.md) |
 | RSS / sitemap / search | `src/rss.zig`, `src/sitemap.zig`, `src/search_index.zig` | [rss-2.0.md](contracts/rss-2.0.md), [xml-sitemap.md](contracts/xml-sitemap.md), [rendered-search.md](contracts/rendered-search.md) |
 | Publication profile / plan / evidence | `src/publication_profile.zig`, `src/publication_plan.zig`, `src/artifact_inventory.zig`, `src/publication_checks.zig`, `src/publication_claims.zig`, `src/publication_touches.zig`, `src/publication_proof_pack.zig` | [publication-profile.md](contracts/publication-profile.md) through [publication-proof-pack.md](contracts/publication-proof-pack.md) |
 | GitHub Pages | `src/github_pages.zig` | [github-pages.md](github-pages.md) |
@@ -37,6 +41,9 @@ Outside `src/`:
 
 Editor
 : [`editor/`](../editor/) — local host. Compiler stays the authority.
+
+Cloudflare Worker host example
+: [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/) — HTTP/R2 glue around the embed Wasm ABI. Not a publication target.
 
 Migration labs / source-RAG / search-index / docs-maintenance
 : [`tools/`](../tools/) — standalone. Not linked into the `boris` binary.

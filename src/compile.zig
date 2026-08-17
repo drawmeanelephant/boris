@@ -59,6 +59,8 @@ const textile = @import("textile.zig");
 const cooklang_seam = @import("cooklang_seam.zig");
 const content_asset = @import("content_asset.zig");
 const source_io = @import("source_io.zig");
+const source_provider = @import("source_provider.zig");
+const artifact_sink = @import("artifact_sink.zig");
 const search_index = @import("search_index.zig");
 const site_url = @import("site_url.zig");
 const github_pages = @import("github_pages.zig");
@@ -301,6 +303,10 @@ pub const CompileOptions = struct {
     diagnostics: ?*diag.Collector = null,
     /// Whole-tree authoring format. Markdown is the byte-compatible default.
     input_format: identity.InputFormat = .markdown,
+    /// When set, page/include/layout reads go through this provider.
+    sources: ?source_provider.Provider = null,
+    /// When set, HTML pages are emitted here instead of a host `dist_dir`.
+    sink: ?artifact_sink.Sink = null,
     /// Oliver serialization profile for this target's page bodies (#448).
     /// `.html` is the byte-identical default; `.xhtml` fails closed on
     /// verbatim raw HTML. The XHTML *document* wrapper (XML declaration +
@@ -432,6 +438,103 @@ pub fn loadLayoutOnce(
     };
 }
 
+fn loadLayoutForOptions(
+    io: Io,
+    dir: Io.Dir,
+    options: CompileOptions,
+    layout_arena: std.mem.Allocator,
+) !assemble.Layout {
+    if (options.sources) |sources| {
+        const raw = try sources.readPage(options.layout_path, layout_arena);
+        return assemble.loadLayoutFromBytes(raw) catch |err| switch (err) {
+            error.MissingContentMarker => return error.LayoutMissingMarker,
+            error.DuplicateContentMarker => return error.LayoutDuplicateMarker,
+            error.DuplicateLayoutMarker => return error.LayoutDuplicateMarker,
+            error.UnknownLayoutMarker => return error.LayoutUnknownMarker,
+            error.TooManyLayoutSegments => return error.LayoutTooManySegments,
+            error.InvalidAssetUrl => return error.LayoutInvalidAssetUrl,
+            error.TooManyAssetUrls => return error.LayoutTooManyAssetUrls,
+            error.InvalidUtf8 => return error.LayoutInvalidUtf8,
+            else => |e| return e,
+        };
+    }
+    return loadLayoutOnce(io, dir, options.layout_path, layout_arena);
+}
+
+/// Sequential HTML compile into an artifact sink. Single-threaded; no staging
+/// directory, incremental cache, sitemap, or --jobs.
+pub fn compileHtmlToSink(
+    io: Io,
+    gpa: std.mem.Allocator,
+    options: CompileOptions,
+) !CompileStats {
+    const sources = options.sources orelse return error.MissingSourceProvider;
+    const sink = options.sink orelse return error.MissingArtifactSink;
+    if (options.jobs != 1) return error.EmbedJobsUnsupported;
+
+    var layout_arena = std.heap.ArenaAllocator.init(gpa);
+    defer layout_arena.deinit();
+    const layout = try loadLayoutForOptions(io, Io.Dir.cwd(), options, layout_arena.allocator());
+
+    var retain_arena = std.heap.ArenaAllocator.init(gpa);
+    defer retain_arena.deinit();
+    var db = PageDb.init(gpa, retain_arena.allocator());
+    defer db.deinit();
+    try loadAndPromoteFromProvider(io, gpa, &db, sources, options.input_format, options.timings);
+
+    var site = try freezeSiteFromPageDb(
+        gpa,
+        &db,
+        options.quiet,
+        layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0,
+        options.timings,
+        options.diagnostics,
+    );
+    defer site.deinit();
+
+    var stats: CompileStats = .{};
+    const dummy_dir: Io.Dir = .{ .handle = 0 };
+    for (db.items(), 0..) |*page, page_index| {
+        var doc_arena = std.heap.ArenaAllocator.init(gpa);
+        defer doc_arena.deinit();
+        const slots = try renderPageSlots(
+            io,
+            gpa,
+            dummy_dir,
+            page,
+            layout,
+            &doc_arena,
+            options,
+            page_index,
+            .{ .site = &site },
+        );
+        const html = try assemble.renderPageAlloc(gpa, layout, slots);
+        defer gpa.free(html);
+        try sink.emit(page.output_path, "text/html; charset=utf-8", html);
+        stats.pages_written += 1;
+        stats.pages_attempted += 1;
+    }
+    if (sources == .memory) {
+        const mem = sources.memory;
+        for (mem.paths, mem.bytes) |path, bytes| {
+            if (!source_provider.isUnderAssetsTree(path) and !isThemeAssetPath(path)) continue;
+            try sink.emit(path, mediaTypeForPath(path), bytes);
+        }
+    }
+    return stats;
+}
+
+fn isThemeAssetPath(path: []const u8) bool {
+    return std.mem.indexOf(u8, path, "/assets/") != null or std.mem.startsWith(u8, path, "assets/");
+}
+
+fn mediaTypeForPath(path: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, path, ".css")) return "text/css";
+    if (std.mem.endsWith(u8, path, ".svg")) return "image/svg+xml";
+    if (std.mem.endsWith(u8, path, ".js")) return "text/javascript";
+    return "application/octet-stream";
+}
+
 /// F9.1 closed metadata fragment: status, parent, tags when set (escaped).
 /// Title is owned by `{{title}}`; entity id is not repeated as chrome.
 /// Empty string when no set fields.
@@ -518,13 +621,50 @@ pub fn loadAndPromoteFormat(
 
     if (recorder) |t| t.stop(.scan);
 
+    return promoteScannedPages(io, gpa, db, content_root, input_format, recorder, &scan_list, null);
+}
+
+fn loadAndPromoteFromProvider(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    sources: source_provider.Provider,
+    input_format: identity.InputFormat,
+    recorder: ?*timings.Recorder,
+) !void {
+    var scan_list = page_mod.PageList.init(gpa, db.retain);
+    defer scan_list.deinit();
+    if (recorder) |t| t.start(.scan);
+    try sources.scan(&scan_list);
+    if (recorder) |t| t.stop(.scan);
+    return promoteScannedPages(io, gpa, db, "", input_format, recorder, &scan_list, sources);
+}
+
+fn promoteScannedPages(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    content_root: []const u8,
+    input_format: identity.InputFormat,
+    recorder: ?*timings.Recorder,
+    scan_list: *page_mod.PageList,
+    sources: ?source_provider.Provider,
+) !void {
     const cwd = Io.Dir.cwd();
-    var content_dir = try cwd.openDir(io, content_root, .{});
-    defer content_dir.close(io);
+    var opened_dir: ?Io.Dir = null;
+    defer if (opened_dir) |*d| d.close(io);
+    var content_dir: Io.Dir = undefined;
+    if (sources == null) {
+        opened_dir = try cwd.openDir(io, content_root, .{});
+        content_dir = opened_dir.?;
+    }
 
     if (recorder) |t| t.start(.parse);
     for (scan_list.items()) |disc| {
-        const source = try source_io.readPageAlloc(io, content_dir, disc.source_path, gpa);
+        const source = if (sources) |s|
+            try s.readPage(disc.source_path, gpa)
+        else
+            try source_io.readPageAlloc(io, content_dir, disc.source_path, gpa);
         defer gpa.free(source);
         if (recorder) |t| t.bump(.page_reads, 1);
 
@@ -607,7 +747,10 @@ fn renderPageSlots(
 ) !assemble.SlotValues {
     const arena = doc_arena.allocator();
 
-    const source = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
+    const source = if (options.sources) |sources|
+        try sources.readPage(page.source_path, arena)
+    else
+        try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
     if (options.test_fail_render_at) |idx| {
         if (idx == page_index) return error.TestInjectedRenderFailure;
     }
@@ -618,6 +761,7 @@ fn renderPageSlots(
         .page_assets = render_opts.page_assets,
         .diagnostics = options.diagnostics,
         .output_profile = options.output_profile,
+        .sources = options.sources,
     });
 
     var slots: assemble.SlotValues = .{ .content = html };
@@ -866,7 +1010,7 @@ pub fn compileHtmlSite(
     // 1. Layout first — hard fail before any content walk on bad marker.
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
-    const layout = loadLayoutOnce(io, cwd, options.layout_path, layout_arena.allocator()) catch |err| {
+    const layout = loadLayoutForOptions(io, cwd, options, layout_arena.allocator()) catch |err| {
         const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ options.layout_path, @errorName(err) });
         defer gpa.free(msg);
         appendHtmlDiagnostic(&options, .{
@@ -885,7 +1029,11 @@ pub fn compileHtmlSite(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.timings);
+    if (options.sources) |sources| {
+        try loadAndPromoteFromProvider(io, gpa, &db, sources, options.input_format, options.timings);
+    } else {
+        try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.timings);
+    }
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.

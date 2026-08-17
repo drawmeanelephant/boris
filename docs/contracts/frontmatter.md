@@ -150,7 +150,8 @@ Do **not** half-parse these; emit [`EFRONTMATTER`](diagnostics.md):
 
 ## Canonical author-facing keys (closed set)
 
-Exactly these eight keys are accepted. **No aliases.**
+Exactly these nine keys are accepted. This is still a closed grammar, not
+open YAML. The ninth key is a documented Cooklang-convention exception.
 
 | Key | Required | Value | Notes |
 |-----|----------|-------|-------|
@@ -162,6 +163,30 @@ Exactly these eight keys are accepted. **No aliases.**
 | `relations` | no | `[kind=target, …]` only | ≤128 bounded semantic relations; token grammar and validation in [semantic-relations.md](semantic-relations.md) |
 | `published_at` | no | `YYYY-MM-DDTHH:MM:SSZ` | Explicit UTC calendar time only; requires `summary` when present |
 | `summary` | no | plain/dquoted string | One line, 1–1,024 UTF-8 bytes; may occur without `published_at` |
+| `servings` | no | leading positive integer, optional units | Cooklang convention count; see below |
+
+### Cooklang exception: `servings` / `serves` / `yield`
+
+Cooklang [canonical metadata](https://cooklang.org/docs/conventions/) names
+`servings`, `serves`, and `yield` as the keys for “how many people this is
+for,” used to scale quantities. Boris accepts those three **author spellings**
+as one field. They are not a second grammar and they do not open the door:
+
+- The stored field is always `servings`.
+- `serves` and `yield` are input aliases for that same field. Two of them on
+  one page is a duplicate key → [`EFRONTMATTER`](diagnostics.md).
+- The value is a **leading positive integer**, optionally a space/tab and
+  units text (`2`, `15 cups worth`). `0`, `many`, `2.5`, and `1/2` fail.
+- Missing `servings` means current count **1** at `recipe-scale --servings`
+  time. The page still builds.
+- Every other Cooklang metadata name stays unknown: `source`, `author`,
+  `course`, `locale`, `time`, `prep time`, `cook time`, `difficulty`,
+  `cuisine`, `diet`, `image`, and the rest → [`EFRONTMATTER`](diagnostics.md).
+- `servings` is not written into `graph.json`. Scale remains a command
+  ([cooklang-compatibility.md](cooklang-compatibility.md)).
+
+This is **not** Astro-style open YAML. Adding another Cooklang metadata name
+requires the same explicit contract change.
 
 ### Forbidden key names and forms
 
@@ -224,6 +249,7 @@ Satellites; parent chains are finite and must be acyclic.
 | `tags` | empty list |
 | `published_at` | `null` |
 | `summary` | `null` |
+| `servings` | `null` (scale treats missing current as `1`) |
 
 ### Empty page with no frontmatter
 
@@ -264,13 +290,15 @@ Unless noted, overflow → [`EFRONTMATTER`](diagnostics.md).
 | Frontmatter field count (non-blank field lines) | 32 | [`EFRONTMATTER`](diagnostics.md) |
 | Title bytes | 512 | [`EFRONTMATTER`](diagnostics.md) |
 | Summary bytes | 1,024 | [`EFRONTMATTER`](diagnostics.md) |
+| Servings value bytes | 64 | [`EFRONTMATTER`](diagnostics.md) |
 | Entity id / parent value bytes | 255 | length → [`EFRONTMATTER`](diagnostics.md); illegal **id** shape → [`EINVALIDPATH`](diagnostics.md) |
 | Tag count | 32 | [`EFRONTMATTER`](diagnostics.md) |
 | Tag token bytes (after quote strip) | 64 | [`EFRONTMATTER`](diagnostics.md) |
 
 Constants live on `page.zig` (`max_source_bytes`, `max_frontmatter_bytes`,
-`max_frontmatter_fields`, `max_title_bytes`, `max_entity_id_bytes`,
-`max_tag_count`, `max_tag_bytes`) and are re-exported by `parser.zig`.
+`max_frontmatter_fields`, `max_title_bytes`, `max_summary_bytes`,
+`max_servings_bytes`, `max_entity_id_bytes`, `max_tag_count`, `max_tag_bytes`)
+and are re-exported by `parser.zig`.
 
 Authoring-page readers enforce the total-source bound before parsing: they
 allocate at most `max_source_bytes + 1` bytes, with the extra byte preserving

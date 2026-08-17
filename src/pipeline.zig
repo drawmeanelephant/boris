@@ -19,7 +19,8 @@ const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
 const cooklang_seam = @import("cooklang_seam.zig");
-const source_io = @import("source_io.zig");
+const source_provider = @import("source_provider.zig");
+const artifact_sink = @import("artifact_sink.zig");
 const doclink = @import("doclink.zig");
 const target_mod = @import("target.zig");
 const timings = @import("timings.zig");
@@ -43,6 +44,10 @@ pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
     /// Opt-in phase timing/counter recorder (`--timings`); null by default.
     timings: ?*timings.Recorder = null,
+    /// When null, `run` opens a filesystem source adapter on `content_root`.
+    sources: ?source_provider.Provider = null,
+    /// When null, `run` publishes through a filesystem sink on `out_dir`.
+    sink: ?artifact_sink.Sink = null,
 };
 
 /// Shared load options for IR and RAG (no output paths).
@@ -52,6 +57,8 @@ pub const CompileOptions = struct {
     input_format: identity.InputFormat = .markdown,
     /// Opt-in phase timing/counter recorder (`--timings`); null by default.
     timings: ?*timings.Recorder = null,
+    /// When null, `compile` opens a filesystem adapter on `content_root`.
+    sources: ?source_provider.Provider = null,
 };
 
 pub const PageEntry = graph_mod.Node;
@@ -181,10 +188,9 @@ fn findPage(nodes: []const PageEntry, id: []const u8) bool {
 }
 
 const DependencyResolver = struct {
-    io: Io,
     gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
-    content_dir: Io.Dir,
+    sources: source_provider.Provider,
     nodes: []const PageEntry,
     edges: *std.ArrayList(DependencyEdge),
     diagnostics: *std.ArrayList(diag.Diagnostic),
@@ -283,7 +289,7 @@ const DependencyResolver = struct {
             }
             if (self.scanned_sources.contains(hit.path)) continue;
 
-            const source = include_mod.readSourceAlloc(self.io, self.content_dir, hit.path, self.gpa) catch |err| switch (err) {
+            const source = self.sources.readInclude(hit.path, self.gpa) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => {
                     fail.set(hit.line, hit.column, hit.path, locus);
@@ -334,18 +340,16 @@ const DependencyResolver = struct {
 };
 
 fn resolveDependencies(
-    io: Io,
     gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
-    content_dir: Io.Dir,
+    sources: source_provider.Provider,
     input_format: identity.InputFormat,
     result: *Result,
 ) !void {
     var resolver: DependencyResolver = .{
-        .io = io,
         .gpa = gpa,
         .retain = retain,
-        .content_dir = content_dir,
+        .sources = sources,
         .nodes = result.pages.items,
         .edges = &result.edges,
         .diagnostics = &result.diagnostics,
@@ -353,7 +357,7 @@ fn resolveDependencies(
     defer resolver.deinit();
 
     for (result.pages.items) |page| {
-        const source = source_io.readPageAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+        const source = sources.readPage(page.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EIO,
@@ -424,11 +428,16 @@ pub fn populateDependencyIndexFormat(
     var diagnostics: std.ArrayList(diag.Diagnostic) = .empty;
     defer diagnostics.deinit(gpa);
 
-    var resolver: DependencyResolver = .{
+    var dir_adapter = source_provider.Dir{
         .io = io,
+        .dir = content_dir,
+        .input_format = input_format,
+        .owns_dir = false,
+    };
+    var resolver: DependencyResolver = .{
         .gpa = gpa,
         .retain = retain,
-        .content_dir = content_dir,
+        .sources = .{ .dir = &dir_adapter },
         .nodes = nodes,
         .edges = &edges,
         .diagnostics = &diagnostics,
@@ -436,7 +445,7 @@ pub fn populateDependencyIndexFormat(
     defer resolver.deinit();
 
     for (nodes) |page| {
-        const source = source_io.readPageAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+        const source = dir_adapter.readPage(page.source_path, gpa) catch |err| {
             std.debug.print("error: EIO: failed to read {s}: {s}\n", .{ page.source_path, @errorName(err) });
             return err;
         };
@@ -648,24 +657,20 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
 /// used (same as HTML stage publish). Cross-volume **atomic** replace is not
 /// claimed. Not proven cross-platform atomic for concurrent readers. Temp
 /// staging path names never appear inside JSON.
-fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
-    if (result.out_dir.len > 0 and result.content_root.len > 0) {
-        try target_mod.validateExportPath(io, gpa, result.content_root, result.out_dir);
-    }
-    const cwd = Io.Dir.cwd();
-    try cwd.createDirPath(io, result.out_dir);
-
+fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result, sink_opt: ?artifact_sink.Sink) !void {
     const report = try renderBuildReport(gpa, result);
     defer gpa.free(report);
 
+    var dir_sink: ?artifact_sink.Dir = null;
+    defer if (dir_sink) |*d| d.deinit();
+    const sink = sink_opt orelse blk: {
+        dir_sink = artifact_sink.Dir.init(io, gpa, result.out_dir, result.content_root);
+        break :blk artifact_sink.Sink{ .dir = &dir_sink.? };
+    };
+
     if (!result.ok) {
-        // Remove graph-dependent artifacts from a previous successful build.
-        var out = try cwd.openDir(io, result.out_dir, .{});
-        defer out.close(io);
-        out.deleteFile(io, "manifest.json") catch {};
-        out.deleteFile(io, "graph.json") catch {};
-        out.deleteFile(io, "completion.json") catch {};
-        try out.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
+        try sink.emit("build-report.json", artifact_sink.json_media_type, report);
+        try sink.commit(false);
         result.published_graph_ir = false;
         return;
     }
@@ -677,41 +682,11 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
     const completion_json = try renderCompletion(gpa, result);
     defer gpa.free(completion_json);
 
-    // Sibling staging directory: `{out_dir}.boris-stage`
-    const stage_rel = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{result.out_dir});
-    defer gpa.free(stage_rel);
-
-    cwd.deleteTree(io, stage_rel) catch {};
-    try cwd.createDirPath(io, stage_rel);
-
-    {
-        var stage = try cwd.openDir(io, stage_rel, .{});
-        defer stage.close(io);
-        try stage.writeFile(io, .{ .sub_path = "manifest.json", .data = manifest });
-        try stage.writeFile(io, .{ .sub_path = "graph.json", .data = graph_json });
-        try stage.writeFile(io, .{ .sub_path = "completion.json", .data = completion_json });
-        try stage.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
-    }
-
-    // Publish: rename each staged file into the final directory (replaces if present).
-    // Cross-device: copy then delete source (not atomic; same honesty as HTML/RAG).
-    var stage_dir = try cwd.openDir(io, stage_rel, .{});
-    defer stage_dir.close(io);
-    var out_dir = try cwd.openDir(io, result.out_dir, .{});
-    defer out_dir.close(io);
-
-    const names = [_][]const u8{ "manifest.json", "graph.json", "completion.json", "build-report.json" };
-    for (names) |name| {
-        stage_dir.rename(name, out_dir, name, io) catch |err| switch (err) {
-            error.CrossDevice => {
-                try stage_dir.copyFile(name, out_dir, name, io, .{ .replace = true });
-                stage_dir.deleteFile(io, name) catch {};
-            },
-            else => return err,
-        };
-    }
-
-    cwd.deleteTree(io, stage_rel) catch {};
+    try sink.emit("manifest.json", artifact_sink.json_media_type, manifest);
+    try sink.emit("graph.json", artifact_sink.json_media_type, graph_json);
+    try sink.emit("completion.json", artifact_sink.json_media_type, completion_json);
+    try sink.emit("build-report.json", artifact_sink.json_media_type, report);
+    try sink.commit(true);
     result.published_graph_ir = true;
 }
 
@@ -765,8 +740,38 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var scan_list = page_mod.PageList.init(gpa, retain);
     defer scan_list.deinit();
 
+    var dir_adapter: ?source_provider.Dir = null;
+    defer if (dir_adapter) |*d| d.close();
+    const sources = options.sources orelse blk: {
+        dir_adapter = source_provider.Dir.open(io, options.content_root, options.input_format) catch |err| switch (err) {
+            error.ContentDirMissing => {
+                try result.diagnostics.append(gpa, .{
+                    .severity = .error_,
+                    .code = .EIO,
+                    .message = try std.fmt.allocPrint(retain, "content root \"{s}\" not found or not a directory", .{options.content_root}),
+                    .remediation = try retain.dupe(u8, "Create the content directory or pass --input=DIR"),
+                });
+                result.failure = .io;
+                diag.sortDiagnostics(result.diagnostics.items);
+                return result;
+            },
+            else => {
+                try result.diagnostics.append(gpa, .{
+                    .severity = .error_,
+                    .code = .EIO,
+                    .message = try std.fmt.allocPrint(retain, "failed to open content root \"{s}\": {s}", .{ options.content_root, @errorName(err) }),
+                    .remediation = try retain.dupe(u8, "Check that the content directory is readable"),
+                });
+                result.failure = .io;
+                diag.sortDiagnostics(result.diagnostics.items);
+                return result;
+            },
+        };
+        break :blk source_provider.Provider{ .dir = &dir_adapter.? };
+    };
+
     if (options.timings) |t| t.start(.scan);
-    scanner.scan(io, .{ .content_root = options.content_root, .input_format = options.input_format }, &scan_list) catch |err| switch (err) {
+    sources.scan(&scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
@@ -842,24 +847,10 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var db = page_mod.PageDb.init(gpa, retain);
     defer db.deinit();
 
-    const cwd = Io.Dir.cwd();
-    var content_dir = cwd.openDir(io, options.content_root, .{}) catch |err| {
-        try result.diagnostics.append(gpa, .{
-            .severity = .error_,
-            .code = .EIO,
-            .message = try std.fmt.allocPrint(retain, "failed to open content root \"{s}\": {s}", .{ options.content_root, @errorName(err) }),
-            .remediation = try retain.dupe(u8, "Check that the content directory is readable"),
-        });
-        result.failure = .io;
-        diag.sortDiagnostics(result.diagnostics.items);
-        return result;
-    };
-    defer content_dir.close(io);
-
     // Per-file scratch: freed after each promote so no parser slice can leak.
     if (options.timings) |t| t.start(.parse);
     for (scan_list.items()) |disc| {
-        const source = source_io.readPageAlloc(io, content_dir, disc.source_path, gpa) catch |err| {
+        const source = sources.readPage(disc.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EIO,
@@ -1027,6 +1018,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             .status = statusName(p.status),
             .published_at = p.published_at,
             .summary = p.summary,
+            .servings = p.servings,
             .tags = p.tags,
             .body_offset = p.body_offset,
             .role = if (p.parent != null) .satellite else .trunk,
@@ -1050,7 +1042,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     if (options.timings) |t| t.stop(.graph_validate);
     if (err_count == 0) {
         if (options.timings) |t| t.start(.dependency_resolve);
-        try resolveDependencies(io, gpa, retain, content_dir, options.input_format, &result);
+        try resolveDependencies(gpa, retain, sources, options.input_format, &result);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
         if (options.timings) |t| t.stop(.dependency_resolve);
@@ -1078,13 +1070,16 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 /// Full IR pipeline. Validates the whole graph before publishing artifacts.
 /// Graph-dependent IR is published only when validation succeeds.
 pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
-    try target_mod.validateExportPath(io, gpa, options.content_root, options.out_dir);
+    if (options.sink == null) {
+        try target_mod.validateExportPath(io, gpa, options.content_root, options.out_dir);
+    }
 
     var result = try compile(io, gpa, .{
         .content_root = options.content_root,
         .quiet = options.quiet,
         .input_format = options.input_format,
         .timings = options.timings,
+        .sources = options.sources,
     });
     errdefer result.deinit();
 
@@ -1094,7 +1089,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
     if (result.ok) {
         log(options, "boris: ignite emitting IR → {s}\n", .{options.out_dir});
     }
-    try publishArtifacts(io, gpa, &result);
+    try publishArtifacts(io, gpa, &result, options.sink);
     if (result.ok) {
         log(options, "boris: reset done ({d} page(s))\n", .{result.pages.items.len});
     }
@@ -1150,6 +1145,77 @@ fn readOutFile(io: Io, gpa: std.mem.Allocator, dir_path: []const u8, name: []con
     var dir = try cwd.openDir(io, dir_path, .{});
     defer dir.close(io);
     return try readFileAlloc(io, dir, name, gpa);
+}
+
+test "compileBundle-shaped memory provider needs no content directory" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const files = [_]source_provider.File{
+        .{ .path = "index.md", .bytes = "---\ntitle: Home\nstatus: published\n---\n# Home\n\n{{include includes/tip.md}}\n" },
+        .{ .path = "includes/tip.md", .bytes = "a tip\n" },
+    };
+    var mem = try source_provider.Memory.init(gpa, &files, .markdown);
+    defer mem.deinit();
+    var result = try compile(io, gpa, .{
+        .content_root = "memory://bundle",
+        .quiet = true,
+        .sources = .{ .memory = &mem },
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    try std.testing.expectEqual(@as(usize, 1), result.pages.items.len);
+    try std.testing.expectEqualStrings("index", result.pages.items[0].id);
+}
+
+test "memory source plus memory sink publishes IR without a host directory" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const files = [_]source_provider.File{
+        .{ .path = "index.md", .bytes = "---\ntitle: Home\nstatus: published\n---\n# Home\n" },
+    };
+    var mem = try source_provider.Memory.init(gpa, &files, .markdown);
+    defer mem.deinit();
+    var sink = artifact_sink.Memory.init(gpa);
+    defer sink.deinit();
+    var result = try run(io, gpa, .{
+        .content_root = "memory://bundle",
+        .out_dir = "",
+        .quiet = true,
+        .sources = .{ .memory = &mem },
+        .sink = .{ .memory = &sink },
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    try std.testing.expect(result.published_graph_ir);
+    try std.testing.expect(sink.get("manifest.json") != null);
+    try std.testing.expect(sink.get("graph.json") != null);
+    try std.testing.expect(sink.get("completion.json") != null);
+    try std.testing.expect(sink.get("build-report.json") != null);
+}
+
+test "memory sink failure emits build-report only" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const files = [_]source_provider.File{
+        .{ .path = "orphan.md", .bytes = "---\ntitle: Orphan\nparent: missing\n---\n# Orphan\n" },
+    };
+    var mem = try source_provider.Memory.init(gpa, &files, .markdown);
+    defer mem.deinit();
+    var sink = artifact_sink.Memory.init(gpa);
+    defer sink.deinit();
+    var result = try run(io, gpa, .{
+        .content_root = "memory://bundle",
+        .out_dir = "",
+        .quiet = true,
+        .sources = .{ .memory = &mem },
+        .sink = .{ .memory = &sink },
+    });
+    defer result.deinit();
+    try std.testing.expect(!result.ok);
+    try std.testing.expect(!result.published_graph_ir);
+    try std.testing.expect(sink.get("build-report.json") != null);
+    try std.testing.expect(sink.get("manifest.json") == null);
+    try std.testing.expect(sink.get("graph.json") == null);
 }
 
 test "e2e valid fixture builds three JSON artifacts" {
@@ -1331,6 +1397,7 @@ test "Cooklang mode extracts recipes, links them, and fails closed" {
     const carbonara = valid.pages.items[0];
     try std.testing.expectEqualStrings("carbonara", carbonara.id);
     try std.testing.expectEqualStrings("carbonara.cook", carbonara.source_path);
+    try std.testing.expectEqual(@as(u32, 2), carbonara.servings.?.count);
 
     // The structured recipe is the point of the format; prose alone would make
     // an ingredient unqueryable.
