@@ -106,6 +106,9 @@ run_image() {
       cat "$json" >&2
     fi
   fi
+  # errexit is re-enabled by now; a bare `return 1` would kill the script
+  # even though the caller captures the status inside `set +e`.
+  set +e
   return "$rc"
 }
 
