@@ -5,6 +5,7 @@ on:
     branches: [main, afterparty]
   pull_request:
     branches: [main, afterparty, 'codex/editor-*']
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -251,6 +252,29 @@ jobs:
 
       - name: Native --once smoke
         run: bash scripts/test-job-runner-image.sh
+
+  # Optional, manual-only parity lane: builds the example container image and
+  # byte-diffs its artifacts against a native --once run. Deliberately NOT in
+  # the required `ci` aggregate: Docker-in-CI proved flaky on this branch, and
+  # this is an operator-parity check, not a release gate. The native smoke
+  # above stays the required check. Run it with:
+  #   gh workflow run ci.yml --ref <branch>
+  job-runner-image-parity:
+    name: job-runner image parity (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build image and diff artifacts vs native
+        run: bash scripts/test-job-runner-image-parity.sh
 
   # Dedicated content-audit lane covering tools/content-audit/** and the root
   # build.zig content-audit wiring. Unlike the path-gated tool lanes above,

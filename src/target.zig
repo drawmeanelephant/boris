@@ -88,7 +88,13 @@ pub fn hasAbsPathPrefix(path: []const u8, prefix: []const u8, case_insensitive: 
     else
         std.mem.eql(u8, head, prefix);
     if (!eq) return false;
-    return path.len == prefix.len or path[prefix.len] == '/';
+    if (path.len == prefix.len) return true;
+    // The filesystem root is a valid prefix for every absolute path. The
+    // component-boundary check below would otherwise reject every path when
+    // the workspace is the root (e.g. boris-job-runner with cwd `/` in a
+    // container image): path[1] is never `/`.
+    if (prefix.len == 1 and prefix[0] == '/') return true;
+    return path[prefix.len] == '/';
 }
 
 /// True when either path equals the other or one is a proper nested child of the other.
@@ -456,6 +462,11 @@ test "hasAbsPathPrefix boundary" {
     try std.testing.expect(!hasAbsPathPrefix("/tmp/ws2/out", "/tmp/ws", false));
     try std.testing.expect(hasAbsPathPrefix("/tmp/ws/dist/prod", "/tmp/ws/dist", false));
     try std.testing.expect(!hasAbsPathPrefix("/tmp/ws/dist-prod", "/tmp/ws/dist", false));
+    // Root workspace: every absolute path is under `/` (boris-job-runner
+    // runs with cwd `/` inside the official container image).
+    try std.testing.expect(hasAbsPathPrefix("/tmp/ws/dist", "/", false));
+    try std.testing.expect(hasAbsPathPrefix("/", "/", false));
+    try std.testing.expect(!hasAbsPathPrefix("relative", "/", false));
 }
 
 test "validateExportPath rejects content aliases and workspace escapes" {
