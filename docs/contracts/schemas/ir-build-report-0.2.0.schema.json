@@ -3,10 +3,14 @@
   "title": "Boris IR build-report.json (v0.2)",
   "description": "Machine-readable twin of the `build-report.json` section of docs/contracts/ir-schema.md. The prose contract remains normative. Unlike manifest.json and graph.json, this file is published on content failure too (ok: false, non-empty diagnostics).",
   "type": "object",
-  "required": ["schemaVersion", "ok", "contentRoot", "outDir", "pageCount", "errorCount", "diagnostics"],
+  "required": ["schemaVersion", "compiler", "ok", "contentRoot", "outDir", "pageCount", "errorCount", "diagnostics"],
   "additionalProperties": false,
   "properties": {
     "schemaVersion": { "const": "0.2.0" },
+    "compiler": {
+      "type": "string",
+      "description": "Compiler identity, e.g. \"boris/0.8.1\"; identical to manifest.json's `compiler` on the same run."
+    },
     "ok": {
       "type": "boolean",
       "description": "true iff zero error diagnostics and freeze succeeded."

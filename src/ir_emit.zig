@@ -621,6 +621,10 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: anytype, versions: Vers
     try json_out.writeString(&buf, gpa, artifactSchemaVersion(result, versions));
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"compiler\": ");
+    try json_out.writeString(&buf, gpa, artifactCompilerId(result, versions));
+    try buf.appendSlice(gpa, ",\n");
+    try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"ok\": ");
     try json_out.writeBool(&buf, gpa, result.ok);
     try buf.appendSlice(gpa, ",\n");
