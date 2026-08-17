@@ -96,6 +96,8 @@ Options:
                       Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
   --incremental       Content-addressed incremental HTML rendering (HTML mode)
   --watch             Compatibility flag; same as the watch command
+  --watch-json        Emit one NDJSON event per build phase on stderr (watch only);
+                      see docs/contracts/watch-mode.md §8
   --serve             Serve the built tree over loopback HTTP (watch only);
                       auto-reload helper: http://127.0.0.1:PORT/__boris/
   --port N            Loopback port for --serve (default 8090; 0 = ephemeral);
