@@ -5,6 +5,7 @@ on:
     branches: [main, afterparty]
   pull_request:
     branches: [main, afterparty, 'codex/editor-*']
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
