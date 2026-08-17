@@ -96,6 +96,10 @@ run_image() {
   if [[ "$rc" -ne 0 ]]; then
     printf '    container log (%s):\n' "$outlog" >&2
     cat "$outlog" >&2
+    if [[ -f "$json" ]]; then
+      printf '    container result (%s):\n' "$json" >&2
+      cat "$json" >&2
+    fi
   fi
   return "$rc"
 }
