@@ -511,6 +511,7 @@ fn handleSigInt(sig: std.posix.SIG) callconv(.c) void {
 fn isRecoverableBuildError(err: anyerror) bool {
     return switch (err) {
         error.ParseFailed,
+        error.GraphValidationFailed,
         error.ComponentFailed,
         error.TextileFailed,
         error.InputFormatMismatch,
@@ -1368,6 +1369,10 @@ test "isRecoverableBuildError classification stays content-only" {
     // Unsafe SVG is an author-correctable content-validation failure: recoverable
     // in both single-target and multi-target watch paths (same session, no restart).
     try std.testing.expect(isRecoverableBuildError(error.AssetUnsafeSvg));
+    // Graph validation (duplicate id, missing parent, cycles, …) is an
+    // author-correctable content failure, exactly like ParseFailed: recoverable
+    // in both single-target and multi-target watch paths (#640).
+    try std.testing.expect(isRecoverableBuildError(error.GraphValidationFailed));
     // Hard filesystem/system failures must still terminate the watcher.
     try std.testing.expect(!isRecoverableBuildError(error.FileNotFound));
     try std.testing.expect(!isRecoverableBuildError(error.AccessDenied));
