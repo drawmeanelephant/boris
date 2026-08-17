@@ -26,7 +26,7 @@ boris recipe-scale --input DIR --id PAGE (--factor TEXT | --servings N) [--cookl
 | `impact ID` | Emit the transitive dependents of a page or source endpoint | Nothing unless `--report` is supplied |
 | `watch` | Run an HTML build, then rebuild after debounced source/layout changes | HTML output selected by build options |
 | `plan` | Parse and normalize one publication profile without executing it | Nothing; normalized declaration JSON is written to stdout |
-| `standard-site <subcommand>` | Explicit Standard.site family (plan / records / verify / login / sessions / logout / publish / smoke) | Plan/records/verify/evidence/smoke artifacts only when `--out` is given; login writes a `0600` session document under the session root |
+| `standard-site <subcommand>` | Explicit Standard.site family (plan / records / verify / login / sessions / logout / publish / smoke) | Plan/records/verify/publish-evidence/smoke artifacts on stdout or `--out PATH`; login writes a `0600` session document under the session root |
 | `nostr plan` | Emit the offline NIP-23 publication plan for the selected profile (no key, no signature, no relay) | Nothing; plan JSON on stdout |
 | `nostr sign` | Sign a plan artifact into a signed-event bundle; the key is read once from stdin (hex or nsec) and never from argv/profile/env | Nothing; bundle JSON on stdout or `--out PATH` |
 | `nostr publish` | Send the exact signed events from a bundle to the plan's relays over RFC-6455 WebSocket (no key; the bundle was signed offline). Every relay interaction is bounded and produces per-relay evidence; the run always reaches a `complete`/`partial`/`failed`/`incomplete` verdict | Nothing; the report JSON on stdout or `--out PATH` |
@@ -98,6 +98,43 @@ content or writing artifacts. `--version` / `-V` exit `0` printing the compiler
 id (`pipeline.compiler_id`, e.g. `boris/0.8.1`) to stdout without reading
 content or writing artifacts.
 
+## stdout machine surface
+
+stdout is a real machine surface, not a void. A closed set of commands and
+flags emit one machine-readable document on stdout; everything else keeps
+stdout empty, so a consumer can distinguish "stdout is empty by contract"
+from "stdout is empty because nothing was requested". Progress, diagnostics
+(text form), `--help`, and the human analysis summary stay on **stderr**.
+
+The closed stdout-emitting set, with each entry's default document:
+
+| Command / flag | stdout document |
+|---|---|
+| `--version` / `-V` | One line: the base compiler id |
+| `--timings` | `boris-timings` JSON report (appended after the run, including failed runs) |
+| `plan` | Normalized publication declaration JSON |
+| `standard-site plan` | Standard.site plan JSON |
+| `standard-site records` | Standard.site records JSON |
+| `standard-site verify` | Standard.site verify result JSON |
+| `standard-site publish` | Standard.site publish evidence JSON |
+| `standard-site smoke` | Standard.site smoke result JSON |
+| `nostr plan` | Offline NIP-23 plan JSON |
+| `nostr sign` | Signed-event bundle JSON |
+| `nostr publish` | Publish report JSON |
+| `recipe-scale` | Derived Cooklang scale-view JSON |
+
+Where a command defines `--out PATH`, that flag writes the same document to a
+file instead of stdout; without `--out`, the document is stdout-only for that
+command. `plan` is the exception: it always writes its single document to
+stdout and rejects `--timings`, because its stdout is reserved for one JSON
+document and no trailing timing report may be appended.
+
+Everything not listed here — including `build`, `validate`, `check`, `impact`,
+`watch`, `init`, `standard-site login|sessions|logout`, and all bare HTML/IR/
+RAG/Context/llms/RSS/sitemap builds — leaves stdout empty. `check` and
+`impact` without `--report` print the human or JSON analysis to **stderr**,
+never stdout.
+
 ## Machine-readable reports
 
 Consumers should invoke:
@@ -137,6 +174,20 @@ link-audit, and layout/theme — and is the surface the preview server and
 editor consume. `--report` is rejected on `watch` and on non-HTML build modes;
 `--format` remains analysis-only. See
 [`diagnostics.md`](diagnostics.md#html-path-machine-readable-report).
+
+### `--report` per mode
+
+`--report PATH` has two meanings, one per command family:
+
+| Command | What `--report PATH` writes | Without `--report` |
+|---|---|---|
+| `check` / `impact` | The Documentation Intelligence analysis report (human or JSON per `--format`) | The same report prints to **stderr** |
+| `build` / `validate` | The HTML-path diagnostics report (`html-build-report-0.1.0` JSON) | No report file; diagnostics stay on stderr as text |
+
+On `build`/`validate` the file is additive: stderr text and exit codes are
+unchanged with or without it. On `check`/`impact` the file replaces the
+stderr print of the report. `--report` is rejected on `watch` and on non-HTML
+build modes (IR/RAG/Context/llms/RSS/sitemap).
 
 ## Version query
 
