@@ -183,8 +183,9 @@ Cloudflare Containers / Wasm
   [`hosts/cloudflare-worker/`](https://github.com/drawmeanelephant/boris/blob/afterparty/hosts/cloudflare-worker/README.md);
   the contract is
   [`docs/contracts/embedding.md`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/embedding.md).
-  Neither is a `publication.target`. Containers stay on
-  [#300](https://github.com/drawmeanelephant/boris/issues/300).
+  Containers have an official hosted-runner example (`boris-job-runner`)
+  with the operator path in `docs/cloudflare-container.md`. Neither is a
+  `publication.target`.
 
 The editor
 : An authoring surface. It can run `Build HTML`. It is not a publication

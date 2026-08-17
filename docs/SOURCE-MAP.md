@@ -35,6 +35,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | Diagnostics | `src/diag.zig`, `src/diagnostic.zig` | [diagnostics.md](contracts/diagnostics.md) |
 | Graph health | `src/intelligence.zig` | [documentation-intelligence.md](contracts/documentation-intelligence.md) |
 | Doctor | `src/doctor.zig` | Internal snapshot kernel only. No public `boris doctor` command. |
+| Hosted job runner (Cloudflare Containers) | `src/job_runner.zig` (`boris-job-runner`) | [cloudflare-container-runner.md](contracts/cloudflare-container-runner.md) |
 
 Outside `src/`:
 

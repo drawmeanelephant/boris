@@ -1,0 +1,23 @@
+{
+  "name": "boris-job-runner",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-16",
+  "observability": { "enabled": true },
+  "limits": { "cpu_ms": 300000 },
+  "containers": [
+    {
+      "class_name": "BorisJobRunner",
+      "image": "./Dockerfile",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "class_name": "BorisJobRunner", "name": "BORIS_JOBS" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["BorisJobRunner"] }
+  ]
+}

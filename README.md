@@ -345,7 +345,7 @@ reviewed or uploaded to an LLM when useful.
 - [ ] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)).
 - [x] Nostr NIP-23 CLI (`plan` / `sign` / `publish`). Not a verified target.
 - [x] Embeddable `compileBundle` (native + Wasm) and an example Cloudflare Worker host ([#301](https://github.com/drawmeanelephant/boris/issues/301) M0–M7). Not a verified target. Live Cloudflare smoke and isolate-peak measurement remain open on the parent issue.
-- [ ] Cloudflare Containers ([#300](https://github.com/drawmeanelephant/boris/issues/300)). Complementary native-binary path. Not a verified target.
+- [x] Cloudflare container hosted runner ([#300](https://github.com/drawmeanelephant/boris/issues/300)). Example only; not a verified target.
 
 Current phase and known gaps live in [`docs/STATUS.md`](docs/STATUS.md).
 

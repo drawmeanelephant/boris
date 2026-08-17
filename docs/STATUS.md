@@ -25,7 +25,7 @@ projections. HTML `dist/` is the **default target**, not the whole product.
 | Evidence chain | `artifacts.json` → `checks.json` → `claims.json` → `touches.json` → Proof Pack. |
 | Editor | In-tree authoring surface. Compiler-backed. Not a second stack. |
 | Labs | Standalone migration and source-RAG tools. In the repo story. Not runtime dependencies. |
-| Parked | Cloudflare Containers (#300). Freestanding Wasm (#301) has an example Worker host; it is not a verified target. |
+| Parked | Cloudflare Containers (#300) has an official hosted-runner example; Freestanding Wasm (#301) has an example Worker host. Neither is a verified target. |
 
 This is not “a bookseller with a few extras in the basement.” It is also not
 two products sharing a git remote. One compiler, several targets, one graph.
@@ -102,8 +102,8 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Card | State |
 |---|---|
-| Cloudflare Containers (#300) | Open. Native Boris behind a Worker. Not a static rehost. |
-| Freestanding Wasm (#301) | Cards M0–M7 exist. Example Worker host is [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/). Not a `publication.target`. #301 stays open: no recorded live Cloudflare invoke, isolate-peak unmeasured, RAG/context not in the first embed profile. |
+| Cloudflare Containers (#300) | **Example runner shipped.** `boris-job-runner` execs native `boris` once (`--once` / `--listen`). Official Worker+Container example under `examples/cloudflare-container/`. Not a verified target. |
+| Freestanding Wasm (#301) | Cards M0–M7 exist. Example Worker host is [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/). Not a `publication.target`. #301 closed with a live Cloudflare smoke and isolate-peak measurements recorded in the worker README; RAG/context not in the first embed profile. |
 | Doctor | **Internal kernel only** — `src/doctor.zig` audits a rendered snapshot. No public `boris doctor` command. The old design note was retired; this row is the remaining card. |
 | Nostr verified-target extras ([#584](https://github.com/drawmeanelephant/boris/issues/584)) | Location adapter / registry membership **declined**. Proof Pack and a live-smoke **gate** stay parked unless a product reason appears. |
 
@@ -114,6 +114,7 @@ zig build
 zig build test
 ./scripts/release-gate.sh
 
+./zig-out/bin/boris-job-runner --once --archive IN.tar --result-json OUT.json
 ./zig-out/bin/boris --quiet                         # HTML → dist/
 ./zig-out/bin/boris validate --quiet                # prepublication validation; no output
 ./zig-out/bin/boris --out .boris --quiet            # IR only
@@ -155,7 +156,7 @@ context, test-throughput audit) is **done**. It is not relisted as upcoming.
 | 5 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 6 | Standard.site HTML verify emit | **Shipped [#569](https://github.com/drawmeanelephant/boris/pull/569)** | `boris --profile` emits verification surfaces from the HTML build. |
 | 7 | Nostr as a verified target | **Decided — stays off the seam** | Location adapter / registry membership declined. See [`publication-platforms.md`](contracts/publication-platforms.md). Proof Pack and a live-smoke **gate** stay parked on [#584](https://github.com/drawmeanelephant/boris/issues/584) and are not implied. |
-| 8 | Cloudflare embedding | **#301 cards landed; parent + #300 remain open** | Example Worker host is [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/). Not a `publication.target`. Live Cloudflare smoke, isolate-peak measurement, and RAG/context embed remain on [#301](https://github.com/drawmeanelephant/boris/issues/301). Containers stay on [#300](https://github.com/drawmeanelephant/boris/issues/300). |
+| 8 | Cloudflare embedding | **Both example surfaces shipped: #301 Worker host + #300 hosted runner** | Example Worker host is [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/); hosted `boris-job-runner` + Worker example under `examples/cloudflare-container/`. Neither is in `publication.target`. |
 
 ## Release bookkeeping
 
@@ -217,6 +218,7 @@ The release audit found these follow-ups:
 | [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration-lab commands |
 | [`tools/search-index/README.md`](../tools/search-index/README.md) | Rendered search tool |
 | [`docs/github-pages.md`](github-pages.md) | GitHub Pages setup, location model, workflow, and evidence boundary |
+| [`docs/cloudflare-container.md`](cloudflare-container.md) | Hosted runner + Cloudflare Containers example (not a target) |
 | [`docs/standard-site.md`](standard-site.md) | Standard.site first-tester path |
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
 | [`AGENTS.md`](../AGENTS.md) | Repository policy and agent constraints |

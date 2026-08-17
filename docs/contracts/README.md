@@ -89,6 +89,7 @@ per topic:
 | Publication Touch Atlas | [publication-touches.md](publication-touches.md) |
 | Publication Proof Pack | [publication-proof-pack.md](publication-proof-pack.md) |
 | Publication platform model / deployment matrix | [publication-platforms.md](publication-platforms.md) |
+| Hosted job runner (Cloudflare Containers) | [cloudflare-container-runner.md](cloudflare-container-runner.md) |
 | AT Protocol OAuth core and host-capability boundary | [atproto-oauth.md](atproto-oauth.md) |
 | Standard.site target (records, rkeys, plan, publish) | [standard-site.md](standard-site.md) |
 | Standard.site app-password login | [atproto-app-password.md](atproto-app-password.md) |

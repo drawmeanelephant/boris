@@ -39,6 +39,12 @@ rg -n 'https?://|<script src=|@import' test-output/<name> --glob '*.html' --glob
 That command should print nothing. Report compiler defects as Boris issues;
 do not repair the engine from an example.
 
+## Host examples (not sites)
+
+| Path | What it is |
+|---|---|
+| [`cloudflare-container`](cloudflare-container/) | Worker + Container host for `boris-job-runner` ([#300](https://github.com/drawmeanelephant/boris/issues/300)). Not a publication target. |
+
 ## Related
 
 - Theme bar and catalog: [`themes/README.md`](../themes/README.md)
