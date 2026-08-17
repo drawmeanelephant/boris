@@ -279,7 +279,8 @@ The host:
   output-byte limits **below** current Worker caps
 - uploads successful artifacts to the `ARTIFACTS` R2 binding
 - returns structured HTTP: `ok`, `status`, `diagnostics`, artifact
-  manifest (sizes + sha256, not payload bytes), and an evidence summary
+  manifest (sizes, plus sha256 when the caller requests it, not payload
+  bytes), and an evidence summary
 - does not upload on validation failure; failed compiles cannot report
   successful claims
 

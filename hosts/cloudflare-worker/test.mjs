@@ -117,6 +117,25 @@ expect(ok.elapsed_ms >= 0, "elapsed_ms");
 console.log(
   `valid: ${ok.artifacts.length} artifacts, ${ok.elapsed_ms} ms, r2=${ok.r2.keys.length}`,
 );
+expect(ok.artifacts.every((a) => a.sha256 === undefined), "sha256 should be omitted by default");
+
+const hashed = await runCompile(
+  abi,
+  {
+    html: true,
+    evidence: true,
+    include_sha256: true,
+    files: valid.map((f) => ({ path: f.path, bytes: b64(f.bytes) })),
+    r2_prefix: "smoke/hashed",
+  },
+  { ARTIFACTS: new MemoryR2() },
+);
+expect(hashed.ok === true, "hashed compile not ok");
+expect(
+  hashed.artifacts.every((a) => typeof a.sha256 === "string" && a.sha256.length === 64),
+  "sha256 present when include_sha256 is set",
+);
+console.log(`hashed: ${hashed.artifacts.length} artifacts with sha256`);
 
 const poisoned = [
   loadFile("fixtures/poisoned/orphan.md"),
