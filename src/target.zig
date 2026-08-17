@@ -478,6 +478,67 @@ test "validateExportPath rejects content aliases and workspace escapes" {
     try validateExportPath(io, gpa, "content", "rag-out");
 }
 
+test "validateExportPath accepts absolute outputs inside cwd, rejects outside" {
+    // The workspace-containment rule (docs/contracts/cli.md) applies to IR/RAG/
+    // context/llms exports exactly as it does to HTML targets: the boundary is
+    // the process cwd, checked lexically on the resolved absolute path. An
+    // absolute output path that resolves inside the cwd is accepted; one that
+    // resolves outside is WorkspaceEscape, and the workspace root itself is
+    // TargetOutputCollision.
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const cwd_owned = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_owned);
+    normalizeSlashesInPlace(cwd_owned);
+    const cwd_path = stripTrailingSlash(cwd_owned);
+
+    const inside_abs = try std.fs.path.join(gpa, &.{ cwd_path, "ir-abs-inside" });
+    defer gpa.free(inside_abs);
+    try validateExportPath(io, gpa, "content", inside_abs);
+
+    const outside_abs = try std.fs.path.join(gpa, &.{ cwd_path, "..", "boris-ir-outside-workspace" });
+    defer gpa.free(outside_abs);
+    try std.testing.expectError(error.WorkspaceEscape, validateExportPath(io, gpa, "content", outside_abs));
+
+    // Workspace root itself (any spelling that resolves to cwd) is a collision,
+    // not an escape: targeting cwd would publish over the source tree.
+    try std.testing.expectError(error.TargetOutputCollision, validateExportPath(io, gpa, "content", cwd_path));
+}
+
+test "validateTargets accepts absolute output inside cwd, rejects outside and root" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const opts = ValidateTargetsOptions{};
+    const cwd_owned = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_owned);
+    normalizeSlashesInPlace(cwd_owned);
+    const cwd_path = stripTrailingSlash(cwd_owned);
+
+    const inside_abs = try std.fs.path.join(gpa, &.{ cwd_path, "tgt-abs-inside" });
+    defer gpa.free(inside_abs);
+    {
+        const specs = [_]TargetSpec{.{ .name = "t", .output_dir = inside_abs }};
+        const plans = try validateTargets(io, gpa, &specs, opts);
+        defer {
+            for (plans) |plan| gpa.free(plan.resolved_output_dir);
+            gpa.free(plans);
+        }
+        try std.testing.expectEqual(@as(usize, 1), plans.len);
+    }
+
+    const outside_abs = try std.fs.path.join(gpa, &.{ cwd_path, "..", "boris-tgt-outside-workspace" });
+    defer gpa.free(outside_abs);
+    {
+        const specs = [_]TargetSpec{.{ .name = "t", .output_dir = outside_abs }};
+        try std.testing.expectError(error.WorkspaceEscape, validateTargets(io, gpa, &specs, opts));
+    }
+
+    {
+        const specs = [_]TargetSpec{.{ .name = "t", .output_dir = cwd_path }};
+        try std.testing.expectError(error.TargetOutputCollision, validateTargets(io, gpa, &specs, opts));
+    }
+}
+
 test "validateTargets overlap, nesting, sort, and escape checks" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
