@@ -2009,7 +2009,7 @@ pub fn printUsage() void {
         \\  --quiet             Suppress progress + success stderr; errors always print
         \\                      (exit codes/artifacts unchanged)
         \\  --format human|json  Analysis output format for check/impact (default human)
-        \\  --report PATH        Write an analysis report instead of stdout
+        \\  --report PATH        Write the report to PATH (check/impact analysis; build/validate HTML diagnostics)
         \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
         \\  --profile PATH       Selected publication profile for `plan`
         \\  --id PAGE            Recipe page entity id (`recipe-scale`; required)

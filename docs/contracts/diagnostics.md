@@ -309,8 +309,8 @@ Rules:
 
 | Stream | Content |
 |--------|---------|
-| **stderr** | Diagnostics (text form); optional progress logs (`boris: load/roll/ignite/reset`) |
-| **stdout** | Reserved; v0.2 prints nothing on the success path (progress uses stderr via `std.debug`) |
+| **stderr** | Diagnostics (text form); optional progress logs (`boris: load/roll/ignite/reset`); the human/JSON analysis summary when `check`/`impact` run without `--report` |
+| **stdout** | Machine payloads for a closed command/flag set (`--version`, `--timings`, `plan`, `standard-site plan|records|verify|publish|smoke`, `nostr plan|sign|publish`, `recipe-scale`); empty for everything else. See the [CLI contract](cli.md#stdout-machine-surface) |
 
 ---
 

@@ -203,7 +203,7 @@ for the normative contract.
 | Option | Meaning |
 |---|---|
 | `--format human\|json` | Human summary or deterministic JSON; analysis commands only |
-| `--report PATH` | Write the analysis report to PATH instead of standard output |
+| `--report PATH` | Write the analysis report to PATH instead of stderr (check/impact) |
 | `--quiet` | Suppress normal progress and diagnostic text where supported |
 
 ## Publication profiles
