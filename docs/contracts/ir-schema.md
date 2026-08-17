@@ -608,18 +608,41 @@ and reverse-index skeleton):
 Key order (root):
 
 ```text
-schemaVersion, ok, contentRoot, outDir, pageCount, errorCount, diagnostics
+schemaVersion, compiler, ok, contentRoot, outDir, pageCount, errorCount, diagnostics
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `schemaVersion` | string | `"0.2.0"` |
+| `compiler` | string | Compiler identity; identical to `manifest.json`'s `compiler` on the same run (e.g. `"boris/0.8.1"`, or a `+`-suffixed variant for Cooklang / semantic-relations corpora) |
 | `ok` | boolean | `true` iff zero error diagnostics and freeze succeeded |
 | `contentRoot` | string | Same string as pipeline option |
 | `outDir` | string | Same string as pipeline option |
 | `pageCount` | integer | Number of page nodes retained after successful parses |
 | `errorCount` | integer | Count of severity=`error` diagnostics |
 | `diagnostics` | array | Sorted diagnostics (see [diagnostics.md](diagnostics.md)) |
+
+`compiler` is written on **both** the success and the content-failure path, so
+a tool reading diagnostics from a failed run can always attribute them to the
+exact compiler that produced them without consulting a sidecar.
+
+### Compiler identity across artifacts
+
+The same compiler identity is recorded under deliberately different field
+names per artifact family. Consumers key off one lookup per artifact; no
+rename is planned because renaming would break existing readers:
+
+| Artifact | Field | Value source |
+|----------|-------|--------------|
+| `manifest.json` | `compiler` | `artifactCompilerId` |
+| `build-report.json` | `compiler` | `artifactCompilerId` |
+| `completion.json` | `compiler_id` | `artifactCompilerId` |
+| `html-build-report` (`build`/`validate --report`) | `compilerId` | `pipeline.compiler_id` |
+| `graph.json` | — | identity-free by design; topology only |
+
+`graph.json` deliberately carries no identity field: it is the frozen topology
+artifact and is always published alongside `manifest.json`, whose `compiler`
+field is the identity of record for that artifact set.
 
 ### Diagnostic object (in report)
 

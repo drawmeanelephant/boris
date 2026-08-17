@@ -93,12 +93,15 @@ build_set() {
   "$BORIS" --input "$root" "$@" --out "$OUT/$label" --quiet \
     || fail "$label IR build failed"
   [[ -f "$OUT/$label/manifest.json" ]] || fail "$label: manifest.json missing"
+  [[ -f "$OUT/$label/build-report.json" ]] || fail "$label: build-report.json missing"
   [[ -f "$OUT/$label/completion.json" ]] || fail "$label: completion.json missing"
   local artifact_id recorded
-  # manifest.json records the id under `compiler`; completion.json under
-  # `compiler_id` — both must satisfy the contract's provenance pattern.
+  # manifest.json and build-report.json record the id under `compiler`;
+  # completion.json under `compiler_id` — each must satisfy the contract's
+  # provenance pattern (base id or a +-suffixed variant).
   for recorded in \
       "$(sed -n 's/.*"compiler": "\([^"]*\)".*/\1/p' "$OUT/$label/manifest.json" | head -1)" \
+      "$(sed -n 's/.*"compiler": "\([^"]*\)".*/\1/p' "$OUT/$label/build-report.json" | head -1)" \
       "$(sed -n 's/.*"compiler_id": "\([^"]*\)".*/\1/p' "$OUT/$label/completion.json" | head -1)"; do
     [[ -n "$recorded" ]] || fail "$label: recorded id empty in an artifact"
     case "$recorded" in

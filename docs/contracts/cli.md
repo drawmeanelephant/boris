@@ -202,8 +202,9 @@ boris/0.8.1
 
 The id is `pipeline.compiler_id` (`src/pipeline.zig`): the base compiler id,
 never suffixed. Artifacts record the base id, or a variant-suffixed id when
-the corpus engages the Cooklang or semantic-relations stack — both the IR
-`manifest.json` (`compiler` field) and the editor `completion.json`
+the corpus engages the Cooklang or semantic-relations stack — the IR
+`manifest.json` (`compiler` field), the IR `build-report.json` (`compiler`
+field, success and failure alike), and the editor `completion.json`
 (`compiler_id` field) write e.g. `boris/0.8.1` for a Markdown corpus and
 `boris/0.8.1+cooklang` for a Cooklang corpus. Scripts and CI can therefore
 pin the compiler, and provenance checks must accept the base or a
