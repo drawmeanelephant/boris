@@ -213,9 +213,7 @@ pub fn freezeSiteFromPageDb(
         if (sink) |s| for (diags.items) |d| s.append(d);
         for (diags.items) |d| {
             if (quiet and d.severity != .error_) continue;
-            const line = diag.formatText(d, gpa) catch continue;
-            defer gpa.free(line);
-            std.debug.print("{s}\n", .{line});
+            diag.printText(d, gpa);
         }
         return error.GraphValidationFailed;
     }
@@ -609,10 +607,12 @@ pub fn loadAndPromoteFormat(
     scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => return error.ContentDirMissing,
         error.InputFormatMismatch => {
-            if (input_format == .cook) {
-                std.debug.print("error: ECOOKLANG: content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode [Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input]\n", .{});
-            } else {
-                std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
+            if (!diag.text_suppressed.load(.unordered)) {
+                if (input_format == .cook) {
+                    std.debug.print("error: ECOOKLANG: content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode [Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input]\n", .{});
+                } else {
+                    std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
+                }
             }
             return error.InputFormatMismatch;
         },
@@ -670,7 +670,7 @@ fn promoteScannedPages(
 
         const parsed = parser.parse(source);
         if (parsed.diagnostic) |pd| {
-            const text = try diag.formatText(.{
+            diag.printText(.{
                 .severity = .error_,
                 .code = diag.parserCategoryToCode(pd.category),
                 .message = pd.message,
@@ -679,8 +679,6 @@ fn promoteScannedPages(
                 .line = pd.line,
                 .column = pd.column,
             }, gpa);
-            defer gpa.free(text);
-            std.debug.print("{s}\n", .{text});
             return error.ParseFailed;
         }
         // Validates the adapter subset for this page; the adapted body is
@@ -1195,7 +1193,7 @@ const CachedLayout = struct {
     theme_material: []u8 = &.{},
 };
 
-fn isContentCompileFailure(err: anyerror) bool {
+pub fn isContentCompileFailure(err: anyerror) bool {
     return switch (err) {
         error.GraphValidationFailed,
         error.IncludeFailed,
@@ -1258,7 +1256,7 @@ pub fn compileHtmlSiteMulti(
     gpa: std.mem.Allocator,
     targets: []const target_mod.TargetSpec,
     base_options: CompileOptions,
-) !void {
+) !CompileStats {
     if (base_options.sitemap_path != null and targets.len > 1) return error.AmbiguousSitemapTargets;
     try validateSitemapConfig(gpa, base_options);
 
@@ -1291,7 +1289,7 @@ pub fn compileHtmlSiteMulti(
     // (RFC §5: ambiguous globs and mixed roots must not leave partial publications).
     for (plans) |plan| {
         target_mod.rejectMixedThemeRoots(plan.layout_path, plan.layout_rules) catch |err| {
-            std.debug.print("error: target '{s}' mixed theme roots in layout rules: {s}\n", .{ plan.name, @errorName(err) });
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' mixed theme roots in layout rules: {s}\n", .{ plan.name, @errorName(err) });
             const msg = try std.fmt.allocPrint(gpa, "target '{s}' mixed theme roots in layout rules: {s}", .{ plan.name, @errorName(err) });
             defer gpa.free(msg);
             appendHtmlDiagnostic(&base_options, .{
@@ -1305,7 +1303,7 @@ pub fn compileHtmlSiteMulti(
         };
         for (db.items()) |page| {
             _ = layout_select.selectLayout(page.entity_id, page.role, plan.layout_rules, plan.layout_path) catch |err| {
-                std.debug.print("error: target '{s}' layout selection failed for '{s}': {s}\n", .{
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' layout selection failed for '{s}': {s}\n", .{
                     plan.name,
                     page.entity_id,
                     @errorName(err),
@@ -1338,6 +1336,9 @@ pub fn compileHtmlSiteMulti(
     var any_failed = false;
     var any_io_failed = false;
     var any_usage_failed = false;
+    // Aggregate page statistics across targets (watch `--watch-json` reports
+    // the total written for the initial build; rebuild values are optional).
+    var total_stats: CompileStats = .{};
     for (plans) |plan| {
         var target_options = base_options;
         target_options.target_name = plan.name;
@@ -1359,7 +1360,7 @@ pub fn compileHtmlSiteMulti(
             const gop = try layout_cache.getOrPut(gpa, lp);
             if (gop.found_existing) continue;
             const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena.allocator()) catch |err| {
-                std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
                 const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
                 defer gpa.free(msg);
                 appendHtmlDiagnostic(&base_options, .{
@@ -1376,7 +1377,7 @@ pub fn compileHtmlSiteMulti(
                 break;
             };
             const bytes = readFileAlloc(io, Io.Dir.cwd(), lp, gpa) catch |err| {
-                std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
                 const msg = try std.fmt.allocPrint(gpa, "failed to read layout {s}: {s}", .{ lp, @errorName(err) });
                 defer gpa.free(msg);
                 appendHtmlDiagnostic(&base_options, .{
@@ -1397,12 +1398,21 @@ pub fn compileHtmlSiteMulti(
         if (load_failed) continue;
 
         const cached = layout_cache.get(plan.layout_path).?;
-        _ = compilePagesWithSharedAndSite(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes, &site) catch |err| {
+        if (compilePagesWithSharedAndSite(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes, &site)) |st| {
+            total_stats.pages_written += st.pages_written;
+            total_stats.pages_attempted += st.pages_attempted;
+            if (st.peak_whiteboard_capacity > total_stats.peak_whiteboard_capacity) {
+                total_stats.peak_whiteboard_capacity = st.peak_whiteboard_capacity;
+            }
+            if (st.last_reset_capacity > total_stats.last_reset_capacity) {
+                total_stats.last_reset_capacity = st.last_reset_capacity;
+            }
+        } else |err| {
             if (err != error.IncludeFailed and err != error.ReferenceFailed and
                 err != error.ComponentFailed and err != error.GraphValidationFailed and err != error.AmbiguousGlob and
                 err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
             {
-                std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
                 const msg = try std.fmt.allocPrint(gpa, "target '{s}' compilation failed: {s}", .{ plan.name, @errorName(err) });
                 defer gpa.free(msg);
                 appendHtmlDiagnostic(&base_options, .{
@@ -1431,7 +1441,7 @@ pub fn compileHtmlSiteMulti(
             // on so each target's phases time independently.
             if (base_options.timings) |t| t.stopAll();
             continue;
-        };
+        }
     }
 
     // Free layout bytes (arena owns Layout views into raw; bytes are GPA).
@@ -1446,6 +1456,7 @@ pub fn compileHtmlSiteMulti(
         if (any_io_failed) return error.MultiTargetIoFailed;
         return error.MultiTargetCompilationFailed;
     }
+    return total_stats;
 }
 
 /// Run the canonical HTML source/target prepublication phases without writing
@@ -1462,7 +1473,7 @@ pub fn validateHtmlSiteMulti(
     validation_options.validation_only = true;
     validation_options.incremental = false;
     validation_options.jobs = 1;
-    return compileHtmlSiteMulti(io, gpa, targets, validation_options);
+    _ = compileHtmlSiteMulti(io, gpa, targets, validation_options) catch |err| return err;
 }
 
 test "multi-target failure classification keeps I/O distinct from content" {
@@ -2177,14 +2188,16 @@ fn reportLinkAuditFindings(sink: ?*diag.Collector, findings: []const link_audit.
             .EPUBLICATIONLOCATION => "does not match the declared publication origin/base path [use a target-relative URL or include the Pages base path]",
             else => "does not resolve to a published output [fix the path, or publish the file it names]",
         };
-        std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
-            f.code.name(),
-            f.source,
-            f.line,
-            f.attribute,
-            f.target,
-            detail,
-        });
+        if (!diag.text_suppressed.load(.unordered)) {
+            std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
+                f.code.name(),
+                f.source,
+                f.line,
+                f.attribute,
+                f.target,
+                detail,
+            });
+        }
         if (sink) |s| s.append(.{
             .severity = .error_,
             .code = f.code,
@@ -2394,7 +2407,7 @@ fn compilePagesInner(
 
     for (db.items(), 0..) |page, i| {
         const sel = layout_select.selectLayout(page.entity_id, page.role, options.layout_rules, options.layout_path) catch |err| {
-            std.debug.print("error: layout selection failed for target '{s}' page '{s}': {s}\n", .{
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: layout selection failed for target '{s}' page '{s}': {s}\n", .{
                 options.target_name,
                 page.entity_id,
                 @errorName(err),
@@ -2540,7 +2553,7 @@ fn compilePagesInner(
     var content_assets = content_asset.loadSiteAssets(io, gpa, content_dir, source_paths, entity_ids, &asset_discovery_fail) catch |err| {
         if (err == error.AssetUnsafeSvg) {
             content_asset.printDiagnostic(gpa, error.AssetUnsafeSvg, "", asset_discovery_fail, options.diagnostics);
-        } else {
+        } else if (!diag.text_suppressed.load(.unordered)) {
             std.debug.print("error: content-local asset discovery failed: {s}\n", .{@errorName(err)});
         }
         return err;
@@ -6274,7 +6287,7 @@ test "validateHtmlSiteMulti shares prepublication semantics without output" {
     try std.testing.expectError(error.FileNotFound, cwd.access(io, stage, .{}));
 
     // Passing validation does not alter normal publication semantics.
-    try compileHtmlSiteMulti(io, gpa, &targets, options);
+    _ = try compileHtmlSiteMulti(io, gpa, &targets, options);
     try cwd.access(io, index_path, .{});
     try cwd.access(io, sitemap_path, .{});
 }
@@ -6429,7 +6442,7 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
             .{ .name = "target_a", .output_dir = dist_a },
         };
 
-        try compileHtmlSiteMulti(io, gpa, &targets, .{
+        _ = try compileHtmlSiteMulti(io, gpa, &targets, .{
             .content_root = content_path,
             .layout_path = layout_path,
             .incremental = true,
@@ -8129,7 +8142,7 @@ test "F9.1 multi-target themes isolate assets" {
     const out_b = try std.fmt.allocPrint(gpa, "{s}/dist/b", .{work});
     defer gpa.free(out_b);
 
-    try compileHtmlSiteMulti(io, gpa, &.{
+    _ = try compileHtmlSiteMulti(io, gpa, &.{
         .{ .name = "a", .output_dir = out_a, .layout_path = layout_a },
         .{ .name = "b", .output_dir = out_b, .layout_path = layout_b },
     }, .{
@@ -8841,7 +8854,7 @@ test "F9.2 --theme sugar + multi-target isolation + incremental byte-identical" 
 
     // Multi-target: same content, isolated outs (reuse experimental theme for both;
     // isolation is ownership of separate roots + caches, not necessarily distinct CSS).
-    try compileHtmlSiteMulti(io, gpa, &.{
+    _ = try compileHtmlSiteMulti(io, gpa, &.{
         .{ .name = "public", .output_dir = public, .layout_path = layout },
         .{ .name = "preview", .output_dir = preview, .layout_path = layout },
     }, .{
@@ -9419,7 +9432,7 @@ test "content-local assets: multi-target isolation and deterministic bytes" {
         .{ .name = "a", .output_dir = dist_a, .layout_path = layout },
         .{ .name = "b", .output_dir = dist_b, .layout_path = layout },
     };
-    try compileHtmlSiteMulti(io, gpa, &targets, .{
+    _ = try compileHtmlSiteMulti(io, gpa, &targets, .{
         .content_root = content,
         .layout_path = layout,
         .quiet = true,
@@ -9919,7 +9932,7 @@ test "multi-target publication derives claims per target" {
         .{ .name = "alpha", .output_dir = dist_a },
         .{ .name = "beta", .output_dir = dist_b },
     };
-    try compileHtmlSiteMulti(io, gpa, &targets, .{
+    _ = try compileHtmlSiteMulti(io, gpa, &targets, .{
         .content_root = content,
         .layout_path = layout,
         .quiet = true,

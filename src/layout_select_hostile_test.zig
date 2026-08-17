@@ -655,7 +655,7 @@ test "H6 multi-target: isolated rules, markers, and cache namespaces" {
     };
 
     // Full build for markers; then incremental for per-target cache namespaces.
-    try compile.compileHtmlSiteMulti(io, gpa, &targets, .{
+    _ = try compile.compileHtmlSiteMulti(io, gpa, &targets, .{
         .content_root = content_root,
         .layout_path = layout_main,
         .quiet = true,
@@ -678,7 +678,7 @@ test "H6 multi-target: isolated rules, markers, and cache namespaces" {
     try expectMarker(b_guides, "section");
 
     // Cache manifests are written only in incremental mode and stay target-local.
-    try compile.compileHtmlSiteMulti(io, gpa, &targets, .{
+    _ = try compile.compileHtmlSiteMulti(io, gpa, &targets, .{
         .content_root = content_root,
         .layout_path = layout_main,
         .incremental = true,

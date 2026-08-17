@@ -31,17 +31,35 @@ start_editor() {
     kill -0 "$editor_pid" 2>/dev/null || { sed -n '1,120p' "$work/host.log" >&2; exit 1; }
     sleep 0.05
   done
-  launch_url="$(sed -n 's/^BORIS_EDITOR_URL=//p' "$work/host.log" | head -1)"
-  [[ -n "$launch_url" ]]
+  # The launch line is a pinned contract (editor/README.md): exactly one line,
+  # BORIS_EDITOR_URL=http://127.0.0.1:<port>/#token=<32 hex chars>. The host
+  # test must fail if the line is missing, duplicated, or unparsable.
+  launch_count="$(grep -c '^BORIS_EDITOR_URL=' "$work/host.log" || true)"
+  [[ "$launch_count" == "1" ]] || { echo "expected exactly one BORIS_EDITOR_URL line, found $launch_count" >&2; sed -n '1,20p' "$work/host.log" >&2; exit 1; }
+  launch_line="$(sed -n 's/^BORIS_EDITOR_URL=//p' "$work/host.log" | head -1)"
+  if ! printf '%s' "$launch_line" | grep -Eq '^http://127\.0\.0\.1:[0-9]+/#token=[0-9a-f]{32}$'; then
+    echo "launch line contract violated: BORIS_EDITOR_URL=$launch_line" >&2
+    exit 1
+  fi
+  launch_url="$launch_line"
   base_url="${launch_url%%/#*}"
   token="${launch_url##*#token=}"
   port="$(printf '%s' "$base_url" | sed -E 's#.*:([0-9]+)$#\1#')"
+  [[ "${#token}" == "32" ]]
 }
 
 stop_editor() {
   kill "$editor_pid" 2>/dev/null || true
-  wait "$editor_pid" 2>/dev/null || true
+  wait "$editor_pid" 2>/dev/null
+  editor_exit=$?
   editor_pid=""
+  # Graceful shutdown contract: SIGTERM/SIGINT exit 0 after the listener
+  # closes, so an embedder treats terminationReason == .uncaughtSignal as
+  # cancel, not a crash (mirrors `boris watch`).
+  if [[ "$editor_exit" != "0" ]]; then
+    echo "editor SIGTERM shutdown exited $editor_exit (expected 0)" >&2
+    exit 1
+  fi
 }
 
 api_get() {

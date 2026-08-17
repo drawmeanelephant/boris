@@ -135,6 +135,52 @@ RAG/Context/llms/RSS/sitemap builds — leaves stdout empty. `check` and
 `impact` without `--report` print the human or JSON analysis to **stderr**,
 never stdout.
 
+## Workspace containment
+
+Every generated **output tree** — HTML (`--html-dir` / `--target`), IR
+(`--out`), RAG (`--rag-dir`), context (`--context-dir`), and `llms.txt`
+(`--llms-path`) — is confined to the **workspace**, defined as the process
+current working directory. A misconfigured build can never clobber an
+arbitrary tree outside the project. Output paths are resolved lexically
+against the cwd and checked with a **path-component boundary**: the resolved
+absolute path must equal the workspace or be `workspace/` + more (so `dist`
+never matches `distribution/…`). A violation fails with `WorkspaceEscape`
+(exit 2, usage class) before any content is read or artifact is written.
+
+The containment rule is uniform across every output tree. Absolute output
+paths are accepted when they resolve inside the workspace; relative paths
+(including `..` segments that stay inside the workspace) are equivalent
+spellings of the same destination. There is no exporter-specific absolute-path
+rule: IR `--out /abs/path` behaves exactly like HTML `--html-dir /abs/path`.
+Because the check is lexical, a spelling that does not match the workspace's
+canonical path is rejected even when the filesystem would resolve it to the
+same place — e.g. on macOS, where `/tmp` is a symlink to `/private/tmp`, an
+absolute output under `/tmp/…` is `WorkspaceEscape` while the same directory
+spelled `/private/tmp/…` is accepted.
+
+| Case | Result |
+|------|--------|
+| `--html-dir`, `--target`, `--out`, `--rag-dir`, `--context-dir`, `--llms-path` pointing outside cwd | `WorkspaceEscape`, exit 2 |
+| Relative output paths inside cwd (`--out ir`, `--out ./ir`, `--out ../x/ir` where `../x` is under cwd) | accepted |
+| Absolute output paths resolving inside cwd (any exporter, `--target name=/abs/…` included) | accepted |
+| The workspace root itself as an output tree (`--html-dir .`, `--out .`) | `TargetOutputCollision`, exit 2 |
+| Output tree equal to or nested under the content root (`--out content`) | `TargetOutputCollision`, exit 2 |
+| Output tree equal to or nested under another target, a declared layout, or its parent | `TargetOutputCollision`, exit 2 |
+| `--report PATH` / `--analysis-report` (single files) | not constrained; any path the process may write |
+| `--input PATH` (content root) | not constrained; `--input` names the source tree, not an output |
+
+Single-file report flags (`--report` on `build`/`validate`, and
+`check`/`impact --report`) are deliberately outside containment: they write
+one explicit file, never a tree, so an absolute path is accepted as-is.
+`--input` is likewise unconstrained: the compiler reads the content root but
+never writes into it as an output tree (outputs that would land inside the
+content root are `TargetOutputCollision`).
+
+The same boundary and exit-2 mapping apply to `watch` (each watch target is
+validated as an HTML target), and to the multi-target plan; the per-target
+rules are specified in
+[multi-target-isolated-output.md](multi-target-isolated-output.md).
+
 ## Machine-readable reports
 
 Consumers should invoke:

@@ -86,6 +86,11 @@ pub const Sink = struct {
         try json_out.writeUsize(&self.buf, self.gpa, value);
     }
 
+    /// A JSON boolean, `true` or `false`. Delegates to `json_out`.
+    pub fn jsonBool(self: *Sink, value: bool) !void {
+        try json_out.writeBool(&self.buf, self.gpa, value);
+    }
+
     /// Append bytes another `Sink` produced. Safe by construction: they already
     /// went through `lit` / `field` / an audited `rawTrusted`.
     pub fn appendSink(self: *Sink, other: *const Sink) !void {

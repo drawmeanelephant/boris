@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const http = std.http;
 const net = std.Io.net;
@@ -24,6 +25,36 @@ pub const Config = struct {
     preview: *preview.Manager,
 };
 
+/// Async-signal-visible shutdown latch for SIGINT/SIGTERM (same contract as
+/// `boris watch`: an embedder treats `terminationReason == .uncaughtSignal`
+/// as cancel, not crash). The handler only stores the flag; the monitor
+/// thread below does the socket work, keeping the handler async-signal-safe.
+pub var should_shutdown: std.atomic.Value(bool) = .init(false);
+
+fn handleSignal(sig: std.posix.SIG) callconv(.c) void {
+    _ = sig;
+    should_shutdown.store(true, .unordered);
+}
+
+/// Poll the shutdown latch and, once set, self-connect to the host listener so
+/// the blocked `accept()` returns a connection (the loop then sees the flag
+/// and exits cleanly). Closing the listener socket alone does not reliably
+/// wake a thread blocked in `accept(2)` — on Linux the blocked accept keeps
+/// waiting on the closed description — so the self-connect trick from the
+/// preview server is used instead. Best-effort: any failure is ignorable
+/// because the accept loop also exits when the listener is closed afterwards.
+fn signalMonitor(io: Io, port: u16) void {
+    while (!should_shutdown.load(.unordered)) {
+        Io.sleep(io, .{ .nanoseconds = 100 * std.time.ns_per_ms }, .awake) catch {};
+    }
+    var addr = net.IpAddress.parseIp4("127.0.0.1", port) catch return;
+    var conn = addr.connect(io, .{ .mode = .stream }) catch return;
+    conn.close(io);
+}
+
+/// Serve the editor loopback host until SIGINT/SIGTERM requests shutdown.
+/// The launch line is a documented contract (editor/README.md): exactly one
+/// line on stderr, `BORIS_EDITOR_URL=http://127.0.0.1:<port>/#token=<32 hex>`.
 pub fn serve(io: Io, allocator: std.mem.Allocator, config: Config) !void {
     const address = try net.IpAddress.parseIp4("127.0.0.1", config.port);
     var listener = try address.listen(io, .{ .reuse_address = true });
@@ -31,8 +62,32 @@ pub fn serve(io: Io, allocator: std.mem.Allocator, config: Config) !void {
     const port = listener.socket.address.getPort();
     std.debug.print("BORIS_EDITOR_URL=http://127.0.0.1:{d}/#token={s}\n", .{ port, config.token });
 
-    while (true) {
-        var stream = try listener.accept(io);
+    if (comptime builtin.os.tag != .windows) {
+        const act = std.posix.Sigaction{
+            .handler = .{ .handler = handleSignal },
+            .mask = std.mem.zeroes(std.posix.sigset_t),
+            .flags = 0,
+        };
+        std.posix.sigaction(std.posix.SIG.INT, &act, null);
+        std.posix.sigaction(std.posix.SIG.TERM, &act, null);
+    }
+    should_shutdown.store(false, .unordered);
+
+    var monitor: ?std.Thread = null;
+    if (comptime builtin.os.tag != .windows) {
+        monitor = std.Thread.spawn(.{}, signalMonitor, .{ io, port }) catch null;
+    }
+    defer if (monitor) |t| t.detach();
+
+    while (!should_shutdown.load(.unordered)) {
+        var stream = listener.accept(io) catch |err| switch (err) {
+            error.SocketNotListening => break,
+            else => {
+                if (should_shutdown.load(.unordered)) break;
+                std.log.warn("editor accept failed: {s}", .{@errorName(err)});
+                continue;
+            },
+        };
         handleConnection(io, allocator, stream, config, port) catch |err| {
             std.log.warn("editor request failed: {s}", .{@errorName(err)});
         };

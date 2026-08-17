@@ -85,9 +85,7 @@ fn printComponentDiagnostics(
         const structured = try componentDiagnostic(gpa, source, body_offset, source_path, component_diag);
         defer gpa.free(structured.message);
         if (sink) |s| s.append(structured);
-        const text = try diag.formatText(structured, gpa);
-        defer gpa.free(text);
-        std.debug.print("{s}\n", .{text});
+        diag.printText(structured, gpa);
     }
 }
 
@@ -106,9 +104,7 @@ fn parserDiagnostic(source_path: []const u8, parsed: parser.Diagnostic) diag.Dia
 fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed: parser.Diagnostic, sink: ?*diag.Collector) !void {
     const structured = parserDiagnostic(source_path, parsed);
     if (sink) |s| s.append(structured);
-    const text = try diag.formatText(structured, gpa);
-    defer gpa.free(text);
-    std.debug.print("{s}\n", .{text});
+    diag.printText(structured, gpa);
 }
 
 /// An adapted page body plus whatever structured data the adapter recovered.
@@ -142,7 +138,7 @@ pub fn bodyForInput(
         .textile => {
             const adapted = try textile.toMarkdown(body, allocator);
             if (adapted.diagnostic) |td| {
-                std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
                     source_path,
                     sourceLineAt(source, body_offset) + td.line - 1,
                     td.column,
@@ -155,7 +151,7 @@ pub fn bodyForInput(
         .cook => {
             const adapted = try cooklang_seam.toMarkdown(body, allocator);
             if (adapted.diagnostic) |cd| {
-                std.debug.print("error: ECOOKLANG: {s}:{d}:{d}: {s} [Use only the bounded Cooklang subset]\n", .{
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: ECOOKLANG: {s}:{d}:{d}: {s} [Use only the bounded Cooklang subset]\n", .{
                     source_path,
                     sourceLineAt(source, body_offset) + cd.line - 1,
                     cd.column,
@@ -167,7 +163,7 @@ pub fn bodyForInput(
             // surface as warnings, not failures. The load-time validation call
             // passes `print_warnings = true`; the render and heading-harvest
             // passes stay silent so the build prints each warning once.
-            if (print_warnings) {
+            if (print_warnings and !diag.text_suppressed.load(.unordered)) {
                 for (adapted.warnings) |w| {
                     std.debug.print("warning: ECOOKLANG: {s}:{d}:{d}: {s}\n", .{
                         source_path,

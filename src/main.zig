@@ -2649,7 +2649,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
     const nostr_head: ?*const nostr_emit.HeadConfig = if (html_nostr) |*bundle| &bundle.config else null;
 
     if (opts.targets.items.len > 0) {
-        compile.compileHtmlSiteMulti(io, gpa, opts.targets.items, .{
+        _ = compile.compileHtmlSiteMulti(io, gpa, opts.targets.items, .{
             .content_root = opts.input_dir,
             .layout_path = layout_path,
             .incremental = opts.incremental,

@@ -210,6 +210,10 @@ pub const Options = struct {
     jobs: usize = 1,
     /// Opt-in local-development watch mode for HTML builds.
     watch: bool = false,
+    /// Emit the machine-readable NDJSON event stream on stderr instead of
+    /// watch prose (`watch --watch-json`). Requires watch mode; implies
+    /// quiet. Contract: docs/contracts/watch-mode.md §8.
+    watch_json: bool = false,
     /// Serve the built HTML tree over loopback HTTP with reload-on-rebuild
     /// (`watch --serve`). Requires watch mode.
     serve: bool = false,
@@ -356,6 +360,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_incremental = false;
     var saw_jobs = false;
     var saw_watch = false;
+    var saw_watch_json = false;
     var saw_serve = false;
     var serve_port: ?u16 = null;
     var saw_textile = false;
@@ -789,6 +794,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--serve")) {
             if (saw_serve) return error.DuplicateFlag;
             saw_serve = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--watch-json")) {
+            if (saw_watch_json) return error.DuplicateFlag;
+            saw_watch_json = true;
             continue;
         }
 
@@ -1527,6 +1538,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // The preview server is a watch-mode surface (`boris watch --serve`).
     if ((saw_serve or serve_port != null) and !saw_watch) return error.ConflictingFlags;
 
+    // `--watch-json` is the watch daemon's machine-readable stderr stream; on
+    // any other command it would silently produce an empty contract.
+    if (saw_watch_json and !saw_watch) return error.ConflictingFlags;
+
     // --- conflict matrix ---------------------------------------------------
     if (saw_rag and saw_no_rag) return error.ConflictingFlags;
     if (saw_no_rag and saw_rag_dir) return error.ConflictingFlags;
@@ -1847,6 +1862,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .incremental = saw_incremental or saw_watch,
             .jobs = jobs,
             .watch = saw_watch,
+            .watch_json = saw_watch_json,
             .serve = saw_serve or serve_port != null,
             .serve_port = serve_port,
             .html_profile = default_profile,
@@ -1999,6 +2015,8 @@ pub fn printUsage() void {
         \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
         \\  --watch             Compatibility flag; same as the watch command
+        \\  --watch-json        Emit one NDJSON event per build phase on stderr (watch only);
+        \\                      see docs/contracts/watch-mode.md §8
         \\  --serve             Serve the built tree over loopback HTTP (watch only);
         \\                      auto-reload helper: http://127.0.0.1:PORT/__boris/
         \\  --port N            Loopback port for --serve (default 8090; 0 = ephemeral);
@@ -2576,6 +2594,32 @@ test "parse: watch --serve and --port (preview server)" {
 
     // Serve requires watch mode; duplicates are usage errors.
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--serve" }));
+}
+
+test "parse: --watch-json requires watch mode" {
+    // `boris watch --watch-json` enables the NDJSON stderr stream.
+    var watch = try parseOptions(std.testing.allocator, &.{ "boris", "watch", "--watch-json" });
+    defer watch.deinit(std.testing.allocator);
+    try expect(watch.watch);
+    try expect(watch.watch_json);
+
+    // Flag form (`boris --watch --watch-json`) is the same watch mode.
+    var flag = try parseOptions(std.testing.allocator, &.{ "boris", "--watch", "--watch-json" });
+    defer flag.deinit(std.testing.allocator);
+    try expect(flag.watch);
+    try expect(flag.watch_json);
+
+    // Composes with --serve: SSE for browsers, NDJSON for the subprocess.
+    var both = try parseOptions(std.testing.allocator, &.{ "boris", "watch", "--watch-json", "--serve" });
+    defer both.deinit(std.testing.allocator);
+    try expect(both.watch_json);
+    try expect(both.serve);
+
+    // Without watch mode it is a usage error, so a typo cannot silently
+    // produce an empty stream.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--watch-json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--watch-json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch-json" }));
 }
 
 test "parse: --target-profile selects the Oliver serialization profile (#448)" {

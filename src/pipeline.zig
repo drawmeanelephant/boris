@@ -482,9 +482,7 @@ pub fn populateDependencyIndexFormat(
         if (sink) |s| for (diagnostics.items) |d| s.append(d);
         for (diagnostics.items) |d| {
             if (quiet and d.severity != .error_) continue;
-            const line = diag.formatText(d, gpa) catch continue;
-            defer gpa.free(line);
-            std.debug.print("{s}\n", .{line});
+            diag.printText(d, gpa);
         }
         for (diagnostics.items) |d| switch (d.code) {
             .EINCLUDESYNTAX, .EINCLUDEMISSING, .EINCLUDECYCLE, .EINVALIDPATH => include_failure = true,
