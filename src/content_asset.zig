@@ -883,6 +883,7 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         .column = fail.column,
     };
     if (sink) |s| s.append(d);
+    if (diag.text_suppressed.load(.unordered)) return;
     if (diag.formatText(d, gpa)) |line| {
         defer gpa.free(line);
         std.debug.print("{s}\n", .{line});

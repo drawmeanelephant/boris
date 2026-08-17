@@ -332,6 +332,14 @@ const modules = [_]Module{
         .source = @embedFile("timings.zig"),
     },
     .{ .name = "unicode_policy.zig", .class = .other },
+    .{
+        .name = "watch_json.zig",
+        .class = .{ .emitter = .{
+            .encoder = .sink,
+            .note = "watch --watch-json NDJSON event stream; every field and diagnostic delegates to structured_out.Sink/json_out",
+        } },
+        .source = @embedFile("watch_json.zig"),
+    },
     .{ .name = "watch.zig", .class = .other },
     .{ .name = "wikilink.zig", .class = .other },
     .{ .name = "ws_client.zig", .class = .other },

@@ -5,8 +5,11 @@ const builtin = @import("builtin");
 const Io = std.Io;
 const compile = @import("compile.zig");
 const cli = @import("cli.zig");
+const diag = @import("diag.zig");
+const pipeline = @import("pipeline.zig");
 const target_mod = @import("target.zig");
 const preview_server = @import("preview_server.zig");
+const watch_json = @import("watch_json.zig");
 
 /// Debounce window after the first change is observed (ms).
 pub const debounce_ms: i64 = 100;
@@ -503,28 +506,15 @@ fn handleSigInt(sig: std.posix.SIG) callconv(.c) void {
 }
 
 /// Content/layout failures that keep the watcher running for author recovery.
-/// The set is closed on errors clearly owned by the watch contract
-/// (docs/contracts/watch-mode.md §5): author-correctable content, frontmatter,
-/// component, include, asset-validation, and layout-marker failures. Hard
+/// The set is the compile path's canonical content-failure classifier, so the
+/// single-target watch path (`compileHtmlSite`) recovers from exactly the same
+/// author-correctable failures the multi-target path folds into
+/// `MultiTargetCompilationFailed` (docs/contracts/watch-mode.md §5). Hard
 /// filesystem/system failures (missing content roots, access errors, watcher
-/// backend errors) are deliberately not listed and terminate the process.
+/// backend errors) are deliberately excluded and terminate the process, as are
+/// usage-class layout-rule failures (exit 2).
 fn isRecoverableBuildError(err: anyerror) bool {
-    return switch (err) {
-        error.ParseFailed,
-        error.GraphValidationFailed,
-        error.ComponentFailed,
-        error.TextileFailed,
-        error.InputFormatMismatch,
-        error.IncludeFailed,
-        error.AssetUnsafeSvg,
-        error.LayoutMissingMarker,
-        error.LayoutDuplicateMarker,
-        error.SitemapDuplicateUrl,
-        error.SitemapUrlLimitExceeded,
-        error.SitemapSizeLimitExceeded,
-        => true,
-        else => false,
-    };
+    return compile.isContentCompileFailure(err);
 }
 
 /// Native helper using std.Io Clock.Duration to sleep portably.
@@ -662,6 +652,159 @@ pub const WatchCoordinator = struct {
         }
     }
 
+    /// True when `err` keeps the watch loop alive: author-correctable content/
+    /// layout failures and the multi-target aggregate wrap of them.
+    fn isRecoverableFailure(err: anyerror) bool {
+        return isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed;
+    }
+
+    /// Wall time of one compile in milliseconds (monotonic `awake` clock).
+    fn elapsedMs(io: Io, start: Io.Timestamp) u64 {
+        const elapsed = Io.Timestamp.durationTo(start, Io.Timestamp.now(io, .awake));
+        if (elapsed.nanoseconds <= 0) return 0;
+        return @intCast(@divTrunc(elapsed.nanoseconds, std.time.ns_per_ms));
+    }
+
+    const BuildOutcome = struct {
+        ok: bool = false,
+        stats: compile.CompileStats = .{ .pages_written = 0, .peak_whiteboard_capacity = 0 },
+        err: ?anyerror = null,
+        duration_ms: u64 = 0,
+    };
+
+    /// Run one HTML compile (initial or rebuild) and capture stats, error, and
+    /// wall duration. `subset` selects the rebuilt targets: null runs the raw
+    /// single-target path (`compileHtmlSite`); non-null runs the multi-target
+    /// path over exactly that subset. Structured diagnostics flow into
+    /// `collector` (set by the `--watch-json` mode) and the prose form is
+    /// suppressed while the compile runs.
+    fn runCompile(self: *WatchCoordinator, subset: ?[]const target_mod.TargetSpec, collector: ?*diag.Collector) BuildOutcome {
+        const start = Io.Timestamp.now(self.io, .awake);
+        var outcome: BuildOutcome = .{ .duration_ms = 0 };
+        const layout_default = self.options.html_layout;
+        if (subset) |targets| {
+            if (compile.compileHtmlSiteMulti(self.io, self.gpa, targets, .{
+                .content_root = self.options.input_dir,
+                .layout_path = layout_default,
+                .incremental = self.options.incremental,
+                // `--watch-json` implies quiet: the stderr stream is the
+                // machine-readable event channel, not prose progress.
+                .quiet = self.options.quiet or self.options.watch_json,
+                .jobs = self.options.jobs,
+                .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
+                .diagnostics = collector,
+            })) |stats| {
+                outcome.ok = true;
+                outcome.stats = stats;
+            } else |err| {
+                outcome.err = err;
+            }
+        } else {
+            if (compile.compileHtmlSite(self.io, self.gpa, .{
+                .content_root = self.options.input_dir,
+                .dist_dir = self.options.html_dir orelse "dist",
+                .layout_path = layout_default,
+                .incremental = self.options.incremental,
+                // `--watch-json` implies quiet: the stderr stream is the
+                // machine-readable event channel, not prose progress.
+                .quiet = self.options.quiet or self.options.watch_json,
+                .jobs = self.options.jobs,
+                .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
+                .diagnostics = collector,
+            })) |stats| {
+                outcome.ok = true;
+                outcome.stats = stats;
+            } else |err| {
+                outcome.err = err;
+            }
+        }
+        outcome.duration_ms = elapsedMs(self.io, start);
+        return outcome;
+    }
+
+    /// Target names for NDJSON events: the subset actually rebuilt (for
+    /// selective rebuilds), never the full configured set. The empty-targets
+    /// single-target path reports the synthetic `default` target, matching the
+    /// CLI's canonical HTML configuration.
+    fn targetNamesOf(gpa: std.mem.Allocator, targets: []const target_mod.TargetSpec) ![][]const u8 {
+        if (targets.len == 0) return gpa.dupe([]const u8, &.{"default"});
+        var names = try gpa.alloc([]const u8, targets.len);
+        for (targets, 0..) |t, i| {
+            names[i] = t.name;
+        }
+        return names;
+    }
+
+    fn emitLine(self: *WatchCoordinator, line: []const u8) void {
+        _ = self;
+        std.debug.print("{s}", .{line});
+    }
+
+    fn emitHello(self: *WatchCoordinator) void {
+        const line = watch_json.renderHello(self.gpa, pipeline.compiler_id) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitBuildStarted(self: *WatchCoordinator, phase: []const u8, targets: []const []const u8, changed: ?[]const []const u8) void {
+        const line = watch_json.renderBuildStarted(self.gpa, phase, "html", targets, changed) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitBuildSucceeded(self: *WatchCoordinator, phase: []const u8, targets: []const []const u8, changed: ?[]const []const u8, outcome: BuildOutcome) void {
+        const line = watch_json.renderBuildSucceeded(self.gpa, phase, "html", targets, changed, outcome.stats.pages_written, outcome.duration_ms) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitBuildFailed(self: *WatchCoordinator, phase: []const u8, targets: []const []const u8, changed: ?[]const []const u8, outcome: BuildOutcome, collector: ?*diag.Collector) void {
+        var diagnostics: []diag.Diagnostic = &.{};
+        if (collector) |c| {
+            diag.sortDiagnostics(c.list.items);
+            diagnostics = c.list.items;
+        }
+        const errors = diag.countErrors(diagnostics);
+        const recoverable = isRecoverableFailure(outcome.err orelse error.Unknown);
+        const line = watch_json.renderBuildFailed(self.gpa, phase, "html", targets, changed, errors, diagnostics, recoverable, outcome.duration_ms) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitWatcherStarted(self: *WatchCoordinator, targets: []const []const u8) void {
+        const line = watch_json.renderWatcherStarted(self.gpa, "html", targets) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitServeStarted(self: *WatchCoordinator, port: u16) void {
+        const url = std.fmt.allocPrint(self.gpa, "http://127.0.0.1:{d}/", .{port}) catch return;
+        defer self.gpa.free(url);
+        const helper = std.fmt.allocPrint(self.gpa, "http://127.0.0.1:{d}/__boris/", .{port}) catch return;
+        defer self.gpa.free(helper);
+        const line = watch_json.renderServeStarted(self.gpa, url, helper, port) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitWatchError(self: *WatchCoordinator, message: []const u8) void {
+        const line = watch_json.renderWatchError(self.gpa, message, true) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitWatchStopped(self: *WatchCoordinator) void {
+        const line = watch_json.renderWatchStopped(self.gpa, "signal") catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
     /// Drain pending paths (sorted for deterministic logging), then rebuild.
     /// Recoverable content/layout errors keep the watch loop alive; other errors propagate.
     pub fn triggerRebuild(self: *WatchCoordinator) !void {
@@ -685,83 +828,73 @@ pub const WatchCoordinator = struct {
             }
         }.less);
 
-        if (!self.options.quiet) {
+        const json = self.options.watch_json;
+        // Layout-only changes fan out to affected targets only. The subset is
+        // computed before any event so NDJSON `targets` names the subset
+        // actually rebuilt, not the full configured set.
+        const layout_default = self.options.html_layout;
+        var subset: ?[]const target_mod.TargetSpec = null;
+        var owned_subset: ?[]const target_mod.TargetSpec = null;
+        if (self.options.targets.items.len > 0) {
+            owned_subset = try selectTargetsForRebuild(self.gpa, paths.items, self.options.targets.items, layout_default);
+            subset = owned_subset;
+        }
+        defer if (owned_subset) |s| self.gpa.free(s);
+
+        if (json) {
+            const targets = try targetNamesOf(self.gpa, subset orelse self.options.targets.items);
+            defer self.gpa.free(targets);
+            self.emitBuildStarted("rebuild", targets, paths.items);
+        } else if (!self.options.quiet) {
             std.debug.print("watch: changed paths detected:\n", .{});
             for (paths.items) |p| {
                 std.debug.print("  - {s}\n", .{p});
             }
             std.debug.print("watch: triggering incremental rebuild...\n", .{});
+            if (subset) |s| {
+                if (s.len < self.options.targets.items.len) {
+                    std.debug.print("watch: selective rebuild of {d}/{d} target(s)\n", .{
+                        s.len,
+                        self.options.targets.items.len,
+                    });
+                }
+            }
         }
+
+        // Under `--watch-json` the prose diagnostic form is suppressed for the
+        // duration of the compile; the same data flows into the collector and
+        // then into the build-failed NDJSON event.
+        if (json) diag.text_suppressed.store(true, .unordered);
+        defer if (json) diag.text_suppressed.store(false, .unordered);
+
+        var collector: ?diag.Collector = null;
+        if (json) collector = diag.Collector.init(self.gpa, self.io);
+        defer if (collector) |*c| c.deinit();
+        const collector_ptr: ?*diag.Collector = if (collector) |*c| c else null;
 
         // Full rediscovery + content-addressed incremental render (event paths
         // trigger the rebuild; dirty-set comes from fingerprints inside compile).
-        // Layout-only changes fan out to affected targets only.
-        const layout_default = self.options.html_layout;
-        if (self.options.targets.items.len > 0) {
-            const subset = try selectTargetsForRebuild(
-                self.gpa,
-                paths.items,
-                self.options.targets.items,
-                layout_default,
-            );
-            defer self.gpa.free(subset);
-
-            if (!self.options.quiet and subset.len < self.options.targets.items.len) {
-                std.debug.print("watch: selective rebuild of {d}/{d} target(s)\n", .{
-                    subset.len,
-                    self.options.targets.items.len,
-                });
+        const outcome = self.runCompile(subset, collector_ptr);
+        if (!outcome.ok) {
+            const err = outcome.err.?;
+            if (json) {
+                const targets = try targetNamesOf(self.gpa, subset orelse self.options.targets.items);
+                defer self.gpa.free(targets);
+                self.emitBuildFailed("rebuild", targets, paths.items, outcome, collector_ptr);
+            } else if (isRecoverableFailure(err)) {
+                std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
+            } else {
+                std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
             }
-
-            compile.compileHtmlSiteMulti(self.io, self.gpa, subset, .{
-                .content_root = self.options.input_dir,
-                .layout_path = layout_default,
-                .incremental = self.options.incremental,
-                .quiet = self.options.quiet,
-                .jobs = self.options.jobs,
-                .input_format = self.options.input_format,
-                .sitemap_path = self.options.sitemap_path,
-                .site_url = self.options.site_url,
-                .publication_location = if (self.options.publication_location) |*location| location else null,
-            }) catch |err| {
-                if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
-                    }
-                    return;
-                }
-                if (!self.options.quiet) {
-                    std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                }
-                return err;
-            };
-        } else {
-            _ = compile.compileHtmlSite(self.io, self.gpa, .{
-                .content_root = self.options.input_dir,
-                .dist_dir = self.options.html_dir orelse "dist",
-                .layout_path = layout_default,
-                .incremental = self.options.incremental,
-                .quiet = self.options.quiet,
-                .jobs = self.options.jobs,
-                .input_format = self.options.input_format,
-                .sitemap_path = self.options.sitemap_path,
-                .site_url = self.options.site_url,
-                .publication_location = if (self.options.publication_location) |*location| location else null,
-            }) catch |err| {
-                if (isRecoverableBuildError(err)) {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
-                    }
-                    return;
-                }
-                if (!self.options.quiet) {
-                    std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                }
-                return err;
-            };
+            if (isRecoverableFailure(err)) return;
+            return err;
         }
 
-        if (!self.options.quiet) {
+        if (json) {
+            const targets = try targetNamesOf(self.gpa, subset orelse self.options.targets.items);
+            defer self.gpa.free(targets);
+            self.emitBuildSucceeded("rebuild", targets, paths.items, outcome);
+        } else if (!self.options.quiet) {
             std.debug.print("watch: rebuild succeeded.\n", .{});
         }
         if (self.serve) |*s| s.notifyRebuild();
@@ -769,70 +902,66 @@ pub const WatchCoordinator = struct {
 
     /// Perform initial build, set up signal handlers, and execute the watch poll loop.
     pub fn run(self: *WatchCoordinator) !void {
-        // Initial build
-        if (!self.options.quiet) {
+        const json = self.options.watch_json;
+        if (json) {
+            self.emitHello();
+            const targets = try targetNamesOf(self.gpa, self.options.targets.items);
+            defer self.gpa.free(targets);
+            self.emitBuildStarted("initial", targets, null);
+        } else if (!self.options.quiet) {
             std.debug.print("watch: performing initial build...\n", .{});
         }
 
-        var initial_success = true;
-        var stats: compile.CompileStats = .{ .pages_written = 0, .peak_whiteboard_capacity = 0 };
-        const layout_default = self.options.html_layout;
-        if (self.options.targets.items.len > 0) {
-            compile.compileHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
-                .content_root = self.options.input_dir,
-                .layout_path = layout_default,
-                .incremental = self.options.incremental,
-                .quiet = self.options.quiet,
-                .jobs = self.options.jobs,
-                .input_format = self.options.input_format,
-                .sitemap_path = self.options.sitemap_path,
-                .site_url = self.options.site_url,
-                .publication_location = if (self.options.publication_location) |*location| location else null,
-            }) catch |err| {
-                initial_success = false;
-                if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
-                    }
-                } else {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                    }
-                    return err;
-                }
-            };
+        // Under `--watch-json` the prose diagnostic form is suppressed for the
+        // duration of the compile; the same data flows into the collector and
+        // then into the build-failed NDJSON event.
+        if (json) diag.text_suppressed.store(true, .unordered);
+        defer if (json) diag.text_suppressed.store(false, .unordered);
+
+        var collector: ?diag.Collector = null;
+        if (json) collector = diag.Collector.init(self.gpa, self.io);
+        defer if (collector) |*c| c.deinit();
+        const collector_ptr: ?*diag.Collector = if (collector) |*c| c else null;
+
+        // Initial build: every configured target (multi) or the single default
+        // (raw single-target path).
+        const subset: ?[]const target_mod.TargetSpec = if (self.options.targets.items.len > 0) self.options.targets.items else null;
+        const outcome = self.runCompile(subset, collector_ptr);
+        const initial_success = outcome.ok;
+
+        var targets: []const []const u8 = &.{};
+        if (json) {
+            targets = try targetNamesOf(self.gpa, self.options.targets.items);
+        }
+        // The defer must live in run()'s scope, not the `if` block: freeing
+        // inside the block would run before the emit calls below read it.
+        defer if (json) self.gpa.free(targets);
+
+        if (initial_success) {
+            if (json) {
+                self.emitBuildSucceeded("initial", targets, null, outcome);
+            } else if (!self.options.quiet) {
+                std.debug.print("watch: initial build succeeded ({d} pages written). Starting watcher...\n", .{outcome.stats.pages_written});
+            }
         } else {
-            if (compile.compileHtmlSite(self.io, self.gpa, .{
-                .content_root = self.options.input_dir,
-                .dist_dir = self.options.html_dir orelse "dist",
-                .layout_path = layout_default,
-                .incremental = self.options.incremental,
-                .quiet = self.options.quiet,
-                .jobs = self.options.jobs,
-                .input_format = self.options.input_format,
-                .sitemap_path = self.options.sitemap_path,
-                .site_url = self.options.site_url,
-                .publication_location = if (self.options.publication_location) |*location| location else null,
-            })) |st| {
-                stats = st;
-            } else |err| {
-                initial_success = false;
-                if (isRecoverableBuildError(err)) {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
-                    }
-                } else {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                    }
-                    return err;
+            const err = outcome.err.?;
+            if (isRecoverableFailure(err)) {
+                if (json) {
+                    self.emitBuildFailed("initial", targets, null, outcome, collector_ptr);
+                } else if (!self.options.quiet) {
+                    std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
                 }
+            } else {
+                if (json) {
+                    self.emitBuildFailed("initial", targets, null, outcome, collector_ptr);
+                } else if (!self.options.quiet) {
+                    std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
+                }
+                return err;
             }
         }
 
-        if (initial_success and !self.options.quiet) {
-            std.debug.print("watch: initial build succeeded ({d} pages written). Starting watcher...\n", .{stats.pages_written});
-        }
+        if (json) self.emitWatcherStarted(targets);
 
         // Register POSIX signal handlers
         if (comptime builtin.os.tag != .windows) {
@@ -852,8 +981,10 @@ pub const WatchCoordinator = struct {
         // tree after a recoverable failure, which the author can still view).
         if (self.serve) |*s| {
             try s.start();
-            if (!self.options.quiet) {
-                const port = s.boundPort();
+            const port = s.boundPort();
+            if (json) {
+                self.emitServeStarted(port);
+            } else if (!self.options.quiet) {
                 std.debug.print("preview: http://127.0.0.1:{d}/  (auto-reload helper: http://127.0.0.1:{d}/__boris/)\n", .{ port, port });
             }
         }
@@ -861,7 +992,9 @@ pub const WatchCoordinator = struct {
         while (!should_shutdown_global.load(.unordered)) {
             self.processEvents() catch |err| {
                 // Transient poll failures must not kill the session (#15).
-                if (!self.options.quiet) {
+                if (json) {
+                    self.emitWatchError(@errorName(err));
+                } else if (!self.options.quiet) {
                     std.debug.print("watch: poll error ({s}); retrying...\n", .{@errorName(err)});
                 }
                 try sleepMs(self.io, idle_poll_ms);
@@ -887,7 +1020,9 @@ pub const WatchCoordinator = struct {
             }
         }
 
-        if (!self.options.quiet) {
+        if (json) {
+            self.emitWatchStopped();
+        } else if (!self.options.quiet) {
             std.debug.print("watch: received shutdown signal, cleaning resources...\n", .{});
         }
     }
@@ -1358,7 +1493,7 @@ test "watch recovery: pending drains and follow-up events still queue" {
 
 test "isRecoverableBuildError classification stays content-only" {
     // Mirrors WatchCoordinator recovery policy: content/layout errors continue;
-    // hard I/O does not. Keep this aligned with isRecoverableBuildError.
+    // hard I/O does not. Keep this aligned with compile.isContentCompileFailure.
     try std.testing.expect(isRecoverableBuildError(error.ParseFailed));
     try std.testing.expect(isRecoverableBuildError(error.ComponentFailed));
     try std.testing.expect(isRecoverableBuildError(error.LayoutMissingMarker));
@@ -1369,10 +1504,15 @@ test "isRecoverableBuildError classification stays content-only" {
     // Unsafe SVG is an author-correctable content-validation failure: recoverable
     // in both single-target and multi-target watch paths (same session, no restart).
     try std.testing.expect(isRecoverableBuildError(error.AssetUnsafeSvg));
-    // Graph validation (duplicate id, missing parent, cycles, …) is an
-    // author-correctable content failure, exactly like ParseFailed: recoverable
-    // in both single-target and multi-target watch paths (#640).
+    // Reference and link-audit failures are author-correctable content, not I/O:
+    // a bad wiki-link or markdown href must keep the watcher alive (single-target
+    // path surfaces these raw, unlike the multi-target wrapper).
+    try std.testing.expect(isRecoverableBuildError(error.ReferenceFailed));
+    try std.testing.expect(isRecoverableBuildError(error.LinkAuditFailed));
     try std.testing.expect(isRecoverableBuildError(error.GraphValidationFailed));
+    // Usage-class layout-rule failures are exit 2, not recoverable watch errors.
+    try std.testing.expect(!isRecoverableBuildError(error.LayoutSelectionFailed));
+    try std.testing.expect(!isRecoverableBuildError(error.MixedThemeRoots));
     // Hard filesystem/system failures must still terminate the watcher.
     try std.testing.expect(!isRecoverableBuildError(error.FileNotFound));
     try std.testing.expect(!isRecoverableBuildError(error.AccessDenied));

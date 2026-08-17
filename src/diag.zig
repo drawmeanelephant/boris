@@ -197,6 +197,26 @@ pub fn sortDiagnostics(diags: []Diagnostic) void {
     std.mem.sort(Diagnostic, diags, {}, lessThan);
 }
 
+/// When true, `printText` emits nothing. `boris watch --watch-json` replaces
+/// the prose diagnostic form with NDJSON events; structured collection via
+/// `Collector` is unaffected. The watch coordinator sets this for the
+/// duration of a `--watch-json` compile. Off everywhere else, so `--quiet`
+/// semantics ("never suppress the explanation for a nonzero exit") are
+/// untouched: this flag suppresses error text only when the same data is
+/// carried by the machine-readable stream.
+pub var text_suppressed: std.atomic.Value(bool) = .init(false);
+
+/// Format `d` and print it to stderr, unless watch-json text suppression is
+/// active. This is the single choke point for formatted diagnostic text, so
+/// every diagnostic-print site that funnels through `formatText` inherits
+/// suppression (and the data still reaches any `Collector`).
+pub fn printText(d: Diagnostic, allocator: std.mem.Allocator) void {
+    if (text_suppressed.load(.unordered)) return;
+    const line = formatText(d, allocator) catch return;
+    defer allocator.free(line);
+    std.debug.print("{s}\n", .{line});
+}
+
 /// Format one diagnostic line for stderr (no trailing newline).
 pub fn formatText(d: Diagnostic, allocator: std.mem.Allocator) ![]u8 {
     const rem = if (d.remediation.len > 0)

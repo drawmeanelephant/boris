@@ -686,9 +686,7 @@ pub fn printDiagnostic(
     defer arena.deinit();
     const d = makeDiagnostic(arena.allocator(), err, source_path, fail) catch return;
     if (sink) |s| s.append(d);
-    const line = diag.formatText(d, gpa) catch return;
-    defer gpa.free(line);
-    std.debug.print("{s}\n", .{line});
+    diag.printText(d, gpa);
 }
 
 // ---------------------------------------------------------------------------

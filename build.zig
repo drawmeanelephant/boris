@@ -651,6 +651,24 @@ pub fn build(b: *std.Build) void {
     );
     test_watch_serve_step.dependOn(&watch_serve_run.step);
 
+    // `watch --watch-json` NDJSON contract (#644): the machine-readable stderr
+    // stream must be exactly one JSON object per line with a pinned key order,
+    // never interleaved with prose progress or prose diagnostics, and the
+    // event sequence must be deterministic. This black-box script is the one
+    // end-to-end guard for the stream's byte shape and prose purity.
+    const watch_json_contract_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-watch-json-contract.sh",
+    });
+    watch_json_contract_run.setCwd(b.path("."));
+    watch_json_contract_run.has_side_effects = true;
+    watch_json_contract_run.step.dependOn(b.getInstallStep());
+    const test_watch_json_contract_step = b.step(
+        "test-watch-json-contract",
+        "Run the watch --watch-json NDJSON stream contract guard",
+    );
+    test_watch_json_contract_step.dependOn(&watch_json_contract_run.step);
+
     // XHTML output profile evidence (#448, acceptance criterion 5): Boris
     // content must publish a page under the XHTML profile that an independent
     // XML parser (xmllint/libxml2, else python3 ElementTree) accepts, and the
@@ -1891,6 +1909,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&github_pages_audit_test.step);
     test_step.dependOn(&xhtml_evidence_run.step);
     test_step.dependOn(&watch_serve_run.step);
+    test_step.dependOn(&watch_json_contract_run.step);
 
     const test_harness_step = b.step(
         "test-harness",

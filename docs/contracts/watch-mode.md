@@ -10,6 +10,11 @@ Watch mode is an opt-in local development feature that monitors source and layou
 - **Flag**: `--watch`
 - **Requires**: HTML mode (`--html`, `--html-dir`, or `--target`).
 - **Implication**: When `--watch` is specified, `--incremental` is automatically implied/enabled to guarantee fast rebuilding.
+- **Flag**: `--watch-json` (watch only; `boris watch --watch-json`, or the flag form `--watch --watch-json`).
+  - **Requires**: watch mode; `--watch-json` without `--watch` / `watch` is a usage error (Exit 2).
+  - **Implication**: The compile's prose progress and diagnostic stderr are suppressed for the
+    lifetime of each build; the same diagnostics flow into the machine-readable `build-failed`
+    event instead (§8).
 - **Conflicts**:
   - `--watch` combined with `--rag` or `--rag-dir` is a usage error (Exit 2).
   - `--watch` combined with `--out` (IR mode) is a usage error (Exit 2).
@@ -92,3 +97,101 @@ Nested output under a watched content root is supported only when exclusion matc
 - **Backends**:
   - `FakeWatcher`: An in-memory, **single-threaded** mock backend for deterministic, non-timing-dependent unit and integration tests.
   - `PollingWatcher`: A portable fallback watcher that compares `mtime` and handles recursive trees without kqueue/inotify file-descriptor exhaustion.
+
+## 8. `--watch-json` NDJSON Event Stream
+
+`--watch-json` switches the watch process into a machine-readable mode: every
+build phase is announced as **one JSON object per line** (NDJSON, UTF-8, LF
+after each record, no pretty-printing) on **stderr**. Consumers parse stderr
+line-by-line and key off the `event` field. Exit codes are unchanged by
+`--watch-json` (0 success, 1 content validation, 2 usage, 3 I/O/system).
+
+### Stream Purity
+
+- The stream is **exclusively NDJSON** while `--watch-json` is active. Compile
+  progress prose (`wrote dist/…`) and prose diagnostics are suppressed for the
+  duration of each build; the diagnostics are carried inside `build-failed`
+  instead. `--quiet` is therefore implied by `--watch-json` for the compile
+  path, but the event stream itself is always emitted regardless of `--quiet`.
+- Key order is stable and written explicitly, so a consumer may pin the exact
+  byte shape. Numeric fields are emitted without quotes; `null` marks an absent
+  optional scalar.
+
+### Versioning Handshake
+
+The first record is always `hello`. A consumer must refuse to proceed when
+`watch_events_schema` is not the version it understands (mirroring how IR
+artifacts gate on `schemaVersion`).
+
+```json
+{"event":"hello","watch_events_schema":1,"compiler":"boris/0.8.1"}
+```
+
+- `compiler` is the `boris/<version>` compiler identifier.
+
+### Event Types
+
+| event             | when                                                                 |
+| ----------------- | -------------------------------------------------------------------- |
+| `hello`           | first record; schema handshake                                       |
+| `build-started`   | a build/rebuild cycle begins                                         |
+| `build-succeeded` | a build/rebuild completes successfully                               |
+| `build-failed`    | a build/rebuild fails (recoverable or not)                           |
+| `watcher-started` | the poll loop begins after the initial build (even if it failed)     |
+| `serve-started`   | `--serve` bound a loopback port (emitted even under `--quiet`)       |
+| `watch-error`     | the watch loop hit a non-build error (e.g. poll failure)             |
+| `watch-stopped`   | graceful shutdown on SIGINT/SIGTERM; `reason` is `"signal"`         |
+
+Common fields:
+
+- `phase` is `"initial"` for the startup build or `"rebuild"` for a change-triggered build.
+- `mode` is `"html"`.
+- `targets` is the **subset actually rebuilt** (selective rebuild names only
+  the affected targets), never the full configured set; the empty-targets
+  single-target path reports the synthetic target `"default"`.
+- `changed` (rebuild only) is the coalesced, sorted set of normalized changed
+  paths that triggered the rebuild.
+
+`build-started`:
+
+```json
+{"event":"build-started","phase":"initial","mode":"html","targets":["default"]}
+```
+
+`build-succeeded`:
+
+```json
+{"event":"build-succeeded","phase":"rebuild","mode":"html","targets":["default"],"changed":["index.md"],"pages_written":1,"duration_ms":45}
+```
+
+- `pages_written` is the number of pages written this cycle (`null` when the
+  compile path does not report it); `duration_ms` is the elapsed wall time of
+  the build.
+
+`build-failed`:
+
+```json
+{"event":"build-failed","phase":"initial","mode":"html","targets":["default"],"errors":1,"diagnostics":[{"severity":"error","code":"EROUTEMISSING","message":"…","remediation":"…","sourcePath":"…","line":null,"column":null,"id":null}],"recoverable":true,"duration_ms":28}
+```
+
+- `errors` is the count of `error`-severity diagnostics.
+- Each `diagnostics` object is byte-identical in shape and field order to the
+  `build-report.json` / `html-build-report-0.1.0` diagnostic object
+  (`severity`, `code`, `message`, `remediation`, `sourcePath`, `line`,
+  `column`, `id`). `sourcePath` and `id` are `null` when absent; `line` and
+  `column` are `null` when not known.
+- `recoverable` is `true` when the watcher keeps running to await a correction
+  (content/layout validation), `false` when the process will exit (hard I/O).
+
+`watcher-started`, `serve-started`, `watch-error`, `watch-stopped`:
+
+```json
+{"event":"watcher-started","mode":"html","targets":["default"]}
+{"event":"serve-started","url":"http://127.0.0.1:8090/","helper":"http://127.0.0.1:8090/__boris/","port":8090}
+{"event":"watch-error","message":"poll error (BrokenPipe)","recoverable":true}
+{"event":"watch-stopped","reason":"signal"}
+```
+
+- `serve-started` is the only port discovery for `--serve` consumers: `url` is
+  the tree origin, `helper` the auto-reload helper origin, `port` the bound
+  loopback port (0 = ephemeral resolves to the actual port).
