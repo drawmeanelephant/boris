@@ -72,25 +72,31 @@ run_native() {
 
 run_image() {
   local archive="$1" json="$2" tar="$3"
-  local cid
+  local cid outlog rc
+  outlog="$OUT/$(basename "$archive")-container.log"
   # Write results inside the container (/tmp is world-writable) and copy them
   # out. Do not override --entrypoint: the image already starts
   # boris-job-runner, and extra args replace CMD. Read-only bind mount for
   # the archive sidesteps the image's non-root uid 65532.
   cid="$(docker create \
     --network none \
+    --workdir / \
     -v "$archive:/in.tar:ro" \
     boris-job-runner:parity \
     --once --boris /usr/local/bin/boris --archive /in.tar \
     --result-json /tmp/result.json --result-tar /tmp/package.tar \
     --work-root /tmp/boris-jobs)"
   set +e
-  docker start -a "$cid"
-  local rc=$?
+  docker start -a "$cid" > "$outlog" 2>&1
+  rc=$?
   set -e
   docker cp "$cid:/tmp/result.json" "$json" 2>/dev/null || true
   docker cp "$cid:/tmp/package.tar" "$tar" 2>/dev/null || true
   docker rm -f "$cid" >/dev/null
+  if [[ "$rc" -ne 0 ]]; then
+    printf '    container log (%s):\n' "$outlog" >&2
+    cat "$outlog" >&2
+  fi
   return "$rc"
 }
 
