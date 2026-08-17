@@ -45,6 +45,43 @@ The adapter accepts only the published Boris versions for `completion.json`,
 publication plans, and the frontmatter JSON Schema. Compiler identifiers are
 opaque and may carry Boris-owned variant suffixes.
 
+## Launch line contract
+
+Embedders (a native `WKWebView`, a test harness, another desktop shell) spawn
+`boris-editor` as a subprocess and discover the session URL from the process
+contract below. Both pieces are pinned by `editor/scripts/test-host.sh`.
+
+**Launch line.** After the loopback listener is bound, the host prints exactly
+one line to **stderr**:
+
+```text
+BORIS_EDITOR_URL=http://127.0.0.1:<port>/#token=<32 hex chars>
+```
+
+The `BORIS_EDITOR_URL=` prefix, the loopback URL shape, and the `#token=`
+fragment are fixed. `--port 0` (the default) selects an ephemeral port and the
+printed port is the bound one. The token is 32 lowercase hex characters and is
+random per process. The token lives in the URL **fragment**, not a query
+string — fragments are never sent to the server on navigation, and the host
+accepts the same token via the `x-boris-editor-token` header for API calls.
+
+**Flags.** `boris-editor [DIR] [--boris PATH] [--ui-dir DIR] [--port PORT]`.
+`DIR` is the project root (default `.`); `--boris` is the compiler binary used
+for fixed invocations (a path-like value is canonicalized against the
+editor's cwd, a bare command name is resolved through `PATH`); `--ui-dir` is
+the built UI shell (default `editor/ui/dist`); `--port 0` means ephemeral.
+
+**Security posture is not relaxed by the contract.** The host binds
+`127.0.0.1` only. Every API request requires the token (fragment or
+`x-boris-editor-token`) and a loopback `Host`; any supplied `Origin` must
+match the session origin; the CSP frames only the editor's own preview port.
+
+**Shutdown.** `SIGINT` and `SIGTERM` stop accepting, close the listener, and
+exit `0` — the same shutdown contract as `boris watch`, so an embedder treats
+`terminationReason == .uncaughtSignal` as cancel, not a crash. No new flags;
+no drain of in-flight HTTP beyond what the single-request accept loop already
+implies.
+
 ## M0 gates
 
 ```bash
