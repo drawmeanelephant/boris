@@ -234,6 +234,16 @@ per-cycle outcomes map to the same convention as the one-shot exit codes
   `Validation passed (cycle N).`, `Validation failed — N problem(s) (cycle N).`,
   or `Validation daemon is restarting with backoff.` — and, when the open
   buffer is dirty, notes that the shown problems reflect saved files.
+- **Validation tracks the newest save (#656).** The four file-mutating
+  endpoints (save / create / rename / delete) record the change with
+  `noteSave()`; a validate demand that lands within 3 s of one waits (bounded,
+  also 3 s) for the daemon's save-triggered cycle to rewrite the report past
+  it, so a manual *Validate project* right after a save never answers from
+  before the save. On the shell side a successful save fires the existing
+  cycle-aware refresh on a 300 ms trailing debounce (rapid saves coalesce),
+  so the problems surface follows the newest save instead of waiting for the
+  next poll tick. No pending cycle → zero added latency; one-shot fallback is
+  untouched (no daemon → no note, no wait, no save-triggered refresh).
 - **Fallback.** With a pre-daemon compiler (or a refused `--watch`), behavior
   is byte-identical to the one-shot path: the daemon never spawns, and every
   validate request runs `boris validate` once with the bounded 120 s timeout.

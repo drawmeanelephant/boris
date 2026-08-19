@@ -323,6 +323,9 @@ fn serveFileSave(io: Io, allocator: std.mem.Allocator, request: *http.Server.Req
             recovery.clear(io, config.state_root, parsed.value.path) catch |err| {
                 std.log.warn("could not clear recovery snapshot after save: {s}", .{@errorName(err)});
             };
+            // The daemon re-validates on its own debounce; remembering this
+            // change lets a validate demand wait for that cycle (#656).
+            config.daemon.noteSave();
             return respondBuffer(allocator, request, .ok, "saved", parsed.value.path, buffer);
         },
         .conflict => |buffer| return respondBuffer(allocator, request, .conflict, "conflict", parsed.value.path, buffer),
@@ -337,6 +340,7 @@ fn serveFileCreate(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
     defer parsed.deinit();
     var buffer = file_api.create(allocator, io, config.project_root, parsed.value.path, parsed.value.content) catch |err| return respondApiError(request, err);
     defer buffer.deinit(allocator);
+    config.daemon.noteSave();
     return respondBuffer(allocator, request, .created, "created", parsed.value.path, buffer);
 }
 
@@ -349,6 +353,7 @@ fn serveFileRename(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
     recovery.clear(io, config.state_root, parsed.value.path) catch |err| {
         std.log.warn("could not clear recovery snapshot after rename: {s}", .{@errorName(err)});
     };
+    config.daemon.noteSave();
     const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .status = "renamed", .path = parsed.value.new_path }, .{});
     defer allocator.free(bytes);
     return respondJson(request, .ok, bytes);
@@ -363,6 +368,7 @@ fn serveFileDelete(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
     recovery.clear(io, config.state_root, parsed.value.path) catch |err| {
         std.log.warn("could not clear recovery snapshot after delete: {s}", .{@errorName(err)});
     };
+    config.daemon.noteSave();
     return respondJson(request, .ok, "{\"status\":\"deleted\"}");
 }
 

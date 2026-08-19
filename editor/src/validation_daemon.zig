@@ -44,6 +44,8 @@ const max_report_bytes = 32 * 1024 * 1024;
 const poll_interval_ns: u64 = 50 * std.time.ns_per_ms;
 const initial_cycle_timeout_ns: u64 = 120 * std.time.ns_per_s;
 const max_backoff_ns: u64 = 30 * std.time.ns_per_s;
+const activity_window_ns: u64 = 3 * std.time.ns_per_s;
+const pending_cycle_wait_ns: u64 = 3 * std.time.ns_per_s;
 
 pub const Daemon = struct {
     io: Io,
@@ -59,6 +61,8 @@ pub const Daemon = struct {
     last_term: ?std.process.Child.Term = null,
     failures: u32 = 0,
     next_spawn_allowed: i96 = 0,
+    activity_at: ?i96 = null,
+    activity_signature: ?Signature = null,
     result_arena: std.heap.ArenaAllocator,
 
     pub fn init(gpa: std.mem.Allocator, io: Io, config: Config) Daemon {
@@ -335,11 +339,42 @@ pub const Daemon = struct {
                 if (self.latest != null) break;
                 Io.sleep(self.io, .{ .nanoseconds = poll_interval_ns }, .awake) catch {};
             }
+        } else if (self.hasPendingCycle()) {
+            // A save / create / rename / delete landed recently and the daemon
+            // has not yet rewritten the report past it: wait (bounded) for that
+            // cycle so the demand answers from after the change, never before.
+            const deadline = self.nowNs() + pending_cycle_wait_ns;
+            while (self.nowNs() < deadline) {
+                self.poll();
+                if (self.child == null) return self.failureResult(allocator);
+                self.refresh();
+                if (!self.hasPendingCycle()) break;
+                Io.sleep(self.io, .{ .nanoseconds = poll_interval_ns }, .awake) catch {};
+            }
         } else {
             self.refresh();
         }
         if (self.latest) |result| return result.*;
         return self.failureResult(allocator);
+    }
+
+    /// Record that the host just changed the tree (save/create/rename/delete).
+    /// The timestamp and the report signature at this moment let a later
+    /// validate demand distinguish "a cycle from this change is still pending"
+    /// (wait for it) from "the cycle already finished" (answer immediately).
+    pub fn noteSave(self: *Daemon) void {
+        self.activity_at = self.nowNs();
+        self.activity_signature = self.reportSignature() catch null;
+    }
+
+    fn hasPendingCycle(self: *Daemon) bool {
+        const activity = self.activity_at orelse return false;
+        if (self.nowNs() - activity > activity_window_ns) return false;
+        const current = self.reportSignature() catch null;
+        const at = self.activity_signature;
+        if (at == null) return current == null;
+        if (current == null) return true;
+        return current.?.mtime.nanoseconds == at.?.mtime.nanoseconds and current.?.size == at.?.size;
     }
 
     /// Read-only validation state for the shell. Polls liveness and refreshes
@@ -494,6 +529,43 @@ test "report signatures advance on rewrite and not on identical reads" {
     try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = "{\"ok\":false,\"extra\":1}" });
     const second = try daemon.reportSignature();
     try std.testing.expect(second.mtime.nanoseconds != first.mtime.nanoseconds or second.size != first.size);
+}
+
+test "noteSave marks a pending cycle until the report advances past it" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    const root_path = try temp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root_path);
+
+    var daemon: Daemon = .init(gpa, io, .{
+        .project_root = root_path,
+        .boris_path = "boris",
+        .editor_id = "boris-editor/test",
+        .input_mode = .markdown,
+    });
+    defer daemon.deinit();
+
+    // No report yet: a note keeps the cycle pending until a report appears.
+    daemon.noteSave();
+    try std.testing.expect(daemon.hasPendingCycle());
+
+    try temp.dir.createDir(io, ".boris", .default_dir);
+    try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = "{\"ok\":true}" });
+    daemon.noteSave();
+
+    // Same report content read back is not a new cycle: still pending.
+    try std.testing.expect(daemon.hasPendingCycle());
+
+    // A rewrite past the note clears the pending state.
+    Io.sleep(io, .{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake) catch {};
+    try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = "{\"ok\":false,\"extra\":1}" });
+    try std.testing.expect(!daemon.hasPendingCycle());
+
+    // A change older than the activity window is never pending.
+    daemon.activity_at = daemon.nowNs() - activity_window_ns - 1;
+    try std.testing.expect(!daemon.hasPendingCycle());
 }
 
 test "backoff grows geometrically and caps at 30 seconds" {
