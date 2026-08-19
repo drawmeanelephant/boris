@@ -235,6 +235,37 @@
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
+  // Honest empty-pane naming (#658): distinguish "the tree was never
+  // validated" from "the newest report has zero problems". The notice is
+  // derived purely from state the host already sends (validate-state for the
+  // daemon path, commandResult presence for the one-shot path) and only
+  // renders when the pane has nothing to list and the last command was
+  // validate (or none) — so it can never contradict a different command's
+  // problem list. `clean` marks a claim about a completed report, which is
+  // what earns the dirty-buffer caveat.
+  $: problemsNotice = (() => {
+    const problems = commandResult?.problems ?? [];
+    if (problems.length > 0) return { text: '', clean: false };
+    if (commandResult && commandResult.mode !== 'validate') return { text: '', clean: false };
+    if (validateDaemon) {
+      if (!validateState) return { text: '', clean: false };
+      switch (validateState.state) {
+        case 'idle':
+          return { text: 'No validation report yet. Run Validate project to start the daemon.', clean: false };
+        case 'running':
+          return { text: 'Waiting for the first validation cycle…', clean: false };
+        case 'success':
+          if ((validateState.problems_count ?? 0) > 0) return { text: '', clean: false };
+          return { text: `No problems in the newest report (cycle ${validateState.cycle ?? 0}).`, clean: true };
+        default:
+          return { text: '', clean: false };
+      }
+    }
+    if (commandResult == null) {
+      return { text: 'No validation report yet. Run Validate project to check the tree.', clean: false };
+    }
+    return { text: '', clean: false };
+  })();
   $: activeProblems = (commandResult?.problems ?? []).filter(problem =>
     problem.source_path !== null && projectPathForProblem(problem.source_path) === activePath
   );
@@ -2157,7 +2188,10 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     {#if validateDaemon}
       <p class="validation-state" role="status" aria-label="Validation state" aria-live="polite">{validationStatusLabel(validateState)}</p>
     {/if}
-    {#if dirty && commandResult && commandResult.problems.length > 0}
+    {#if problemsNotice.text}
+      <p class="problems-notice" role="status" aria-label="Problems notice" aria-live="polite">{problemsNotice.text}</p>
+    {/if}
+    {#if dirty && ((commandResult?.problems.length ?? 0) > 0 || problemsNotice.clean)}
       <p class="warning-text">Problems reflect saved files; the open buffer has unsaved changes.</p>
     {/if}
     <div class="command-bar" aria-label="Boris commands">
@@ -2182,7 +2216,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       <p class="fallback-notice">Machine-readable diagnostics were unavailable for this command. Boris stderr was used; reported source positions are labeled best-effort.</p>
     {/if}
 
-    {#if commandResult && commandResult.problems.length === 0}
+    {#if commandResult && commandResult.problems.length === 0 && !problemsNotice.text}
       <p>No Boris diagnostics were reported by the last command.</p>
     {/if}
 

@@ -841,6 +841,70 @@ test('a save does not fire a validate refresh on the one-shot path (#656)', asyn
   await expect(page.getByText('Saved with a bad key.', { exact: true })).toHaveCount(0);
 });
 
+test('the problems pane names no-report-yet and the clean newest report (#658)', async ({ page }) => {
+  const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
+  await installApi(page, {
+    version: { compiler_id: 'boris/0.8.1', supported: { validate_watch: true } },
+    validateState
+  });
+  const notice = page.getByRole('status', { name: 'Problems notice' });
+
+  // No completed cycle: the pane says the report does not exist yet, using
+  // the daemon's own state rather than inventing one.
+  await expect(notice).toHaveText('No validation report yet. Run Validate project to start the daemon.', { timeout: 10000 });
+  validateState.state = 'running';
+  await expect(notice).toHaveText('Waiting for the first validation cycle…', { timeout: 10000 });
+
+  // The first completed cycle is clean: the pane names the report by its
+  // cycle, and the generic command line is suppressed for validate.
+  validateState.state = 'success';
+  validateState.failure_class = 'success';
+  validateState.cycle = 1;
+  validateState.problems_count = 0;
+  await expect(notice).toHaveText('No problems in the newest report (cycle 1).', { timeout: 10000 });
+  await expect(page.getByText('No Boris diagnostics were reported by the last command.')).toHaveCount(0);
+
+  // A dirty buffer earns the same saved-files caveat the problem list gets.
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await expect(page.getByText('Problems reflect saved files; the open buffer has unsaved changes.')).toBeVisible();
+});
+
+test('the one-shot pane names no-report-yet and keeps the clean command line (#658)', async ({ page }) => {
+  await installApi(page);
+  const notice = page.getByRole('status', { name: 'Problems notice' });
+
+  await expect(notice).toHaveText('No validation report yet. Run Validate project to check the tree.', { timeout: 10000 });
+
+  // A clean one-shot validate keeps the existing command-generic line; the
+  // notice disappears because a report now exists.
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validate project finished: Success (exit 0).');
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByText('No Boris diagnostics were reported by the last command.')).toBeVisible();
+});
+
+test('the clean-report notice never contradicts another command (#658)', async ({ page }) => {
+  const validateState: Record<string, unknown> = { supported: true, state: 'success', cycle: 2, failure_class: 'success', problems_count: 0 };
+  await installApi(page, {
+    version: { compiler_id: 'boris/0.8.1', supported: { validate_watch: true } },
+    validateState,
+    commands: { html_build: commandResult('html_build') }
+  });
+  const notice = page.getByRole('status', { name: 'Problems notice' });
+
+  await expect(notice).toHaveText('No problems in the newest report (cycle 2).', { timeout: 10000 });
+
+  // A clean non-validate command speaks for itself: the generic line returns
+  // and the daemon's clean-validation notice steps aside. (The rail scrolls
+  // internally at wide viewports and the pane content spills past its box at
+  // the boundary, so scroll the rail to make the button fully hittable.)
+  await page.locator('.workspace-rail').evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await page.getByRole('button', { name: 'Build HTML', exact: true }).click();
+  await expect(page.getByText('No Boris diagnostics were reported by the last command.')).toBeVisible();
+  await expect(notice).toHaveCount(0);
+});
+
 test('validation state line names idle, running, success, failed, and stale (#654)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
   await installApi(page, {

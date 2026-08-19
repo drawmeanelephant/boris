@@ -233,7 +233,13 @@ per-cycle outcomes map to the same convention as the one-shot exit codes
   `Validation is idle.`, `Validation is running the first cycle…`,
   `Validation passed (cycle N).`, `Validation failed — N problem(s) (cycle N).`,
   or `Validation daemon is restarting with backoff.` — and, when the open
-  buffer is dirty, notes that the shown problems reflect saved files.
+  buffer is dirty, notes that the shown problems reflect saved files. The
+  pane body also names its own empty states (#658), derived only from state
+  the host already sends: before any completed cycle it says *"No validation
+  report yet."* (daemon: `validate-state` `idle`/`running`; one-shot: no
+  command has run), and after a clean cycle it says *"No problems in the
+  newest report (cycle N)."* — so an empty pane never silently means both
+  "not checked" and "passed".
 - **Validation tracks the newest save (#656).** The four file-mutating
   endpoints (save / create / rename / delete) record the change with
   `noteSave()`; a validate demand that lands within 3 s of one waits (bounded,

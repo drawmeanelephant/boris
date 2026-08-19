@@ -161,7 +161,10 @@ footer { padding: 1rem clamp(1rem, 4vw, 4rem) 2rem; }
 @media (min-width: 80rem) {
   main { grid-template-columns: minmax(16rem, 0.7fr) minmax(24rem, 1.3fr) minmax(20rem, 1fr); }
   .workspace-rail { grid-column: auto; max-height: calc(100vh - 14rem); overflow-y: auto; }
-  .problems-pane { min-height: 0; }
+  /* Keep the pane from shrinking below its content: a shrunken box spills
+     the command bar under the later-painted preview heading, which covers
+     clicks on the boundary buttons (#658). The rail itself still scrolls. */
+  .problems-pane { min-height: 0; flex-shrink: 0; }
   #preview iframe { min-height: max(20rem, calc(100vh - 30rem)); }
 }
 
