@@ -79,7 +79,7 @@ get_api() {
 
 state_cycle() {
   get_api "$work/state.json" '/api/validate-state'
-  node -e 'const s = require(process.argv[1]); if (!s.supported || typeof s.cycle !== "number") throw Error("validate-state payload mismatch"); console.log(s.cycle);' "$work/state.json"
+  node -e 'const s = require(process.argv[1]); if (!s.supported || typeof s.cycle !== "number" || !(s.report_age_ms === null || typeof s.report_age_ms === "number")) throw Error("validate-state payload mismatch"); console.log(s.cycle);' "$work/state.json"
 }
 
 daemon_pids() {

@@ -226,9 +226,14 @@ per-cycle outcomes map to the same convention as the one-shot exit codes
   management is POSIX-only; on Windows the probe reports unsupported and the
   one-shot validate path is used unchanged.
 - **Shell state channel.** `GET /api/validate-state` returns
-  `{supported, state, cycle, failure_class, problems_count}`; the shell polls
-  it cheaply and re-runs validate only when the cycle counter moves, so the
-  problems surface reflects the newest report within the daemon's debounce.
+  `{supported, state, cycle, failure_class, problems_count, report_age_ms}`;
+  `cycle` is the newest completed daemon cycle and `report_age_ms` is the
+  bounded age of that cycle's report, or `null` before the first report. The
+  shell polls it cheaply and re-runs validate only when the cycle counter
+  moves, so the problems surface reflects the newest report within the
+  daemon's debounce. The validation status line keeps the state label beside
+  `Cycle N · Report age: …`, making a quiet or delayed daemon visible without
+  inventing a compiler result.
   The Problems section also names the last reported state verbatim —
   `Validation is idle.`, `Validation is running the first cycle…`,
   `Validation passed (cycle N).`, `Validation failed — N problem(s) (cycle N).`,

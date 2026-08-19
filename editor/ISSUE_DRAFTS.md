@@ -2,8 +2,6 @@
 
 This document contains drafted updates for existing issues and new proposed issues based on real-browser testing against `boris/0.8.1` and the `boris-editor` host.
 
----
-
 ## 1. Progress Comment for Issue #418 (Boris Editor Epic)
 
 **Target Issue**: [drawmeanelephant/boris#418](https://github.com/drawmeanelephant/boris/issues/418)  
@@ -107,3 +105,42 @@ To provide immediate feedback to sighted and pointer users, the button label sho
 1. Track active copied button state in `App.svelte` (`let copiedProblemPacketId = ''`).
 2. When clicked, set `copiedProblemPacketId = problem.id ?? problem.code` and clear via `setTimeout` after 1500ms.
 3. Preserve the full accessible label via `aria-label` while presenting the visual confirmation text.
+
+---
+
+## 5. New Issue Draft: Surface the live validation cycle and report age
+
+**Title**: `[Editor UX] Show the validation daemon cycle and report age in the status line`
+**Labels**: `editor`, `ux`, `validation`
+
+### Summary
+
+The editor already receives the daemon's validation state and completed cycle
+counter, but the Problems pane only names the state. An author cannot tell
+which report they are looking at or whether a successful report is becoming
+old while the daemon is quiet or delayed.
+
+### Expected Behavior
+
+When the compiler supports `validate --watch`, show the live completed cycle
+and report age beside the existing validation state, for example:
+
+```text
+Validation passed (cycle 5).    Cycle 5 · Report age: 4s
+```
+
+Before the first report, show an honest missing age (`Report age: —`). The age
+must come from the daemon's report signature, update with the existing state
+poll, and remain absent on the one-shot fallback path. No compiler result is
+inferred from elapsed time.
+
+### Acceptance Criteria
+
+- [ ] `/api/validate-state` includes `report_age_ms`, or `null` before a report.
+- [ ] The editor status line surfaces the current cycle and a human-readable
+      report age next to idle/running/success/failed/stale state text.
+- [ ] The age advances while the report remains unchanged; cycle changes still
+      refresh the Problems surface as before.
+- [ ] One-shot hosts and existing validation-state labels remain unchanged.
+- [ ] Gates: `npm run check`, `npm run build`, editor host tests, validation
+      daemon integration, and Playwright.

@@ -92,6 +92,9 @@ input, select { width: 100%; padding: 0.7rem; border: 1px solid #82958b; border-
 .recipe-scale input { width: 100%; }
 .recipe-scale button { width: auto; }
 .problems-heading { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+.validation-state-line { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; margin: 0.75rem 0; }
+.validation-state-line .validation-state { margin: 0; }
+.validation-meta { color: #53625c; font: 0.82rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .command-result { flex: 0 0 auto; padding: 0.4rem 0.65rem; border-radius: 999px; color: #13563e; background: #dff1e8; font-weight: 700; }
 .command-result.failure { color: #7d241b; background: #ffe6e1; }
 .command-bar { display: flex; gap: 0.55rem; flex-wrap: wrap; margin: 1rem 0; }
