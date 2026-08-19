@@ -1,4 +1,0 @@
-# Fetched dependency archive (root .gitignore only anchors /zig-pkg/)
-zig-pkg/
-# Runtime staging dir for the harness's synthesized checks.json
-repro-420-io/
