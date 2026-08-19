@@ -995,6 +995,27 @@ test('validation state line names idle, running, success, failed, and stale (#65
   await expect(stateLine).toHaveText('Validation daemon is restarting with backoff.', { timeout: 10000 });
 });
 
+test('validation status line surfaces the live cycle and report age (#A22)', async ({ page }) => {
+  const validateState: Record<string, unknown> = {
+    supported: true, state: 'success', cycle: 4, failure_class: 'success', problems_count: 0,
+    report_age_ms: 4200
+  };
+  await installApi(page, {
+    version: { compiler_id: 'boris/0.8.1', supported: { validate_watch: true } },
+    validateState
+  });
+  const meta = page.locator('.validation-meta');
+
+  await expect(meta).toHaveText('Cycle 4 · Report age: 4s', { timeout: 10000 });
+  validateState.cycle = 5;
+  validateState.report_age_ms = 61_000;
+  await expect(meta).toHaveText('Cycle 5 · Report age: 1m 1s', { timeout: 10000 });
+
+  validateState.state = 'running';
+  validateState.report_age_ms = null;
+  await expect(meta).toHaveText('Cycle 5 · Report age: —', { timeout: 10000 });
+});
+
 test('a dirty buffer names that problems reflect saved files (#654)', async ({ page }) => {
   await installApi(page, {
     commands: {

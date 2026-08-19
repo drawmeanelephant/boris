@@ -388,18 +388,24 @@ pub const Daemon = struct {
                 .cycle = self.cycle,
                 .failure_class = null,
                 .problems_count = 0,
+                .report_age_ms = null,
             }, .{});
         }
         self.poll();
         self.refresh();
         const failure_class: ?[]const u8 = if (self.latest) |result| @tagName(result.failure_class) else null;
         const problems_count: usize = if (self.latest) |result| result.problems.len else 0;
+        const report_age_ms: ?u64 = if (self.last_signature) |signature|
+            reportAgeMs(self.nowNs(), signature.mtime.nanoseconds)
+        else
+            null;
         return std.json.Stringify.valueAlloc(allocator, .{
             .supported = true,
             .state = @tagName(self.state),
             .cycle = self.cycle,
             .failure_class = failure_class,
             .problems_count = problems_count,
+            .report_age_ms = report_age_ms,
         }, .{});
     }
 
@@ -455,6 +461,11 @@ fn backoffDelay(failures: u32) i96 {
         delay_ns *= 2;
     }
     return @min(delay_ns, max_backoff_ns);
+}
+
+fn reportAgeMs(now: i96, report_mtime: i96) u64 {
+    if (now <= report_mtime) return 0;
+    return @intCast(@divTrunc(now - report_mtime, std.time.ns_per_ms));
 }
 
 fn termFromStatus(status: u32) std.process.Child.Term {
@@ -574,6 +585,13 @@ test "backoff grows geometrically and caps at 30 seconds" {
     try std.testing.expectEqual(@as(i96, 2 * std.time.ns_per_s), backoffDelay(2));
     try std.testing.expectEqual(@as(i96, 4 * std.time.ns_per_s), backoffDelay(3));
     try std.testing.expectEqual(@as(i96, 30 * std.time.ns_per_s), backoffDelay(20));
+}
+
+test "report age is clamped at zero and expressed in milliseconds" {
+    try std.testing.expectEqual(@as(u64, 0), reportAgeMs(10, 20));
+    try std.testing.expectEqual(@as(u64, 0), reportAgeMs(20, 20));
+    try std.testing.expectEqual(@as(u64, 1), reportAgeMs(20 + std.time.ns_per_ms, 20));
+    try std.testing.expectEqual(@as(u64, 1250), reportAgeMs(20 + 1250 * std.time.ns_per_ms, 20));
 }
 
 test "reaped statuses convert to the contracted term shape" {

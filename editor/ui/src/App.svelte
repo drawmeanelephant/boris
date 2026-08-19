@@ -16,6 +16,7 @@
     cycle?: number;
     failure_class?: FailureClass | null;
     problems_count?: number;
+    report_age_ms?: number | null;
   };
   type FileEntry = { path: string };
   type FileList = { files: FileEntry[] };
@@ -1141,6 +1142,20 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     }
   }
 
+  function reportAgeLabel(ageMs: number | null | undefined): string {
+    if (ageMs == null) return 'Report age: —';
+    if (ageMs < 1000) return 'Report age: <1s';
+    if (ageMs < 60_000) return `Report age: ${Math.floor(ageMs / 1000)}s`;
+    const minutes = Math.floor(ageMs / 60_000);
+    const seconds = Math.floor((ageMs % 60_000) / 1000);
+    return `Report age: ${minutes}m ${seconds}s`;
+  }
+
+  function validationCycleLabel(state: ValidateState | null): string {
+    if (!state || state.cycle === undefined) return 'Cycle: — · Report age: —';
+    return `Cycle ${state.cycle} · ${reportAgeLabel(state.report_age_ms)}`;
+  }
+
   async function refreshValidate() {
     const started = Date.now();
     const result = await api<CommandResult | ErrorResponse>('/api/commands/run', {
@@ -2231,7 +2246,10 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       {/if}
     </div>
     {#if validateDaemon}
-      <p class="validation-state" role="status" aria-label="Validation state" aria-live="polite">{validationStatusLabel(validateState)}</p>
+      <div class="validation-state-line">
+        <p class="validation-state" role="status" aria-label="Validation state" aria-live="polite">{validationStatusLabel(validateState)}</p>
+        <span class="validation-meta" aria-label="Validation cycle and report age">{validationCycleLabel(validateState)}</span>
+      </div>
     {/if}
     {#if problemsNotice.text}
       <p class="problems-notice" role="status" aria-label="Problems notice" aria-live="polite">{problemsNotice.text}</p>
