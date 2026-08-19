@@ -229,6 +229,11 @@ per-cycle outcomes map to the same convention as the one-shot exit codes
   `{supported, state, cycle, failure_class, problems_count}`; the shell polls
   it cheaply and re-runs validate only when the cycle counter moves, so the
   problems surface reflects the newest report within the daemon's debounce.
+  The Problems section also names the last reported state verbatim —
+  `Validation is idle.`, `Validation is running the first cycle…`,
+  `Validation passed (cycle N).`, `Validation failed — N problem(s) (cycle N).`,
+  or `Validation daemon is restarting with backoff.` — and, when the open
+  buffer is dirty, notes that the shown problems reflect saved files.
 - **Fallback.** With a pre-daemon compiler (or a refused `--watch`), behavior
   is byte-identical to the one-shot path: the daemon never spawns, and every
   validate request runs `boris validate` once with the bounded 120 s timeout.

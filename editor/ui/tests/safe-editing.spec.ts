@@ -777,6 +777,59 @@ test('daemon validate-state cycles refresh the problems surface without a manual
   await expect(page.getByText('index.md · error · EFRONTMATTER', { exact: true })).toBeVisible();
 });
 
+test('validation state line names idle, running, success, failed, and stale (#654)', async ({ page }) => {
+  const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
+  await installApi(page, {
+    version: { compiler_id: 'boris/0.8.1', supported: { validate_watch: true } },
+    validateState
+  });
+  const stateLine = page.getByRole('status', { name: 'Validation state' });
+
+  await expect(stateLine).toHaveText('Validation is idle. Run Validate project to start the daemon.', { timeout: 10000 });
+  validateState.state = 'running';
+  await expect(stateLine).toHaveText('Validation is running the first cycle…', { timeout: 10000 });
+  validateState.state = 'success';
+  validateState.failure_class = 'success';
+  await expect(stateLine).toHaveText('Validation passed (cycle 0).', { timeout: 10000 });
+  validateState.state = 'failed';
+  validateState.failure_class = 'content';
+  validateState.problems_count = 2;
+  await expect(stateLine).toHaveText('Validation failed — 2 problems (cycle 0).', { timeout: 10000 });
+  validateState.state = 'stale';
+  await expect(stateLine).toHaveText('Validation daemon is restarting with backoff.', { timeout: 10000 });
+});
+
+test('a dirty buffer names that problems reflect saved files (#654)', async ({ page }) => {
+  await installApi(page, {
+    commands: {
+      validate: commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Unknown key.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 1, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    }
+  });
+
+  // Without a daemon (the default host), no validation-state line appears.
+  await expect(page.getByRole('status', { name: 'Validation state' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByText('Unknown key.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Problems reflect saved files; the open buffer has unsaved changes.')).toBeHidden();
+
+  // Editing without saving makes the shown problems stale relative to the buffer.
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await expect(page.getByText('Problems reflect saved files; the open buffer has unsaved changes.')).toBeVisible();
+
+  // Saving clears the note: the buffer now matches what validation saw.
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await expect(page.getByText('Problems reflect saved files; the open buffer has unsaved changes.')).toBeHidden();
+});
+
 test('stderr diagnostics are announced as best-effort and dirty buffers route commands through a resolution dialog', async ({ page }) => {
   await installApi(page, {
     commands: {
