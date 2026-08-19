@@ -95,9 +95,10 @@ Options:
   --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
                       Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
   --incremental       Content-addressed incremental HTML rendering (HTML mode)
-  --watch             Compatibility flag; same as the watch command
-  --watch-json        Emit one NDJSON event per build phase on stderr (watch only);
-                      see docs/contracts/watch-mode.md §8
+  --watch             Compatibility flag; same as the watch command; with `validate`
+                      starts the zero-write validation daemon (validate --watch)
+  --watch-json        Emit one NDJSON event per build phase on stderr (watch only,
+                      including validate --watch); see docs/contracts/watch-mode.md §8
   --serve             Serve the built tree over loopback HTTP (watch only);
                       auto-reload helper: http://127.0.0.1:PORT/__boris/
   --port N            Loopback port for --serve (default 8090; 0 = ephemeral);
@@ -157,7 +158,8 @@ Conflicts (exit 2):
   --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
   --target with --html-dir
   --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
-  validate with non-HTML exports, --incremental, --watch, --jobs, --format, or --report
+  validate with non-HTML exports, --incremental, --jobs, --format, or --out
+  validate --watch with --html-dir, --target, --serve/--port, --incremental, --jobs, or --format
   Invalid target names, duplicate names, output collisions, workspace escape,
   content/layout overlap, unknown --target-layout / --layout-rule target,
   duplicate or invalid layout selectors, invalid layout paths (.. / absolute),
@@ -167,6 +169,8 @@ Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
 
 Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
       `boris validate` observes the selected HTML target configuration but writes no artifacts.
+      `boris validate --watch` repeats that preflight on every change and exits 0 on signal;
+      `--report PATH` is rewritten each cycle and `--watch-json` emits mode "validate" events.
       `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
       `boris recipe-scale --input DIR --id PAGE --factor TEXT` prints a derived
       scaled view on stdout; `--servings N` is the same view with

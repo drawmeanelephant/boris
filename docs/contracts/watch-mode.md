@@ -10,6 +10,16 @@ Watch mode is an opt-in local development feature that monitors source and layou
 - **Flag**: `--watch`
 - **Requires**: HTML mode (`--html`, `--html-dir`, or `--target`).
 - **Implication**: When `--watch` is specified, `--incremental` is automatically implied/enabled to guarantee fast rebuilding.
+- **`boris validate --watch` (issue #647)**: the zero-write validation daemon.
+  It reuses this same coordinator — debounce/coalescing, normalization,
+  ignore rules, serialization, and signal handling — but every cycle runs the
+  one-shot `validate` preflight instead of an HTML publish (action
+  `.validate`). It writes nothing except the optional `--report` file, which
+  is replaced (never appended) every cycle; `--html-dir`, `--target`,
+  `--serve`, and `--port` are usage errors with it because the single
+  synthetic `default` target is always preflighted and no output exists.
+  NDJSON events carry `mode` `"validate"` (§8); the daemon exits `0` on
+  SIGINT/SIGTERM.
 - **Flag**: `--watch-json` (watch only; `boris watch --watch-json`, or the flag form `--watch --watch-json`).
   - **Requires**: watch mode; `--watch-json` without `--watch` / `watch` is a usage error (Exit 2).
   - **Implication**: The compile's prose progress and diagnostic stderr are suppressed for the
@@ -145,10 +155,12 @@ artifacts gate on `schemaVersion`).
 Common fields:
 
 - `phase` is `"initial"` for the startup build or `"rebuild"` for a change-triggered build.
-- `mode` is `"html"`.
+- `mode` is `"html"` for the publish daemon or `"validate"` for the
+  zero-write validation daemon (`boris validate --watch`, issue #647).
 - `targets` is the **subset actually rebuilt** (selective rebuild names only
   the affected targets), never the full configured set; the empty-targets
-  single-target path reports the synthetic target `"default"`.
+  single-target path reports the synthetic target `"default"`. Validate mode
+  always reports `["default"]` (no target fan-out).
 - `changed` (rebuild only) is the coalesced, sorted set of normalized changed
   paths that triggered the rebuild.
 
@@ -165,8 +177,14 @@ Common fields:
 ```
 
 - `pages_written` is the number of pages written this cycle (`null` when the
-  compile path does not report it); `duration_ms` is the elapsed wall time of
-  the build.
+  compile path does not report it — always `null` in `validate` mode, which
+  writes nothing); `duration_ms` is the elapsed wall time of the build.
+
+Validate mode uses the same event names with `mode` `"validate"`:
+
+```json
+{"event":"build-succeeded","phase":"rebuild","mode":"validate","targets":["default"],"changed":["index.md"],"pages_written":null,"duration_ms":12}
+```
 
 `build-failed`:
 

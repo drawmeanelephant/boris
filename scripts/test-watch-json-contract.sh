@@ -57,27 +57,45 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Poll stderr until a line matches $1 (an extended regex). Fails if the
-# watcher exits first, so a silent crash cannot be mistaken for a timeout.
+# Poll stderr until a line matches an extended regex. Two call forms:
+#   wait_for REGEX                  → REGEX against $ERR (phase-1 form)
+#   wait_for FILE REGEX [PID]       → REGEX against FILE (multi-phase form)
+# Fails if the watcher exits first, so a silent crash cannot be mistaken for
+# a timeout.
 wait_for() {
+    local file="$ERR"
+    local re=""
+    local pid="$WATCH_PID"
+    if [[ $# -ge 2 ]]; then
+        file="$1"
+        re="$2"
+        [[ $# -ge 3 ]] && pid="$3"
+    else
+        re="$1"
+    fi
     local i
     for i in $(seq 1 80); do
-        grep -Eq "$1" "$ERR" 2>/dev/null && return 0
-        kill -0 "$WATCH_PID" 2>/dev/null || fail "watch exited before observing: $1 (stderr tail: $(tail -3 "$ERR" 2>/dev/null))"
+        grep -Eq "$re" "$file" 2>/dev/null && return 0
+        kill -0 "$pid" 2>/dev/null || fail "watch exited before observing: $re (stderr tail: $(tail -3 "$file" 2>/dev/null))"
         sleep 0.25
     done
-    fail "timed out waiting for: $1 (stderr tail: $(tail -5 "$ERR" 2>/dev/null))"
+    fail "timed out waiting for: $re (stderr tail: $(tail -5 "$file" 2>/dev/null))"
 }
 
-# $1 is an exact whole line that must appear in the stream (byte shape).
+# $1 is an exact whole line that must appear in the stream (byte shape);
+# $2 is the file to search (default $ERR).
 expect_line() {
-    grep -Fx "$1" "$ERR" >/dev/null 2>&1 || fail "missing exact NDJSON line: $1"
+    local line="$1"
+    local file="${2:-$ERR}"
+    grep -Fx "$line" "$file" >/dev/null 2>&1 || fail "missing exact NDJSON line: $line"
 }
 
 # $1 is an extended regex that must match a whole line (key order pinned,
-# timing/count values allowed to vary).
+# timing/count values allowed to vary); $2 is the file to search (default $ERR).
 expect_shape() {
-    grep -E "$1" "$ERR" >/dev/null 2>&1 || fail "missing NDJSON shape: $1"
+    local re="$1"
+    local file="${2:-$ERR}"
+    grep -E "$re" "$file" >/dev/null 2>&1 || fail "missing NDJSON shape: $re"
 }
 
 # The hello handshake pins the compiler id exactly, so derive it from the
@@ -164,5 +182,146 @@ SEQ="$(grep -o '"event":"[a-z-]*"' "$ERR" | sed 's/"event"://; s/"//g' | tr '\n'
 EXPECTED="hello build-started build-succeeded watcher-started build-started build-succeeded build-started build-failed watch-stopped "
 [[ "$SEQ" == "$EXPECTED" ]] || fail "unexpected event sequence: $SEQ"
 pass "event sequence pinned"
+
+# ---------------------------------------------------------------------------
+# Phase 2: `validate --watch --watch-json` — the zero-write validation daemon
+# (#647). Same NDJSON protocol with mode "validate"; nothing is written.
+# ---------------------------------------------------------------------------
+note "phase 2: start boris validate --watch --watch-json"
+# The html phase left a broken wiki-link in index.md; restore valid content.
+cat > "$OUT/content/index.md" <<'MD'
+# Watch JSON contract
+
+Version three.
+MD
+VERR="$OUT/validate-stderr.log"
+VOUT="$OUT/validate-stdout.log"
+"$BORIS" validate --watch --watch-json \
+    --input "$OUT/content" \
+    --theme "$OUT/theme" \
+    >"$VOUT" 2>"$VERR" &
+VPID=$!
+
+wait_for "$VERR" '"event":"hello"' "$VPID"
+wait_for "$VERR" '"event":"watcher-started"' "$VPID"
+
+note "validate events: initial sequence byte shapes"
+expect_line '{"event":"build-started","phase":"initial","mode":"validate","targets":["default"]}' "$VERR"
+expect_shape '^\{"event":"build-succeeded","phase":"initial","mode":"validate","targets":\["default"\],"pages_written":null,"duration_ms":[0-9]+\}$' "$VERR"
+expect_line '{"event":"watcher-started","mode":"validate","targets":["default"]}' "$VERR"
+pass "validate initial sequence byte shapes"
+
+note "validate rebuild names the changed path and reports no pages written"
+cat > "$OUT/content/index.md.tmp" <<'MD'
+# Watch JSON contract
+
+Version four.
+MD
+mv "$OUT/content/index.md.tmp" "$OUT/content/index.md"
+wait_for "$VERR" '"event":"build-succeeded","phase":"rebuild"' "$VPID"
+expect_line '{"event":"build-started","phase":"rebuild","mode":"validate","targets":["default"],"changed":["index.md"]}' "$VERR"
+expect_shape '^\{"event":"build-succeeded","phase":"rebuild","mode":"validate","targets":\["default"\],"changed":\["index.md"\],"pages_written":null,"duration_ms":[0-9]+\}$' "$VERR"
+pass "validate rebuild sequence + changed-path byte shapes"
+
+note "a recoverable content failure emits build-failed mode validate"
+cat > "$OUT/content/index.md.tmp" <<'MD'
+# Watch JSON contract
+
+See [[does-not-exist]].
+MD
+mv "$OUT/content/index.md.tmp" "$OUT/content/index.md"
+wait_for "$VERR" '"event":"build-failed"' "$VPID"
+expect_shape '^\{"event":"build-failed","phase":"rebuild","mode":"validate","targets":\["default"\],"changed":\["index.md"\],"errors":[0-9]+,"diagnostics":\[.*\],"recoverable":true,"duration_ms":[0-9]+\}$' "$VERR"
+grep -q '"severity":"error","code":"EREFERENCEMISSING"' "$VERR" \
+    || fail "validate build-failed diagnostics missing the report-shape EREFERENCEMISSING object"
+pass "validate build-failed recoverable=true with structured diagnostics"
+
+note "the validate daemon writes no output tree (zero-write)"
+[[ ! -e "$OUT/validate-site" ]] || fail "validate --watch created an output tree"
+pass "zero-write daemon leaves no output tree"
+
+note "SIGTERM stops the validate daemon with watch-stopped (exit 0)"
+kill -TERM "$VPID"
+RC=0
+wait "$VPID" || RC=$?
+VPID=""
+[[ "$RC" == "0" ]] || fail "validate watch exited $RC on SIGTERM (expected 0)"
+expect_line '{"event":"watch-stopped","reason":"signal"}' "$VERR"
+pass "validate clean SIGTERM shutdown"
+
+note "validate stream is exclusively NDJSON; stdout empty"
+if grep -vE '^\{"event":"' "$VERR" | grep -q .; then
+    fail "prose leaked into the validate NDJSON stream: $(grep -vE '^\{"event":"' "$VERR" | head -1)"
+fi
+[[ ! -s "$VOUT" ]] || fail "validate stdout is not empty: $(head -1 "$VOUT")"
+pass "validate stream purity"
+
+# ---------------------------------------------------------------------------
+# Phase 3: `validate --watch --report PATH` — the report file is rewritten
+# (replaced, never appended) on every cycle (#647).
+# ---------------------------------------------------------------------------
+note "phase 3: validate --watch --report rewrites the report file every cycle"
+cat > "$OUT/content/index.md" <<'MD'
+# Watch JSON contract
+
+Version five.
+MD
+RERR="$OUT/report-stderr.log"
+ROUT="$OUT/report-stdout.log"
+REPORT="$OUT/report.json"
+"$BORIS" validate --watch --report "$REPORT" \
+    --input "$OUT/content" \
+    --theme "$OUT/theme" \
+    >"$ROUT" 2>"$RERR" &
+RPID=$!
+
+for i in $(seq 1 80); do
+    grep -q '"ok": true' "$REPORT" 2>/dev/null && break
+    kill -0 "$RPID" 2>/dev/null || fail "report watch exited before the initial ok report"
+    sleep 0.25
+done
+grep -q '"ok": true' "$REPORT" 2>/dev/null || fail "initial report is not ok:true"
+pass "initial cycle writes ok:true report"
+
+note "a failed cycle rewrites the report (not append) with diagnostics"
+cat > "$OUT/content/index.md.tmp" <<'MD'
+# Watch JSON contract
+
+See [[does-not-exist]].
+MD
+mv "$OUT/content/index.md.tmp" "$OUT/content/index.md"
+for i in $(seq 1 80); do
+    grep -q '"ok": false' "$REPORT" 2>/dev/null && break
+    kill -0 "$RPID" 2>/dev/null || fail "report watch exited before the failed report"
+    sleep 0.25
+done
+grep -q '"ok": false' "$REPORT" 2>/dev/null || fail "report was not rewritten with ok:false"
+grep -q 'EREFERENCEMISSING' "$REPORT" 2>/dev/null || fail "failed report lacks the EREFERENCEMISSING diagnostic"
+pass "failed cycle rewrites report to ok:false with diagnostics"
+
+note "a corrected cycle rewrites the report back to ok:true as one document"
+cat > "$OUT/content/index.md.tmp" <<'MD'
+# Watch JSON contract
+
+Version six.
+MD
+mv "$OUT/content/index.md.tmp" "$OUT/content/index.md"
+for i in $(seq 1 80); do
+    grep -q '"ok": true' "$REPORT" 2>/dev/null && break
+    kill -0 "$RPID" 2>/dev/null || fail "report watch exited before the corrected report"
+    sleep 0.25
+done
+grep -q '"ok": true' "$REPORT" 2>/dev/null || fail "report was not rewritten back to ok:true"
+JSON_DOCS="$(grep -c '^{' "$REPORT")"
+[[ "$JSON_DOCS" == "1" ]] || fail "report file has $JSON_DOCS JSON documents (expected 1 replacement)"
+pass "report rewritten per cycle as a single document"
+
+note "SIGTERM stops the report daemon cleanly (exit 0)"
+kill -TERM "$RPID"
+RC=0
+wait "$RPID" || RC=$?
+RPID=""
+[[ "$RC" == "0" ]] || fail "report watch exited $RC on SIGTERM (expected 0)"
+pass "report daemon clean SIGTERM shutdown"
 
 echo "watch-json-contract: all assertions passed"

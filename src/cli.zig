@@ -208,7 +208,8 @@ pub const Options = struct {
     incremental: bool = false,
     /// Bounded parallel rendering worker count (HTML mode only).
     jobs: usize = 1,
-    /// Opt-in local-development watch mode for HTML builds.
+    /// Opt-in local-development watch mode for HTML builds and, with the
+    /// `validate` command, the zero-write validation daemon (`validate --watch`).
     watch: bool = false,
     /// Emit the machine-readable NDJSON event stream on stderr instead of
     /// watch prose (`watch --watch-json`). Requires watch mode; implies
@@ -1516,16 +1517,28 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     if (command == .validate) {
         // Validation is the no-publication form of the selected HTML source /
         // target compiler path. Export selectors, output-bearing analysis,
-        // watch/cache behavior, and rendering worker controls would either
+        // cache behavior, and rendering worker controls would either
         // select another projection or imply filesystem state.
         if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or
             saw_rss_title or saw_rss_description or saw_rss_limit or saw_scope or
-            saw_split_size or saw_bundles_only or saw_incremental or saw_watch or
-            saw_jobs or saw_format)
+            saw_split_size or saw_bundles_only or saw_incremental or saw_jobs or
+            saw_format)
         {
             return error.ConflictingFlags;
         }
-    } else if (command == .check or command == .impact) {
+    }
+
+    // `validate --watch` is the zero-write validation daemon (#647): it emits
+    // only the optional `--report` file and the `--watch-json` event stream,
+    // so explicit output/selection flags that imply filesystem state are usage
+    // errors (exit 2) instead of silently selecting nothing.
+    if (command == .validate and saw_watch and
+        (saw_html_dir or has_explicit_targets or saw_serve or serve_port != null))
+    {
+        return error.ConflictingFlags;
+    }
+
+    if (command == .check or command == .impact) {
         if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_target_profiles or has_layout_rules) {
             return error.ConflictingFlags;
         }
@@ -2014,9 +2027,10 @@ pub fn printUsage() void {
         \\  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
         \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
-        \\  --watch             Compatibility flag; same as the watch command
-        \\  --watch-json        Emit one NDJSON event per build phase on stderr (watch only);
-        \\                      see docs/contracts/watch-mode.md §8
+        \\  --watch             Compatibility flag; same as the watch command; with `validate`
+        \\                      starts the zero-write validation daemon (validate --watch)
+        \\  --watch-json        Emit one NDJSON event per build phase on stderr (watch only,
+        \\                      including validate --watch); see docs/contracts/watch-mode.md §8
         \\  --serve             Serve the built tree over loopback HTTP (watch only);
         \\                      auto-reload helper: http://127.0.0.1:PORT/__boris/
         \\  --port N            Loopback port for --serve (default 8090; 0 = ephemeral);
@@ -2076,7 +2090,8 @@ pub fn printUsage() void {
         \\  --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
         \\  --target with --html-dir
         \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
-        \\  validate with non-HTML exports, --incremental, --watch, --jobs, --format, or --report
+        \\  validate with non-HTML exports, --incremental, --jobs, --format, or --out
+        \\  validate --watch with --html-dir, --target, --serve/--port, --incremental, --jobs, or --format
         \\  Invalid target names, duplicate names, output collisions, workspace escape,
         \\  content/layout overlap, unknown --target-layout / --layout-rule target,
         \\  duplicate or invalid layout selectors, invalid layout paths (.. / absolute),
@@ -2086,6 +2101,8 @@ pub fn printUsage() void {
         \\
         \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
         \\      `boris validate` observes the selected HTML target configuration but writes no artifacts.
+        \\      `boris validate --watch` repeats that preflight on every change and exits 0 on signal;
+        \\      `--report PATH` is rewritten each cycle and `--watch-json` emits mode "validate" events.
         \\      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
         \\      `boris recipe-scale --input DIR --id PAGE --factor TEXT` prints a derived
         \\      scaled view on stdout; `--servings N` is the same view with
@@ -2509,6 +2526,34 @@ test "parse: validate selects HTML configuration without publication controls" {
 
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--report", "watch.json" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--out", ".boris", "--report", "x.json" }));
+}
+
+test "parse: validate --watch starts the zero-write validation daemon (#647)" {
+    var v = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch" });
+    defer v.deinit(std.testing.allocator);
+    try expectEqual(Command.validate, v.command);
+    try expectEqual(Mode.html, v.mode);
+    try expect(v.watch);
+    // `--watch` implies `incremental` in Options (same as HTML watch); the
+    // validate action forces incremental off internally (validateHtmlSiteMulti).
+    try expect(v.incremental);
+
+    var json = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch", "--watch-json" });
+    defer json.deinit(std.testing.allocator);
+    try expect(json.watch_json);
+
+    var report = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch", "--report", "v.json" });
+    defer report.deinit(std.testing.allocator);
+    try expectEqualStrings("v.json", report.report_path.?);
+    try expect(report.analysis_report == null);
+
+    // The zero-write daemon accepts no output/selection flags: conflicts stay
+    // exit 2, exactly like every other validate combination.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch", "--html-dir", "site" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch", "--target", "a=b" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch", "--serve" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch", "--port", "0" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--watch", "--out", ".boris" }));
 }
 
 test "parse: --timings is opt-in and mode-agnostic" {

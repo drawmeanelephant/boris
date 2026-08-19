@@ -67,7 +67,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Default site build | **Done** — `boris` writes HTML to `dist/`. |
 | Markdown rendering | **Done** — Oliver (pinned in `build.zig.zon`) through `src/render.zig`: CommonMark + GFM tables + heading ids/IAL, footnotes, definition lists, strikethrough. |
 | Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy with arbitrary finite acyclic parent chains, includes, wiki links, and heading targets. |
-| No-publication validation | **Done** — `boris validate` reuses the canonical HTML prepublication compiler path and writes no target, cache, search, or evidence artifacts. |
+| No-publication validation | **Done** — `boris validate` reuses the canonical HTML prepublication compiler path and writes no target, cache, search, or evidence artifacts. `validate --watch` repeats that preflight as a zero-write daemon with `--watch-json` events and per-cycle `--report` rewriting. |
 | HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, isolated targets, opt-in XML sitemap. |
 | Machine outputs | **Done** — IR 0.2, RAG (working-context packs + `--complete` corpus, schema 2), Context Bundles, `llms.txt`, deterministic RSS 2.0; semantic relations retain their documented conditional IR 0.3 artifacts. |
 

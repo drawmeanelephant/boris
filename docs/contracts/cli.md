@@ -21,7 +21,7 @@ boris recipe-scale --input DIR --id PAGE (--factor TEXT | --servings N) [--cookl
 | Command | Purpose | Writes by default |
 |---------|---------|-------------------|
 | `build` | Compile the configured site or explicitly selected export | HTML `dist/`, or the selected `--out`, `--rag-dir`, `--context-dir`, `--llms`, or `--rss` path |
-| `validate` | Run the selected HTML input/configuration through the canonical prepublication compiler phases | Nothing |
+| `validate` | Run the selected HTML input/configuration through the canonical prepublication compiler phases | Nothing; `--report PATH` writes the HTML-path diagnostics JSON |
 | `check` | Validate the frozen graph and emit a deterministic health report | Nothing unless `--report` is supplied |
 | `impact ID` | Emit the transitive dependents of a page or source endpoint | Nothing unless `--report` is supplied |
 | `watch` | Run an HTML build, then rebuild after debounced source/layout changes | HTML output selected by build options |
@@ -46,6 +46,15 @@ does not grant `site.standard.authFull`. `smoke` accepts `--did` or
 `watch` is the command spelling for local development. The existing
 `build --watch` / bare `--watch` form remains accepted as a compatibility alias
 and has identical behavior. Watch is HTML-only and implies incremental mode.
+
+`boris validate --watch` is the zero-write validation daemon (issue #647): the
+same debounced coordinator re-runs the `validate` preflight on every change,
+writes nothing except the optional `--report` file (replaced each cycle), emits
+`--watch-json` events with `mode` `"validate"` and `pages_written` `null`, and
+exits `0` on SIGINT/SIGTERM. `--html-dir`, `--target`, `--serve`, and `--port`
+are usage errors with it; see the
+[validation contract](validation.md) and
+[watch-mode contract](watch-mode.md).
 
 ### Local preview (`watch --serve`)
 
@@ -79,9 +88,12 @@ preflight. See the normative [validation contract](validation.md).
 `validate` does not create HTML, IR, RAG, context, RSS, cache, search, or
 publication-evidence artifacts. It accepts applicable existing HTML options,
 including target/layout/theme and sitemap configuration, and rejects export
-selectors, `--incremental`, `--watch`, `--jobs`, `--format`, and `--report`.
-`check` and `impact` likewise create no product artifacts; only their explicit
-`--report` path may be written.
+selectors, `--incremental`, `--jobs`, and `--format`; `--report PATH` writes
+the shared `html-build-report-0.1.0` JSON (additive; see
+[Machine-readable reports](#machine-readable-reports)). With `--watch` it
+becomes the zero-write validation daemon described above. `check` and `impact`
+likewise create no product artifacts; only their explicit `--report` path may
+be written.
 
 ## Exit codes
 

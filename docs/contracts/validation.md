@@ -41,14 +41,29 @@ The command accepts the existing HTML vocabulary where applicable:
 - `--html-layout PATH`, `--theme ROOT`, `--target-layout NAME=PATH`, and
   `--layout-rule TARGET SELECTOR PATH`;
 - `--sitemap`, `--sitemap-path PATH`, and their required `--site-url URL`;
-- `--quiet` and `--help`.
+- `--quiet`, `--help`, and `--report PATH` (the HTML-path diagnostics
+  report, `html-build-report-0.1.0`; see
+  [`diagnostics.md`](diagnostics.md#html-path-machine-readable-report));
+- `--watch` (issue #647): the zero-write validation daemon. `validate --watch`
+  repeats the preflight on every debounced change using the same watch
+  coordinator, coalescing, ignore rules, and signal handling as HTML watch
+  mode ([`watch-mode.md`](watch-mode.md)). `--watch-json` carries each cycle
+  on the NDJSON event stream with `mode` `"validate"` and `pages_written`
+  `null`; `--report PATH` is rewritten (replacement, never append) every
+  cycle. `--incremental` is implied by `--watch` in `Options` but the
+  validate action forces it off internally (validation never writes
+  fingerprints). The daemon exits `0` on SIGINT/SIGTERM.
 
 It deliberately rejects:
 
 - publication/export selectors: `--out`, `--no-rag`, RAG, Context Bundle,
   `llms.txt`, and RSS options;
-- publication execution controls: `--incremental`, `--watch`, and `--jobs`;
-- Documentation Intelligence report controls: `--format` and `--report`;
+- publication execution controls: `--incremental` (standalone; implied by
+  `--watch`) and `--jobs`;
+- Documentation Intelligence analysis controls: `--format`;
+- `--html-dir`, `--target`, `--serve`, and `--port` **with `--watch`**: the
+  daemon always preflights the single synthetic `default` target and writes
+  no output, so output/selection flags would silently select nothing;
 - publication-profile selection, which belongs to `plan` and any future
   profile consumer.
 
@@ -128,7 +143,13 @@ On success or failure, `validate` must not create, replace, remove, or scrub:
 - IR, RAG, Context Bundle, `llms.txt`, or RSS artifacts;
 - `artifacts.json`, `checks.json`, `claims.json`, `touches.json`, Proof Pack
   files, or any other publication evidence;
-- a validation report or semantic authority file.
+- a semantic authority file.
+
+The optional `--report PATH` file is the one deliberate exception: it writes
+the shared HTML-path diagnostics report. Under `--watch`, every cycle repeats
+this contract — each rebuild re-runs the preflight and writes nothing except
+that report, which is replaced (never appended) per cycle so a consumer never
+reads stale failure state.
 
 Target path validation may observe path metadata for the same no-follow and
 isolation rules used by a later build. Existing target contents remain
@@ -149,9 +170,13 @@ text, sorting, stderr text form, and process exit classes from
 
 Non-quiet success writes only a progress line to stderr; stdout remains
 reserved. `--quiet` suppresses progress and diagnostic stderr without changing
-the exit code. `validate` does not accept `--format` or `--report` because the
-compiler has no separate structured validation-report schema; it must not
-misuse the Documentation Intelligence schema or write `build-report.json`.
+the exit code. `validate` rejects `--format`, which belongs to Documentation
+Intelligence analysis, and must not misuse the Documentation Intelligence
+schema or write IR `build-report.json`; `--report PATH` (one-shot or under
+`--watch`) writes the HTML-path diagnostics report
+(`html-build-report-0.1.0`), never a semantic authority file. Under `--watch`
+the daemon keeps running across recoverable failures and exits `0` on
+SIGINT/SIGTERM (same policy as HTML watch mode).
 
 ## Distinction from adjacent commands
 
@@ -193,4 +218,8 @@ The shipped contract tests must cover valid and repeated runs, canonical
 frontmatter/ID/parent/relation/include/wiki/component failures, layout and
 target configuration, duplicate-ID diagnostic parity with normal compilation,
 absence of new or mutated target/evidence trees, and a validation-pass followed
-by a successful normal build.
+by a successful normal build. For `validate --watch`, the black-box contract
+script (`scripts/test-watch-json-contract.sh`) must cover the initial and
+rebuild cycles emitting `mode` `"validate"` with `pages_written` `null`,
+recoverable `build-failed` events that keep the daemon alive, and a
+`--report` file rewritten per cycle with no output tree ever appearing.

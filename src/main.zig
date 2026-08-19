@@ -21,6 +21,7 @@ const rss = @import("rss.zig");
 const compile = @import("compile.zig");
 const target = @import("target.zig");
 const theme_mod = @import("theme.zig");
+const watch = @import("watch.zig");
 const intelligence = @import("intelligence.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
@@ -178,7 +179,7 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
     else if (opts.command == .recipe_scale)
         runRecipeScale(io, gpa, opts)
     else if (opts.command == .validate)
-        runValidate(io, gpa, opts, recorder_ptr)
+        if (opts.watch) runValidateWatch(io, gpa, opts) else runValidate(io, gpa, opts, recorder_ptr)
     else if (opts.command == .check or opts.command == .impact)
         runIntelligence(io, gpa, opts, recorder_ptr)
     else switch (opts.mode) {
@@ -2550,74 +2551,101 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings
 }
 
 /// HTML site render via the Oliver-backed seam + whiteboard arena (default CLI path).
+/// Add the watch roots shared by the HTML publish daemon and the zero-write
+/// validation daemon (`validate --watch`, #647): the content root plus every
+/// unique layout parent (global `--html-layout` and per-target overrides and
+/// rules), with theme roots watched whole so footer and asset edits produce
+/// events (#59).
+fn addWatchRoots(gpa: std.mem.Allocator, opts: Options, watcher: *watch.PollingWatcher) !void {
+    const layout_path = opts.html_layout;
+    try watcher.addRoot(opts.input_dir);
+
+    // Watch unique layout parent directories (global + per-target overrides).
+    var layout_roots: std.StringHashMapUnmanaged(void) = .{};
+    defer layout_roots.deinit(gpa);
+    const add_layout_root = struct {
+        fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, lp: []const u8, input_dir: []const u8) !void {
+            // A managed theme root owns `layouts/`, optional `footer.html` and
+            // `assets/`. Watch the whole root, not just the layout's parent:
+            // footer and referenced asset bytes are page-fingerprint inputs
+            // (F9.1), so edits under `<theme>/assets/` must produce events or
+            // `--watch` serves stale output (#59). scanFiles is recursive, so
+            // this also covers `layouts/`; a missing dir scans to nothing.
+            if (theme_mod.themeRootFromLayoutPath(lp)) |theme_root| {
+                if (std.mem.eql(u8, theme_root, input_dir)) return; // content root covers it
+                const t_gop = try map.getOrPut(gpa_, theme_root);
+                if (!t_gop.found_existing) {
+                    try w.addRoot(theme_root);
+                }
+                return;
+            }
+            // Bare filename (no dirname) — watch the file via its parent only when
+            // that parent is not the whole cwd (which would scan .git/dist every poll).
+            // Prefer not adding "." when content is already watched under input_dir.
+            const dir = std.fs.path.dirname(lp) orelse {
+                // Layout sits at repo root as a bare name: do not addRoot(".") —
+                // the layout file is still picked up if it lives under a watched root;
+                // otherwise watch only that single path's parent when it equals input_dir.
+                if (std.mem.eql(u8, input_dir, ".") or std.mem.eql(u8, input_dir, "./")) {
+                    return; // content root already covers cwd
+                }
+                return; // skip cwd-wide layout root (issue #18)
+            };
+            // Skip layout parent if it is already covered by content root.
+            if (std.mem.eql(u8, dir, input_dir)) return;
+            const gop = try map.getOrPut(gpa_, dir);
+            if (!gop.found_existing) {
+                try w.addRoot(dir);
+            }
+        }
+    }.go;
+    try add_layout_root(watcher, &layout_roots, gpa, layout_path, opts.input_dir);
+    for (opts.targets.items) |t| {
+        if (t.layout_path) |lp| {
+            try add_layout_root(watcher, &layout_roots, gpa, lp, opts.input_dir);
+        }
+        for (t.layout_rules) |rule| {
+            try add_layout_root(watcher, &layout_roots, gpa, rule.layout_path, opts.input_dir);
+        }
+    }
+}
+
+/// `validate --watch` (#647): the zero-write validation daemon. Reuses the
+/// watch coordinator with the validate action — the same debounce/coalescing,
+/// ignore rules, and signal handlers — but every cycle runs the one-shot
+/// `validate` preflight instead of an HTML publish. Writes nothing except the
+/// optional `--report` file; exits 0 on SIGINT/SIGTERM.
+fn runValidateWatch(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    var watcher = watch.PollingWatcher.init(gpa, io);
+    defer watcher.deinit();
+
+    addWatchRoots(gpa, opts, &watcher) catch |err| {
+        return mapHtmlError(err, opts.targets.items, opts.html_layout);
+    };
+
+    var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
+        return mapHtmlError(err, opts.targets.items, opts.html_layout);
+    };
+    defer coord.deinit();
+
+    coord.run() catch |err| {
+        return mapHtmlError(err, opts.targets.items, opts.html_layout);
+    };
+    return .success;
+}
+
 pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const html_dir = opts.html_dir orelse default_html;
 
     const layout_path = opts.html_layout;
 
     if (opts.watch) {
-        const watch = @import("watch.zig");
         var watcher = watch.PollingWatcher.init(gpa, io);
         defer watcher.deinit();
 
-        watcher.addRoot(opts.input_dir) catch |err| {
+        addWatchRoots(gpa, opts, &watcher) catch |err| {
             return mapHtmlError(err, opts.targets.items, layout_path);
         };
-
-        // Watch unique layout parent directories (global + per-target overrides).
-        var layout_roots: std.StringHashMapUnmanaged(void) = .{};
-        defer layout_roots.deinit(gpa);
-        const add_layout_root = struct {
-            fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, lp: []const u8, input_dir: []const u8) !void {
-                // A managed theme root owns `layouts/`, optional `footer.html` and
-                // `assets/`. Watch the whole root, not just the layout's parent:
-                // footer and referenced asset bytes are page-fingerprint inputs
-                // (F9.1), so edits under `<theme>/assets/` must produce events or
-                // `--watch` serves stale output (#59). scanFiles is recursive, so
-                // this also covers `layouts/`; a missing dir scans to nothing.
-                if (theme_mod.themeRootFromLayoutPath(lp)) |theme_root| {
-                    if (std.mem.eql(u8, theme_root, input_dir)) return; // content root covers it
-                    const t_gop = try map.getOrPut(gpa_, theme_root);
-                    if (!t_gop.found_existing) {
-                        try w.addRoot(theme_root);
-                    }
-                    return;
-                }
-                // Bare filename (no dirname) — watch the file via its parent only when
-                // that parent is not the whole cwd (which would scan .git/dist every poll).
-                // Prefer not adding "." when content is already watched under input_dir.
-                const dir = std.fs.path.dirname(lp) orelse {
-                    // Layout sits at repo root as a bare name: do not addRoot(".") —
-                    // the layout file is still picked up if it lives under a watched root;
-                    // otherwise watch only that single path's parent when it equals input_dir.
-                    if (std.mem.eql(u8, input_dir, ".") or std.mem.eql(u8, input_dir, "./")) {
-                        return; // content root already covers cwd
-                    }
-                    return; // skip cwd-wide layout root (issue #18)
-                };
-                // Skip layout parent if it is already covered by content root.
-                if (std.mem.eql(u8, dir, input_dir)) return;
-                const gop = try map.getOrPut(gpa_, dir);
-                if (!gop.found_existing) {
-                    try w.addRoot(dir);
-                }
-            }
-        }.go;
-        add_layout_root(&watcher, &layout_roots, gpa, layout_path, opts.input_dir) catch |err| {
-            return mapHtmlError(err, opts.targets.items, layout_path);
-        };
-        for (opts.targets.items) |t| {
-            if (t.layout_path) |lp| {
-                add_layout_root(&watcher, &layout_roots, gpa, lp, opts.input_dir) catch |err| {
-                    return mapHtmlError(err, opts.targets.items, layout_path);
-                };
-            }
-            for (t.layout_rules) |rule| {
-                add_layout_root(&watcher, &layout_roots, gpa, rule.layout_path, opts.input_dir) catch |err| {
-                    return mapHtmlError(err, opts.targets.items, layout_path);
-                };
-            }
-        }
 
         var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
             return mapHtmlError(err, opts.targets.items, layout_path);
