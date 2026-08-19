@@ -396,7 +396,7 @@ pub const Daemon = struct {
         const failure_class: ?[]const u8 = if (self.latest) |result| @tagName(result.failure_class) else null;
         const problems_count: usize = if (self.latest) |result| result.problems.len else 0;
         const report_age_ms: ?u64 = if (self.last_signature) |signature|
-            reportAgeMs(self.nowNs(), signature.mtime.nanoseconds)
+            reportAgeMs(Io.Timestamp.now(self.io, .real).nanoseconds, signature.mtime.nanoseconds)
         else
             null;
         return std.json.Stringify.valueAlloc(allocator, .{
