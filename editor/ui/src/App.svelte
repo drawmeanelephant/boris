@@ -269,11 +269,12 @@
   $: activeProblems = (commandResult?.problems ?? []).filter(problem =>
     problem.source_path !== null && projectPathForProblem(problem.source_path) === activePath
   );
-  // Per-problem staleness (#660): a problem is possibly stale when the open
-  // buffer changed the problem's own source region since the last report and
-  // the caret currently sits inside that region. Lines are compared against
+  // Per-problem staleness (#660, #662): a problem is possibly stale when the
+  // open buffer changed the problem's own source region since the last report
+  // — or shifted its position via a line-count change above it — and the
+  // caret currently sits inside that region. Lines are compared against
   // `baseline` (the last loaded/saved buffer, i.e. the report-time snapshot);
-  // edits on other lines and problems in other files never mark anything.
+  // pure edits on other lines and problems in other files never mark anything.
   $: staleProblems = (() => {
     const set = new Set<Problem>();
     if (!dirty || !activePath || content === baseline) return set;
@@ -283,13 +284,23 @@
     for (let index = 0; index < Math.max(savedLines.length, bufferLines.length); index += 1) {
       if (savedLines[index] !== bufferLines[index]) changed.add(index + 1);
     }
-    if (changed.size === 0) return set;
+    // Line-number drift: when the line count changed, positions from the
+    // first divergent line onward may no longer address the text the report
+    // saw — even if the line now at the reported number happens to match.
+    // The documented approximation: any count change with a divergence above
+    // the problem's line flags it (a rare mixed edit may over-mark, which
+    // errs toward honesty; the mark clears on save).
+    const netDelta = bufferLines.length - savedLines.length;
+    let firstDiff = 0;
+    const shared = Math.min(savedLines.length, bufferLines.length);
+    while (firstDiff < shared && savedLines[firstDiff] === bufferLines[firstDiff]) firstDiff += 1;
     for (const problem of activeProblems) {
       if (!problem.source_path || problem.line == null) continue;
       if (problem.position_confidence === 'none') continue;
       if (problem.line !== cursor.line) continue;
       if (problem.column != null && cursor.column < problem.column) continue;
-      if (changed.has(problem.line)) set.add(problem);
+      const above = problem.line - 1;
+      if (changed.has(problem.line) || (netDelta !== 0 && firstDiff < above)) set.add(problem);
     }
     return set;
   })();

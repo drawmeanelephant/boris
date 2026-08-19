@@ -246,9 +246,12 @@ per-cycle outcomes map to the same convention as the one-shot exit codes
   in the pane card and the Source pane inline list — but only when the caret
   sits inside that region, so editing elsewhere leaves accurate problems
   unflagged and rewriting a failing line flags the report's complaint about
-  it as not-yet-trusted. The check compares the buffer against `baseline`
+  it  as not-yet-trusted. The check compares the buffer against `baseline`
   (the last loaded/saved content, i.e. the report-time snapshot); moving the
-  caret off the region or saving clears the mark.
+  caret off the region or saving clears the mark. A problem is also marked
+  when a line-count change above its reported line drifts the position —
+  even if the text now at that line happens to match (#662) — while pure
+  edits on other lines and deletions below it never mark anything.
 - **Validation tracks the newest save (#656).** The four file-mutating
   endpoints (save / create / rename / delete) record the change with
   `noteSave()`; a validate demand that lands within 3 s of one waits (bounded,

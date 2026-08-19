@@ -973,6 +973,64 @@ test('editing a different line never marks the problem, on the daemon path too (
   await expect(staleNote).toHaveCount(0);
 });
 
+test('deleting a line above the problem marks it possibly-stale even when its own text matches (#662)', async ({ page }) => {
+  // The report saw '## Section' at lines 3 and 4. Deleting the empty line 2
+  // shifts the content up: the text at line 3 is still '## Section', so the
+  // own-line check passes — only the line-count change above flags it.
+  await installApi(page, {
+    disk: '# Draft\n\n## Section\n## Section\n\nMore.\n',
+    commands: {
+      validate: commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Section problem.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 3, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    }
+  });
+  const staleNote = page.getByText('Possibly stale — the open buffer changed this region since the report.');
+
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByText('Section problem.', { exact: true })).toBeVisible();
+
+  // Delete line 2 (an empty line): one fewer line, and the first divergence
+  // from baseline sits above the problem's line.
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n## Section\n## Section\n\nMore.\n');
+  await page.getByRole('button', { name: 'Go to index.md line 3 column 1: EFRONTMATTER', exact: true }).click();
+  await expect(staleNote).toHaveCount(2);
+});
+
+test('deleting a line below the problem never marks it (#662)', async ({ page }) => {
+  await installApi(page, {
+    disk: '# Draft\n\n## Section\n\nMore.\n',
+    commands: {
+      validate: commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Section problem.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 3, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    }
+  });
+  const staleNote = page.getByText('Possibly stale — the open buffer changed this region since the report.');
+
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByText('Section problem.', { exact: true })).toBeVisible();
+
+  // Delete the lines below the problem: its own line is untouched and no
+  // count change sits above it, so the report's line number still addresses
+  // the same text.
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n\n## Section');
+  await page.getByRole('button', { name: 'Go to index.md line 3 column 1: EFRONTMATTER', exact: true }).click();
+  await expect(staleNote).toHaveCount(0);
+});
+
 test('validation state line names idle, running, success, failed, and stale (#654)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
   await installApi(page, {
