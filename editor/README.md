@@ -59,11 +59,26 @@ BORIS_EDITOR_URL=http://127.0.0.1:<port>/#token=<32 hex chars>
 ```
 
 The `BORIS_EDITOR_URL=` prefix, the loopback URL shape, and the `#token=`
-fragment are fixed. `--port 0` (the default) selects an ephemeral port and the
+fragment are fixed (an optional `open=` fragment parameter may follow — see
+below). `--port 0` (the default) selects an ephemeral port and the
 printed port is the bound one. The token is 32 lowercase hex characters and is
 random per process. The token lives in the URL **fragment**, not a query
 string — fragments are never sent to the server on navigation, and the host
 accepts the same token via the `x-boris-editor-token` header for API calls.
+
+**Optional `open=` fragment parameter (UI contract).** An embedder may append
+`&open=<project-relative path>` to the printed URL, for example
+`BORIS_EDITOR_URL=http://127.0.0.1:<port>/#token=<32 hex>&open=content/foo.md`.
+The shell opens that file on launch through its ordinary open path, so dirty
+tracking, undo, `activePath`, and save behavior are exactly as if the author
+opened it by hand. The value must obey the same author-owned rule as the file
+API ([`file_api.validatePath`](src/file_api.zig)): exactly `boris.json` or a
+regular file below `content/` or `themes/`, with no leading `/`, no `..`
+segments, and no backslashes. An invalid path is ignored with a status message;
+a well-formed but missing path surfaces the host's `file_not_found`; either way
+the editor still boots to the project file list. The fragment is consumed only
+by the shell — the host keeps printing the token-only launch line and never
+reads a file from the URL, so the token/CSP/loopback posture is unchanged.
 
 **Flags.** `boris-editor [DIR] [--boris PATH] [--ui-dir DIR] [--port PORT]`.
 `DIR` is the project root (default `.`); `--boris` is the compiler binary used

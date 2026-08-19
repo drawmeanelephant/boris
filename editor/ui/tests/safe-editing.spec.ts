@@ -17,6 +17,7 @@ type MockOptions = {
   version?: Record<string, unknown>;
   openError?: { error: string };
   saveError?: { error: string };
+  hash?: string;
   commandByCall?: CommandResult[];
   recoverySkipped?: number;
 };
@@ -291,7 +292,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
   await page.route('https://preview.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Compiler output</h1>' }));
-  await page.goto('/#token=test-session-token');
+  await page.goto(options.hash ?? '/#token=test-session-token');
 }
 
 test('semantic shell and file tree expose stable keyboard and voice names', async ({ page }) => {
@@ -2719,4 +2720,34 @@ test('a Boris command names the running wait and elapsed time (#418 M11)', async
   await running;
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validate project finished: Success');
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('s)');
+});
+
+test('launching with an open= fragment lands the editor on that file (#649 A15)', async ({ page }) => {
+  const openRequestPromise = page.waitForRequest('**/api/files/open');
+  await installApi(page, { hash: '/#token=test-session-token&open=content/index.md' });
+  const openRequest = await openRequestPromise;
+  expect(openRequest.postDataJSON()).toEqual({ path: 'content/index.md' });
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opened content/index.md.');
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+});
+
+test('launching with an unsafe open= fragment never reaches the host (#649 A15)', async ({ page }) => {
+  const openRequests: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('/api/files/open')) openRequests.push(request.url());
+  });
+  await installApi(page, { hash: '/#token=test-session-token&open=dist/index.html' });
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Launch open path ignored');
+  expect(openRequests).toHaveLength(0);
+  await page.goto('/#token=test-session-token&open=../secret');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Launch open path ignored');
+  expect(openRequests).toHaveLength(0);
+});
+
+test('launching with a missing open= file surfaces the host failure (#649 A15)', async ({ page }) => {
+  await installApi(page, {
+    hash: '/#token=test-session-token&open=content/nope.md',
+    openError: { error: 'file_not_found' }
+  });
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Could not open content/nope.md');
 });

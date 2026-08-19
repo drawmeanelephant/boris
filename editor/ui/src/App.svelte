@@ -328,7 +328,9 @@
     }
   }
 
-  const token = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
+  const launchFragment = new URLSearchParams(window.location.hash.slice(1));
+  const token = launchFragment.get('token') ?? '';
+  const launchOpenPath = launchFragment.get('open') ?? '';
 
   async function api<T>(path: string, options: RequestInit = {}): Promise<{ response: Response; data: T }> {
     const headers = new Headers(options.headers);
@@ -400,6 +402,13 @@
       } else {
         editorStatus = 'Project files are available, but recovery snapshots could not be loaded.';
       }
+      if (launchOpenPath) {
+        if (isLaunchOpenSafe(launchOpenPath)) {
+          void openFile(launchOpenPath);
+        } else {
+          editorStatus = `Launch open path ignored: ${launchOpenPath} is not an author-owned project file.`;
+        }
+      }
       startHostWatch();
       startDiskWatch();
     } catch {
@@ -424,6 +433,17 @@
     undoStack = [];
     redoStack = [];
     editorStatus = status;
+  }
+
+  // Mirrors editor/src/file_api.zig `validatePath` (the authoritative rule):
+  // a launch target must be an author-owned project file. This pre-check keeps
+  // an unsafe `open=` fragment from even reaching the host; the host still
+  // re-validates every open request.
+  function isLaunchOpenSafe(path: string): boolean {
+    if (!path || path.length > 4096) return false;
+    if (path.startsWith('/') || path.includes('\\') || path.includes('\u0000')) return false;
+    if (path.split('/').some(segment => segment === '' || segment === '.' || segment === '..')) return false;
+    return path === 'boris.json' || path.startsWith('content/') || path.startsWith('themes/');
   }
 
   async function openFile(path: string): Promise<boolean> {
