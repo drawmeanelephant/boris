@@ -106,12 +106,21 @@ node -e '
 ' "$work/impact-missing.json"
 
 mv "$work/project/content" "$work/project/content-away"
-run_command "$work/io-failure.json" '{"mode":"validate"}'
+# With the validation daemon, the missing content root kills the daemon on its
+# next poll and the host reaps it (exit 3 / io); with the one-shot fallback the
+# very first call reports it. Retry until the failure surfaces so both paths
+# are deterministic.
+io_seen=""
+for _ in $(seq 1 60); do
+  run_command "$work/io-failure.json" '{"mode":"validate"}' || true
+  if node -e 'const r = require(process.argv[1]); process.exit(r.failure_class === "io" && (r.exit_code === 3 || r.exit_code === null) ? 0 : 1)' "$work/io-failure.json"; then
+    io_seen=1
+    break
+  fi
+  sleep 0.5
+done
 mv "$work/project/content-away" "$work/project/content"
-node -e '
-  const r = require(process.argv[1]);
-  if (r.exit_code !== 3 || r.failure_class !== "io") throw Error("exit 3 was not preserved");
-' "$work/io-failure.json"
+[[ -n "$io_seen" ]] || { echo "missing content root was not reported as an I/O failure" >&2; exit 1; }
 
 run_command "$work/html-valid.json" '{"mode":"html_build"}'
 node -e '

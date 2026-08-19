@@ -99,7 +99,7 @@ pub const Request = struct {
 
 const check_report_name = "editor-check.json";
 const impact_report_name = "editor-impact.json";
-const html_report_name = "html-build-report.json";
+pub const html_report_name = "html-build-report.json";
 const max_process_output = 16 * 1024 * 1024;
 const max_report_bytes = 32 * 1024 * 1024;
 
@@ -121,8 +121,8 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
 
     const compiler_id = try readCompilerId(allocator, io, config);
     const execution = execute(allocator, io, config, request) catch |err| switch (err) {
-        error.Timeout => return processFailureResult(allocator, config, request.mode, compiler_id, .terminated, "Boris did not finish before the command timeout."),
-        error.StreamTooLong => return processFailureResult(allocator, config, request.mode, compiler_id, .terminated, "Boris exceeded the bounded process-output limit."),
+        error.Timeout => return processFailureResult(allocator, config, request.mode, compiler_id, .terminated, null, "Boris did not finish before the command timeout."),
+        error.StreamTooLong => return processFailureResult(allocator, config, request.mode, compiler_id, .terminated, null, "Boris exceeded the bounded process-output limit."),
         else => |other| return other,
     };
     const exit_code = termExitCode(execution.term);
@@ -496,12 +496,60 @@ fn appendImpact(allocator: std.mem.Allocator, private_root: []const u8, document
     });
 }
 
-fn processFailureResult(allocator: std.mem.Allocator, config: Config, mode: Mode, compiler_id: []const u8, class: FailureClass, message: []const u8) !Result {
+/// Builds a validate-mode Result from an html-build-report document without
+/// spawning the compiler. Used by the long-lived validation daemon (#652):
+/// the report file is the single authority for diagnostics, and the cycle's
+/// `ok` field maps to the same outcome convention as the one-shot path
+/// (0 success, 1 content failure), so existing consumers keep working.
+pub fn resultFromReport(
+    allocator: std.mem.Allocator,
+    config: Config,
+    compiler_id: []const u8,
+    bytes: []const u8,
+) !Result {
+    var document = contracts.readHtmlBuildReport(allocator, bytes) catch return error.UnsupportedArtifact;
+    defer document.deinit();
+    const ok = contracts.htmlReportOk(&document) catch return error.UnsupportedArtifact;
+    const failure_class: FailureClass = if (ok) .success else .content;
+    const exit_code: ?u8 = if (ok) 0 else 1;
+    var problems: std.ArrayList(Problem) = .empty;
+    try appendStructuredProblems(allocator, config, .validate, compiler_id, failure_class, &document, .build_report, &problems);
+    if (failure_class != .success and problems.items.len == 0) {
+        try appendProcessProblem(allocator, config, .validate, compiler_id, failure_class, fallbackFailureMessage(failure_class), &problems);
+    }
+    return .{
+        .mode = .validate,
+        .exit_code = exit_code,
+        .failure_class = failure_class,
+        .compiler_id = compiler_id,
+        .report_version = try allocator.dupe(u8, document.version),
+        .used_stderr_fallback = false,
+        .problems = try problems.toOwnedSlice(allocator),
+        .findings = try allocator.alloc(Finding, 0),
+        .impact = try allocator.alloc(ImpactEndpoint, 0),
+        .publication_plan = null,
+        .recipe_scale_view = null,
+    };
+}
+
+/// A Result for a command that never produced a compiler run: timeouts,
+/// stream overruns, or — for the validation daemon — a daemon that died or
+/// could not be started. `exit_code`, when known, preserves the compiler's
+/// contracted exit-code convention (0 success, 1 content, 2 usage, 3 I/O).
+pub fn processFailureResult(
+    allocator: std.mem.Allocator,
+    config: Config,
+    mode: Mode,
+    compiler_id: []const u8,
+    class: FailureClass,
+    exit_code: ?u8,
+    message: []const u8,
+) !Result {
     var problems: std.ArrayList(Problem) = .empty;
     try appendProcessProblem(allocator, config, mode, compiler_id, class, message, &problems);
     return .{
         .mode = mode,
-        .exit_code = null,
+        .exit_code = exit_code,
         .failure_class = class,
         .compiler_id = compiler_id,
         .report_version = null,
@@ -632,6 +680,48 @@ fn fallbackFailureMessage(class: FailureClass) []const u8 {
         .io => "Boris reported an I/O or system failure.",
         .terminated => "Boris terminated without a contracted exit code.",
     };
+}
+
+test "report results map ok to the one-shot outcome convention" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const config: Config = .{
+        .project_root = "/private/project",
+        .boris_path = "boris",
+        .editor_id = "boris-editor/test",
+    };
+
+    const ok_result = try resultFromReport(arena.allocator(), config, "boris/test",
+        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/test","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+    );
+    try std.testing.expectEqual(FailureClass.success, ok_result.failure_class);
+    try std.testing.expectEqual(@as(?u8, 0), ok_result.exit_code);
+    try std.testing.expectEqual(@as(usize, 0), ok_result.problems.len);
+    try std.testing.expect(!ok_result.used_stderr_fallback);
+    try std.testing.expectEqualStrings("html-build-report-0.1.0", ok_result.report_version.?);
+
+    const failed_result = try resultFromReport(arena.allocator(), config, "boris/test",
+        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/test","ok":false,"contentRoot":"content","outDir":"dist","errorCount":1,"diagnostics":[{"severity":"error","code":"EFRONTMATTER","message":"bad.md:2:1: unknown key","remediation":"remove the unknown key","sourcePath":"bad.md","line":2,"column":1,"id":null}]}
+    );
+    try std.testing.expectEqual(FailureClass.content, failed_result.failure_class);
+    try std.testing.expectEqual(@as(?u8, 1), failed_result.exit_code);
+    try std.testing.expectEqual(@as(usize, 1), failed_result.problems.len);
+    try std.testing.expectEqualStrings("EFRONTMATTER", failed_result.problems[0].code.?);
+    try std.testing.expectEqual(PositionConfidence.exact, failed_result.problems[0].position_confidence);
+}
+
+test "process failure results preserve the contracted exit code" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const config: Config = .{
+        .project_root = "/private/project",
+        .boris_path = "boris",
+        .editor_id = "boris-editor/test",
+    };
+    const result = try processFailureResult(arena.allocator(), config, .validate, "boris/test", .io, 3, "daemon stopped");
+    try std.testing.expectEqual(@as(?u8, 3), result.exit_code);
+    try std.testing.expectEqual(FailureClass.io, result.failure_class);
+    try std.testing.expect(result.used_stderr_fallback);
 }
 
 test "exit classes remain distinct" {

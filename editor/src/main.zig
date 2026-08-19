@@ -11,6 +11,7 @@ const runner = @import("runner.zig");
 const security = @import("security.zig");
 const server = @import("server.zig");
 const state_root = @import("state_root.zig");
+const validation_daemon = @import("validation_daemon.zig");
 
 pub const editor_version = server.editor_id;
 
@@ -76,6 +77,16 @@ pub fn main(init: std.process.Init) u8 {
     };
     var preview_manager = preview.Manager.init(init.io, canonical_project, boris_path, preview_port);
 
+    // One zero-write validation daemon per project (#652); deinit on host exit
+    // SIGTERM-reaps the child so no orphan compiler process survives.
+    var validation = validation_daemon.Daemon.init(allocator, init.io, .{
+        .project_root = canonical_project,
+        .boris_path = boris_path,
+        .editor_id = server.editor_id,
+        .input_mode = found.input_mode,
+    });
+    defer validation.deinit();
+
     server.serve(init.io, allocator, .{
         .project_root = canonical_project,
         .ui_dir = options.ui_dir,
@@ -84,6 +95,7 @@ pub fn main(init: std.process.Init) u8 {
         .port = options.port,
         .token = token,
         .preview = &preview_manager,
+        .daemon = &validation,
     }) catch |err| {
         std.debug.print("boris-editor: host failed: {s}\n", .{@errorName(err)});
         return 3;
@@ -180,4 +192,5 @@ test {
     _ = recovery;
     _ = runner;
     _ = security;
+    _ = validation_daemon;
 }
