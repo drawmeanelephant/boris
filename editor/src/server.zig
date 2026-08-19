@@ -12,6 +12,7 @@ const publication = @import("publication.zig");
 const recovery = @import("recovery.zig");
 const runner = @import("runner.zig");
 const security = @import("security.zig");
+const validation_daemon = @import("validation_daemon.zig");
 
 pub const editor_id = "boris-editor/0.1.0";
 
@@ -23,6 +24,7 @@ pub const Config = struct {
     port: u16 = 0,
     token: [32]u8,
     preview: *preview.Manager,
+    daemon: *validation_daemon.Daemon,
 };
 
 /// Async-signal-visible shutdown latch for SIGINT/SIGTERM (same contract as
@@ -167,6 +169,10 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         if (std.mem.eql(u8, target, "/api/commands/run")) {
             if (request.head.method != .POST) return methodNotAllowed(request, "POST");
             return serveCommandRun(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/validate-state")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            return serveValidateState(allocator, request, config);
         }
         if (std.mem.eql(u8, target, "/api/authoring")) {
             if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
@@ -398,12 +404,26 @@ fn serveCommandRun(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
     defer parsed.deinit();
     var arena: std.heap.ArenaAllocator = .init(allocator);
     defer arena.deinit();
-    const result = runner.run(arena.allocator(), io, .{
-        .project_root = config.project_root,
-        .boris_path = config.boris_path,
-        .editor_id = editor_id,
-    }, parsed.value) catch |err| return respondApiError(request, err);
+    // Validate runs through the long-lived daemon when the installed compiler
+    // supports `validate --watch`; everything else keeps the one-shot runner.
+    const result = if (parsed.value.mode == .validate and config.daemon.watchSupported())
+        try config.daemon.runValidate(arena.allocator())
+    else
+        try runner.run(arena.allocator(), io, .{
+            .project_root = config.project_root,
+            .boris_path = config.boris_path,
+            .editor_id = editor_id,
+        }, parsed.value);
     const bytes = try std.json.Stringify.valueAlloc(allocator, result, .{});
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
+/// Read-only validation daemon state for the shell's file-watch push: the UI
+/// polls this cheaply and re-runs `/api/commands/run` validate only when the
+/// cycle counter moves.
+fn serveValidateState(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const bytes = try config.daemon.stateJson(allocator);
     defer allocator.free(bytes);
     return respondJson(request, .ok, bytes);
 }
@@ -485,6 +505,9 @@ fn methodNotAllowed(request: *http.Server.Request, allow: []const u8) !void {
 }
 
 fn serveHealth(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    // Cheap piggyback: the shell polls health every few seconds, so this keeps
+    // unexpected daemon deaths reaped without extra host traffic.
+    config.daemon.poll();
     const found = project.discover(io, config.project_root) catch project.Discovery{
         .content = false,
         .default_layout = false,
@@ -530,6 +553,7 @@ fn serveVersion(io: Io, allocator: std.mem.Allocator, request: *http.Server.Requ
             .documentation_intelligence = [_][]const u8{"0.2.0"},
             .publication_plan = [_]u8{1},
             .frontmatter = [_]u8{1},
+            .validate_watch = config.daemon.watchSupported(),
         },
     };
     const bytes = try std.json.Stringify.valueAlloc(allocator, response, .{});

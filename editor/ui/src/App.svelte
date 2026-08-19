@@ -8,7 +8,14 @@
   };
   type Version = {
     compiler_id: string;
-    supported?: { completion?: number[]; ir?: string[]; publication_plan?: number[]; frontmatter?: number[] };
+    supported?: { completion?: number[]; ir?: string[]; publication_plan?: number[]; frontmatter?: number[]; validate_watch?: boolean };
+  };
+  type ValidateState = {
+    supported?: boolean;
+    state?: 'idle' | 'running' | 'success' | 'failed' | 'stale';
+    cycle?: number;
+    failure_class?: FailureClass | null;
+    problems_count?: number;
   };
   type FileEntry = { path: string };
   type FileList = { files: FileEntry[] };
@@ -215,6 +222,9 @@
   let graphStatus = 'Loading the Boris graph…';
   let inputMode: NonNullable<Health['project']['input_mode']> = 'empty';
   let previewWidth: 'full' | '375' | '768' | '1440' = 'full';
+  let validateDaemon = false;
+  let lastValidateCycle = -1;
+  let validateStateTimer: ReturnType<typeof setInterval> | undefined;
   let publicationPayload: PublicationPayload | null = null;
   let publicationStatus = 'Loading publication profiles…';
   let selectedProfile = '';
@@ -380,6 +390,7 @@
       const health = healthResult.data;
       connection = `Connected to ${health.editor_id}. Opened project in ${elapsedLabel(started)}.`;
       compiler = versionLabel(versionResult.data);
+      validateDaemon = versionResult.data.supported?.validate_watch ?? false;
       inputMode = health.project.input_mode ?? 'empty';
       project = health.project.content
         ? `Project found${health.project.publication_profile ? ' with boris.json' : ''}${inputMode === 'cooklang' ? '; Cooklang tree (--cooklang)' : inputMode === 'textile' ? '; Textile tree (--textile)' : ''}.`
@@ -411,6 +422,7 @@
       }
       startHostWatch();
       startDiskWatch();
+      if (validateDaemon) startValidateWatch();
     } catch {
       noteHostUnavailable();
       compiler = 'Boris version unavailable.';
@@ -1007,6 +1019,34 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   function startDiskWatch() {
     if (diskTimer) return;
     diskTimer = setInterval(() => void probeDisk(), 3000);
+  }
+
+  // With a `validate --watch` daemon the host rewrites the report on its own
+  // debounced cycle after every save; this poller watches the cycle counter
+  // and pulls the newest problems only when a cycle actually completes.
+  function startValidateWatch() {
+    if (validateStateTimer) return;
+    validateStateTimer = setInterval(() => void watchValidateState(), 1000);
+  }
+
+  async function watchValidateState() {
+    if (!validateDaemon) return;
+    const result = await api<ValidateState | ErrorResponse>('/api/validate-state');
+    if (!result.response.ok) return;
+    const state = result.data as ValidateState;
+    if (state.cycle === undefined || state.cycle === lastValidateCycle) return;
+    lastValidateCycle = state.cycle;
+    await refreshValidate();
+  }
+
+  async function refreshValidate() {
+    const started = Date.now();
+    const result = await api<CommandResult | ErrorResponse>('/api/commands/run', {
+      method: 'POST', body: JSON.stringify({ mode: 'validate' })
+    });
+    if (!result.response.ok) return;
+    commandResult = result.data as CommandResult;
+    commandStatus = `Validation updated from the daemon: ${failureLabel(commandResult.failure_class, commandResult.exit_code)}. (${elapsedLabel(started)})`;
   }
 
   async function watchHost() {

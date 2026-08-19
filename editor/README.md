@@ -168,10 +168,11 @@ dirty.
 
 IR build diagnostics come only from Boris's `.boris/build-report.json`.
 Check and impact consume Boris Documentation Intelligence reports under
-`.boris/`. Until the HTML-path machine-readable diagnostics contract lands,
-validate and HTML build use a bounded stderr adapter and label source positions
-as best-effort. Exit 1 (content), 2 (usage/configuration), and 3 (I/O/system)
-remain distinct.
+`.boris/`. Validate consumes the machine-readable `html-build-report-0.1.0`
+(`.boris/html-build-report.json`), so problems carry exact positions and never
+fall back to stderr; HTML build uses the same report with a bounded stderr
+adapter as a compatibility fallback. Exit 1 (content), 2 (usage/configuration),
+and 3 (I/O/system) remain distinct.
 
 Problems are grouped by content-relative source, severity, and Boris code.
 Named buttons navigate to Boris-reported UTF-8 byte positions and copy a
@@ -194,6 +195,56 @@ copying.
 
 M3 deliberately does not add layout diagnostics, LSP, autofix, arbitrary
 commands, source parsing, autosave, or preview serving.
+
+## Validation daemon (#652)
+
+When the installed compiler accepts `validate --watch` (probed once via
+`boris validate --help`), the host runs **one zero-write validation daemon per
+project** instead of spawning a fresh `boris validate` subprocess per request:
+
+```text
+boris validate --input content --report .boris/html-build-report.json --watch [--cooklang]
+```
+
+The daemon re-runs the preflight on its own debounced cycle after every change
+and rewrites the report file each cycle (replacement, never append), staying
+alive across recoverable content failures. The host watches that file
+(mtime + size) and adapts the newest report through the same structured-
+diagnostic path as the one-shot runner, so the report file is the single
+authority and `/api/commands/run` validate responses stay byte-compatible:
+per-cycle outcomes map to the same convention as the one-shot exit codes
+(0 success, 1 content failure), and `report_version` is
+`html-build-report-0.1.0`.
+
+- **Lazy start.** The daemon spawns on the first validate demand and stays up
+  until the host exits. `GET /api/version` advertises
+  `supported.validate_watch` so the shell knows the daemon is available.
+- **Lifecycle.** Unexpected daemon death (recoverable content failures keep it
+  alive) is reaped non-blockingly and recovered with bounded exponential
+  backoff (1s → 30s, reset on a completed cycle). On host shutdown the daemon
+  is SIGTERM'd and reaped, leaving no orphan compiler process. Process
+  management is POSIX-only; on Windows the probe reports unsupported and the
+  one-shot validate path is used unchanged.
+- **Shell state channel.** `GET /api/validate-state` returns
+  `{supported, state, cycle, failure_class, problems_count}`; the shell polls
+  it cheaply and re-runs validate only when the cycle counter moves, so the
+  problems surface reflects the newest report within the daemon's debounce.
+- **Fallback.** With a pre-daemon compiler (or a refused `--watch`), behavior
+  is byte-identical to the one-shot path: the daemon never spawns, and every
+  validate request runs `boris validate` once with the bounded 120 s timeout.
+
+The daemon gate adds:
+
+```bash
+./editor/scripts/test-validation-daemon.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+The seeded black-box test pins one daemon across repeated validates, a
+save → report rewrite → failure → fix → recovery cycle without a host restart,
+bounded-backoff recovery after `kill -9`, and SIGTERM reaping on editor exit
+(no orphan). Playwright covers the shell's cycle-driven refresh of the
+problems surface.
 
 ## M4 schema and completion-aware authoring
 

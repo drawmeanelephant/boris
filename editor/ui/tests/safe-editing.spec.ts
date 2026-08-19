@@ -20,6 +20,7 @@ type MockOptions = {
   hash?: string;
   commandByCall?: CommandResult[];
   recoverySkipped?: number;
+  validateState?: Record<string, unknown>;
 };
 
 type CommandResult = {
@@ -262,6 +263,12 @@ async function installApi(page: Page, options: MockOptions = {}) {
       body: JSON.stringify(payload)
     });
   });
+  // The validation daemon state endpoint is only consulted when the host
+  // advertises `validate_watch`; the default response keeps the daemon off.
+  await page.route('**/api/validate-state', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(options.validateState ?? { supported: false, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 })
+  }));
   await page.route('**/api/authoring', route => {
     const sequence = options.authoring ?? [authoringPayload()];
     const body = sequence[Math.min(authoringRequest, sequence.length - 1)];
@@ -738,6 +745,36 @@ test('structured problems group, navigate by UTF-8 byte position, and copy a bou
   expect(copied).not.toContain('/Users/');
   await expect(copy).toHaveText('Copied!');
   await expect(copy).toHaveAttribute('aria-label', 'Copy packet for EDUPLICATEID at index.md');
+});
+
+test('daemon validate-state cycles refresh the problems surface without a manual command (#652)', async ({ page }) => {
+  const validateState: Record<string, unknown> = { supported: true, state: 'success', cycle: 0, failure_class: 'success', problems_count: 0 };
+  await installApi(page, {
+    version: { compiler_id: 'boris/0.8.1', supported: { validate_watch: true } },
+    validateState,
+    commandByCall: [
+      commandResult('validate'),
+      commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Unknown key.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 1, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    ]
+  });
+
+  // The first state poll is the initial validate demand: the newest report
+  // lands in the problems surface without opening the palette.
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validation updated from the daemon: Success', { timeout: 10000 });
+
+  // A later daemon cycle (a save triggered it) pushes the new report through.
+  validateState.cycle = 1;
+  validateState.failure_class = 'content';
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validation updated from the daemon: Content or graph failure (exit 1)', { timeout: 10000 });
+  await expect(page.getByText('Unknown key.', { exact: true })).toBeVisible();
+  await expect(page.getByText('index.md · error · EFRONTMATTER', { exact: true })).toBeVisible();
 });
 
 test('stderr diagnostics are announced as best-effort and dirty buffers route commands through a resolution dialog', async ({ page }) => {

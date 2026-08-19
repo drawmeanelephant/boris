@@ -448,6 +448,17 @@ fn requireBool(document: *const Document, key: []const u8) Error!void {
     if (value != .bool) return error.InvalidField;
 }
 
+/// The `ok` field of an html-build-report document: true when the build or
+/// validation cycle completed without failures. The long-lived validation
+/// daemon (#652) derives its per-cycle failure class from this field — the
+/// daemon process itself stays alive across recoverable content failures, so
+/// the report is the only per-cycle outcome signal.
+pub fn htmlReportOk(document: *const Document) Error!bool {
+    const value = rootObject(document).get("ok") orelse return error.MissingField;
+    if (value != .bool) return error.InvalidField;
+    return value.bool;
+}
+
 fn requireArray(document: *const Document, key: []const u8) Error!void {
     const value = rootObject(document).get(key) orelse return error.MissingField;
     if (value != .array) return error.InvalidField;
