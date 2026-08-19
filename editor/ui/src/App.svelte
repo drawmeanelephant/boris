@@ -269,6 +269,30 @@
   $: activeProblems = (commandResult?.problems ?? []).filter(problem =>
     problem.source_path !== null && projectPathForProblem(problem.source_path) === activePath
   );
+  // Per-problem staleness (#660): a problem is possibly stale when the open
+  // buffer changed the problem's own source region since the last report and
+  // the caret currently sits inside that region. Lines are compared against
+  // `baseline` (the last loaded/saved buffer, i.e. the report-time snapshot);
+  // edits on other lines and problems in other files never mark anything.
+  $: staleProblems = (() => {
+    const set = new Set<Problem>();
+    if (!dirty || !activePath || content === baseline) return set;
+    const savedLines = baseline.split('\n');
+    const bufferLines = content.split('\n');
+    const changed = new Set<number>();
+    for (let index = 0; index < Math.max(savedLines.length, bufferLines.length); index += 1) {
+      if (savedLines[index] !== bufferLines[index]) changed.add(index + 1);
+    }
+    if (changed.size === 0) return set;
+    for (const problem of activeProblems) {
+      if (!problem.source_path || problem.line == null) continue;
+      if (problem.position_confidence === 'none') continue;
+      if (problem.line !== cursor.line) continue;
+      if (problem.column != null && cursor.column < problem.column) continue;
+      if (changed.has(problem.line)) set.add(problem);
+    }
+    return set;
+  })();
   $: suggestions = completionSuggestions(authoring, completionKind, completionQuery);
   $: if (selectedSuggestion >= suggestions.length) selectedSuggestion = Math.max(0, suggestions.length - 1);
   $: activeNode = nodeForPath(graphPayload?.graph ?? null, activePath);
@@ -476,6 +500,7 @@
     readOnly = buffer.read_only;
     undoStack = [];
     redoStack = [];
+    cursor = { line: 1, column: 1 };
     editorStatus = status;
   }
 
@@ -927,6 +952,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     const offset = sourceOffset(content, problem.line, problem.column);
     editor.focus();
     editor.setSelectionRange(offset, offset);
+    trackCursor();
     editor.scrollTop = Math.max(0, editor.scrollHeight * (offset / Math.max(1, content.length)) - editor.clientHeight / 2);
     editorStatus = problem.line
       ? `Moved to ${path}, line ${problem.line}${problem.column ? `, column ${problem.column}` : ''}.`
@@ -1070,6 +1096,19 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     if (state.cycle === undefined || state.cycle === lastValidateCycle) return;
     lastValidateCycle = state.cycle;
     await refreshValidate();
+  }
+
+  let cursor = { line: 1, column: 1 };
+
+  // Caret -> 1-based line/column, mirroring the problem position convention
+  // (`sourceOffset` walks lines then columns the same way).
+  function trackCursor() {
+    const editor = document.getElementById('source-editor') as HTMLTextAreaElement | null;
+    if (!editor) return;
+    const offset = editor.selectionStart;
+    const before = content.slice(0, offset);
+    const lines = before.split('\n');
+    cursor = { line: lines.length, column: lines[lines.length - 1].length + 1 };
   }
 
   let saveRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1808,6 +1847,9 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
         readonly={readOnly}
         spellcheck="false"
         oninput={editSource}
+        onselect={trackCursor}
+        onclick={trackCursor}
+        onkeyup={trackCursor}
       ></textarea>
       <aside class="authoring-tools" aria-labelledby="authoring-heading">
         <div class="authoring-heading">
@@ -2086,6 +2128,9 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
                 <button type="button" onclick={() => navigateToProblem(problem)}>
                   Go to {problemLocationLabel(problem)}: {problem.code ?? 'Unstructured Boris output'}
                 </button>
+                {#if staleProblems.has(problem)}
+                  <p class="warning-text">Possibly stale — the open buffer changed this region since the report.</p>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -2228,6 +2273,9 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
             {#each group.problems as problem}
               <li class="problem-card">
                 <p>{problem.message}</p>
+                {#if staleProblems.has(problem)}
+                  <p class="warning-text">Possibly stale — the open buffer changed this region since the report.</p>
+                {/if}
                 {#if problem.remediation}<p><strong>Remediation:</strong> {problem.remediation}</p>{/if}
                 <p class="confidence">
                   {problem.position_confidence === 'exact'

@@ -240,6 +240,15 @@ per-cycle outcomes map to the same convention as the one-shot exit codes
   command has run), and after a clean cycle it says *"No problems in the
   newest report (cycle N)."* — so an empty pane never silently means both
   "not checked" and "passed".
+- **Per-problem staleness (#660).** While the open buffer is dirty, a
+  problem whose own source region changed since the last report is marked
+  *"Possibly stale — the open buffer changed this region since the report."*
+  in the pane card and the Source pane inline list — but only when the caret
+  sits inside that region, so editing elsewhere leaves accurate problems
+  unflagged and rewriting a failing line flags the report's complaint about
+  it as not-yet-trusted. The check compares the buffer against `baseline`
+  (the last loaded/saved content, i.e. the report-time snapshot); moving the
+  caret off the region or saving clears the mark.
 - **Validation tracks the newest save (#656).** The four file-mutating
   endpoints (save / create / rename / delete) record the change with
   `noteSave()`; a validate demand that lands within 3 s of one waits (bounded,
