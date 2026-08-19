@@ -354,6 +354,30 @@ test "build-failed pins multiple diagnostics, ordering, and null optionals" {
     );
 }
 
+test "validate-mode events carry mode validate and null pages_written (#647)" {
+    const gpa = std.testing.allocator;
+    const started = try renderBuildStarted(gpa, "initial", "validate", &.{"default"}, null);
+    defer gpa.free(started);
+    try std.testing.expectEqualStrings(
+        "{\"event\":\"build-started\",\"phase\":\"initial\",\"mode\":\"validate\",\"targets\":[\"default\"]}\n",
+        started,
+    );
+
+    const done = try renderBuildSucceeded(gpa, "initial", "validate", &.{"default"}, null, null, 7);
+    defer gpa.free(done);
+    try std.testing.expectEqualStrings(
+        "{\"event\":\"build-succeeded\",\"phase\":\"initial\",\"mode\":\"validate\",\"targets\":[\"default\"],\"pages_written\":null,\"duration_ms\":7}\n",
+        done,
+    );
+
+    const watcher = try renderWatcherStarted(gpa, "validate", &.{"default"});
+    defer gpa.free(watcher);
+    try std.testing.expectEqualStrings(
+        "{\"event\":\"watcher-started\",\"mode\":\"validate\",\"targets\":[\"default\"]}\n",
+        watcher,
+    );
+}
+
 test "serve-started carries bound port url and helper" {
     const gpa = std.testing.allocator;
     const line = try renderServeStarted(gpa, "http://127.0.0.1:53202/", "http://127.0.0.1:53202/__boris/", 53202);
