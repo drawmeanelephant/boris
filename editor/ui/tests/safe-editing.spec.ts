@@ -777,6 +777,70 @@ test('daemon validate-state cycles refresh the problems surface without a manual
   await expect(page.getByText('index.md · error · EFRONTMATTER', { exact: true })).toBeVisible();
 });
 
+test('a successful save fires an immediate cycle-aware validate refresh (#656)', async ({ page }) => {
+  // The validate-state payload never advances its cycle, so the 1 s poller is
+  // quiescent after the first tick: the only way the post-save failure below
+  // can reach the problems surface is the save-triggered refresh (#656).
+  const validateState: Record<string, unknown> = { supported: true, state: 'success', cycle: 0, failure_class: 'success', problems_count: 0 };
+  await installApi(page, {
+    version: { compiler_id: 'boris/0.8.1', supported: { validate_watch: true } },
+    validateState,
+    commandByCall: [
+      commandResult('validate'),
+      commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Saved with a bad key.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 1, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    ]
+  });
+
+  // The initial state poll is the first validate demand; the poller is then
+  // quiescent (the cycle never advances).
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validation updated from the daemon: Success', { timeout: 10000 });
+
+  // Edit and save. The refresh fires on the 300 ms save debounce, without
+  // waiting for the next poll tick or a manual command.
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validation updated from the daemon: Content or graph failure (exit 1)', { timeout: 10000 });
+  await expect(page.getByText('Saved with a bad key.', { exact: true })).toBeVisible();
+  await expect(page.getByText('index.md · error · EFRONTMATTER', { exact: true })).toBeVisible();
+});
+
+test('a save does not fire a validate refresh on the one-shot path (#656)', async ({ page }) => {
+  // Default host: no daemon (validate_watch absent), so no validate-state
+  // poller runs and no save-triggered refresh may fire.
+  await installApi(page, {
+    commandByCall: [
+      commandResult('validate'),
+      commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Saved with a bad key.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 1, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    ]
+  });
+
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/index.md.');
+
+  // Give any (buggy) save-triggered refresh time to land; the queued failure
+  // must stay unconsumed on the one-shot path.
+  await page.waitForTimeout(1200);
+  await expect(page.getByText('Saved with a bad key.', { exact: true })).toHaveCount(0);
+});
+
 test('validation state line names idle, running, success, failed, and stale (#654)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
   await installApi(page, {

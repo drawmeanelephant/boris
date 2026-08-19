@@ -1041,6 +1041,19 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     await refreshValidate();
   }
 
+  let saveRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // A successful save is the highest-signal moment for validation feedback:
+  // fire the existing cycle-aware refresh on a short trailing debounce so
+  // rapid saves coalesce, instead of waiting for the next 1 s poll tick (#656).
+  function scheduleValidateRefresh() {
+    if (saveRefreshTimer) clearTimeout(saveRefreshTimer);
+    saveRefreshTimer = setTimeout(() => {
+      saveRefreshTimer = undefined;
+      void refreshValidate();
+    }, 300);
+  }
+
   // Honest state naming for the problems surface (#654): the daemon reports
   // idle/running/success/failed/stale, and the shell names exactly what the
   // validate-state payload says — never a fabricated mid-cycle state.
@@ -1195,6 +1208,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
         conflictDialog?.close();
         await refreshFiles();
         await rebuildPreview('save');
+        if (validateDaemon) scheduleValidateRefresh();
         return true;
       }
       const error = result.data as ErrorResponse;
