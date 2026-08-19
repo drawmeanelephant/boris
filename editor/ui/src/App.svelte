@@ -223,6 +223,7 @@
   let inputMode: NonNullable<Health['project']['input_mode']> = 'empty';
   let previewWidth: 'full' | '375' | '768' | '1440' = 'full';
   let validateDaemon = false;
+  let validateState: ValidateState | null = null;
   let lastValidateCycle = -1;
   let validateStateTimer: ReturnType<typeof setInterval> | undefined;
   let publicationPayload: PublicationPayload | null = null;
@@ -1034,9 +1035,27 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     const result = await api<ValidateState | ErrorResponse>('/api/validate-state');
     if (!result.response.ok) return;
     const state = result.data as ValidateState;
+    validateState = state;
     if (state.cycle === undefined || state.cycle === lastValidateCycle) return;
     lastValidateCycle = state.cycle;
     await refreshValidate();
+  }
+
+  // Honest state naming for the problems surface (#654): the daemon reports
+  // idle/running/success/failed/stale, and the shell names exactly what the
+  // validate-state payload says — never a fabricated mid-cycle state.
+  function validationStatusLabel(state: ValidateState | null): string {
+    if (!state) return '';
+    const cycle = state.cycle ?? 0;
+    const count = state.problems_count ?? 0;
+    switch (state.state) {
+      case 'idle': return 'Validation is idle. Run Validate project to start the daemon.';
+      case 'running': return 'Validation is running the first cycle…';
+      case 'success': return `Validation passed (cycle ${cycle}).`;
+      case 'failed': return `Validation failed — ${count} problem${count === 1 ? '' : 's'} (cycle ${cycle}).`;
+      case 'stale': return 'Validation daemon is restarting with backoff.';
+      default: return '';
+    }
   }
 
   async function refreshValidate() {
@@ -2121,6 +2140,12 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
         </p>
       {/if}
     </div>
+    {#if validateDaemon}
+      <p class="validation-state" role="status" aria-label="Validation state" aria-live="polite">{validationStatusLabel(validateState)}</p>
+    {/if}
+    {#if dirty && commandResult && commandResult.problems.length > 0}
+      <p class="warning-text">Problems reflect saved files; the open buffer has unsaved changes.</p>
+    {/if}
     <div class="command-bar" aria-label="Boris commands">
       <button type="button" disabled={commandRunning} onclick={() => runCommand('validate')}>Validate project</button>
       <button type="button" disabled={commandRunning} onclick={() => runCommand('ir_build')}>Build diagnostics</button>
