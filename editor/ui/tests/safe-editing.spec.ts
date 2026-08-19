@@ -905,6 +905,74 @@ test('the clean-report notice never contradicts another command (#658)', async (
   await expect(notice).toHaveCount(0);
 });
 
+test('a problem at the caret is marked possibly-stale when its region changed (#660)', async ({ page }) => {
+  await installApi(page, {
+    disk: '# Draft\n\n## Section\n\nMore.\n',
+    commands: {
+      validate: commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Section problem.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 3, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    }
+  });
+  const staleNote = page.getByText('Possibly stale — the open buffer changed this region since the report.');
+
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByText('Section problem.', { exact: true })).toBeVisible();
+  await expect(staleNote).toHaveCount(0);
+
+  // Rewrite the problem's own line and jump the caret onto it: the report
+  // complaint about this region is now possibly stale, in the pane card and
+  // the Source pane inline list (the same problem, two surfaces).
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n\n## Section edited\n\nMore.\n');
+  await page.getByRole('button', { name: 'Go to index.md line 3 column 1: EFRONTMATTER', exact: true }).click();
+  await expect(staleNote).toHaveCount(2);
+
+  // Moving the caret off the region clears the mark; saving clears it too.
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).press('ArrowUp');
+  await expect(staleNote).toHaveCount(0);
+  await page.getByRole('button', { name: 'Go to index.md line 3 column 1: EFRONTMATTER', exact: true }).click();
+  await expect(staleNote).toHaveCount(2);
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await expect(staleNote).toHaveCount(0);
+});
+
+test('editing a different line never marks the problem, on the daemon path too (#660)', async ({ page }) => {
+  const validateState: Record<string, unknown> = { supported: true, state: 'success', cycle: 1, failure_class: 'success', problems_count: 1 };
+  await installApi(page, {
+    disk: '# Draft\n\n## Section\n\nMore.\n',
+    version: { compiler_id: 'boris/0.8.1', supported: { validate_watch: true } },
+    validateState,
+    commands: {
+      validate: commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Section problem.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 3, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    }
+  });
+  const staleNote = page.getByText('Possibly stale — the open buffer changed this region since the report.');
+
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  // The daemon poll pulls the failing report into the pane without a manual
+  // command.
+  await expect(page.getByText('Section problem.', { exact: true })).toBeVisible({ timeout: 10000 });
+
+  // A change on a different line leaves the problem's own region intact: even
+  // with the caret on the problem line, nothing is marked.
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft edited\n\n## Section\n\nMore.\n');
+  await page.getByRole('button', { name: 'Go to index.md line 3 column 1: EFRONTMATTER', exact: true }).click();
+  await expect(staleNote).toHaveCount(0);
+});
+
 test('validation state line names idle, running, success, failed, and stale (#654)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
   await installApi(page, {
