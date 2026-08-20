@@ -1,175 +1,85 @@
 <script lang="ts">
   import { tick } from 'svelte';
-
-  type Health = {
-    status: string;
-    editor_id: string;
-    project: { content: boolean; default_layout: boolean; publication_profile: boolean; input_mode?: 'markdown' | 'cooklang' | 'textile' | 'mixed' | 'empty' };
-  };
-  type Version = {
-    compiler_id: string;
-    supported?: { completion?: number[]; ir?: string[]; publication_plan?: number[]; frontmatter?: number[]; validate_watch?: boolean };
-  };
-  type ValidateState = {
-    supported?: boolean;
-    state?: 'idle' | 'running' | 'success' | 'failed' | 'stale';
-    cycle?: number;
-    failure_class?: FailureClass | null;
-    problems_count?: number;
-    report_age_ms?: number | null;
-  };
-  type FileEntry = { path: string };
-  type FileList = { files: FileEntry[] };
-  const visibleFileLimit = 200;
-  const unfilteredPaletteEntryLimit = 50;
-  type BufferResponse = {
-    status: 'opened' | 'saved' | 'created' | 'conflict';
-    path: string;
-    content: string;
-    fingerprint: string;
-    read_only: boolean;
-  };
-  type ProbeResponse = {
-    status: 'unchanged' | 'changed' | 'deleted' | 'transient';
-    path?: string;
-    content?: string;
-    fingerprint?: string;
-    read_only?: boolean;
-  };
-  type RecoverySnapshot = { path: string; content: string; fingerprint: string };
-  type RecoveryList = { snapshots: RecoverySnapshot[]; skipped?: number };
-  type ErrorResponse = { error?: string; status?: string };
-  type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact' | 'plan' | 'recipe_scale';
-  type FailureClass = 'success' | 'content' | 'usage' | 'io' | 'terminated';
-  type PendingResolution =
-    | { action: 'open'; target: string }
-    | { action: 'command'; mode: CommandMode }
-    | { action: 'preview'; reason: 'save' | 'manual' }
-    | { action: 'restore'; snapshot: RecoverySnapshot };
-  type PaletteItem =
-    | { kind: 'create' }
-    | { kind: 'rename' }
-    | { kind: 'delete' }
-    | { kind: 'save' }
-    | { kind: 'command'; mode: CommandMode }
-    | { kind: 'preview' }
-    | { kind: 'source' }
-    | { kind: 'parent' }
-    | { kind: 'impact-here' }
-    | { kind: 'entity'; id: string }
-    | { kind: 'open'; path: string };
-  type Problem = {
-    severity: 'error' | 'warning' | 'info';
-    code: string | null;
-    message: string;
-    remediation: string;
-    source_path: string | null;
-    line: number | null;
-    column: number | null;
-    id: string | null;
-    origin: 'build_report' | 'analysis_report' | 'stderr' | 'process';
-    position_confidence: 'exact' | 'best_effort' | 'none';
-    packet: string;
-  };
-  type AnalysisFinding = {
-    code: string;
-    endpoint_type: 'page' | 'source';
-    value: string;
-    count: number;
-    source_path: string | null;
-    line: number | null;
-    column: number | null;
-  };
-  type ImpactEndpoint = { endpoint_type: 'page' | 'source'; value: string };
-  type PublicationSite = { url?: string | null; title?: string | null; description?: string | null };
-  type PublicationIdentity = {
-    target?: string | null;
-    base_url?: string | null;
-    origin?: string | null;
-    base_path?: string | null;
-    site_kind?: string | null;
-  };
-  type PublicationTarget = {
-    name: string;
-    output: string;
-    public?: boolean | null;
-    theme?: string | null;
-    layout?: string | null;
-  };
-  type PublicationPlan = {
-    format: string;
-    schema_version: number;
-    input: string;
-    input_format: string;
-    site?: PublicationSite | null;
-    publication?: PublicationIdentity | null;
-    targets: PublicationTarget[];
-    editions?: { ir?: unknown; rag?: unknown; context?: unknown };
-  };
-  type PublicationProfile = { path: string };
-  type PublicationProof = {
-    path: string;
-    html_path: string | null;
-    target: string;
-    schema_version: string;
-    overall_presentation_status: string;
-    artifacts_total: number;
-    checks_total: number;
-    findings_total: number;
-    claims_total: number;
-  };
-  type PublicationPayload = { profiles: PublicationProfile[]; proof: PublicationProof | null; proof_status?: 'ready' | 'absent' | 'unsupported' };
-  type CommandResult = {
-    mode: CommandMode;
-    exit_code: number | null;
-    failure_class: FailureClass;
-    compiler_id: string;
-    report_version: string | null;
-    used_stderr_fallback: boolean;
-    problems: Problem[];
-    findings: AnalysisFinding[];
-    impact: ImpactEndpoint[];
-    publication_plan?: PublicationPlan | null;
-    recipe_scale_view?: RecipeScaleView | null;
-  };
-  type ProblemGroup = { key: string; label: string; problems: Problem[] };
-  type JsonSchemaProperty = { type?: string | string[]; enum?: Array<string | null>; maxLength?: number; maxItems?: number; pattern?: string; items?: JsonSchemaProperty };
-  type CompletionEntity = { id: string; title: string | null; parent: string | null; role: string; status: string | null; tags: string[]; relations: Array<{ kind: string; target: string }> };
-  type CompletionIndex = { format: string; schema_version: number; compiler_id: string; frozen: boolean; entities: CompletionEntity[]; relation_kinds: string[]; parent_targets: string[]; layout_slots: string[] };
-  type AuthoringPayload = { frontmatter_schema: { title: string; properties: Record<string, JsonSchemaProperty> }; completion: CompletionIndex | null; completion_status: 'ready' | 'build_required' | 'unsupported' };
-  type CompletionKind = 'frontmatter_key' | 'status' | 'entity' | 'wiki_link' | 'parent' | 'relation_kind' | 'relation_target' | 'layout_slot';
-  type Suggestion = { value: string; insert: string; detail: string };
-  type PreviewState = { phase: 'idle' | 'running' | 'success' | 'failed' | 'stale'; generation: number; exit_code: number | null; used_stderr_fallback: boolean; message: string; preview_url: string };
-  type GraphEndpoint = { type: 'page' | 'source'; value: string };
-  type RecipeQuantity = { amount: string; unit: string };
-  type RecipeIngredient = { name: string; quantity: RecipeQuantity; preparation: string; recipeRef: string | null };
-  type RecipeItem = { name: string; quantity: RecipeQuantity };
-  type RecipeFacet = { ingredients: RecipeIngredient[]; cookware: RecipeItem[]; timers: RecipeItem[] };
-  type RecipeScaleAmount = { class: 'empty' | 'scalable' | 'fixed'; original: string; scaled: string };
-  type RecipeScaleQuantity = { amount: RecipeScaleAmount; unit: string };
-  type RecipeScaleView = {
-    format: string;
-    schemaVersion: string;
-    compiler: string;
-    factor: { num: number; den: number };
-    page: string;
-    ingredients: Array<{ name: string; quantity: RecipeScaleQuantity; preparation: string; recipeRef: string | null }>;
-    cookware: Array<{ name: string; quantity: RecipeScaleQuantity }>;
-    timers: Array<{ name: string; quantity: RecipeScaleQuantity }>;
-  };
-  type GraphNode = {
-    index: number; id: string; sourcePath: string; role: string; parent: string | null;
-    parentIndex: number | null; title: string | null; status: string | null; tags: string[]; bodyOffset: number;
-    recipe?: RecipeFacet | null;
-  };
-  type GraphEdge = { from: GraphEndpoint; to: GraphEndpoint; kind: 'parent' | 'include' | 'reference' };
-  type GraphNav = { index: number; id: string; breadcrumb: number[]; children: number[]; siblings: number[] };
-  type GraphDocument = {
-    schemaVersion: string; frozen: boolean; nodes: GraphNode[]; edges: GraphEdge[];
-    reverseIndex: Array<{ target: GraphEndpoint; incomingEdges: number[] }>; nav: GraphNav[];
-  };
-  type GraphPayload = { graph: GraphDocument | null; graph_status: 'ready' | 'build_required' | 'unsupported' };
-  type GraphLink = { label: string; path: string; kind: string };
+  import { token, launchOpenPath, api, elapsedLabel, hostErrorLabel, isLaunchOpenSafe } from './lib/api';
+  import type {
+    Health,
+    Version,
+    ValidateState,
+    FileEntry,
+    FileList,
+    BufferResponse,
+    ProbeResponse,
+    RecoverySnapshot,
+    RecoveryList,
+    ErrorResponse,
+    CommandMode,
+    FailureClass,
+    PendingResolution,
+    PaletteItem,
+    Problem,
+    AnalysisFinding,
+    ImpactEndpoint,
+    PublicationSite,
+    PublicationIdentity,
+    PublicationTarget,
+    PublicationPlan,
+    PublicationProfile,
+    PublicationProof,
+    PublicationPayload,
+    CommandResult,
+    ProblemGroup,
+    JsonSchemaProperty,
+    CompletionEntity,
+    CompletionIndex,
+    AuthoringPayload,
+    CompletionKind,
+    Suggestion,
+    PreviewState,
+    GraphEndpoint,
+    RecipeQuantity,
+    RecipeIngredient,
+    RecipeItem,
+    RecipeFacet,
+    RecipeScaleAmount,
+    RecipeScaleQuantity,
+    RecipeScaleView,
+    GraphNode,
+    GraphEdge,
+    GraphNav,
+    GraphDocument,
+    GraphPayload,
+    GraphLink
+  } from './lib/types';
+  import { visibleFileLimit, unfilteredPaletteEntryLimit } from './lib/types';
+  import {
+    commandLabel,
+    versionLabel,
+    failureLabel,
+    groupProblems,
+    projectPathForProblem,
+    projectPathForGraphSource,
+    nodeForPath,
+    nodeForId,
+    navForNode,
+    graphLinksForIndices,
+    endpointPath,
+    outgoingGraphLinks,
+    incomingGraphLinks,
+    wikiLinksInSource,
+    quantityLabel,
+    displayQuantity,
+    escapeHtml,
+    sourceOffset,
+    packetCopyKey,
+    packetCopyLabel,
+    problemLocationLabel,
+    schemaHint,
+    completionSuggestions,
+    validationStatusLabel,
+    reportAgeLabel,
+    validationCycleLabel,
+    fileTreeAnnouncement
+  } from './lib/utils';
 
   let connection = 'Connecting to the local host…';
   let compiler = 'Checking Boris version…';
@@ -411,34 +321,6 @@
     }
   }
 
-  const launchFragment = new URLSearchParams(window.location.hash.slice(1));
-  const token = launchFragment.get('token') ?? '';
-  const launchOpenPath = launchFragment.get('open') ?? '';
-
-  async function api<T>(path: string, options: RequestInit = {}): Promise<{ response: Response; data: T }> {
-    const headers = new Headers(options.headers);
-    headers.set('X-Boris-Editor-Token', token);
-    if (options.body) headers.set('Content-Type', 'application/json');
-    let response: Response;
-    try {
-      response = await fetch(path, { ...options, headers });
-    } catch {
-      return {
-        response: new Response('{"error":"host_unavailable"}', {
-          status: 503, headers: { 'Content-Type': 'application/json' }
-        }),
-        data: { error: 'host_unavailable' } as T
-      };
-    }
-    let data: T;
-    try {
-      data = await response.json() as T;
-    } catch {
-      data = {} as T;
-    }
-    return { response, data };
-  }
-
   async function connect() {
     if (!token) {
       connection = 'Session token missing. Launch the editor from boris-editor.';
@@ -525,12 +407,6 @@
   // a launch target must be an author-owned project file. This pre-check keeps
   // an unsafe `open=` fragment from even reaching the host; the host still
   // re-validates every open request.
-  function isLaunchOpenSafe(path: string): boolean {
-    if (!path || path.length > 4096) return false;
-    if (path.startsWith('/') || path.includes('\\') || path.includes('\u0000')) return false;
-    if (path.split('/').some(segment => segment === '' || segment === '.' || segment === '..')) return false;
-    return path === 'boris.json' || path.startsWith('content/') || path.startsWith('themes/');
-  }
 
   async function openFile(path: string): Promise<boolean> {
     if (path === activePath) return true;
@@ -614,11 +490,6 @@
     if (mode === 'html_build' || mode === 'plan') await refreshPublication();
   }
 
-  function versionLabel(version: Version): string {
-    const ir = version.supported?.ir;
-    const range = ir && ir.length > 0 ? `; IR ${ir[0]}${ir.length > 1 ? `–${ir[ir.length - 1]}` : ''}` : '';
-    return `Compiler: ${version.compiler_id}${range}`;
-  }
 
   function setAuthoring(payload: AuthoringPayload) {
     authoring = payload;
@@ -701,27 +572,7 @@
     } else previewState = `Preview host failed: ${(result.data as ErrorResponse).error ?? 'request failed'}. Existing output is not current.`;
   }
 
-  function completionSuggestions(payload: AuthoringPayload | null, kind: CompletionKind, query: string): Suggestion[] {
-    if (!payload) return [];
-    const schema = payload.frontmatter_schema.properties;
-    const index = payload.completion;
-    let values: Suggestion[] = [];
-    if (kind === 'frontmatter_key') values = Object.entries(schema).map(([name, property]) => ({ value: name, insert: `${name}: `, detail: schemaHint(property) }));
-    if (kind === 'status') values = (schema.status?.enum ?? []).filter((value): value is string => typeof value === 'string').map(value => ({ value, insert: value, detail: 'Closed enum from Boris frontmatter schema' }));
-    if (kind === 'entity' || kind === 'relation_target') values = (index?.entities ?? []).map(entity => ({ value: entity.id, insert: entity.id, detail: `${entity.role}${entity.title ? ` · ${entity.title}` : ''}` }));
-    if (kind === 'wiki_link') values = (index?.entities ?? []).map(entity => ({ value: entity.id, insert: `[[${entity.id}]]`, detail: entity.title ?? entity.role }));
-    if (kind === 'parent') values = (index?.parent_targets ?? []).map(value => ({ value, insert: value, detail: 'Observed parent target from completion.json' }));
-    if (kind === 'relation_kind') values = (index?.relation_kinds ?? []).map(value => ({ value, insert: `${value}=`, detail: 'Relation kind from completion.json' }));
-    if (kind === 'layout_slot') values = (index?.layout_slots ?? []).map(value => ({ value, insert: `{{${value}}}`, detail: 'Closed layout slot from completion.json' }));
-    const needle = query.trim().toLocaleLowerCase();
-    return values.filter(item => !needle || item.value.toLocaleLowerCase().startsWith(needle)).slice(0, 50);
-  }
 
-  function schemaHint(property: JsonSchemaProperty): string {
-    const type = Array.isArray(property.type) ? property.type.filter(value => value !== 'null').join(' or ') : (property.type ?? 'value');
-    const bounds = property.maxLength ? ` · at most ${property.maxLength} characters` : property.maxItems ? ` · at most ${property.maxItems} items` : '';
-    return `${type}${bounds}`;
-  }
 
   function completionKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
@@ -750,142 +601,20 @@
     editor.setSelectionRange(start + suggestion.insert.length, start + suggestion.insert.length);
   }
 
-  function commandLabel(mode: CommandMode): string {
-    return ({
-      validate: 'Validate project',
-      ir_build: 'Build diagnostics',
-      html_build: 'Build HTML',
-      check: 'Check graph',
-      impact: 'Run impact',
-      plan: 'Run publication plan',
-      recipe_scale: 'Scale recipe'
-    } satisfies Record<CommandMode, string>)[mode];
-  }
 
-  function elapsedLabel(started: number): string {
-    return `${((Date.now() - started) / 1000).toFixed(1)}s`;
-  }
 
-  function hostErrorLabel(code: string | undefined): string {
-    if (code === 'payload_too_large') return 'the file exceeds the 8 MiB editor bound';
-    if (code === 'too_many_files') return 'the project has more than 50,000 author-owned files';
-    if (code === 'host_unavailable') return 'the editor host stopped; restart boris-editor';
-    if (code === 'boris_unavailable') return 'the Boris binary is not available; restart the editor';
-    if (code === 'invalid_boris_version') return 'the Boris version string is not usable';
-    if (code === 'unsupported_boris_artifact') return 'a generated Boris artifact is stale or unsupported; rebuild it';
-    return code ?? 'request failed';
-  }
 
-  function failureLabel(failure: FailureClass, exitCode: number | null): string {
-    const labels: Record<FailureClass, string> = {
-      success: 'Success',
-      content: 'Content or graph failure',
-      usage: 'Usage or configuration failure',
-      io: 'I/O or system failure',
-      terminated: 'Process terminated'
-    };
-    return exitCode === null ? labels[failure] : `${labels[failure]} (exit ${exitCode})`;
-  }
 
-  function groupProblems(problems: Problem[]): ProblemGroup[] {
-    const groups = new Map<string, ProblemGroup>();
-    for (const problem of problems) {
-      const source = problem.source_path ?? 'Project';
-      const code = problem.code ?? 'Unstructured Boris output';
-      const key = `${source}\u0000${problem.severity}\u0000${code}`;
-      const existing = groups.get(key);
-      if (existing) {
-        existing.problems.push(problem);
-      } else {
-        groups.set(key, { key, label: `${source} · ${problem.severity} · ${code}`, problems: [problem] });
-      }
-    }
-    const severityOrder = { error: 0, warning: 1, info: 2 };
-    return [...groups.values()].sort((left, right) => {
-      const source = (left.problems[0].source_path ?? '\uffff').localeCompare(right.problems[0].source_path ?? '\uffff');
-      if (source !== 0) return source;
-      const severity = severityOrder[left.problems[0].severity] - severityOrder[right.problems[0].severity];
-      return severity !== 0 ? severity : left.label.localeCompare(right.label);
-    });
-  }
 
-  function projectPathForProblem(sourcePath: string): string {
-    if (sourcePath === 'boris.json' || sourcePath.startsWith('content/') || sourcePath.startsWith('themes/')) return sourcePath;
-    return `content/${sourcePath}`;
-  }
 
-  function projectPathForGraphSource(sourcePath: string): string {
-    return projectPathForProblem(sourcePath);
-  }
 
-  function nodeForPath(graph: GraphDocument | null, path: string): GraphNode | null {
-    if (!graph || !path) return null;
-    return graph.nodes.find(node => projectPathForGraphSource(node.sourcePath) === path) ?? null;
-  }
 
-  function nodeForId(graph: GraphDocument | null, id: string): GraphNode | null {
-    if (!graph) return null;
-    return graph.nodes.find(node => node.id === id) ?? null;
-  }
 
-  function navForNode(graph: GraphDocument | null, node: GraphNode | null): GraphNav | null {
-    if (!graph || !node) return null;
-    return graph.nav.find(entry => entry.id === node.id) ?? null;
-  }
 
-  function graphLinksForIndices(graph: GraphDocument | null, indices: number[]): GraphLink[] {
-    if (!graph) return [];
-    return indices.flatMap(index => {
-      const node = graph.nodes.find(entry => entry.index === index);
-      if (!node) return [];
-      return [{ label: node.title ? `${node.id} · ${node.title}` : node.id, path: projectPathForGraphSource(node.sourcePath), kind: 'page' }];
-    });
-  }
 
-  function endpointPath(graph: GraphDocument | null, endpoint: GraphEndpoint): string | null {
-    if (endpoint.type === 'page') {
-      const node = nodeForId(graph, endpoint.value);
-      return node ? projectPathForGraphSource(node.sourcePath) : null;
-    }
-    return projectPathForGraphSource(endpoint.value);
-  }
 
-  function outgoingGraphLinks(graph: GraphDocument | null, node: GraphNode | null): GraphLink[] {
-    if (!graph || !node) return [];
-    return graph.edges.flatMap(edge => {
-      if (edge.from.type !== 'page' || edge.from.value !== node.id || edge.kind === 'parent') return [];
-      const path = endpointPath(graph, edge.to);
-      if (!path) return [];
-      return [{ label: `${edge.kind} → ${edge.to.value}`, path, kind: edge.kind }];
-    });
-  }
 
-  function incomingGraphLinks(graph: GraphDocument | null, node: GraphNode | null): GraphLink[] {
-    if (!graph || !node) return [];
-    const incoming = graph.reverseIndex.find(entry => entry.target.type === 'page' && entry.target.value === node.id);
-    if (!incoming) return [];
-    return incoming.incomingEdges.flatMap(index => {
-      const edge = graph.edges[index];
-      if (!edge) return [];
-      const path = endpointPath(graph, edge.from);
-      if (!path) return [];
-      return [{ label: `${edge.kind} ← ${edge.from.value}`, path, kind: edge.kind }];
-    });
-  }
 
-  function wikiLinksInSource(source: string): string[] {
-    const ids: string[] = [];
-    const seen = new Set<string>();
-    const pattern = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(source))) {
-      const id = match[1].trim();
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      ids.push(id);
-    }
-    return ids;
-  }
 
   async function openGraphPath(path: string) {
     await openFile(path);
@@ -902,17 +631,7 @@
     await runCommand('impact');
   }
 
-  function quantityLabel(quantity: RecipeQuantity): string {
-    return [quantity.amount, quantity.unit].filter(part => part.trim() !== '').join(' ');
-  }
 
-  function displayQuantity(authored: RecipeQuantity, scaled: RecipeScaleQuantity | undefined, timer: boolean): string {
-    const original = quantityLabel(authored);
-    if (timer || !scaled || scaled.amount.scaled === scaled.amount.original) return original || '—';
-    const scaledLabel = [scaled.amount.scaled, scaled.unit].filter(part => part.trim() !== '').join(' ');
-    if (!original) return scaledLabel || '—';
-    return `${original} → ${scaledLabel}`;
-  }
 
   function resetScale() {
     scaleView = null;
@@ -955,9 +674,6 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     printer.print();
   }
 
-  function escapeHtml(value: string): string {
-    return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] ?? character));
-  }
 
   async function navigateToProblem(problem: Problem | AnalysisFinding) {
     if (!problem.source_path) return;
@@ -976,37 +692,8 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       : `Opened ${path} for this Boris finding.`;
   }
 
-  function sourceOffset(source: string, line: number | null, column: number | null): number {
-    if (!line || line < 1) return 0;
-    let lineStart = 0;
-    for (let currentLine = 1; currentLine < line; currentLine += 1) {
-      const newline = source.indexOf('\n', lineStart);
-      if (newline < 0) return source.length;
-      lineStart = newline + 1;
-    }
-    if (!column || column <= 1) return lineStart;
-    const lineEnd = source.indexOf('\n', lineStart);
-    const text = source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd);
-    const wantedBytes = column - 1;
-    let consumedBytes = 0;
-    let codeUnits = 0;
-    const encoder = new TextEncoder();
-    for (const character of text) {
-      const bytes = encoder.encode(character).length;
-      if (consumedBytes + bytes > wantedBytes) break;
-      consumedBytes += bytes;
-      codeUnits += character.length;
-    }
-    return lineStart + codeUnits;
-  }
 
-  function packetCopyKey(problem: Problem): string {
-    return `${problem.code ?? ''}\0${problem.source_path ?? ''}\0${problem.line ?? ''}\0${problem.column ?? ''}\0${problem.packet}`;
-  }
 
-  function packetCopyLabel(problem: Problem): string {
-    return `Copy packet for ${problem.code ?? 'unstructured Boris output'} at ${problem.source_path ?? 'project'}`;
-  }
 
   async function copyDiagnosticPacket(problem: Problem) {
     try {
@@ -1031,11 +718,6 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     document.getElementById('completion-query')?.focus();
   }
 
-  function problemLocationLabel(problem: Problem | AnalysisFinding): string {
-    if (!problem.source_path) return 'project';
-    if (!problem.line) return problem.source_path;
-    return `${problem.source_path} line ${problem.line}${problem.column ? ` column ${problem.column}` : ''}`;
-  }
 
   function editSource(event: Event) {
     const next = (event.currentTarget as HTMLTextAreaElement).value;
@@ -1144,33 +826,8 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   // Honest state naming for the problems surface (#654): the daemon reports
   // idle/running/success/failed/stale, and the shell names exactly what the
   // validate-state payload says — never a fabricated mid-cycle state.
-  function validationStatusLabel(state: ValidateState | null): string {
-    if (!state) return '';
-    const cycle = state.cycle ?? 0;
-    const count = state.problems_count ?? 0;
-    switch (state.state) {
-      case 'idle': return 'Validation is idle. Run Validate project to start the daemon.';
-      case 'running': return 'Validation is running the first cycle…';
-      case 'success': return `Validation passed (cycle ${cycle}).`;
-      case 'failed': return `Validation failed — ${count} problem${count === 1 ? '' : 's'} (cycle ${cycle}).`;
-      case 'stale': return 'Validation daemon is restarting with backoff.';
-      default: return '';
-    }
-  }
 
-  function reportAgeLabel(ageMs: number | null | undefined): string {
-    if (ageMs == null) return 'Report age: —';
-    if (ageMs < 1000) return 'Report age: <1s';
-    if (ageMs < 60_000) return `Report age: ${Math.floor(ageMs / 1000)}s`;
-    const minutes = Math.floor(ageMs / 60_000);
-    const seconds = Math.floor((ageMs % 60_000) / 1000);
-    return `Report age: ${minutes}m ${seconds}s`;
-  }
 
-  function validationCycleLabel(state: ValidateState | null): string {
-    if (!state || state.cycle === undefined) return 'Cycle: — · Report age: —';
-    return `Cycle ${state.cycle} · ${reportAgeLabel(state.report_age_ms)}`;
-  }
 
   async function refreshValidate() {
     const started = Date.now();
@@ -1489,17 +1146,6 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     deleteDialog.querySelector<HTMLButtonElement>('.dialog-actions .danger')?.focus();
   }
 
-  function fileTreeAnnouncement(total: number, matched: number, shown: number, query: string): string {
-    if (total === 0) return '';
-    const needle = query.trim();
-    if (needle) {
-      if (matched === 0) return `No project files match “${needle}”.`;
-      if (matched > shown) return `Showing ${shown} of ${matched} project files matching “${needle}”. Filter further to find the rest.`;
-      return `${matched} project file${matched === 1 ? ' matches' : 's match'} “${needle}”.`;
-    }
-    if (matched > visibleFileLimit) return `Showing ${shown} of ${total} project files. Filter to find the rest.`;
-    return '';
-  }
 
   function paletteItemMatches(item: PaletteItem, needle: string): boolean {
     if (!needle) return true;
