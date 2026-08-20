@@ -12,7 +12,7 @@
 - **Lifted state** stays in `App.svelte` orchestrator (~250 lines goal): owns `token`+`api<T>`+timers (host 5s/disk 3s/validate 1s/recovery 3s/save-refresh 300ms) and prop-drills/callbacks. Each pane owns its DOM slice.
 - **No contract change** except fixing a moved-type import if a host test imports a moved type (none today). No `main` backport.
 
-## Directory contract (from issue, now scaffolded)
+## Directory contract (from issue, to be scaffolded per slice)
 ```
 editor/ui/src/
   lib/
@@ -37,7 +37,7 @@ editor/ui/src/
   App.svelte                   orchestrator, no fetch
 ```
 
-Shells for all components/dialogs are present as dead code (not wired) so svelte-check/build stay green while template remains byte-identical. This enables parallel ownership.
+No component/dialog Svelte files are added in slice 1; only `lib/types.ts`/`api.ts`/`utils.ts` exist after this PR. The table above defines the contract for later slices — each slice will add its own `components/`/`dialogs/` files and wire them into `App.svelte` while keeping the template byte-identical.
 
 ## Slices — land in order, each green, one concern per branch (AGENTS.md)
 Each slice keeps `styles.css` and stable ids; merges target `afterparty`, not `main`.
@@ -85,8 +85,8 @@ Each future feature now has a scoped component to land in, with lib/utils giving
 `main` is frozen; `afterparty` is active integration line. All work branches from up-to-date `afterparty`, target PRs at `afterparty`. Never push directly to `main` or `afterparty`. One agent owns a branch and its hot files. Keep generated outputs (`dist/`, `zig-out/`) ignored. End each slice with `docs/COMPLETION-REPORT-TEMPLATE.md` evidence block.
 
 ## Evidence for slice 1
-- After slice 1: App 2377→2188 after adding utils imports (measured via `wc -l`).
+- After slice 1: `App.svelte` `2542 → 2188` after `lib/types`+`api`+`utils` imports (measured via `wc -l` on `origin/afterparty` vs. this branch).
 - `npm --prefix editor/ui run check` 0 errors, `npm run build` succeeds (≈116kB JS gz 38kB).
 - `zig build --build-file editor/build.zig test` silent green.
-- Component shells present but not wired → zero visual delta, screenshot identical by construction.
-- `svelte-check` now checks all new `.svelte` files (Header, SectionNav, etc.) with 0 errors, 0 warnings.
+- No component/dialog Svelte files in this slice → zero visual delta, screenshot identical by construction.
+- `svelte-check` checks `App.svelte` + `lib/*` with 0 errors, 0 warnings; no additional component surface to mis-attribute in this slice.
