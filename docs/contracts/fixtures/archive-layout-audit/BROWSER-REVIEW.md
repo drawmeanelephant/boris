@@ -1,9 +1,8 @@
 # Archive-layout browser review
 
-**Scope:** real-browser evidence pass over the retained fixture (STATUS roadmap
-item 2 — the manual review that `REPORT.md` still requires). The evidence-gated
-presentation fix it led to (roadmap item 3) accompanies this document in the
-same change set and is recorded under Finding 1.
+**Scope:** real-browser evidence pass over the retained fixture, covering the
+manual review that `REPORT.md` still requires. The evidence-gated presentation
+fix it led to accompanies this document and is recorded under Finding 1.
 
 **Date:** 2026-08-20 · **Build:** merged `afterparty` tip (`121a13ac`), `boris/0.8.1`.
 **Fixture build:** the exact command in this directory's `README.md` (id:archive →
@@ -64,7 +63,7 @@ audit harness (`test/archive-layout-audit.sh`) only checks that an
 break goes unseen — exactly the "not a claim of cross-browser visual
 certification" caveat `REPORT.md` records.
 
-**Resolution (roadmap item 3, 2026-08-20):** the horizontal overflow moved to
+**Resolution (2026-08-20):** the horizontal overflow moved to
 the table's parent — `article { max-width: 72ch; overflow-x: auto; }` in
 `theme/assets/archive-audit.css`. The table keeps its readable 512 px minimum
 and scrolls internally within the article at phone widths while the page stays
@@ -96,6 +95,7 @@ recorded: if this theme is ever promoted to a shipping surface, an explicit
 - A real trusted-key Tab traversal and screen-reader order audit still need a
   human (or a raw-input test tool): programmatic focus cannot trigger the
   browser's `:focus-visible` keyboard heuristic, so the default ring's actual
-  appearance was not observed here.
+  appearance was not observed here. STATUS deliberately keeps this
+  accessibility review open.
 - Color-contrast review of the fixture palette (REPORT.md item) remains a
   human/vision pass.
