@@ -35,11 +35,27 @@
 // Zero dependencies: plain Node, regex + bracket scanning over App.svelte.
 // Runs built-in self-tests first, then checks the real source.
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SOURCE = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'App.svelte');
+const SRC_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+const SOURCE = join(SRC_ROOT, 'App.svelte');
+
+function collectSvelteSources(root) {
+  const out = [];
+  function walk(dir) {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      const stat = statSync(full);
+      if (stat.isDirectory()) walk(full);
+      else if (full.endsWith('.svelte')) out.push(full);
+    }
+  }
+  walk(root);
+  return out.sort();
+}
+const SOURCES = collectSvelteSources(SRC_ROOT);
 
 // --- key token mapping -----------------------------------------------------
 
@@ -497,7 +513,10 @@ function analyze(template, script, bodies) {
 
   // The recovery banner's Restore button must route a dirty buffer through
   // the Save/Discard resolution dialog; otherwise the Tab + Enter hint drifts
-  // from what Restore actually does while editing.
+  // from what Restore actually does while editing. After slice 2 the banner
+  // lives in `components/RecoveryBanner.svelte` and is prop-drilled via
+  // `onRestore` — the dirty routing still lives in `App.svelte`'s
+  // `restoreSnapshot`.
   for (const banner of banners) {
     const restore = (banner._buttons ?? []).find(button => button.text.startsWith('Restore'));
     if (!restore) {
@@ -506,6 +525,13 @@ function analyze(template, script, bodies) {
     }
     if (!restore.callee) {
       problems.push(`recovery banner Restore button at line ${banner._line ?? '?'} does not call a named handler`);
+      continue;
+    }
+    if (restore.callee === 'onRestore') {
+      // Prop-drilled banner (slice 2+): the component delegates to App. The
+      // real routing is verified by scanning App's `restoreSnapshot` separately
+      // in the aggregated check below — the component only needs to expose the
+      // button.
       continue;
     }
     const body = bodies.get(restore.callee) ?? '';
@@ -1147,15 +1173,40 @@ function runSelfTests() {
 let failures = 0;
 failures += runSelfTests();
 
-const source = readFileSync(SOURCE, 'utf8');
-const problems = checkSource(source);
-for (const p of problems) console.error(`  - ${p}`);
-if (problems.length > 0) {
-  console.error(`\nkey-hints conformance: ${problems.length} problem(s) in ${SOURCE}`);
+// Aggregate across all Svelte sources so extracted banners (RecoveryBanner.svelte)
+// and future extracted dialogs/comboboxes remain linted. `App.svelte` still
+// owns the state machines; prop-drilled surfaces delegate via on* props.
+let allProblems = [];
+let totalHints = 0;
+let combinedBodies = new Map();
+for (const file of SOURCES) {
+  const src = readFileSync(file, 'utf8');
+  const bodies = handlerBodies(scriptBlock(src));
+  for (const [k, v] of bodies) if (!combinedBodies.has(k)) combinedBodies.set(k, v);
+}
+for (const file of SOURCES) {
+  const src = readFileSync(file, 'utf8');
+  const problems = checkSource(src);
+  for (const p of problems) allProblems.push(`${relative(SRC_ROOT, file)}: ${p}`);
+  totalHints += (src.match(/<kbd>/g) ?? []).length;
+}
+// Global prop-drilled banner invariant: if any banner delegates via
+// `onRestore`, App's `restoreSnapshot` must still route dirty buffers.
+const hasPropDrilledBanner = SOURCES.some(file => {
+  const src = readFileSync(file, 'utf8');
+  return src.includes('recovery-banner') && src.includes('onRestore');
+});
+if (hasPropDrilledBanner) {
+  const body = combinedBodies.get('restoreSnapshot') ?? '';
+  const missing = ['dirty', 'requestResolution', "'restore'"].filter(t => !body.includes(t));
+  if (missing.length > 0) allProblems.push(`recovery banner prop-drilled onRestore but App restoreSnapshot does not route dirty buffers (missing ${missing.join(', ')})`);
+}
+for (const p of allProblems) console.error(`  - ${p}`);
+if (allProblems.length > 0) {
+  console.error(`\nkey-hints conformance: ${allProblems.length} problem(s) across ${SOURCES.length} Svelte sources`);
   process.exitCode = 1;
 } else {
-  const hints = (source.match(/<kbd>/g) ?? []).length;
-  console.log(`key-hints conformance: OK (${hints} visible key hints backed by handlers)`);
+  console.log(`key-hints conformance: OK (${totalHints} visible key hints backed by handlers across ${SOURCES.length} Svelte sources)`);
 }
 
 if (failures > 0) process.exitCode = 1;
