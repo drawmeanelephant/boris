@@ -341,7 +341,7 @@ reviewed or uploaded to an LLM when useful.
 - [x] Local Boris Editor (compiler-backed authoring).
 - [x] Migration labs and real-site dogfood evidence.
 - [x] v0.8.1 candidate packaging (untagged; 200+ changelog fragments queued).
-- [ ] Archive-layout browser review and any evidence-gated presentation fixes.
+- [x] Archive-layout browser review and evidence-gated presentation fixes ([#667](https://github.com/drawmeanelephant/boris/pull/667)).
 - [ ] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)).
 - [x] Nostr NIP-23 CLI (`plan` / `sign` / `publish`). Not a verified target.
 - [x] Embeddable `compileBundle` (native + Wasm) and an example Cloudflare Worker host ([#301](https://github.com/drawmeanelephant/boris/issues/301) M0–M7). Not a verified target. Live Cloudflare smoke and isolate-peak measurement remain open on the parent issue.
