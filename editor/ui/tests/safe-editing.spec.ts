@@ -973,6 +973,72 @@ test('editing a different line never marks the problem, on the daemon path too (
   await expect(staleNote).toHaveCount(0);
 });
 
+test('deleting a line above marks the problem possibly-stale when line numbers drift (#662)', async ({ page }) => {
+  // A20's own-line check compares the text at the same line number, so
+  // deleting a line above shifts the report's position even when the text now
+  // at the reported line is byte-identical (adjacent identical lines). Only
+  // the #662 drift branch can mark this case.
+  await installApi(page, {
+    disk: '# Draft\n## Intro\n## Section\n## Section\n',
+    commands: {
+      validate: commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Section problem.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 3, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    }
+  });
+  const staleNote = page.getByText('Possibly stale — the open buffer changed this region since the report.');
+
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByText('Section problem.', { exact: true })).toBeVisible();
+  await expect(staleNote).toHaveCount(0);
+
+  // Delete the line above (`## Intro`): lines 3 and 4 are identical, so the
+  // text now at the reported line 3 is unchanged and A20's own-line check
+  // passes — only the line-count drift can flag the shifted position.
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n## Section\n## Section\n');
+  await page.getByRole('button', { name: 'Go to index.md line 3 column 1: EFRONTMATTER', exact: true }).click();
+  await expect(staleNote).toHaveCount(2);
+
+  // Saving clears the mark as before.
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await expect(staleNote).toHaveCount(0);
+});
+
+test('deleting a line below the problem never marks it (#662)', async ({ page }) => {
+  await installApi(page, {
+    disk: '# Draft\n## Intro\n## Section\nTail.\n',
+    commands: {
+      validate: commandResult('validate', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Section problem.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 3, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    }
+  });
+  const staleNote = page.getByText('Possibly stale — the open buffer changed this region since the report.');
+
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByText('Section problem.', { exact: true })).toBeVisible();
+  await expect(staleNote).toHaveCount(0);
+
+  // Deleting a line below leaves the report's position intact: the first
+  // divergence sits below the problem, so neither the own-line rule nor the
+  // drift rule marks.
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n## Intro\n## Section\n');
+  await page.getByRole('button', { name: 'Go to index.md line 3 column 1: EFRONTMATTER', exact: true }).click();
+  await expect(staleNote).toHaveCount(0);
+});
+
 test('validation state line names idle, running, success, failed, and stale (#654)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
   await installApi(page, {

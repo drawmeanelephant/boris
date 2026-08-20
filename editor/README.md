@@ -245,7 +245,7 @@ per-cycle outcomes map to the same convention as the one-shot exit codes
   command has run), and after a clean cycle it says *"No problems in the
   newest report (cycle N)."* — so an empty pane never silently means both
   "not checked" and "passed".
-- **Per-problem staleness (#660).** While the open buffer is dirty, a
+- **Per-problem staleness (#660, #662).** While the open buffer is dirty, a
   problem whose own source region changed since the last report is marked
   *"Possibly stale — the open buffer changed this region since the report."*
   in the pane card and the Source pane inline list — but only when the caret
@@ -253,7 +253,14 @@ per-cycle outcomes map to the same convention as the one-shot exit codes
   unflagged and rewriting a failing line flags the report's complaint about
   it as not-yet-trusted. The check compares the buffer against `baseline`
   (the last loaded/saved content, i.e. the report-time snapshot); moving the
-  caret off the region or saving clears the mark.
+  caret off the region or saving clears the mark. #662 adds **line-number
+  drift**: when the buffer's line count changed and the first divergence
+  from `baseline` sits strictly above the problem's line, the reported line
+  number may address moved text even when the text at that line happens to
+  match (e.g. adjacent identical lines) — so deleting a line above a problem
+  also flags it. That is a documented approximation that errs toward honesty
+  (the mark clears on save); identical-line insertion above stays ambiguous
+  from text alone.
 - **Validation tracks the newest save (#656).** The four file-mutating
   endpoints (save / create / rename / delete) record the change with
   `noteSave()`; a validate demand that lands within 3 s of one waits (bounded,
