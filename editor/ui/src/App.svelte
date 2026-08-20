@@ -270,27 +270,43 @@
   $: activeProblems = (commandResult?.problems ?? []).filter(problem =>
     problem.source_path !== null && projectPathForProblem(problem.source_path) === activePath
   );
-  // Per-problem staleness (#660): a problem is possibly stale when the open
-  // buffer changed the problem's own source region since the last report and
-  // the caret currently sits inside that region. Lines are compared against
-  // `baseline` (the last loaded/saved buffer, i.e. the report-time snapshot);
-  // edits on other lines and problems in other files never mark anything.
+  // Per-problem staleness (#660, #662): a problem is possibly stale when the
+  // open buffer changed the problem's own source region since the last report
+  // and the caret currently sits inside that region. Lines are compared
+  // against `baseline` (the last loaded/saved buffer, i.e. the report-time
+  // snapshot); edits on other lines and problems in other files never mark
+  // anything. The #662 drift extension also marks when the buffer's line count
+  // changed and the first divergence from `baseline` sits strictly above the
+  // problem's line: the reported line number may address moved text even when
+  // the text at that line happens to match (e.g. adjacent identical lines).
+  // That is the documented approximation from #662 — it errs toward honesty,
+  // and the mark clears on caret move or save; identical-line insertion above
+  // stays ambiguous from text alone.
   $: staleProblems = (() => {
     const set = new Set<Problem>();
     if (!dirty || !activePath || content === baseline) return set;
     const savedLines = baseline.split('\n');
     const bufferLines = content.split('\n');
     const changed = new Set<number>();
+    let firstDiff = -1;
     for (let index = 0; index < Math.max(savedLines.length, bufferLines.length); index += 1) {
-      if (savedLines[index] !== bufferLines[index]) changed.add(index + 1);
+      if (savedLines[index] !== bufferLines[index]) {
+        changed.add(index + 1);
+        if (firstDiff < 0) firstDiff = index;
+      }
     }
     if (changed.size === 0) return set;
+    const lineCountChanged = savedLines.length !== bufferLines.length;
     for (const problem of activeProblems) {
       if (!problem.source_path || problem.line == null) continue;
       if (problem.position_confidence === 'none') continue;
       if (problem.line !== cursor.line) continue;
       if (problem.column != null && cursor.column < problem.column) continue;
-      if (changed.has(problem.line)) set.add(problem);
+      if (changed.has(problem.line)) {
+        set.add(problem);
+        continue;
+      }
+      if (lineCountChanged && firstDiff >= 0 && firstDiff < problem.line - 1) set.add(problem);
     }
     return set;
   })();
