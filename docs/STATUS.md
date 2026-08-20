@@ -1,6 +1,6 @@
 # Project status — Boris
 
-**As of:** 2026-08-16
+**As of:** 2026-08-20
 
 **Integration line:** `afterparty` during the Build Week judging window; `main` is frozen.
 
@@ -94,7 +94,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Relationship inventory + classification | **Done** — schema-v2 inventory and exact eligible-key classification (`inventoried`, `ambiguous`, `absent`, `invalid`). No automatic relation emission. |
 | Migration-guide executable pass | **Evidence complete** — 69-page Starlight dogfood converted and compiled; human review remains for preserved/stripped/manual-review findings. |
 | Source-RAG ergonomics | **Measured** — no behavior change justified by the snapshot. |
-| Archive-layout evidence | **Done mechanically** — fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain unverified. |
+| Archive-layout evidence | **Done** — fixture, black-box audit, link audit, and a real-browser viewport + keyboard review at 375/768/1440 px; the review's one reproducible issue (table pages overflowing the viewport at phone widths) was fixed in [#667](https://github.com/drawmeanelephant/boris/pull/667). Evidence: [`BROWSER-REVIEW.md`](contracts/fixtures/archive-layout-audit/BROWSER-REVIEW.md). |
 | Twenty Twenty materialization | **Done** — bounded GPL-evidenced archaeology → reviewed ledger → static materialization → Boris build → link audit. |
 | Filed.fyi / theme dogfood reports | **Retired** — long-form `docs/dogfood/` writeups deleted. Facts stay in this table. Human review findings for the Starlight migration-guide pass remain on the roadmap. |
 
@@ -150,13 +150,11 @@ context, test-throughput audit) is **done**. It is not relisted as upcoming.
 | Order | Card | State | Boundary / verification |
 |---:|---|---|---|
 | 1 | Release-state decision | **Decided — pending release context** | Preserve the erroneous v0.8.0 tag; next identifier is v0.8.1. Do not tag until release context is complete. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
-| 2 | Archive browser review | **Next evidence pass** | Inspect the retained fixture at 375px, 768px, and 1440px plus keyboard traversal; record actual evidence before changing layout behavior. |
-| 3 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the browser review finds a reproducible issue. |
-| 4 | Migration-guide review findings | **Evidence complete — review remains** | Review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
-| 5 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
-| 6 | Standard.site HTML verify emit | **Shipped [#569](https://github.com/drawmeanelephant/boris/pull/569)** | `boris --profile` emits verification surfaces from the HTML build. |
-| 7 | Nostr as a verified target | **Decided — stays off the seam** | Location adapter / registry membership declined. See [`publication-platforms.md`](contracts/publication-platforms.md). Proof Pack and a live-smoke **gate** stay parked on [#584](https://github.com/drawmeanelephant/boris/issues/584) and are not implied. |
-| 8 | Cloudflare embedding | **Both example surfaces shipped: #301 Worker host + #300 hosted runner** | Example Worker host is [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/); hosted `boris-job-runner` + Worker example under `examples/cloudflare-container/`. Neither is in `publication.target`. |
+| 2 | Migration-guide review findings | **Evidence complete — review remains** | Review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
+| 3 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
+| 4 | Standard.site HTML verify emit | **Shipped [#569](https://github.com/drawmeanelephant/boris/pull/569)** | `boris --profile` emits verification surfaces from the HTML build. |
+| 5 | Nostr as a verified target | **Decided — stays off the seam** | Location adapter / registry membership declined. See [`publication-platforms.md`](contracts/publication-platforms.md). Proof Pack and a live-smoke **gate** stay parked on [#584](https://github.com/drawmeanelephant/boris/issues/584) and are not implied. |
+| 6 | Cloudflare embedding | **Both example surfaces shipped: #301 Worker host + #300 hosted runner** | Example Worker host is [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/); hosted `boris-job-runner` + Worker example under `examples/cloudflare-container/`. Neither is in `publication.target`. |
 
 ## Release bookkeeping
 
