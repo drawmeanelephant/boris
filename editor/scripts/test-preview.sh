@@ -18,6 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 "$boris_bin" init "$work/project" >/dev/null
+(cd "$work/project" && "$boris_bin" build --input content --html-dir dist >/dev/null)
 "$editor_bin" "$work/project" --boris "$boris_bin" --ui-dir "$ui_dir" --port 0 >"$work/host.log" 2>&1 &
 editor_pid=$!
 for _ in $(seq 1 100); do
@@ -38,7 +39,10 @@ api_post() {
 }
 
 initial="$(api_get /api/preview/state)"
-node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="idle"||r.generation!==0) throw Error("preview did not start idle")' "$initial"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.generation!==0||r.message!=="Showing existing preview output from an earlier build; rebuild to refresh.") throw Error("preview did not identify existing output as stale")' "$initial"
+initial_preview_url="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).preview_url)' "$initial")"
+curl --fail --silent --show-error --cookie-jar "$work/initial-cookies" "$initial_preview_url" >"$work/initial.html"
+cmp "$work/initial.html" "$work/project/dist/index.html"
 
 current="$(api_post /api/preview/rebuild '{}')"
 node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="success"||r.generation!==1||r.exit_code!==0) throw Error("first preview build failed")' "$current"
