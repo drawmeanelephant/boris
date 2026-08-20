@@ -327,12 +327,14 @@ and terminates with the editor process. The preview origin requires its random
 session token, validates Host and any supplied Origin, rejects traversal and
 symlinks, and uses a port-scoped HttpOnly cookie for generated subresources.
 
-The UI reports idle, running, success, failed, and stale distinctly. Boris's
-staged output commit preserves the last valid `dist/` tree after a failed
-rebuild; the iframe generation advances only on success. While #421 remains
-open, failures show bounded Boris stderr and identify that fallback. Embedded
-preview content is sandboxed; a named link opens the exact site origin in a new
-tab for full behavior.
+The UI reports idle, running, success, failed, and stale distinctly. If an
+existing `dist/index.html` is present at startup, it remains `stale` and the
+banner says that the output is from an earlier build; use **Rebuild preview**
+to refresh it. Boris's staged output commit preserves the last valid `dist/`
+tree after a failed rebuild; the iframe generation advances only on success.
+While #421 remains open, failures show bounded Boris stderr and identify that
+fallback. Embedded preview content is sandboxed; a named link opens the exact
+site origin in a new tab for full behavior.
 
 The M5 gate adds:
 

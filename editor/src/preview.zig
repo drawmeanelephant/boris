@@ -29,7 +29,7 @@ pub const Manager = struct {
             .port = port,
             .phase = if (hasIndex(io, project_root)) .stale else .idle,
         };
-        result.setMessage(if (result.phase == .stale) "Existing preview output is previous/stale until rebuilt." else "Preview has not been built yet.");
+        result.setMessage(if (result.phase == .stale) "Showing existing preview output from an earlier build; rebuild to refresh." else "Preview has not been built yet.");
         return result;
     }
 
