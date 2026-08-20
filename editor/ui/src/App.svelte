@@ -80,6 +80,9 @@
     validationCycleLabel,
     fileTreeAnnouncement
   } from './lib/utils';
+  import Header from './components/Header.svelte';
+  import SectionNav from './components/SectionNav.svelte';
+  import RecoveryBanner from './components/RecoveryBanner.svelte';
 
   let connection = 'Connecting to the local host…';
   let compiler = 'Checking Boris version…';
@@ -1421,45 +1424,11 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   onfocus={() => void probeDisk()}
 />
 
-<header>
-  <a class="skip-link" href="#workspace" onclick={(event) => {
-    event.preventDefault();
-    document.getElementById('workspace')?.focus();
-  }}>Skip to workspace</a>
-  <div>
-    <p class="eyebrow">Local authoring environment</p>
-    <h1>Boris Editor</h1>
-  </div>
-  <p class="connection" role="status" aria-label="Connection status" aria-live="polite">{connection}</p>
-</header>
+<Header {connection} />
 
-<nav class="section-nav" aria-label="Editor sections">
-  <a href="#project">Project</a>
-  <a href="#source">Source</a>
-  <a href="#graph">Graph</a>
-  <a href="#publication">Publication</a>
-  <a href="#problems">Problems</a>
-  <a href="#preview">Preview</a>
-</nav>
+<SectionNav />
 
-{#if snapshots.length > 0}
-  <aside class="recovery-banner" aria-labelledby="recovery-heading">
-    <div>
-      <h2 id="recovery-heading">Recovered unsaved work</h2>
-      <p>Recovery copies never replace project files without an explicit save.</p>
-      <p class="key-hint"><kbd>Tab</kbd> to an action · <kbd>Enter</kbd> runs it</p>
-    </div>
-    <ul>
-      {#each snapshots as snapshot (snapshot.path)}
-        <li>
-          <span>{snapshot.path}</span>
-          <button type="button" onclick={() => restoreSnapshot(snapshot)}>Restore {snapshot.path}</button>
-          <button type="button" onclick={() => clearRecovery(snapshot.path)}>Discard recovery for {snapshot.path}</button>
-        </li>
-      {/each}
-    </ul>
-  </aside>
-{/if}
+<RecoveryBanner {snapshots} onRestore={restoreSnapshot} onDiscard={clearRecovery} />
 
 <main id="workspace" tabindex="-1">
   <section id="project" class="project-pane" aria-labelledby="project-heading">
