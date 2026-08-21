@@ -56,6 +56,7 @@ function collectSvelteSources(root) {
   return out.sort();
 }
 const SOURCES = collectSvelteSources(SRC_ROOT);
+let globalBodiesForLint = new Map();
 
 // --- key token mapping -----------------------------------------------------
 
@@ -337,8 +338,10 @@ function analyze(template, script, bodies) {
     }
     // Surface wiring discovered from descendants.
     if (elem.attrs.onkeydown && elem.name !== 'svelte:window') {
-      if (!bodies.has(elem.attrs.onkeydown)) {
-        problems.push(`onkeydown references missing handler function "${elem.attrs.onkeydown}" (line ${lineOf(template, tag.start)})`);
+      const handler = elem.attrs.onkeydown;
+      const isPropDrilledCombobox = handler === 'onCompletionKeydown' && globalBodiesForLint.has('completionKeydown');
+      if (!bodies.has(handler) && !isPropDrilledCombobox) {
+        problems.push(`onkeydown references missing handler function "${handler}" (line ${lineOf(template, tag.start)})`);
       }
       for (let s = stack.length - 1; s >= 0; s--) {
         const e = stack[s];
@@ -374,11 +377,13 @@ function analyze(template, script, bodies) {
 
   // The combobox Esc-close hint must be reversible: the filter input has to
   // reopen the list on focus and on input, or Esc becomes a one-way trap.
+  // After slice 3 the combobox lives in `AuthoringTools.svelte` and is
+  // prop-drilled via `onCompletionOpen(true)` rather than `completionOpen = true`.
   for (const box of comboboxes) {
     const raw = box._inputRaw ?? '';
     for (const attr of ['onfocus', 'oninput']) {
       const value = attrValue(raw, attr);
-      if (value === null || !value.includes('= true')) {
+      if (value === null || (!value.includes('= true') && !value.includes('onCompletionOpen'))) {
         problems.push(`completion combobox at line ${box._line ?? '?'} is missing ${attr} wiring that reopens the suggestion list after Esc closes it`);
       }
     }
@@ -584,7 +589,10 @@ function analyze(template, script, bodies) {
         problems.push(`key hint <kbd>${token}</kbd> (line ${hit.line}) in the completion combobox is not a recognized key`);
         continue;
       }
-      const body = bodies.get(handler) ?? '';
+      let body = bodies.get(handler) ?? '';
+      if (handler === 'onCompletionKeydown' && !body) {
+        body = globalBodiesForLint.get('completionKeydown') ?? '';
+      }
       const missing = tokens.filter(t => !body.includes(t));
       if (missing.length > 0) {
         problems.push(`key hint <kbd>${token}</kbd> (line ${hit.line}) in the completion combobox is not handled by ${handler} (missing ${missing.map(t => `'${t}'`).join(', ')})`);
@@ -1184,6 +1192,7 @@ for (const file of SOURCES) {
   const bodies = handlerBodies(scriptBlock(src));
   for (const [k, v] of bodies) if (!combinedBodies.has(k)) combinedBodies.set(k, v);
 }
+globalBodiesForLint = combinedBodies;
 for (const file of SOURCES) {
   const src = readFileSync(file, 'utf8');
   const problems = checkSource(src);
