@@ -306,260 +306,28 @@ const default_html_layout = "themes/boris/layouts/main.html";
 ///
 /// `args[0]` is the program name when present (skipped).
 /// `--help` / `-h` short-circuit: remaining args are not validated.
+///
+/// Structure: `ParseState` accumulates one run; prefix/loop parsing is split
+/// into single-purpose parsers below; each non-build command finishes in its
+/// own builder; build-shaped commands share the conflict matrix, mode
+/// resolution, and per-mode option construction.
 pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError!Options {
-    var quiet = false;
-    var input_dir: []const u8 = default_input_dir;
-    var out_dir: []const u8 = default_out_dir;
-    var rag_dir: []const u8 = default_rag_dir;
-    var context_dir: []const u8 = default_context_dir;
-    var llms_path: []const u8 = default_llms_path;
-    var rss_path: []const u8 = default_rss_path;
-    var site_url: ?[]const u8 = null;
-    var pages_base_url: ?[]const u8 = null;
-    var pages_origin: ?[]const u8 = null;
-    var pages_base_path: ?[]const u8 = null;
-    var rss_title: ?[]const u8 = null;
-    var rss_description: ?[]const u8 = null;
-    var rss_limit: usize = 20;
-    var sitemap_path: []const u8 = default_sitemap_path;
-    var html_dir: []const u8 = default_html_dir;
-    var scope: ?[]const u8 = null;
-    var split_size: ?usize = null;
-    var bundles_only = false;
-    var complete = false;
-
-    var saw_quiet = false;
-    var saw_timings = false;
-    var saw_input = false;
-    var saw_out = false;
-    var saw_rag = false;
-    var saw_no_rag = false;
-    var saw_rag_dir = false;
-    var saw_context = false;
-    var saw_context_dir = false;
-    var saw_scope = false;
-    var saw_split_size = false;
-    var saw_bundles_only = false;
-    var saw_complete = false;
-    var saw_llms = false;
-    var saw_llms_path = false;
-    var saw_rss = false;
-    var saw_rss_path = false;
-    var saw_site_url = false;
-    var saw_pages_base_url = false;
-    var saw_pages_origin = false;
-    var saw_pages_base_path = false;
-    var saw_rss_title = false;
-    var saw_rss_description = false;
-    var saw_rss_limit = false;
-    var saw_sitemap = false;
-    var saw_sitemap_path = false;
-    var saw_html = false;
-    var saw_html_dir = false;
-    var saw_html_layout = false;
-    var saw_theme = false;
-    var saw_incremental = false;
-    var saw_jobs = false;
-    var saw_watch = false;
-    var saw_watch_json = false;
-    var saw_serve = false;
-    var serve_port: ?u16 = null;
-    var saw_textile = false;
-    var saw_cooklang = false;
-    var saw_format = false;
-    var saw_report = false;
-    // `standard-site` family state.
-    var standard_site_command: StandardSiteCommand = .publish;
-    var standard_site_publish = false;
-    var session_did: ?[]const u8 = null;
-    var saw_session_did = false;
-    var session_handle: ?[]const u8 = null;
-    var saw_session_handle = false;
-    var app_password = false;
-    var saw_app_password = false;
-    var session_root: ?[]const u8 = null;
-    var saw_session_root = false;
-    var plan_path: ?[]const u8 = null;
-    var saw_plan_path = false;
-    var publish_prune = false;
-    var source_commit: ?[]const u8 = null;
-    var saw_source_commit = false;
-    var smoke_namespace: ?[]const u8 = null;
-    var saw_smoke_namespace = false;
-    var smoke_surface_url: ?[]const u8 = null;
-    var saw_smoke_surface_url = false;
-    var smoke_indexer_origin: ?[]const u8 = null;
-    var saw_smoke_indexer_origin = false;
-    var verify_dist: ?[]const u8 = null;
-    var saw_verify_dist = false;
-    var saw_fail_on_unreferenced = false;
-    var saw_profile = false;
-    var saw_nostr_plan = false;
-    var saw_nostr_bundle = false;
-    var saw_nostr_key_stdin = false;
-    var saw_nostr_out = false;
-    var saw_nostr_prior = false;
-    var saw_nostr_created_at = false;
-    var jobs: usize = 1;
-    var html_layout: []const u8 = default_html_layout;
-    var theme_root: ?[]const u8 = null;
-    var profile_path: ?[]const u8 = null;
-    var nostr_plan_path: ?[]const u8 = null;
-    var nostr_bundle_path: ?[]const u8 = null;
-    var nostr_key_stdin = false;
-    var nostr_out_path: ?[]const u8 = null;
-    var nostr_prior_path: ?[]const u8 = null;
-    var nostr_created_at: ?i64 = null;
-    var recipe_scale_id: ?[]const u8 = null;
-    var saw_recipe_scale_id = false;
-    var recipe_scale_factor: ?[]const u8 = null;
-    var saw_recipe_scale_factor = false;
-    var recipe_scale_servings: ?[]const u8 = null;
-    var saw_recipe_scale_servings = false;
-    var recipe_scale_out: ?[]const u8 = null;
-    var saw_recipe_scale_out = false;
-
-    var targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
-    errdefer {
-        for (targets.items) |t| {
-            if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
-        }
-        targets.deinit(gpa);
-    }
-    var publication_location: ?github_pages.Location = null;
-    var allow_markdown_links: bool = false;
-    errdefer if (publication_location) |*location| location.deinit(gpa);
-    // Pending --target-layout NAME=PATH applied after targets are known.
-    var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
-    defer target_layouts.deinit(gpa);
-    // Pending --target-profile NAME=PROFILE applied after targets are known.
-    var target_profiles: std.ArrayListUnmanaged(struct { name: []const u8, profile: render.OutputProfile }) = .{ .items = &.{}, .capacity = 0 };
-    defer target_profiles.deinit(gpa);
-    // Pending --layout-rule TARGET SELECTOR LAYOUT_PATH (three following args).
-    var pending_rules: std.ArrayListUnmanaged(struct {
-        target: []const u8,
-        selector: []const u8,
-        path: []const u8,
-    }) = .{ .items = &.{}, .capacity = 0 };
-    defer pending_rules.deinit(gpa);
-
-    var command: Command = .build;
-    var impact_id: ?[]const u8 = null;
-    var init_dir: ?[]const u8 = null;
-    var analysis_format: AnalysisFormat = .human;
-    var analysis_report: ?[]const u8 = null;
-    var fail_on_unreferenced = false;
+    var st = ParseState{};
+    errdefer freeTargetList(gpa, &st.targets);
+    errdefer if (st.publication_location) |*location| location.deinit(gpa);
+    // Pending --target-layout / --target-profile / --layout-rule entries hold
+    // argv views only; they are joined to targets after the loop.
+    defer st.target_layouts.deinit(gpa);
+    defer st.target_profiles.deinit(gpa);
+    defer st.pending_rules.deinit(gpa);
 
     var i: usize = if (args.len > 0) 1 else 0;
-    if (i < args.len and std.mem.eql(u8, args[i], "build")) {
-        command = .build;
-        i += 1;
-    } else if (i < args.len and std.mem.eql(u8, args[i], "validate")) {
-        command = .validate;
-        i += 1;
-    } else if (i < args.len and std.mem.eql(u8, args[i], "watch")) {
-        command = .watch;
-        saw_watch = true;
-        i += 1;
-    } else if (i < args.len and std.mem.eql(u8, args[i], "check")) {
-        command = .check;
-        i += 1;
-    } else if (i < args.len and std.mem.eql(u8, args[i], "impact")) {
-        command = .impact;
-        i += 1;
-        // The target id is captured in the loop so flags may precede it
-        // (`boris impact --quiet ID`); a missing target is checked after
-        // the loop so `boris impact` stays a usage error.
-    } else if (i < args.len and std.mem.eql(u8, args[i], "plan")) {
-        command = .plan;
-        i += 1;
-    } else if (i < args.len and std.mem.eql(u8, args[i], "nostr")) {
-        i += 1;
-        // Exactly the subcommands this build implements. An unknown one is a
-        // usage error rather than a stub, so nothing can look like publishing
-        // exists.
-        if (i >= args.len) return error.UnknownNostrSubcommand;
-        if (std.mem.eql(u8, args[i], "plan")) {
-            command = .nostr_plan;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "sign")) {
-            command = .nostr_sign;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "publish")) {
-            command = .nostr_publish;
-            i += 1;
-        } else {
-            return error.UnknownNostrSubcommand;
-        }
-    } else if (i < args.len and std.mem.eql(u8, args[i], "init")) {
-        command = .init;
-        i += 1;
-        // `boris init [DIR]` — exactly one optional positional target
-        // directory. A second positional is a usage error.
-        if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) {
-            init_dir = args[i];
-            i += 1;
-        }
-        if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) return error.UnexpectedPositional;
-    } else if (i < args.len and std.mem.eql(u8, args[i], "standard-site")) {
-        command = .standard_site;
-        i += 1;
-        // The network family has explicit subcommands. A missing or unknown
-        // subcommand is a usage error, never a silent fallback. `--help` /
-        // `-h` here is family help (exit 0), not a missing subcommand.
-        if (i >= args.len) return error.MissingStandardSiteSubcommand;
-        if (std.mem.eql(u8, args[i], "--help") or std.mem.eql(u8, args[i], "-h")) {
-            // Leave the flag for the shared help short-circuit so exit 0
-            // stays identical to every other `--help`.
-        } else if (std.mem.eql(u8, args[i], "publish")) {
-            standard_site_command = .publish;
-            standard_site_publish = true;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "plan")) {
-            standard_site_command = .plan;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "records")) {
-            standard_site_command = .records;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "verify")) {
-            standard_site_command = .verify;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "login")) {
-            standard_site_command = .login;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "sessions")) {
-            standard_site_command = .sessions;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "logout")) {
-            standard_site_command = .logout;
-            i += 1;
-        } else if (std.mem.eql(u8, args[i], "smoke")) {
-            standard_site_command = .smoke;
-            i += 1;
-        } else {
-            return error.UnknownStandardSiteSubcommand;
-        }
-        if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) return error.UnexpectedPositional;
-    } else if (i < args.len and std.mem.eql(u8, args[i], "recipe-scale")) {
-        command = .recipe_scale;
-        i += 1;
-    }
+    try parseCommandPrefix(args, &i, &st);
+
     while (i < args.len) : (i += 1) {
         const a = args[i];
 
-        // `init [DIR]` and `impact <ID>` — the single positional may also
-        // follow flags (`boris init --quiet DIR`, `boris impact --quiet ID`);
-        // the pre-loop capture handles the immediate-after-command form, this
-        // handles flags in between. A second positional still falls through
-        // to UnexpectedPositional.
-        if (command == .init and init_dir == null and !std.mem.startsWith(u8, a, "-")) {
-            init_dir = a;
-            continue;
-        }
-        if (command == .impact and impact_id == null and !std.mem.startsWith(u8, a, "-")) {
-            impact_id = a;
-            continue;
-        }
+        if (captureCommandPositional(&st, a)) continue;
 
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h") or
             std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V"))
@@ -570,20 +338,17 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             // Options carries an empty list (no allocation), and the caller's
             // deinit would never see the accumulated one (errdefer only fires
             // on error), so `--target X --help`/`--version` must not leak it.
-            for (targets.items) |t| {
-                if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
-            }
-            targets.deinit(gpa);
+            freeTargetList(gpa, &st.targets);
             const wants_help = std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h");
             return .{
                 .help = wants_help,
                 .version = !wants_help,
-                .quiet = quiet,
-                .timings = saw_timings,
-                .command = command,
+                .quiet = st.quiet,
+                .timings = st.saw_timings,
+                .command = st.command,
                 .mode = .ir,
-                .input_dir = input_dir,
-                .out_dir = out_dir,
+                .input_dir = st.input_dir,
+                .out_dir = st.out_dir,
                 .rag_dir = null,
                 .context_dir = null,
                 .scope = null,
@@ -595,934 +360,1366 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             };
         }
 
-        if (std.mem.eql(u8, a, "--quiet")) {
-            if (saw_quiet) return error.DuplicateFlag;
-            saw_quiet = true;
-            quiet = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--timings")) {
-            if (saw_timings) return error.DuplicateFlag;
-            saw_timings = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--profile") or std.mem.startsWith(u8, a, "--profile=")) {
-            if (saw_profile) return error.DuplicateFlag;
-            saw_profile = true;
-            profile_path = try takeValue(args, &i, a, "--profile");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--plan") or std.mem.startsWith(u8, a, "--plan=")) {
-            // `--plan` is owned by the nostr sign/publish family (the
-            // signed-bundle input) and the standard-site family (the
-            // publication plan); anywhere else it is a conflict rather than
-            // a silently accepted flag. The standard-site subcommand
-            // validations below additionally reject it for smoke, login,
-            // sessions, and logout.
-            if (command == .nostr_sign or command == .nostr_publish) {
-                if (saw_nostr_plan) return error.DuplicateFlag;
-                saw_nostr_plan = true;
-                nostr_plan_path = try takeValue(args, &i, a, "--plan");
-            } else if (command == .standard_site) {
-                if (saw_plan_path) return error.DuplicateFlag;
-                saw_plan_path = true;
-                plan_path = try takeValue(args, &i, a, "--plan");
-            } else {
-                return error.ConflictingFlags;
-            }
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--bundle") or std.mem.startsWith(u8, a, "--bundle=")) {
-            if (command != .nostr_publish) return error.ConflictingFlags;
-            if (saw_nostr_bundle) return error.DuplicateFlag;
-            saw_nostr_bundle = true;
-            nostr_bundle_path = try takeValue(args, &i, a, "--bundle");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--key-stdin")) {
-            if (command != .nostr_sign) return error.ConflictingFlags;
-            if (saw_nostr_key_stdin) return error.DuplicateFlag;
-            saw_nostr_key_stdin = true;
-            nostr_key_stdin = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--prior") or std.mem.startsWith(u8, a, "--prior=")) {
-            if (command != .nostr_sign) return error.ConflictingFlags;
-            if (saw_nostr_prior) return error.DuplicateFlag;
-            saw_nostr_prior = true;
-            nostr_prior_path = try takeValue(args, &i, a, "--prior");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--created-at") or std.mem.startsWith(u8, a, "--created-at=")) {
-            if (command != .nostr_sign) return error.ConflictingFlags;
-            if (saw_nostr_created_at) return error.DuplicateFlag;
-            saw_nostr_created_at = true;
-            const value = try takeValue(args, &i, a, "--created-at");
-            nostr_created_at = std.fmt.parseInt(i64, value, 10) catch return error.InvalidValue;
-            continue;
-        }
-
-        // `nostr sign` / `nostr publish` re-own `--out` as the artifact path;
-        // every other command keeps the IR-directory meaning (and nostr_plan
-        // rejects it). `recipe-scale` also re-owns `--out` as a JSON file path.
-        if ((command == .nostr_sign or command == .nostr_publish) and (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out="))) {
-            if (saw_nostr_out) return error.DuplicateFlag;
-            saw_nostr_out = true;
-            nostr_out_path = try takeValue(args, &i, a, "--out");
-            continue;
-        }
-        if (command == .recipe_scale and (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out="))) {
-            if (saw_recipe_scale_out) return error.DuplicateFlag;
-            saw_recipe_scale_out = true;
-            recipe_scale_out = try takeValue(args, &i, a, "--out");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--id") or std.mem.startsWith(u8, a, "--id=")) {
-            if (command != .recipe_scale) return error.ConflictingFlags;
-            if (saw_recipe_scale_id) return error.DuplicateFlag;
-            saw_recipe_scale_id = true;
-            recipe_scale_id = try takeValue(args, &i, a, "--id");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--factor") or std.mem.startsWith(u8, a, "--factor=")) {
-            if (command != .recipe_scale) return error.ConflictingFlags;
-            if (saw_recipe_scale_factor) return error.DuplicateFlag;
-            saw_recipe_scale_factor = true;
-            recipe_scale_factor = try takeValue(args, &i, a, "--factor");
-            continue;
-        }
-        if (std.mem.eql(u8, a, "--servings") or std.mem.startsWith(u8, a, "--servings=")) {
-            if (command != .recipe_scale) return error.ConflictingFlags;
-            if (saw_recipe_scale_servings) return error.DuplicateFlag;
-            saw_recipe_scale_servings = true;
-            recipe_scale_servings = try takeValue(args, &i, a, "--servings");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--textile")) {
-            if (saw_textile) return error.DuplicateFlag;
-            saw_textile = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--cooklang")) {
-            if (saw_cooklang) return error.DuplicateFlag;
-            saw_cooklang = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--rag")) {
-            if (saw_rag) return error.DuplicateFlag;
-            saw_rag = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--context")) {
-            if (saw_context) return error.DuplicateFlag;
-            saw_context = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--bundles-only")) {
-            if (saw_bundles_only) return error.DuplicateFlag;
-            saw_bundles_only = true;
-            bundles_only = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--complete")) {
-            if (saw_complete) return error.DuplicateFlag;
-            saw_complete = true;
-            complete = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--llms")) {
-            if (saw_llms) return error.DuplicateFlag;
-            saw_llms = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--rss")) {
-            if (saw_rss) return error.DuplicateFlag;
-            saw_rss = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--sitemap")) {
-            if (saw_sitemap) return error.DuplicateFlag;
-            saw_sitemap = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--allow-markdown-links")) {
-            allow_markdown_links = true;
-            continue;
-        }
-        if (std.mem.eql(u8, a, "--no-rag")) {
-            if (saw_no_rag) return error.DuplicateFlag;
-            saw_no_rag = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--html")) {
-            if (saw_html) return error.DuplicateFlag;
-            saw_html = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--incremental")) {
-            if (saw_incremental) return error.DuplicateFlag;
-            saw_incremental = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--watch")) {
-            if (saw_watch) return error.DuplicateFlag;
-            saw_watch = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--serve")) {
-            if (saw_serve) return error.DuplicateFlag;
-            saw_serve = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--watch-json")) {
-            if (saw_watch_json) return error.DuplicateFlag;
-            saw_watch_json = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--port") or std.mem.startsWith(u8, a, "--port=")) {
-            if (serve_port != null) return error.DuplicateFlag;
-            const value = try takeValue(args, &i, a, "--port");
-            serve_port = std.fmt.parseUnsigned(u16, value, 10) catch return error.InvalidValue;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--format") or std.mem.startsWith(u8, a, "--format=")) {
-            if (saw_format) return error.DuplicateFlag;
-            saw_format = true;
-            const value = try takeValue(args, &i, a, "--format");
-            analysis_format = if (std.mem.eql(u8, value, "human")) .human else if (std.mem.eql(u8, value, "json")) .json else return error.InvalidValue;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--report") or std.mem.startsWith(u8, a, "--report=")) {
-            if (saw_report) return error.DuplicateFlag;
-            saw_report = true;
-            analysis_report = try takeValue(args, &i, a, "--report");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--fail-on-unreferenced")) {
-            if (saw_fail_on_unreferenced) return error.DuplicateFlag;
-            saw_fail_on_unreferenced = true;
-            fail_on_unreferenced = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--target") or std.mem.startsWith(u8, a, "--target=")) {
-            const val = try takeValue(args, &i, a, "--target");
-            const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
-                return error.InvalidValue;
-            };
-            const name = val[0..eq_idx];
-            const output_dir = val[eq_idx + 1 ..];
-            if (name.len == 0 or output_dir.len == 0) {
-                return error.InvalidValue;
-            }
-            if (!target_mod.isValidTargetName(name)) {
-                return error.InvalidValue;
-            }
-            for (targets.items) |existing| {
-                if (std.mem.eql(u8, existing.name, name)) {
-                    return error.DuplicateFlag;
-                }
-            }
-            try targets.append(gpa, .{
-                .name = name,
-                .output_dir = output_dir,
-                .layout_path = null,
-            });
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--target-layout") or std.mem.startsWith(u8, a, "--target-layout=")) {
-            const val = try takeValue(args, &i, a, "--target-layout");
-            const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
-                return error.InvalidValue;
-            };
-            const name = val[0..eq_idx];
-            const path = val[eq_idx + 1 ..];
-            if (name.len == 0 or path.len == 0) {
-                return error.InvalidValue;
-            }
-            if (!target_mod.isValidTargetName(name)) {
-                return error.InvalidValue;
-            }
-            layout_select.validateLayoutPath(path) catch return error.InvalidValue;
-            for (target_layouts.items) |existing| {
-                if (std.mem.eql(u8, existing.name, name)) {
-                    return error.DuplicateFlag;
-                }
-            }
-            try target_layouts.append(gpa, .{ .name = name, .path = path });
-            continue;
-        }
-
-        // --target-profile NAME=PROFILE (html|xhtml), applied after targets are
-        // known. Mirrors --target-layout; the profile is a serialization switch
-        // (#448) and composes with layout/rule selection.
-        if (std.mem.eql(u8, a, "--target-profile") or std.mem.startsWith(u8, a, "--target-profile=")) {
-            const val = try takeValue(args, &i, a, "--target-profile");
-            const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
-                return error.InvalidValue;
-            };
-            const name = val[0..eq_idx];
-            const profile_raw = val[eq_idx + 1 ..];
-            if (name.len == 0 or profile_raw.len == 0) return error.InvalidValue;
-            if (!target_mod.isValidTargetName(name)) return error.InvalidValue;
-            const profile: render.OutputProfile = if (std.mem.eql(u8, profile_raw, "html"))
-                .html
-            else if (std.mem.eql(u8, profile_raw, "xhtml"))
-                .xhtml
-            else
-                return error.InvalidValue;
-            for (target_profiles.items) |existing| {
-                if (std.mem.eql(u8, existing.name, name)) {
-                    return error.DuplicateFlag;
-                }
-            }
-            try target_profiles.append(gpa, .{ .name = name, .profile = profile });
-            continue;
-        }
-
-        // --layout-rule TARGET SELECTOR LAYOUT_PATH (exactly three following args).
-        if (std.mem.eql(u8, a, "--layout-rule") or std.mem.startsWith(u8, a, "--layout-rule=")) {
-            if (std.mem.startsWith(u8, a, "--layout-rule=")) return error.InvalidValue;
-            if (i + 3 >= args.len) return error.MissingValue;
-            const tname = args[i + 1];
-            const selector = args[i + 2];
-            const path = args[i + 3];
-            if (tname.len == 0 or selector.len == 0 or path.len == 0) return error.EmptyValue;
-            if (!target_mod.isValidTargetName(tname)) return error.InvalidValue;
-            // Reject values that look like flags (prevent silent arg shift).
-            if (tname[0] == '-' or selector[0] == '-' or path[0] == '-') return error.InvalidValue;
-            // Validate selector grammar early (fail before discovery).
-            _ = layout_select.parseSelector(selector) catch return error.InvalidValue;
-            layout_select.validateLayoutPath(path) catch return error.InvalidValue;
-            try pending_rules.append(gpa, .{ .target = tname, .selector = selector, .path = path });
-            i += 3;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--jobs") or std.mem.startsWith(u8, a, "--jobs=") or
-            std.mem.eql(u8, a, "-j") or std.mem.startsWith(u8, a, "-j="))
-        {
-            if (saw_jobs) return error.DuplicateFlag;
-            saw_jobs = true;
-            const val_str = if (std.mem.startsWith(u8, a, "-j"))
-                try takeValue(args, &i, a, "-j")
-            else
-                try takeValue(args, &i, a, "--jobs");
-            const parsed_val = std.fmt.parseInt(usize, val_str, 10) catch {
-                return error.InvalidValue;
-            };
-            if (parsed_val < 1 or parsed_val > 64) {
-                return error.InvalidValue;
-            }
-            jobs = parsed_val;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--prune")) {
-            if (publish_prune) return error.DuplicateFlag;
-            publish_prune = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--source-commit") or std.mem.startsWith(u8, a, "--source-commit=")) {
-            if (saw_source_commit) return error.DuplicateFlag;
-            saw_source_commit = true;
-            source_commit = try takeValue(args, &i, a, "--source-commit");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--did") or std.mem.startsWith(u8, a, "--did=")) {
-            if (saw_session_did) return error.DuplicateFlag;
-            saw_session_did = true;
-            session_did = try takeValue(args, &i, a, "--did");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--handle") or std.mem.startsWith(u8, a, "--handle=")) {
-            if (saw_session_handle) return error.DuplicateFlag;
-            saw_session_handle = true;
-            session_handle = try takeValue(args, &i, a, "--handle");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--app-password")) {
-            if (saw_app_password) return error.DuplicateFlag;
-            saw_app_password = true;
-            app_password = true;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--session-root") or std.mem.startsWith(u8, a, "--session-root=")) {
-            if (saw_session_root) return error.DuplicateFlag;
-            saw_session_root = true;
-            session_root = try takeValue(args, &i, a, "--session-root");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--dist") or std.mem.startsWith(u8, a, "--dist=")) {
-            if (saw_verify_dist) return error.DuplicateFlag;
-            saw_verify_dist = true;
-            verify_dist = try takeValue(args, &i, a, "--dist");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--namespace") or std.mem.startsWith(u8, a, "--namespace=")) {
-            if (saw_smoke_namespace) return error.DuplicateFlag;
-            saw_smoke_namespace = true;
-            smoke_namespace = try takeValue(args, &i, a, "--namespace");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--surface-url") or std.mem.startsWith(u8, a, "--surface-url=")) {
-            if (saw_smoke_surface_url) return error.DuplicateFlag;
-            saw_smoke_surface_url = true;
-            smoke_surface_url = try takeValue(args, &i, a, "--surface-url");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--indexer") or std.mem.startsWith(u8, a, "--indexer=")) {
-            if (saw_smoke_indexer_origin) return error.DuplicateFlag;
-            saw_smoke_indexer_origin = true;
-            smoke_indexer_origin = try takeValue(args, &i, a, "--indexer");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--input") or std.mem.startsWith(u8, a, "--input=")) {
-            if (saw_input) return error.DuplicateFlag;
-            saw_input = true;
-            input_dir = try takeValue(args, &i, a, "--input");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out=")) {
-            if (saw_out) return error.DuplicateFlag;
-            saw_out = true;
-            out_dir = try takeValue(args, &i, a, "--out");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--rag-dir") or std.mem.startsWith(u8, a, "--rag-dir=")) {
-            if (saw_rag_dir) return error.DuplicateFlag;
-            saw_rag_dir = true;
-            rag_dir = try takeValue(args, &i, a, "--rag-dir");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--context-dir") or std.mem.startsWith(u8, a, "--context-dir=")) {
-            if (saw_context_dir) return error.DuplicateFlag;
-            saw_context_dir = true;
-            context_dir = try takeValue(args, &i, a, "--context-dir");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--scope") or std.mem.startsWith(u8, a, "--scope=")) {
-            if (saw_scope) return error.DuplicateFlag;
-            saw_scope = true;
-            scope = try takeValue(args, &i, a, "--scope");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--split-size") or std.mem.startsWith(u8, a, "--split-size=")) {
-            if (saw_split_size) return error.DuplicateFlag;
-            saw_split_size = true;
-            const raw = try takeValue(args, &i, a, "--split-size");
-            const parsed = std.fmt.parseInt(usize, raw, 10) catch return error.InvalidValue;
-            if (parsed == 0) return error.InvalidValue;
-            split_size = parsed;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--llms-path") or std.mem.startsWith(u8, a, "--llms-path=")) {
-            if (saw_llms_path) return error.DuplicateFlag;
-            saw_llms_path = true;
-            llms_path = try takeValue(args, &i, a, "--llms-path");
-            if (std.fs.path.isAbsolute(llms_path)) return error.InvalidValue;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--rss-path") or std.mem.startsWith(u8, a, "--rss-path=")) {
-            if (saw_rss_path) return error.DuplicateFlag;
-            saw_rss_path = true;
-            rss_path = try takeValue(args, &i, a, "--rss-path");
-            if (std.fs.path.isAbsolute(rss_path)) return error.InvalidValue;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--sitemap-path") or std.mem.startsWith(u8, a, "--sitemap-path=")) {
-            if (saw_sitemap_path) return error.DuplicateFlag;
-            saw_sitemap_path = true;
-            sitemap_path = try takeValue(args, &i, a, "--sitemap-path");
-            sitemap.validateOutputPath(sitemap_path) catch return error.InvalidValue;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--site-url") or std.mem.startsWith(u8, a, "--site-url=")) {
-            if (saw_site_url) return error.DuplicateFlag;
-            saw_site_url = true;
-            site_url = try takeValue(args, &i, a, "--site-url");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--pages-base-url") or std.mem.startsWith(u8, a, "--pages-base-url=")) {
-            if (saw_pages_base_url) return error.DuplicateFlag;
-            saw_pages_base_url = true;
-            pages_base_url = try takeValue(args, &i, a, "--pages-base-url");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--pages-origin") or std.mem.startsWith(u8, a, "--pages-origin=")) {
-            if (saw_pages_origin) return error.DuplicateFlag;
-            saw_pages_origin = true;
-            pages_origin = try takeValue(args, &i, a, "--pages-origin");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--pages-base-path") or std.mem.startsWith(u8, a, "--pages-base-path=")) {
-            if (saw_pages_base_path) return error.DuplicateFlag;
-            saw_pages_base_path = true;
-            pages_base_path = try takeValueAllowEmpty(args, &i, a, "--pages-base-path");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--rss-title") or std.mem.startsWith(u8, a, "--rss-title=")) {
-            if (saw_rss_title) return error.DuplicateFlag;
-            saw_rss_title = true;
-            rss_title = try takeValue(args, &i, a, "--rss-title");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--rss-description") or std.mem.startsWith(u8, a, "--rss-description=")) {
-            if (saw_rss_description) return error.DuplicateFlag;
-            saw_rss_description = true;
-            rss_description = try takeValue(args, &i, a, "--rss-description");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--rss-limit") or std.mem.startsWith(u8, a, "--rss-limit=")) {
-            if (saw_rss_limit) return error.DuplicateFlag;
-            saw_rss_limit = true;
-            rss_limit = std.fmt.parseInt(usize, try takeValue(args, &i, a, "--rss-limit"), 10) catch return error.InvalidRssLimit;
-            if (rss_limit < 1 or rss_limit > 500) return error.InvalidRssLimit;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--html-dir") or std.mem.startsWith(u8, a, "--html-dir=")) {
-            if (saw_html_dir) return error.DuplicateFlag;
-            saw_html_dir = true;
-            html_dir = try takeValue(args, &i, a, "--html-dir");
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--html-layout") or std.mem.startsWith(u8, a, "--html-layout=")) {
-            if (saw_html_layout) return error.DuplicateFlag;
-            saw_html_layout = true;
-            html_layout = try takeValue(args, &i, a, "--html-layout");
-            layout_select.validateLayoutPath(html_layout) catch return error.InvalidValue;
-            continue;
-        }
-
-        // F9.1: --theme ROOT is sugar for --html-layout ROOT/layouts/main.html
-        // (theme asset root is derived from the layout path at compile time).
-        if (std.mem.eql(u8, a, "--theme") or std.mem.startsWith(u8, a, "--theme=")) {
-            if (saw_theme) return error.DuplicateFlag;
-            saw_theme = true;
-            theme_root = try takeValue(args, &i, a, "--theme");
-            // Theme root uses the same no-escape relative path grammar; the
-            // synthesized layout path is validated after composition below.
-            layout_select.validateLayoutPath(theme_root.?) catch return error.InvalidValue;
-            continue;
-        }
-
-        if (std.mem.startsWith(u8, a, "-")) {
-            return error.UnknownFlag;
-        }
+        if (try parseGlobalFlags(&st, a)) continue;
+        if (try parseProfileAndPlanFlags(&st, a, args, &i)) continue;
+        if (try parseNostrFlags(&st, a, args, &i)) continue;
+        if (try parseRecipeScaleFlags(&st, a, args, &i)) continue;
+        if (try parseModeFlags(&st, a, args, &i)) continue;
+        if (try parseAnalysisFlags(&st, a, args, &i)) continue;
+        if (try parseTargetSpecs(gpa, &st, a, args, &i)) continue;
+        if (try parseSessionFlags(&st, a, args, &i)) continue;
+        if (try parsePathFlags(&st, a, args, &i)) continue;
+        if (try parseHtmlFlags(&st, a, args, &i)) continue;
+
+        if (std.mem.startsWith(u8, a, "-")) return error.UnknownFlag;
         return error.UnexpectedPositional;
     }
 
-    // Resolve --theme sugar before mode selection (implies HTML layout path).
-    var owned_html_layout = false;
-    if (theme_root) |tr| {
-        if (tr.len == 0) return error.EmptyValue;
-        if (saw_html_layout) return error.ConflictingFlags;
-        // Joined path is owned by Options (freed in deinit).
-        html_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{tr});
-        owned_html_layout = true;
-        saw_html_layout = true;
-        layout_select.validateLayoutPath(html_layout) catch {
-            gpa.free(html_layout);
-            owned_html_layout = false;
-            return error.InvalidValue;
-        };
-    }
+    try resolveThemeSugar(gpa, &st);
+    errdefer if (st.owned_html_layout) gpa.free(st.html_layout);
 
     // `impact` requires its target; the loop capture defers the immediate-
     // after-command check so flags may precede the positional.
-    if (command == .impact and impact_id == null) return error.MissingValue;
-    errdefer if (owned_html_layout) gpa.free(html_layout);
-
-    const has_explicit_targets = targets.items.len > 0;
-    const has_target_layouts = target_layouts.items.len > 0;
-    const has_target_profiles = target_profiles.items.len > 0;
-    const has_layout_rules = pending_rules.items.len > 0;
-    const wants_sitemap = saw_sitemap or saw_sitemap_path;
-    // Explicit HTML selectors (not the bare default).
-    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or has_target_profiles or saw_theme or has_layout_rules or wants_sitemap;
-    const wants_rag = saw_rag or saw_rag_dir;
-    const wants_context = saw_context or saw_context_dir;
-    const wants_llms = saw_llms or saw_llms_path;
-    const wants_rss = saw_rss or saw_rss_path;
-    const saw_pages_location = saw_pages_base_url or saw_pages_origin or saw_pages_base_path;
-    // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
-    const wants_ir = saw_out or saw_no_rag;
+    if (st.command == .impact and st.impact_id == null) return error.MissingValue;
 
     // One explicit source family per build. Two adapters at once has no
     // meaning: each is a whole-tree mode that refuses the other's extension.
-    if (saw_textile and saw_cooklang) return error.ConflictingFlags;
-    const input_format: identity.InputFormat = if (saw_textile)
-        .textile
-    else if (saw_cooklang)
-        .cook
-    else
-        .markdown;
-    const saw_input_format = saw_textile or saw_cooklang;
+    if (st.saw_textile and st.saw_cooklang) return error.ConflictingFlags;
 
-    if (command == .plan) {
-        if (profile_path == null) return error.MissingValue;
-        // The plan command has one publication identity boundary: profile
-        // input, input format, and the single-target HTML output override.
-        // Other projection selectors would either execute or invent a second
-        // configuration source, so keep them as usage errors.
-        // `--timings` is rejected here too: `plan` owns stdout for its single
-        // declaration JSON document, and it runs no compiler phase, so the
-        // machine-readable timing report has nowhere to go without corrupting
-        // the plan stream.
-        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
-            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
-            saw_format or saw_report or saw_watch or saw_timings)
-        {
+    switch (st.command) {
+        .plan => return try buildPlanOptions(&st),
+        .nostr_plan => return try buildNostrPlanOptions(&st),
+        .nostr_sign => return try buildNostrSignOptions(&st),
+        .nostr_publish => return try buildNostrPublishOptions(&st),
+        .init => return try buildInitOptions(&st),
+        .recipe_scale => return try buildRecipeScaleOptions(&st),
+        .standard_site => return try buildStandardSiteOptions(&st),
+        .build, .validate, .check, .impact, .watch => {},
+    }
+
+    try validateBuildConflicts(&st);
+    const mode = resolveMode(&st);
+
+    // The HTML-path diagnostics report (`--report`) belongs to the HTML mode.
+    // `check`/`impact` reuse the same flag name for their analysis report (see
+    // `analysis_report`), so only non-HTML build/watch runs must refuse it.
+    if (mode != .html and (st.command == .build or st.command == .watch) and st.saw_report) {
+        return error.ConflictingFlags;
+    }
+
+    try finalizePublicationIdentity(gpa, &st);
+    // Snapshot before synthesizing the default target below: the HTML option
+    // construction distinguishes explicit --target lists from the synthesized
+    // single-target form.
+    const had_explicit_targets = st.hasExplicitTargets();
+    try synthesizeDefaultTarget(gpa, &st, mode);
+    try applyTargetLayouts(&st);
+    try applyTargetProfiles(&st);
+    const default_profile = scanDefaultProfile(&st);
+    if (st.pending_rules.items.len > 0) try attachLayoutRules(gpa, &st);
+
+    // Canonical target order: equivalent --target argv permutations produce the
+    // same Options.targets sequence (sorted by name). Execution/diagnostics use
+    // the same order via validateTargets.
+    if (st.targets.items.len > 1) {
+        target_mod.sortTargetSpecsByName(st.targets.items);
+    }
+
+    return buildOptionsForMode(&st, mode, default_profile, had_explicit_targets);
+}
+
+// ---------------------------------------------------------------------------
+// parseOptions internals
+//
+// The parser is decomposed around a flat accumulator (`ParseState`) plus
+// single-purpose parsers and per-command option builders. Behavior parity is
+// the invariant: same flag grammar, same error precedence, same duplicate and
+// conflict detection, same argv views, and the same `Options` field sets per
+// mode as the historical single-loop implementation.
+// ---------------------------------------------------------------------------
+
+/// One `--target-layout NAME=PATH` awaiting a matching target. Applied after
+/// the target list is known, so flag order relative to `--target` is free.
+const PendingTargetLayout = struct { name: []const u8, path: []const u8 };
+
+/// One `--target-profile NAME=PROFILE` awaiting a matching target (#448).
+const PendingTargetProfile = struct { name: []const u8, profile: render.OutputProfile };
+
+/// One `--layout-rule TARGET SELECTOR LAYOUT_PATH` (three following args).
+const PendingLayoutRule = struct {
+    target: []const u8,
+    selector: []const u8,
+    path: []const u8,
+};
+
+/// Mutable accumulator for one `parseOptions` run. Field defaults are the
+/// canonical pre-parse values; `saw_*` flags double as duplicate-option
+/// detectors and, for boolean selectors, as the selected value.
+const ParseState = struct {
+    command: Command = .build,
+
+    // Global flags.
+    quiet: bool = false,
+    saw_quiet: bool = false,
+    saw_timings: bool = false,
+
+    // Source tree and projection paths (argv views or static defaults).
+    input_dir: []const u8 = default_input_dir,
+    out_dir: []const u8 = default_out_dir,
+    rag_dir: []const u8 = default_rag_dir,
+    context_dir: []const u8 = default_context_dir,
+    llms_path: []const u8 = default_llms_path,
+    rss_path: []const u8 = default_rss_path,
+    sitemap_path: []const u8 = default_sitemap_path,
+    html_dir: []const u8 = default_html_dir,
+    html_layout: []const u8 = default_html_layout,
+    theme_root: ?[]const u8 = null,
+
+    // Publication identity and RSS/sitemap channel data.
+    site_url: ?[]const u8 = null,
+    pages_base_url: ?[]const u8 = null,
+    pages_origin: ?[]const u8 = null,
+    pages_base_path: ?[]const u8 = null,
+    rss_title: ?[]const u8 = null,
+    rss_description: ?[]const u8 = null,
+    rss_limit: usize = 20,
+
+    // RAG/context projection controls.
+    scope: ?[]const u8 = null,
+    split_size: ?usize = null,
+    bundles_only: bool = false,
+    complete: bool = false,
+
+    // HTML rendering controls.
+    jobs: usize = 1,
+    serve_port: ?u16 = null,
+    owned_html_layout: bool = false,
+
+    // Duplicate detectors for repeatable-once flags.
+    saw_input: bool = false,
+    saw_out: bool = false,
+    saw_rag: bool = false,
+    saw_no_rag: bool = false,
+    saw_rag_dir: bool = false,
+    saw_context: bool = false,
+    saw_context_dir: bool = false,
+    saw_scope: bool = false,
+    saw_split_size: bool = false,
+    saw_bundles_only: bool = false,
+    saw_complete: bool = false,
+    saw_llms: bool = false,
+    saw_llms_path: bool = false,
+    saw_rss: bool = false,
+    saw_rss_path: bool = false,
+    saw_site_url: bool = false,
+    saw_pages_base_url: bool = false,
+    saw_pages_origin: bool = false,
+    saw_pages_base_path: bool = false,
+    saw_rss_title: bool = false,
+    saw_rss_description: bool = false,
+    saw_rss_limit: bool = false,
+    saw_sitemap: bool = false,
+    saw_sitemap_path: bool = false,
+    saw_html: bool = false,
+    saw_html_dir: bool = false,
+    saw_html_layout: bool = false,
+    saw_theme: bool = false,
+    saw_incremental: bool = false,
+    saw_jobs: bool = false,
+    saw_watch: bool = false,
+    saw_watch_json: bool = false,
+    saw_serve: bool = false,
+    saw_textile: bool = false,
+    saw_cooklang: bool = false,
+    saw_format: bool = false,
+    saw_report: bool = false,
+    saw_fail_on_unreferenced: bool = false,
+    saw_profile: bool = false,
+
+    // Analysis commands (`check` / `impact`) and their shared flags.
+    impact_id: ?[]const u8 = null,
+    analysis_format: AnalysisFormat = .human,
+    analysis_report: ?[]const u8 = null,
+    fail_on_unreferenced: bool = false,
+
+    // `init [DIR]` positional.
+    init_dir: ?[]const u8 = null,
+
+    // `plan` / profile selection.
+    profile_path: ?[]const u8 = null,
+
+    // `standard-site` family state.
+    standard_site_command: StandardSiteCommand = .publish,
+    session_did: ?[]const u8 = null,
+    saw_session_did: bool = false,
+    session_handle: ?[]const u8 = null,
+    saw_session_handle: bool = false,
+    app_password: bool = false,
+    saw_app_password: bool = false,
+    session_root: ?[]const u8 = null,
+    saw_session_root: bool = false,
+    plan_path: ?[]const u8 = null,
+    saw_plan_path: bool = false,
+    publish_prune: bool = false,
+    source_commit: ?[]const u8 = null,
+    saw_source_commit: bool = false,
+    smoke_namespace: ?[]const u8 = null,
+    saw_smoke_namespace: bool = false,
+    smoke_surface_url: ?[]const u8 = null,
+    saw_smoke_surface_url: bool = false,
+    smoke_indexer_origin: ?[]const u8 = null,
+    saw_smoke_indexer_origin: bool = false,
+    verify_dist: ?[]const u8 = null,
+    saw_verify_dist: bool = false,
+
+    // `nostr sign` / `nostr publish` family state.
+    nostr_plan_path: ?[]const u8 = null,
+    saw_nostr_plan: bool = false,
+    nostr_bundle_path: ?[]const u8 = null,
+    saw_nostr_bundle: bool = false,
+    nostr_key_stdin: bool = false,
+    saw_nostr_key_stdin: bool = false,
+    nostr_out_path: ?[]const u8 = null,
+    saw_nostr_out: bool = false,
+    nostr_prior_path: ?[]const u8 = null,
+    saw_nostr_prior: bool = false,
+    nostr_created_at: ?i64 = null,
+    saw_nostr_created_at: bool = false,
+
+    // `recipe-scale` family state.
+    recipe_scale_id: ?[]const u8 = null,
+    saw_recipe_scale_id: bool = false,
+    recipe_scale_factor: ?[]const u8 = null,
+    saw_recipe_scale_factor: bool = false,
+    recipe_scale_servings: ?[]const u8 = null,
+    saw_recipe_scale_servings: bool = false,
+    recipe_scale_out: ?[]const u8 = null,
+    saw_recipe_scale_out: bool = false,
+
+    // Heap-backed accumulators and moved-ownership results.
+    targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
+    publication_location: ?github_pages.Location = null,
+    allow_markdown_links: bool = false,
+    target_layouts: std.ArrayListUnmanaged(PendingTargetLayout) = .{ .items = &.{}, .capacity = 0 },
+    target_profiles: std.ArrayListUnmanaged(PendingTargetProfile) = .{ .items = &.{}, .capacity = 0 },
+    pending_rules: std.ArrayListUnmanaged(PendingLayoutRule) = .{ .items = &.{}, .capacity = 0 },
+
+    fn hasExplicitTargets(st: *const ParseState) bool {
+        return st.targets.items.len > 0;
+    }
+
+    fn hasTargetLayouts(st: *const ParseState) bool {
+        return st.target_layouts.items.len > 0;
+    }
+
+    fn hasTargetProfiles(st: *const ParseState) bool {
+        return st.target_profiles.items.len > 0;
+    }
+
+    fn hasLayoutRules(st: *const ParseState) bool {
+        return st.pending_rules.items.len > 0;
+    }
+
+    fn wantsSitemap(st: *const ParseState) bool {
+        return st.saw_sitemap or st.saw_sitemap_path;
+    }
+
+    /// Explicit HTML selectors (not the bare default).
+    fn explicitHtml(st: *const ParseState) bool {
+        return st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or
+            st.saw_html_layout or st.hasTargetLayouts() or st.hasTargetProfiles() or
+            st.saw_theme or st.hasLayoutRules() or st.wantsSitemap();
+    }
+
+    fn wantsRag(st: *const ParseState) bool {
+        return st.saw_rag or st.saw_rag_dir;
+    }
+
+    fn wantsContext(st: *const ParseState) bool {
+        return st.saw_context or st.saw_context_dir;
+    }
+
+    fn wantsLlms(st: *const ParseState) bool {
+        return st.saw_llms or st.saw_llms_path;
+    }
+
+    fn wantsRss(st: *const ParseState) bool {
+        return st.saw_rss or st.saw_rss_path;
+    }
+
+    fn sawPagesLocation(st: *const ParseState) bool {
+        return st.saw_pages_base_url or st.saw_pages_origin or st.saw_pages_base_path;
+    }
+
+    /// Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
+    fn wantsIr(st: *const ParseState) bool {
+        return st.saw_out or st.saw_no_rag;
+    }
+
+    /// Whole-tree authoring format. The textile/cooklang pair conflict is
+    /// checked before this is consulted.
+    fn inputFormat(st: *const ParseState) identity.InputFormat {
+        if (st.saw_textile) return .textile;
+        if (st.saw_cooklang) return .cook;
+        return .markdown;
+    }
+};
+
+/// Top-level commands whose parsing is a bare leading token. Order-free: the
+/// names are mutually exclusive literals.
+const simple_commands = [_]struct { name: []const u8, command: Command }{
+    .{ .name = "build", .command = .build },
+    .{ .name = "validate", .command = .validate },
+    .{ .name = "watch", .command = .watch },
+    .{ .name = "check", .command = .check },
+    .{ .name = "impact", .command = .impact },
+    .{ .name = "plan", .command = .plan },
+    .{ .name = "recipe-scale", .command = .recipe_scale },
+};
+
+/// Exactly the `nostr` subcommands this build implements. An unknown one is a
+/// usage error rather than a stub, so nothing can look like publishing
+/// exists.
+const nostr_subcommands = [_]struct { name: []const u8, command: Command }{
+    .{ .name = "plan", .command = .nostr_plan },
+    .{ .name = "sign", .command = .nostr_sign },
+    .{ .name = "publish", .command = .nostr_publish },
+};
+
+const ModeBoolFlag = enum {
+    textile,
+    cooklang,
+    rag,
+    context,
+    bundles_only,
+    complete,
+    llms,
+    rss,
+    sitemap,
+    html,
+    incremental,
+    watch,
+    serve,
+    watch_json,
+    no_rag,
+};
+
+/// Boolean mode selectors handled identically: record once (duplicates are
+/// usage errors) and, for two of them, mirror into a value variable.
+const mode_bool_flags = [_]struct { name: []const u8, flag: ModeBoolFlag }{
+    .{ .name = "--textile", .flag = .textile },
+    .{ .name = "--cooklang", .flag = .cooklang },
+    .{ .name = "--rag", .flag = .rag },
+    .{ .name = "--context", .flag = .context },
+    .{ .name = "--bundles-only", .flag = .bundles_only },
+    .{ .name = "--complete", .flag = .complete },
+    .{ .name = "--llms", .flag = .llms },
+    .{ .name = "--rss", .flag = .rss },
+    .{ .name = "--sitemap", .flag = .sitemap },
+    .{ .name = "--html", .flag = .html },
+    .{ .name = "--incremental", .flag = .incremental },
+    .{ .name = "--watch", .flag = .watch },
+    .{ .name = "--serve", .flag = .serve },
+    .{ .name = "--watch-json", .flag = .watch_json },
+    .{ .name = "--no-rag", .flag = .no_rag },
+};
+
+/// Duplicate-option guard shared by every repeatable-once flag: the first
+/// occurrence records, a second is a usage error.
+fn markSaw(saw: *bool) ParseError!void {
+    if (saw.*) return error.DuplicateFlag;
+    saw.* = true;
+}
+
+fn applyModeBoolFlag(st: *ParseState, entry: ModeBoolFlag) ParseError!void {
+    const saw: *bool = switch (entry) {
+        .textile => &st.saw_textile,
+        .cooklang => &st.saw_cooklang,
+        .rag => &st.saw_rag,
+        .context => &st.saw_context,
+        .bundles_only => &st.saw_bundles_only,
+        .complete => &st.saw_complete,
+        .llms => &st.saw_llms,
+        .rss => &st.saw_rss,
+        .sitemap => &st.saw_sitemap,
+        .html => &st.saw_html,
+        .incremental => &st.saw_incremental,
+        .watch => &st.saw_watch,
+        .serve => &st.saw_serve,
+        .watch_json => &st.saw_watch_json,
+        .no_rag => &st.saw_no_rag,
+    };
+    try markSaw(saw);
+    switch (entry) {
+        .bundles_only => st.bundles_only = true,
+        .complete => st.complete = true,
+        else => {},
+    }
+}
+
+/// Free one accumulated target list, including per-target rule allocations.
+fn freeTargetList(gpa: std.mem.Allocator, targets: *std.ArrayListUnmanaged(target_mod.TargetSpec)) void {
+    for (targets.items) |t| {
+        if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
+    }
+    targets.deinit(gpa);
+}
+
+/// Parse the leading command token, including the `nostr` and
+/// `standard-site` subcommand families. Consumes argv up to (but not
+/// including) the first flag or positional handled by the main loop.
+fn parseCommandPrefix(args: []const []const u8, i: *usize, st: *ParseState) ParseError!void {
+    if (i.* >= args.len) return;
+    for (simple_commands) |entry| {
+        if (!std.mem.eql(u8, args[i.*], entry.name)) continue;
+        st.command = entry.command;
+        i.* += 1;
+        // Bare `boris watch` is watch mode, identical to `--watch`.
+        if (entry.command == .watch) st.saw_watch = true;
+        return;
+    }
+    if (std.mem.eql(u8, args[i.*], "nostr")) {
+        return parseNostrFamily(args, i, &st.command);
+    }
+    if (std.mem.eql(u8, args[i.*], "init")) {
+        st.command = .init;
+        i.* += 1;
+        // `boris init [DIR]` — exactly one optional positional target
+        // directory. A second positional is a usage error.
+        if (i.* < args.len and !std.mem.startsWith(u8, args[i.*], "-")) {
+            st.init_dir = args[i.*];
+            i.* += 1;
+        }
+        if (i.* < args.len and !std.mem.startsWith(u8, args[i.*], "-")) return error.UnexpectedPositional;
+        return;
+    }
+    if (std.mem.eql(u8, args[i.*], "standard-site")) {
+        return parseStandardSiteFamily(args, i, st);
+    }
+}
+
+fn parseNostrFamily(args: []const []const u8, i: *usize, command: *Command) ParseError!void {
+    i.* += 1;
+    if (i.* >= args.len) return error.UnknownNostrSubcommand;
+    for (nostr_subcommands) |sub| {
+        if (std.mem.eql(u8, args[i.*], sub.name)) {
+            command.* = sub.command;
+            i.* += 1;
+            return;
+        }
+    }
+    return error.UnknownNostrSubcommand;
+}
+
+fn parseStandardSiteFamily(args: []const []const u8, i: *usize, st: *ParseState) ParseError!void {
+    st.command = .standard_site;
+    i.* += 1;
+    // The network family has explicit subcommands. A missing or unknown
+    // subcommand is a usage error, never a silent fallback. `--help` /
+    // `-h` here is family help (exit 0), not a missing subcommand.
+    if (i.* >= args.len) return error.MissingStandardSiteSubcommand;
+    const token = args[i.*];
+    if (std.mem.eql(u8, token, "--help") or std.mem.eql(u8, token, "-h")) {
+        // Leave the flag for the shared help short-circuit so exit 0
+        // stays identical to every other `--help`.
+    } else if (std.meta.stringToEnum(StandardSiteCommand, token)) |sub| {
+        // The accepted spellings are exactly the enum's field names.
+        st.standard_site_command = sub;
+        i.* += 1;
+    } else {
+        return error.UnknownStandardSiteSubcommand;
+    }
+    if (i.* < args.len and !std.mem.startsWith(u8, args[i.*], "-")) return error.UnexpectedPositional;
+}
+
+/// `init [DIR]` and `impact <ID>` — the single positional may follow flags
+/// (`boris init --quiet DIR`, `boris impact --quiet ID`); the prefix capture
+/// handles the immediate-after-command form, this handles flags in between.
+/// A second positional still falls through to UnexpectedPositional.
+fn captureCommandPositional(st: *ParseState, a: []const u8) bool {
+    if (st.command == .init and st.init_dir == null and !std.mem.startsWith(u8, a, "-")) {
+        st.init_dir = a;
+        return true;
+    }
+    if (st.command == .impact and st.impact_id == null and !std.mem.startsWith(u8, a, "-")) {
+        st.impact_id = a;
+        return true;
+    }
+    return false;
+}
+
+/// `--quiet` / `--timings`: global observation flags valid beside any
+/// command or mode.
+fn parseGlobalFlags(st: *ParseState, a: []const u8) ParseError!bool {
+    if (std.mem.eql(u8, a, "--quiet")) {
+        try markSaw(&st.saw_quiet);
+        st.quiet = true;
+        return true;
+    }
+    if (std.mem.eql(u8, a, "--timings")) {
+        try markSaw(&st.saw_timings);
+        return true;
+    }
+    return false;
+}
+
+/// `--profile` and the command-routed `--plan` (nostr sign/publish bundle
+/// input vs standard-site publication plan; anywhere else a conflict).
+fn parseProfileAndPlanFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--profile") or std.mem.startsWith(u8, a, "--profile=")) {
+        try markSaw(&st.saw_profile);
+        st.profile_path = try takeValue(args, i, a, "--profile");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--plan") or std.mem.startsWith(u8, a, "--plan=")) {
+        // `--plan` is owned by the nostr sign/publish family (the
+        // signed-bundle input) and the standard-site family (the
+        // publication plan); anywhere else it is a conflict rather than
+        // a silently accepted flag. The standard-site subcommand
+        // validations below additionally reject it for smoke, login,
+        // sessions, and logout.
+        if (st.command == .nostr_sign or st.command == .nostr_publish) {
+            try markSaw(&st.saw_nostr_plan);
+            st.nostr_plan_path = try takeValue(args, i, a, "--plan");
+        } else if (st.command == .standard_site) {
+            try markSaw(&st.saw_plan_path);
+            st.plan_path = try takeValue(args, i, a, "--plan");
+        } else {
             return error.ConflictingFlags;
         }
-        return .{
-            .help = false,
-            .quiet = quiet,
-            .timings = saw_timings,
-            .command = .plan,
-            .profile_path = profile_path,
-            .profile_input_override = if (saw_input) input_dir else null,
-            .profile_input_format_override = if (saw_input_format) input_format else null,
-            .profile_html_output_override = if (saw_html_dir) html_dir else null,
-            .mode = .html,
-            .input_format = input_format,
-            .input_dir = input_dir,
-            .html_dir = if (saw_html_dir) html_dir else null,
-            .incremental = saw_incremental,
-            .jobs = jobs,
-            .targets = targets,
-        };
+        return true;
+    }
+    return false;
+}
+
+/// Nostr sign/publish family flags. Each is rejected outside its owning
+/// subcommand rather than silently ignored.
+fn parseNostrFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--bundle") or std.mem.startsWith(u8, a, "--bundle=")) {
+        if (st.command != .nostr_publish) return error.ConflictingFlags;
+        try markSaw(&st.saw_nostr_bundle);
+        st.nostr_bundle_path = try takeValue(args, i, a, "--bundle");
+        return true;
     }
 
-    if (command == .nostr_plan) {
-        if (profile_path == null) return error.MissingValue;
-        // Same boundary as `plan`, and for the same reason: the profile is the
-        // only configuration source. This command does scan content, so
-        // `--input`/`--cooklang`/`--textile` overrides stay meaningful, but
-        // stdout belongs to the single plan document — hence no `--timings`.
-        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or wants_sitemap or
-            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
-            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental)
-        {
-            return error.ConflictingFlags;
-        }
-        return .{
-            .help = false,
-            .quiet = quiet,
-            .timings = false,
-            .command = .nostr_plan,
-            .profile_path = profile_path,
-            .profile_input_override = if (saw_input) input_dir else null,
-            .profile_input_format_override = if (saw_input_format) input_format else null,
-            .mode = .html,
-            .input_format = input_format,
-            .input_dir = input_dir,
-            .jobs = jobs,
-            .targets = targets,
-        };
+    if (std.mem.eql(u8, a, "--key-stdin")) {
+        if (st.command != .nostr_sign) return error.ConflictingFlags;
+        try markSaw(&st.saw_nostr_key_stdin);
+        st.nostr_key_stdin = true;
+        return true;
     }
 
-    if (command == .nostr_sign) {
-        // The signer consumes a plan artifact and a secret key read once from
-        // stdin. The profile is configuration, not input, for signing; every
-        // other selector either executes another projection or implies state
-        // the signer does not have. `--timings` is rejected because stdout is
-        // reserved for the signed-event bundle when --out is absent.
-        if (nostr_plan_path == null) return error.MissingValue;
-        if (!nostr_key_stdin) return error.MissingValue;
-        if (saw_profile or saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
-            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
-            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental or saw_jobs)
-        {
-            return error.ConflictingFlags;
-        }
-        return .{
-            .help = false,
-            .quiet = quiet,
-            .timings = false,
-            .command = .nostr_sign,
-            .nostr_plan_path = nostr_plan_path,
-            .nostr_key_stdin = nostr_key_stdin,
-            .nostr_out_path = nostr_out_path,
-            .nostr_prior_path = nostr_prior_path,
-            .nostr_created_at = nostr_created_at,
-            .mode = .html,
-            .input_format = input_format,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .html_dir = null,
-            .targets = targets,
-        };
+    if (std.mem.eql(u8, a, "--prior") or std.mem.startsWith(u8, a, "--prior=")) {
+        if (st.command != .nostr_sign) return error.ConflictingFlags;
+        try markSaw(&st.saw_nostr_prior);
+        st.nostr_prior_path = try takeValue(args, i, a, "--prior");
+        return true;
     }
 
-    if (command == .nostr_publish) {
-        // The publisher consumes a plan artifact and its already-signed event
-        // bundle. The secret never enters this command: the bundle was signed
-        // offline by `nostr sign`, and publishing only re-transmits it. Like
-        // the other nostr subcommands, no profile or projection selector is
-        // meaningful here, and stdout is reserved for the report when --out is
-        // absent.
-        if (nostr_plan_path == null) return error.MissingValue;
-        if (nostr_bundle_path == null) return error.MissingValue;
-        if (saw_profile or saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
-            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
-            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental or saw_jobs)
-        {
-            return error.ConflictingFlags;
-        }
-        return .{
-            .help = false,
-            .quiet = quiet,
-            .timings = false,
-            .command = .nostr_publish,
-            .nostr_plan_path = nostr_plan_path,
-            .nostr_bundle_path = nostr_bundle_path,
-            .nostr_out_path = nostr_out_path,
-            .mode = .html,
-            .input_format = input_format,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .html_dir = null,
-            .targets = targets,
-        };
+    if (std.mem.eql(u8, a, "--created-at") or std.mem.startsWith(u8, a, "--created-at=")) {
+        if (st.command != .nostr_sign) return error.ConflictingFlags;
+        try markSaw(&st.saw_nostr_created_at);
+        const value = try takeValue(args, i, a, "--created-at");
+        st.nostr_created_at = std.fmt.parseInt(i64, value, 10) catch return error.InvalidValue;
+        return true;
     }
 
-    if (command == .init) {
-        // `init` writes a deterministic starter tree into one positional
-        // target directory. Compiler modes, output selectors, publication
-        // inputs, analysis flags, and watch/incremental controls select work
-        // init does not perform; the target directory is positional, so
-        // `--input` is rejected rather than silently misread.
-        if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or
-            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or
-            saw_rss_title or saw_rss_description or saw_rss_limit or saw_format or saw_report or saw_watch or saw_timings or
-            saw_profile or saw_input or saw_textile or saw_cooklang or saw_out or saw_rag_dir or saw_incremental or saw_jobs)
-        {
-            return error.ConflictingFlags;
-        }
-        return .{
-            .help = false,
-            .quiet = quiet,
-            .timings = false,
-            .command = .init,
-            .init_dir = init_dir,
-            .mode = .html,
-            .input_format = identity.InputFormat.markdown,
-            .input_dir = "content",
-            .out_dir = null,
-            .html_dir = null,
-            .targets = targets,
-        };
+    // `nostr sign` / `nostr publish` re-own `--out` as the artifact path;
+    // every other command keeps the IR-directory meaning (and nostr_plan
+    // rejects it).
+    if ((st.command == .nostr_sign or st.command == .nostr_publish) and
+        (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out=")))
+    {
+        try markSaw(&st.saw_nostr_out);
+        st.nostr_out_path = try takeValue(args, i, a, "--out");
+        return true;
+    }
+    return false;
+}
+
+/// `recipe-scale` family flags; `--out` is re-owned as a JSON file path.
+fn parseRecipeScaleFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (st.command == .recipe_scale and
+        (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out=")))
+    {
+        try markSaw(&st.saw_recipe_scale_out);
+        st.recipe_scale_out = try takeValue(args, i, a, "--out");
+        return true;
     }
 
-    if (command == .recipe_scale) {
-        if (recipe_scale_id == null) return error.MissingValue;
-        const has_factor = recipe_scale_factor != null;
-        const has_servings = recipe_scale_servings != null;
-        if (has_factor and has_servings) return error.ConflictingFlags;
-        if (!has_factor and !has_servings) return error.MissingValue;
-        if (has_factor) _ = recipe_scale.parseFactor(recipe_scale_factor.?) catch return error.InvalidValue;
-        if (has_servings) _ = recipe_scale.parseServingsTarget(recipe_scale_servings.?) catch return error.InvalidValue;
-        // The view owns stdout. Projection selectors, watch/HTML, analysis,
-        // and `--timings` would either execute another path or corrupt the
-        // JSON stream.
-        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
-            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
-            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental or saw_jobs or saw_profile)
-        {
-            return error.ConflictingFlags;
-        }
-        return .{
-            .help = false,
-            .quiet = quiet,
-            .timings = false,
-            .command = .recipe_scale,
-            .recipe_scale_id = recipe_scale_id,
-            .recipe_scale_factor = recipe_scale_factor,
-            .recipe_scale_servings = recipe_scale_servings,
-            .recipe_scale_out = recipe_scale_out,
-            .mode = .html,
-            .input_format = input_format,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .html_dir = null,
-            .targets = targets,
-        };
+    if (std.mem.eql(u8, a, "--id") or std.mem.startsWith(u8, a, "--id=")) {
+        if (st.command != .recipe_scale) return error.ConflictingFlags;
+        try markSaw(&st.saw_recipe_scale_id);
+        st.recipe_scale_id = try takeValue(args, i, a, "--id");
+        return true;
     }
 
-    if (command == .standard_site) {
-        // The `standard-site` family is the one-shot network family: publish,
-        // login, sessions, and logout. Compiler modes, targets, and projection
-        // selectors have no meaning here, and `--timings` must not corrupt the
-        // evidence stream on stdout. `publish` requires a profile and forbids
-        // `--did`; `login`/`logout`/`smoke` require `--did` or `--handle`;
-        // `sessions` forbids both.
-        if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or
-            wants_sitemap or wants_rag or saw_no_rag or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or
-            saw_rss_title or saw_rss_description or saw_rss_limit or saw_format or saw_report or saw_watch or saw_timings or
-            saw_input or saw_textile or saw_cooklang or saw_rag_dir or saw_scope or saw_split_size or saw_bundles_only or saw_complete or
-            saw_incremental or saw_jobs or saw_llms_path or saw_rss_path or saw_sitemap_path or saw_context_dir)
-        {
-            return error.ConflictingStandardSiteFlags;
-        }
-        // Smoke-only and verify-only flags have no meaning on the other
-        // subcommands; reject them rather than silently ignoring them.
-        const saw_smoke_only = saw_smoke_namespace or saw_smoke_surface_url or saw_smoke_indexer_origin;
-        switch (standard_site_command) {
-            .publish => {
-                if (profile_path == null) return error.MissingStandardSiteProfile;
-                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist) return error.ConflictingStandardSiteFlags;
-            },
-            .plan => {
-                if (profile_path == null) return error.MissingStandardSiteProfile;
-                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingStandardSiteFlags;
-            },
-            .records => {
-                if (profile_path == null) return error.MissingStandardSiteProfile;
-                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingStandardSiteFlags;
-            },
-            .verify => {
-                if (profile_path == null) return error.MissingStandardSiteProfile;
-                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingStandardSiteFlags;
-            },
-            .login => {
-                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingStandardSiteFlags;
-                if (app_password) {
-                    // App-password login takes exactly one identity: a DID or
-                    // a handle (resolved to a DID).
-                    if (session_did == null and session_handle == null) return error.MissingStandardSiteIdentity;
-                    if (session_did != null and session_handle != null) return error.ConflictingStandardSiteFlags;
-                } else {
-                    if (session_did == null) return error.MissingStandardSiteIdentity;
-                    if (session_handle != null) return error.ConflictingStandardSiteFlags;
-                }
-            },
-            .logout => {
-                if (session_did == null and session_handle == null) return error.MissingStandardSiteIdentity;
-                if (session_did != null and session_handle != null) return error.ConflictingStandardSiteFlags;
-                if (app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingStandardSiteFlags;
-            },
-            .sessions => {
-                if (saw_session_did or saw_session_handle or saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingStandardSiteFlags;
-            },
-            .smoke => {
-                if (session_did == null and session_handle == null) return error.MissingStandardSiteIdentity;
-                if (session_did != null and session_handle != null) return error.ConflictingStandardSiteFlags;
-                if (saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_verify_dist) return error.ConflictingStandardSiteFlags;
-            },
-        }
-        return .{
-            .help = false,
-            .quiet = quiet,
-            .timings = false,
-            .command = .standard_site,
-            .standard_site_command = standard_site_command,
-            .standard_site_publish = standard_site_command == .publish,
-            .plan_path = plan_path,
-            .publish_out = if (saw_out) out_dir else null,
-            .plan_out = if (saw_out) out_dir else null,
-            .records_out = if (saw_out) out_dir else null,
-            .verify_out = if (saw_out) out_dir else null,
-            .verify_dist = verify_dist orelse "dist",
-            .publish_prune = publish_prune,
-            .source_commit = source_commit,
-            .session_did = session_did,
-            .session_handle = session_handle,
-            .app_password = app_password,
-            .session_root = session_root,
-            .smoke_namespace = smoke_namespace,
-            .smoke_surface_url = smoke_surface_url,
-            .smoke_indexer_origin = smoke_indexer_origin,
-            .smoke_out = if (saw_out) out_dir else null,
-            .profile_path = profile_path,
-            .mode = .html,
-            .input_format = identity.InputFormat.markdown,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .html_dir = null,
-            .targets = targets,
-        };
+    if (std.mem.eql(u8, a, "--factor") or std.mem.startsWith(u8, a, "--factor=")) {
+        if (st.command != .recipe_scale) return error.ConflictingFlags;
+        try markSaw(&st.saw_recipe_scale_factor);
+        st.recipe_scale_factor = try takeValue(args, i, a, "--factor");
+        return true;
     }
 
+    if (std.mem.eql(u8, a, "--servings") or std.mem.startsWith(u8, a, "--servings=")) {
+        if (st.command != .recipe_scale) return error.ConflictingFlags;
+        try markSaw(&st.saw_recipe_scale_servings);
+        st.recipe_scale_servings = try takeValue(args, i, a, "--servings");
+        return true;
+    }
+    return false;
+}
+
+/// Projection/mode selectors: boolean switches from the table plus the
+/// value-bearing `--port`.
+fn parseModeFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    for (mode_bool_flags) |entry| {
+        if (std.mem.eql(u8, a, entry.name)) {
+            try applyModeBoolFlag(st, entry.flag);
+            return true;
+        }
+    }
+
+    if (std.mem.eql(u8, a, "--allow-markdown-links")) {
+        // Idempotent by design: repeatable without a duplicate detector.
+        st.allow_markdown_links = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--port") or std.mem.startsWith(u8, a, "--port=")) {
+        if (st.serve_port != null) return error.DuplicateFlag;
+        const value = try takeValue(args, i, a, "--port");
+        st.serve_port = std.fmt.parseUnsigned(u16, value, 10) catch return error.InvalidValue;
+        return true;
+    }
+    return false;
+}
+
+/// Analysis-command flags shared by `check` and `impact` (with `--report`
+/// additionally meaningful on HTML build/validate).
+fn parseAnalysisFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--format") or std.mem.startsWith(u8, a, "--format=")) {
+        try markSaw(&st.saw_format);
+        const value = try takeValue(args, i, a, "--format");
+        st.analysis_format = if (std.mem.eql(u8, value, "human"))
+            .human
+        else if (std.mem.eql(u8, value, "json"))
+            .json
+        else
+            return error.InvalidValue;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--report") or std.mem.startsWith(u8, a, "--report=")) {
+        try markSaw(&st.saw_report);
+        st.analysis_report = try takeValue(args, i, a, "--report");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--fail-on-unreferenced")) {
+        try markSaw(&st.saw_fail_on_unreferenced);
+        st.fail_on_unreferenced = true;
+        return true;
+    }
+    return false;
+}
+
+/// Target declarations and their deferred attachments (`--target`,
+/// `--target-layout`, `--target-profile`, `--layout-rule`). Layouts,
+/// profiles, and rules are collected first and joined to targets after the
+/// loop, so flag order relative to `--target` does not matter.
+fn parseTargetSpecs(
+    gpa: std.mem.Allocator,
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--target") or std.mem.startsWith(u8, a, "--target=")) {
+        const val = try takeValue(args, i, a, "--target");
+        const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
+            return error.InvalidValue;
+        };
+        const name = val[0..eq_idx];
+        const output_dir = val[eq_idx + 1 ..];
+        if (name.len == 0 or output_dir.len == 0) {
+            return error.InvalidValue;
+        }
+        if (!target_mod.isValidTargetName(name)) {
+            return error.InvalidValue;
+        }
+        for (st.targets.items) |existing| {
+            if (std.mem.eql(u8, existing.name, name)) {
+                return error.DuplicateFlag;
+            }
+        }
+        try st.targets.append(gpa, .{
+            .name = name,
+            .output_dir = output_dir,
+            .layout_path = null,
+        });
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--target-layout") or std.mem.startsWith(u8, a, "--target-layout=")) {
+        const val = try takeValue(args, i, a, "--target-layout");
+        const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
+            return error.InvalidValue;
+        };
+        const name = val[0..eq_idx];
+        const path = val[eq_idx + 1 ..];
+        if (name.len == 0 or path.len == 0) {
+            return error.InvalidValue;
+        }
+        if (!target_mod.isValidTargetName(name)) {
+            return error.InvalidValue;
+        }
+        layout_select.validateLayoutPath(path) catch return error.InvalidValue;
+        for (st.target_layouts.items) |existing| {
+            if (std.mem.eql(u8, existing.name, name)) {
+                return error.DuplicateFlag;
+            }
+        }
+        try st.target_layouts.append(gpa, .{ .name = name, .path = path });
+        return true;
+    }
+
+    // --target-profile NAME=PROFILE (html|xhtml), applied after targets are
+    // known. Mirrors --target-layout; the profile is a serialization switch
+    // (#448) and composes with layout/rule selection.
+    if (std.mem.eql(u8, a, "--target-profile") or std.mem.startsWith(u8, a, "--target-profile=")) {
+        const val = try takeValue(args, i, a, "--target-profile");
+        const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
+            return error.InvalidValue;
+        };
+        const name = val[0..eq_idx];
+        const profile_raw = val[eq_idx + 1 ..];
+        if (name.len == 0 or profile_raw.len == 0) return error.InvalidValue;
+        if (!target_mod.isValidTargetName(name)) return error.InvalidValue;
+        const profile: render.OutputProfile = if (std.mem.eql(u8, profile_raw, "html"))
+            .html
+        else if (std.mem.eql(u8, profile_raw, "xhtml"))
+            .xhtml
+        else
+            return error.InvalidValue;
+        for (st.target_profiles.items) |existing| {
+            if (std.mem.eql(u8, existing.name, name)) {
+                return error.DuplicateFlag;
+            }
+        }
+        try st.target_profiles.append(gpa, .{ .name = name, .profile = profile });
+        return true;
+    }
+
+    // --layout-rule TARGET SELECTOR LAYOUT_PATH (exactly three following args).
+    if (std.mem.eql(u8, a, "--layout-rule") or std.mem.startsWith(u8, a, "--layout-rule=")) {
+        if (std.mem.startsWith(u8, a, "--layout-rule=")) return error.InvalidValue;
+        if (i.* + 3 >= args.len) return error.MissingValue;
+        const tname = args[i.* + 1];
+        const selector = args[i.* + 2];
+        const path = args[i.* + 3];
+        if (tname.len == 0 or selector.len == 0 or path.len == 0) return error.EmptyValue;
+        if (!target_mod.isValidTargetName(tname)) return error.InvalidValue;
+        // Reject values that look like flags (prevent silent arg shift).
+        if (tname[0] == '-' or selector[0] == '-' or path[0] == '-') return error.InvalidValue;
+        // Validate selector grammar early (fail before discovery).
+        _ = layout_select.parseSelector(selector) catch return error.InvalidValue;
+        layout_select.validateLayoutPath(path) catch return error.InvalidValue;
+        try st.pending_rules.append(gpa, .{ .target = tname, .selector = selector, .path = path });
+        i.* += 3;
+        return true;
+    }
+    return false;
+}
+
+/// Session and credential flags for the `standard-site` family.
+fn parseSessionFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--prune")) {
+        if (st.publish_prune) return error.DuplicateFlag;
+        st.publish_prune = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--source-commit") or std.mem.startsWith(u8, a, "--source-commit=")) {
+        try markSaw(&st.saw_source_commit);
+        st.source_commit = try takeValue(args, i, a, "--source-commit");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--did") or std.mem.startsWith(u8, a, "--did=")) {
+        try markSaw(&st.saw_session_did);
+        st.session_did = try takeValue(args, i, a, "--did");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--handle") or std.mem.startsWith(u8, a, "--handle=")) {
+        try markSaw(&st.saw_session_handle);
+        st.session_handle = try takeValue(args, i, a, "--handle");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--app-password")) {
+        try markSaw(&st.saw_app_password);
+        st.app_password = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--session-root") or std.mem.startsWith(u8, a, "--session-root=")) {
+        try markSaw(&st.saw_session_root);
+        st.session_root = try takeValue(args, i, a, "--session-root");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--dist") or std.mem.startsWith(u8, a, "--dist=")) {
+        try markSaw(&st.saw_verify_dist);
+        st.verify_dist = try takeValue(args, i, a, "--dist");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--namespace") or std.mem.startsWith(u8, a, "--namespace=")) {
+        try markSaw(&st.saw_smoke_namespace);
+        st.smoke_namespace = try takeValue(args, i, a, "--namespace");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--surface-url") or std.mem.startsWith(u8, a, "--surface-url=")) {
+        try markSaw(&st.saw_smoke_surface_url);
+        st.smoke_surface_url = try takeValue(args, i, a, "--surface-url");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--indexer") or std.mem.startsWith(u8, a, "--indexer=")) {
+        try markSaw(&st.saw_smoke_indexer_origin);
+        st.smoke_indexer_origin = try takeValue(args, i, a, "--indexer");
+        return true;
+    }
+    return false;
+}
+
+/// Source tree, projection directories, and publication identity flags.
+fn parsePathFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--input") or std.mem.startsWith(u8, a, "--input=")) {
+        try markSaw(&st.saw_input);
+        st.input_dir = try takeValue(args, i, a, "--input");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out=")) {
+        try markSaw(&st.saw_out);
+        st.out_dir = try takeValue(args, i, a, "--out");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--rag-dir") or std.mem.startsWith(u8, a, "--rag-dir=")) {
+        try markSaw(&st.saw_rag_dir);
+        st.rag_dir = try takeValue(args, i, a, "--rag-dir");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--context-dir") or std.mem.startsWith(u8, a, "--context-dir=")) {
+        try markSaw(&st.saw_context_dir);
+        st.context_dir = try takeValue(args, i, a, "--context-dir");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--scope") or std.mem.startsWith(u8, a, "--scope=")) {
+        try markSaw(&st.saw_scope);
+        st.scope = try takeValue(args, i, a, "--scope");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--split-size") or std.mem.startsWith(u8, a, "--split-size=")) {
+        try markSaw(&st.saw_split_size);
+        const raw = try takeValue(args, i, a, "--split-size");
+        const parsed = std.fmt.parseInt(usize, raw, 10) catch return error.InvalidValue;
+        if (parsed == 0) return error.InvalidValue;
+        st.split_size = parsed;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--llms-path") or std.mem.startsWith(u8, a, "--llms-path=")) {
+        try markSaw(&st.saw_llms_path);
+        st.llms_path = try takeValue(args, i, a, "--llms-path");
+        if (std.fs.path.isAbsolute(st.llms_path)) return error.InvalidValue;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--rss-path") or std.mem.startsWith(u8, a, "--rss-path=")) {
+        try markSaw(&st.saw_rss_path);
+        st.rss_path = try takeValue(args, i, a, "--rss-path");
+        if (std.fs.path.isAbsolute(st.rss_path)) return error.InvalidValue;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--sitemap-path") or std.mem.startsWith(u8, a, "--sitemap-path=")) {
+        try markSaw(&st.saw_sitemap_path);
+        st.sitemap_path = try takeValue(args, i, a, "--sitemap-path");
+        sitemap.validateOutputPath(st.sitemap_path) catch return error.InvalidValue;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--site-url") or std.mem.startsWith(u8, a, "--site-url=")) {
+        try markSaw(&st.saw_site_url);
+        st.site_url = try takeValue(args, i, a, "--site-url");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--pages-base-url") or std.mem.startsWith(u8, a, "--pages-base-url=")) {
+        try markSaw(&st.saw_pages_base_url);
+        st.pages_base_url = try takeValue(args, i, a, "--pages-base-url");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--pages-origin") or std.mem.startsWith(u8, a, "--pages-origin=")) {
+        try markSaw(&st.saw_pages_origin);
+        st.pages_origin = try takeValue(args, i, a, "--pages-origin");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--pages-base-path") or std.mem.startsWith(u8, a, "--pages-base-path=")) {
+        try markSaw(&st.saw_pages_base_path);
+        st.pages_base_path = try takeValueAllowEmpty(args, i, a, "--pages-base-path");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--rss-title") or std.mem.startsWith(u8, a, "--rss-title=")) {
+        try markSaw(&st.saw_rss_title);
+        st.rss_title = try takeValue(args, i, a, "--rss-title");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--rss-description") or std.mem.startsWith(u8, a, "--rss-description=")) {
+        try markSaw(&st.saw_rss_description);
+        st.rss_description = try takeValue(args, i, a, "--rss-description");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--rss-limit") or std.mem.startsWith(u8, a, "--rss-limit=")) {
+        try markSaw(&st.saw_rss_limit);
+        st.rss_limit = std.fmt.parseInt(usize, try takeValue(args, i, a, "--rss-limit"), 10) catch return error.InvalidRssLimit;
+        if (st.rss_limit < 1 or st.rss_limit > 500) return error.InvalidRssLimit;
+        return true;
+    }
+    return false;
+}
+
+/// HTML rendering controls: worker count, output directory, layout/theme
+/// selection.
+fn parseHtmlFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--jobs") or std.mem.startsWith(u8, a, "--jobs=") or
+        std.mem.eql(u8, a, "-j") or std.mem.startsWith(u8, a, "-j="))
+    {
+        try markSaw(&st.saw_jobs);
+        const val_str = if (std.mem.startsWith(u8, a, "-j"))
+            try takeValue(args, i, a, "-j")
+        else
+            try takeValue(args, i, a, "--jobs");
+        const parsed_val = std.fmt.parseInt(usize, val_str, 10) catch {
+            return error.InvalidValue;
+        };
+        if (parsed_val < 1 or parsed_val > 64) {
+            return error.InvalidValue;
+        }
+        st.jobs = parsed_val;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--html-dir") or std.mem.startsWith(u8, a, "--html-dir=")) {
+        try markSaw(&st.saw_html_dir);
+        st.html_dir = try takeValue(args, i, a, "--html-dir");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--html-layout") or std.mem.startsWith(u8, a, "--html-layout=")) {
+        try markSaw(&st.saw_html_layout);
+        st.html_layout = try takeValue(args, i, a, "--html-layout");
+        layout_select.validateLayoutPath(st.html_layout) catch return error.InvalidValue;
+        return true;
+    }
+
+    // F9.1: --theme ROOT is sugar for --html-layout ROOT/layouts/main.html
+    // (theme asset root is derived from the layout path at compile time).
+    if (std.mem.eql(u8, a, "--theme") or std.mem.startsWith(u8, a, "--theme=")) {
+        try markSaw(&st.saw_theme);
+        st.theme_root = try takeValue(args, i, a, "--theme");
+        // Theme root uses the same no-escape relative path grammar; the
+        // synthesized layout path is validated after composition below.
+        layout_select.validateLayoutPath(st.theme_root.?) catch return error.InvalidValue;
+        return true;
+    }
+    return false;
+}
+
+/// Resolve --theme sugar before mode selection (implies HTML layout path).
+fn resolveThemeSugar(gpa: std.mem.Allocator, st: *ParseState) ParseError!void {
+    if (st.theme_root) |tr| {
+        if (tr.len == 0) return error.EmptyValue;
+        if (st.saw_html_layout) return error.ConflictingFlags;
+        // Joined path is owned by Options (freed in deinit).
+        st.html_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{tr});
+        st.owned_html_layout = true;
+        st.saw_html_layout = true;
+        layout_select.validateLayoutPath(st.html_layout) catch {
+            gpa.free(st.html_layout);
+            st.owned_html_layout = false;
+            return error.InvalidValue;
+        };
+    }
+}
+
+fn buildPlanOptions(st: *ParseState) ParseError!Options {
+    if (st.profile_path == null) return error.MissingValue;
+    // The plan command has one publication identity boundary: profile
+    // input, input format, and the single-target HTML output override.
+    // Other projection selectors would either execute or invent a second
+    // configuration source, so keep them as usage errors.
+    // `--timings` is rejected here too: `plan` owns stdout for its single
+    // declaration JSON document, and it runs no compiler phase, so the
+    // machine-readable timing report has nowhere to go without corrupting
+    // the plan stream.
+    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
+        st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings)
+    {
+        return error.ConflictingFlags;
+    }
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = st.saw_timings,
+        .command = .plan,
+        .profile_path = st.profile_path,
+        .profile_input_override = if (st.saw_input) st.input_dir else null,
+        .profile_input_format_override = if (st.saw_textile or st.saw_cooklang) st.inputFormat() else null,
+        .profile_html_output_override = if (st.saw_html_dir) st.html_dir else null,
+        .mode = .html,
+        .input_format = st.inputFormat(),
+        .input_dir = st.input_dir,
+        .html_dir = if (st.saw_html_dir) st.html_dir else null,
+        .incremental = st.saw_incremental,
+        .jobs = st.jobs,
+        .targets = st.targets,
+    };
+}
+
+fn buildNostrPlanOptions(st: *ParseState) ParseError!Options {
+    if (st.profile_path == null) return error.MissingValue;
+    // Same boundary as `plan`, and for the same reason: the profile is the
+    // only configuration source. This command does scan content, so
+    // `--input`/`--cooklang`/`--textile` overrides stay meaningful, but
+    // stdout belongs to the single plan document — hence no `--timings`.
+    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or st.wantsSitemap() or
+        st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental)
+    {
+        return error.ConflictingFlags;
+    }
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = false,
+        .command = .nostr_plan,
+        .profile_path = st.profile_path,
+        .profile_input_override = if (st.saw_input) st.input_dir else null,
+        .profile_input_format_override = if (st.saw_textile or st.saw_cooklang) st.inputFormat() else null,
+        .mode = .html,
+        .input_format = st.inputFormat(),
+        .input_dir = st.input_dir,
+        .jobs = st.jobs,
+        .targets = st.targets,
+    };
+}
+
+fn buildNostrSignOptions(st: *ParseState) ParseError!Options {
+    // The signer consumes a plan artifact and a secret key read once from
+    // stdin. The profile is configuration, not input, for signing; every
+    // other selector either executes another projection or implies state
+    // the signer does not have. `--timings` is rejected because stdout is
+    // reserved for the signed-event bundle when --out is absent.
+    if (st.nostr_plan_path == null) return error.MissingValue;
+    if (!st.nostr_key_stdin) return error.MissingValue;
+    if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
+        st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs)
+    {
+        return error.ConflictingFlags;
+    }
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = false,
+        .command = .nostr_sign,
+        .nostr_plan_path = st.nostr_plan_path,
+        .nostr_key_stdin = st.nostr_key_stdin,
+        .nostr_out_path = st.nostr_out_path,
+        .nostr_prior_path = st.nostr_prior_path,
+        .nostr_created_at = st.nostr_created_at,
+        .mode = .html,
+        .input_format = st.inputFormat(),
+        .input_dir = st.input_dir,
+        .out_dir = null,
+        .html_dir = null,
+        .targets = st.targets,
+    };
+}
+
+fn buildNostrPublishOptions(st: *ParseState) ParseError!Options {
+    // The publisher consumes a plan artifact and its already-signed event
+    // bundle. The secret never enters this command: the bundle was signed
+    // offline by `nostr sign`, and publishing only re-transmits it. Like
+    // the other nostr subcommands, no profile or projection selector is
+    // meaningful here, and stdout is reserved for the report when --out is
+    // absent.
+    if (st.nostr_plan_path == null) return error.MissingValue;
+    if (st.nostr_bundle_path == null) return error.MissingValue;
+    if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
+        st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs)
+    {
+        return error.ConflictingFlags;
+    }
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = false,
+        .command = .nostr_publish,
+        .nostr_plan_path = st.nostr_plan_path,
+        .nostr_bundle_path = st.nostr_bundle_path,
+        .nostr_out_path = st.nostr_out_path,
+        .mode = .html,
+        .input_format = st.inputFormat(),
+        .input_dir = st.input_dir,
+        .out_dir = null,
+        .html_dir = null,
+        .targets = st.targets,
+    };
+}
+
+fn buildInitOptions(st: *ParseState) ParseError!Options {
+    // `init` writes a deterministic starter tree into one positional
+    // target directory. Compiler modes, output selectors, publication
+    // inputs, analysis flags, and watch/incremental controls select work
+    // init does not perform; the target directory is positional, so
+    // `--input` is rejected rather than silently misread.
+    if (st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or
+        st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
+        st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
+        st.saw_profile or st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_out or st.saw_rag_dir or st.saw_incremental or st.saw_jobs)
+    {
+        return error.ConflictingFlags;
+    }
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = false,
+        .command = .init,
+        .init_dir = st.init_dir,
+        .mode = .html,
+        .input_format = identity.InputFormat.markdown,
+        .input_dir = "content",
+        .out_dir = null,
+        .html_dir = null,
+        .targets = st.targets,
+    };
+}
+
+fn buildRecipeScaleOptions(st: *ParseState) ParseError!Options {
+    if (st.recipe_scale_id == null) return error.MissingValue;
+    const has_factor = st.recipe_scale_factor != null;
+    const has_servings = st.recipe_scale_servings != null;
+    if (has_factor and has_servings) return error.ConflictingFlags;
+    if (!has_factor and !has_servings) return error.MissingValue;
+    if (has_factor) _ = recipe_scale.parseFactor(st.recipe_scale_factor.?) catch return error.InvalidValue;
+    if (has_servings) _ = recipe_scale.parseServingsTarget(st.recipe_scale_servings.?) catch return error.InvalidValue;
+    // The view owns stdout. Projection selectors, watch/HTML, analysis,
+    // and `--timings` would either execute another path or corrupt the
+    // JSON stream.
+    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
+        st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs or st.saw_profile)
+    {
+        return error.ConflictingFlags;
+    }
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = false,
+        .command = .recipe_scale,
+        .recipe_scale_id = st.recipe_scale_id,
+        .recipe_scale_factor = st.recipe_scale_factor,
+        .recipe_scale_servings = st.recipe_scale_servings,
+        .recipe_scale_out = st.recipe_scale_out,
+        .mode = .html,
+        .input_format = st.inputFormat(),
+        .input_dir = st.input_dir,
+        .out_dir = null,
+        .html_dir = null,
+        .targets = st.targets,
+    };
+}
+
+fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
+    // The `standard-site` family is the one-shot network family: publish,
+    // login, sessions, and logout. Compiler modes, targets, and projection
+    // selectors have no meaning here, and `--timings` must not corrupt the
+    // evidence stream on stdout. `publish` requires a profile and forbids
+    // `--did`; `login`/`logout`/`smoke` require `--did` or `--handle`;
+    // `sessions` forbids both.
+    if (st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or
+        st.wantsSitemap() or st.wantsRag() or st.saw_no_rag or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
+        st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
+        st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_rag_dir or st.saw_scope or st.saw_split_size or st.saw_bundles_only or st.saw_complete or
+        st.saw_incremental or st.saw_jobs or st.saw_llms_path or st.saw_rss_path or st.saw_sitemap_path or st.saw_context_dir)
+    {
+        return error.ConflictingStandardSiteFlags;
+    }
+    // Smoke-only and verify-only flags have no meaning on the other
+    // subcommands; reject them rather than silently ignoring them.
+    const saw_smoke_only = st.saw_smoke_namespace or st.saw_smoke_surface_url or st.saw_smoke_indexer_origin;
+    switch (st.standard_site_command) {
+        .publish => {
+            if (st.profile_path == null) return error.MissingStandardSiteProfile;
+            if (st.saw_session_did or st.saw_session_handle or st.saw_app_password or saw_smoke_only or st.saw_verify_dist) return error.ConflictingStandardSiteFlags;
+        },
+        .plan => {
+            if (st.profile_path == null) return error.MissingStandardSiteProfile;
+            if (st.saw_session_did or st.saw_session_handle or st.saw_app_password or saw_smoke_only or st.saw_verify_dist or st.saw_plan_path or st.publish_prune or st.saw_source_commit) return error.ConflictingStandardSiteFlags;
+        },
+        .records => {
+            if (st.profile_path == null) return error.MissingStandardSiteProfile;
+            if (st.saw_session_did or st.saw_session_handle or st.saw_app_password or saw_smoke_only or st.saw_verify_dist or st.saw_plan_path or st.publish_prune or st.saw_source_commit) return error.ConflictingStandardSiteFlags;
+        },
+        .verify => {
+            if (st.profile_path == null) return error.MissingStandardSiteProfile;
+            if (st.saw_session_did or st.saw_session_handle or st.saw_app_password or saw_smoke_only or st.saw_plan_path or st.publish_prune or st.saw_source_commit) return error.ConflictingStandardSiteFlags;
+        },
+        .login => {
+            if (st.profile_path != null or st.saw_plan_path or st.publish_prune or st.saw_source_commit or st.saw_out or saw_smoke_only or st.saw_verify_dist) return error.ConflictingStandardSiteFlags;
+            if (st.app_password) {
+                // App-password login takes exactly one identity: a DID or
+                // a handle (resolved to a DID).
+                if (st.session_did == null and st.session_handle == null) return error.MissingStandardSiteIdentity;
+                if (st.session_did != null and st.session_handle != null) return error.ConflictingStandardSiteFlags;
+            } else {
+                if (st.session_did == null) return error.MissingStandardSiteIdentity;
+                if (st.session_handle != null) return error.ConflictingStandardSiteFlags;
+            }
+        },
+        .logout => {
+            if (st.session_did == null and st.session_handle == null) return error.MissingStandardSiteIdentity;
+            if (st.session_did != null and st.session_handle != null) return error.ConflictingStandardSiteFlags;
+            if (st.app_password or st.profile_path != null or st.saw_plan_path or st.publish_prune or st.saw_source_commit or st.saw_out or saw_smoke_only or st.saw_verify_dist) return error.ConflictingStandardSiteFlags;
+        },
+        .sessions => {
+            if (st.saw_session_did or st.saw_session_handle or st.saw_app_password or st.profile_path != null or st.saw_plan_path or st.publish_prune or st.saw_source_commit or st.saw_out or saw_smoke_only or st.saw_verify_dist) return error.ConflictingStandardSiteFlags;
+        },
+        .smoke => {
+            if (st.session_did == null and st.session_handle == null) return error.MissingStandardSiteIdentity;
+            if (st.session_did != null and st.session_handle != null) return error.ConflictingStandardSiteFlags;
+            if (st.saw_app_password or st.profile_path != null or st.saw_plan_path or st.publish_prune or st.saw_source_commit or st.saw_verify_dist) return error.ConflictingStandardSiteFlags;
+        },
+    }
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = false,
+        .command = .standard_site,
+        .standard_site_command = st.standard_site_command,
+        .standard_site_publish = st.standard_site_command == .publish,
+        .plan_path = st.plan_path,
+        .publish_out = if (st.saw_out) st.out_dir else null,
+        .plan_out = if (st.saw_out) st.out_dir else null,
+        .records_out = if (st.saw_out) st.out_dir else null,
+        .verify_out = if (st.saw_out) st.out_dir else null,
+        .verify_dist = st.verify_dist orelse "dist",
+        .publish_prune = st.publish_prune,
+        .source_commit = st.source_commit,
+        .session_did = st.session_did,
+        .session_handle = st.session_handle,
+        .app_password = st.app_password,
+        .session_root = st.session_root,
+        .smoke_namespace = st.smoke_namespace,
+        .smoke_surface_url = st.smoke_surface_url,
+        .smoke_indexer_origin = st.smoke_indexer_origin,
+        .smoke_out = if (st.saw_out) st.out_dir else null,
+        .profile_path = st.profile_path,
+        .mode = .html,
+        .input_format = identity.InputFormat.markdown,
+        .input_dir = st.input_dir,
+        .out_dir = null,
+        .html_dir = null,
+        .targets = st.targets,
+    };
+}
+
+/// Command-shape conflicts for the compiler-facing commands that share the
+/// mode-selection tail (`build`, `validate`, `check`, `impact`, `watch`).
+/// Per-family validation lives with each command's builder above.
+fn validateBuildConflicts(st: *const ParseState) ParseError!void {
     // `--profile` on the HTML build is the Standard.site verification-emit
     // opt-in (#533) and the Nostr `nostr:naddr` alternate-link emit (#571).
     // Other modes already have their own profile commands (`plan`,
     // `standard-site *`, `nostr plan`) or do not emit surfaces.
-    if (saw_profile) {
-        if (command == .watch or saw_watch or command == .validate or
-            command == .check or command == .impact or
-            wants_rag or wants_ir or wants_context or wants_llms or wants_rss)
+    if (st.saw_profile) {
+        if (st.command == .watch or st.saw_watch or st.command == .validate or
+            st.command == .check or st.command == .impact or
+            st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss())
         {
             return error.ConflictingFlags;
         }
     }
-    if (saw_fail_on_unreferenced and command != .check) return error.ConflictingFlags;
+    if (st.saw_fail_on_unreferenced and st.command != .check) return error.ConflictingFlags;
 
-    if (command == .validate) {
+    if (st.command == .validate) {
         // Validation is the no-publication form of the selected HTML source /
         // target compiler path. Export selectors, output-bearing analysis,
         // cache behavior, and rendering worker controls would either
         // select another projection or imply filesystem state.
-        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or
-            saw_rss_title or saw_rss_description or saw_rss_limit or saw_scope or
-            saw_split_size or saw_bundles_only or saw_incremental or saw_jobs or
-            saw_format)
+        if (st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or
+            st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_scope or
+            st.saw_split_size or st.saw_bundles_only or st.saw_incremental or st.saw_jobs or
+            st.saw_format)
         {
             return error.ConflictingFlags;
         }
@@ -1532,132 +1729,147 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // only the optional `--report` file and the `--watch-json` event stream,
     // so explicit output/selection flags that imply filesystem state are usage
     // errors (exit 2) instead of silently selecting nothing.
-    if (command == .validate and saw_watch and
-        (saw_html_dir or has_explicit_targets or saw_serve or serve_port != null))
+    if (st.command == .validate and st.saw_watch and
+        (st.saw_html_dir or st.hasExplicitTargets() or st.saw_serve or st.serve_port != null))
     {
         return error.ConflictingFlags;
     }
 
-    if (command == .check or command == .impact) {
-        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_target_profiles or has_layout_rules) {
+    if (st.command == .check or st.command == .impact) {
+        if (st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.wantsSitemap() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.explicitHtml() or st.saw_jobs or st.saw_watch or st.saw_incremental or st.saw_theme or st.saw_html_layout or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules()) {
             return error.ConflictingFlags;
         }
-    } else if (command == .build and saw_format) {
+    } else if (st.command == .build and st.saw_format) {
         return error.ConflictingFlags;
-    } else if (command == .watch and (saw_format or saw_report)) {
+    } else if (st.command == .watch and (st.saw_format or st.saw_report)) {
         return error.ConflictingFlags;
     }
 
     // The preview server is a watch-mode surface (`boris watch --serve`).
-    if ((saw_serve or serve_port != null) and !saw_watch) return error.ConflictingFlags;
+    if ((st.saw_serve or st.serve_port != null) and !st.saw_watch) return error.ConflictingFlags;
 
     // `--watch-json` is the watch daemon's machine-readable stderr stream; on
     // any other command it would silently produce an empty contract.
-    if (saw_watch_json and !saw_watch) return error.ConflictingFlags;
+    if (st.saw_watch_json and !st.saw_watch) return error.ConflictingFlags;
 
-    // --- conflict matrix ---------------------------------------------------
-    if (saw_rag and saw_no_rag) return error.ConflictingFlags;
-    if (saw_no_rag and saw_rag_dir) return error.ConflictingFlags;
+    try validateProjectionConflicts(st);
+}
+
+/// The cross-projection conflict matrix: at most one output projection may
+/// be selected, and each projection's companion options must stay with it.
+fn validateProjectionConflicts(st: *const ParseState) ParseError!void {
+    const wants_rag = st.wantsRag();
+    const wants_context = st.wantsContext();
+    const wants_ir = st.wantsIr();
+    const wants_llms = st.wantsLlms();
+    const wants_rss = st.wantsRss();
+    const wants_sitemap = st.wantsSitemap();
+    const explicit_html = st.explicitHtml();
+    const saw_pages_location = st.sawPagesLocation();
+
+    if (st.saw_rag and st.saw_no_rag) return error.ConflictingFlags;
+    if (st.saw_no_rag and st.saw_rag_dir) return error.ConflictingFlags;
     // Explicit --out must never be combined with RAG-only selection.
-    if (saw_out and wants_rag) return error.ConflictingFlags;
+    if (st.saw_out and wants_rag) return error.ConflictingFlags;
     if (wants_context and (wants_rag or wants_ir)) return error.ConflictingFlags;
-    if ((saw_scope or saw_split_size) and !(wants_rag or wants_context)) return error.ConflictingFlags;
-    if (bundles_only and !wants_rag) return error.ConflictingFlags;
+    if ((st.saw_scope or st.saw_split_size) and !(wants_rag or wants_context)) return error.ConflictingFlags;
+    if (st.bundles_only and !wants_rag) return error.ConflictingFlags;
     // Complete-corpus RAG is RAG-only and owns the tree shape; the working
     // pack target and bundle-style flags belong to the default working mode.
     // A complete export is the entire validated corpus, so a scope projection
     // is a usage error rather than a silent partial export.
-    if (saw_complete and !wants_rag) return error.ConflictingFlags;
-    if (saw_complete and saw_scope) return error.ConflictingFlags;
-    if (saw_complete and (saw_split_size or saw_bundles_only)) return error.ConflictingFlags;
+    if (st.saw_complete and !wants_rag) return error.ConflictingFlags;
+    if (st.saw_complete and st.saw_scope) return error.ConflictingFlags;
+    if (st.saw_complete and (st.saw_split_size or st.saw_bundles_only)) return error.ConflictingFlags;
     if (wants_llms and (wants_rag or wants_ir or wants_context or wants_rss or explicit_html)) return error.ConflictingFlags;
     if (wants_rss and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
     if (saw_pages_location and (wants_rag or wants_ir or wants_context)) return error.ConflictingFlags;
-    if ((saw_rss_title or saw_rss_description or saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
-    if (saw_site_url and !(wants_rss or wants_sitemap)) return error.ConflictingFlags;
-    if (wants_rss and (site_url == null or rss_title == null or rss_description == null)) return error.RSSMetadataRequired;
-    if (wants_sitemap and site_url == null) return error.SitemapSiteUrlRequired;
+    if ((st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
+    if (st.saw_site_url and !(wants_rss or wants_sitemap)) return error.ConflictingFlags;
+    if (wants_rss and (st.site_url == null or st.rss_title == null or st.rss_description == null)) return error.RSSMetadataRequired;
+    if (wants_sitemap and st.site_url == null) return error.SitemapSiteUrlRequired;
     if (wants_sitemap and (wants_rag or wants_ir or wants_context or wants_llms or wants_rss)) return error.ConflictingFlags;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
-    if (explicit_html and (wants_rag or wants_context or saw_out)) {
+    if (explicit_html and (wants_rag or wants_context or st.saw_out)) {
         return error.ConflictingFlags;
     }
     // HTML-only options conflict with IR or RAG selection (default HTML is fine).
-    if ((saw_jobs or saw_watch or saw_incremental) and (wants_ir or wants_rag or wants_context or wants_rss)) {
+    if ((st.saw_jobs or st.saw_watch or st.saw_incremental) and (wants_ir or wants_rag or wants_context or wants_rss)) {
         return error.ConflictingFlags;
     }
     // Target conflict rules
-    if (has_explicit_targets and saw_html_dir) return error.ConflictingFlags;
-    if (wants_sitemap and targets.items.len > 1) return error.ConflictingFlags;
-    // --target-layout / --layout-rule attach to a named --target, or to the
-    // synthetic "default" target on bare HTML / --html / --html-dir. Unknown
-    // target names are rejected after default synthesis (InvalidValue).
+    if (st.hasExplicitTargets() and st.saw_html_dir) return error.ConflictingFlags;
+    if (wants_sitemap and st.targets.items.len > 1) return error.ConflictingFlags;
+}
 
-    // Mode selection:
-    // 1. Explicit HTML flags / --target / --target-layout / --layout-rule → HTML
-    // 2. --rag / --rag-dir → RAG-only
-    // 3. --out / --no-rag → IR
-    // 4. Default (no mode flags) → HTML site under dist/
-    const mode: Mode = if (explicit_html)
+/// Mode selection:
+/// 1. Explicit HTML flags / --target / --target-layout / --layout-rule → HTML
+/// 2. --rag / --rag-dir → RAG-only
+/// 3. --out / --no-rag → IR
+/// 4. Default (no mode flags) → HTML site under dist/
+fn resolveMode(st: *const ParseState) Mode {
+    return if (st.explicitHtml())
         .html
-    else if (wants_rag)
+    else if (st.wantsRag())
         .rag
-    else if (wants_context)
+    else if (st.wantsContext())
         .context
-    else if (wants_llms)
+    else if (st.wantsLlms())
         .llms
-    else if (wants_rss)
+    else if (st.wantsRss())
         .rss
-    else if (wants_ir)
+    else if (st.wantsIr())
         .ir
     else
         .html;
+}
 
-    // The HTML-path diagnostics report (`--report`) belongs to the HTML mode.
-    // `check`/`impact` reuse the same flag name for their analysis report (see
-    // `analysis_report`), so only non-HTML build/watch runs must refuse it.
-    if (mode != .html and (command == .build or command == .watch) and saw_report) {
-        return error.ConflictingFlags;
-    }
-
-    if (saw_pages_location and !(saw_pages_base_url and saw_pages_origin and saw_pages_base_path)) {
+/// Validate and normalize the GitHub Pages publication identity, then the
+/// reusable site URL. Both are parse-time shape checks; neither touches the
+/// filesystem.
+fn finalizePublicationIdentity(gpa: std.mem.Allocator, st: *ParseState) ParseError!void {
+    if (st.sawPagesLocation() and !(st.saw_pages_base_url and st.saw_pages_origin and st.saw_pages_base_path)) {
         return error.PagesLocationIncomplete;
     }
-    if (saw_pages_location) {
-        publication_location = github_pages.parse(
+    if (st.sawPagesLocation()) {
+        st.publication_location = github_pages.parse(
             gpa,
-            pages_base_url.?,
-            pages_origin.?,
-            pages_base_path.?,
+            st.pages_base_url.?,
+            st.pages_origin.?,
+            st.pages_base_path.?,
         ) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => return error.InvalidValue,
         };
     }
 
-    if (site_url) |raw_url| {
+    if (st.site_url) |raw_url| {
         const normalized = site_url_mod.normalized(gpa, raw_url) catch |err| switch (err) {
             error.InvalidSiteUrl => return error.InvalidValue,
             error.OutOfMemory => return error.OutOfMemory,
         };
         gpa.free(normalized);
     }
+}
 
-    // Single-target HTML (bare CLI, --html, or --html-dir) maps to target "default".
-    // --target-layout / --layout-rule may attach to this synthetic target.
-    if (mode == .html and !has_explicit_targets) {
-        try targets.append(gpa, .{
+/// Single-target HTML (bare CLI, --html, or --html-dir) maps to target "default".
+/// --target-layout / --layout-rule may attach to this synthetic target.
+fn synthesizeDefaultTarget(gpa: std.mem.Allocator, st: *ParseState, mode: Mode) ParseError!void {
+    if (mode == .html and !st.hasExplicitTargets()) {
+        try st.targets.append(gpa, .{
             .name = "default",
-            .output_dir = if (saw_html_dir) html_dir else default_html_dir,
+            .output_dir = if (st.saw_html_dir) st.html_dir else default_html_dir,
             .layout_path = null,
         });
     }
+}
 
-    // Apply --target-layout NAME=PATH onto matching targets. Flag order relative
-    // to --target does not matter (layouts are collected first, applied here).
-    for (target_layouts.items) |tl| {
+/// Apply --target-layout NAME=PATH onto matching targets. Flag order relative
+/// to --target does not matter (layouts are collected first, applied here).
+fn applyTargetLayouts(st: *ParseState) ParseError!void {
+    for (st.target_layouts.items) |tl| {
         var found = false;
-        for (targets.items) |*t| {
+        for (st.targets.items) |*t| {
             if (std.mem.eql(u8, t.name, tl.name)) {
                 if (t.layout_path != null) return error.DuplicateFlag;
                 t.layout_path = tl.path;
@@ -1667,12 +1879,14 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
         if (!found) return error.InvalidValue;
     }
+}
 
-    // Apply --target-profile NAME=PROFILE onto matching targets (including the
-    // synthetic "default" target on bare HTML / --html / --html-dir).
-    for (target_profiles.items) |tp| {
+/// Apply --target-profile NAME=PROFILE onto matching targets (including the
+/// synthetic "default" target on bare HTML / --html / --html-dir).
+fn applyTargetProfiles(st: *ParseState) ParseError!void {
+    for (st.target_profiles.items) |tp| {
         var found = false;
-        for (targets.items) |*t| {
+        for (st.targets.items) |*t| {
             if (std.mem.eql(u8, t.name, tp.name)) {
                 if (t.html_profile != null) return error.DuplicateFlag;
                 t.html_profile = tp.profile;
@@ -1682,214 +1896,152 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
         if (!found) return error.InvalidValue;
     }
+}
 
-    // The effective profile for the synthetic "default" target, surfaced on
-    // Options for the single-target compile path (`main.runHtml`).
-    var default_profile: ?render.OutputProfile = null;
-    for (targets.items) |t| {
+/// The effective profile for the synthetic "default" target, surfaced on
+/// Options for the single-target compile path (`main.runHtml`).
+fn scanDefaultProfile(st: *const ParseState) ?render.OutputProfile {
+    for (st.targets.items) |t| {
         if (std.mem.eql(u8, t.name, "default")) {
-            default_profile = t.html_profile;
-            break;
+            return t.html_profile;
         }
     }
+    return null;
+}
 
-    // Attach --layout-rule TARGET SELECTOR PATH. Order relative to --target is
-    // independent; unknown targets and duplicate selectors fail as usage.
-    if (has_layout_rules) {
-        // Count rules per target for the 256 limit.
-        for (targets.items) |*t| {
-            var count: usize = 0;
-            for (pending_rules.items) |pr| {
-                if (std.mem.eql(u8, pr.target, t.name)) count += 1;
-            }
-            if (count > layout_select.max_rules_per_target) return error.InvalidValue;
-            if (count == 0) continue;
-
-            var rules = try gpa.alloc(layout_select.LayoutRule, count);
-            errdefer gpa.free(rules);
-            var filled: usize = 0;
-            for (pending_rules.items) |pr| {
-                if (!std.mem.eql(u8, pr.target, t.name)) continue;
-                const parsed = layout_select.parseSelector(pr.selector) catch return error.InvalidValue;
-                rules[filled] = .{
-                    .kind = parsed.kind,
-                    .value = parsed.value,
-                    .layout_path = pr.path,
-                };
-                filled += 1;
-            }
-            layout_select.rejectDuplicateSelectors(rules) catch return error.DuplicateFlag;
-            layout_select.sortRulesCanonical(rules);
-            t.layout_rules = rules;
+/// Attach --layout-rule TARGET SELECTOR PATH. Order relative to --target is
+/// independent; unknown targets and duplicate selectors fail as usage.
+fn attachLayoutRules(gpa: std.mem.Allocator, st: *ParseState) ParseError!void {
+    // Count rules per target for the 256 limit.
+    for (st.targets.items) |*t| {
+        var count: usize = 0;
+        for (st.pending_rules.items) |pr| {
+            if (std.mem.eql(u8, pr.target, t.name)) count += 1;
         }
-        // Unknown rule targets (no matching --target / default).
-        for (pending_rules.items) |pr| {
-            var found = false;
-            for (targets.items) |t| {
-                if (std.mem.eql(u8, t.name, pr.target)) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) return error.InvalidValue;
+        if (count > layout_select.max_rules_per_target) return error.InvalidValue;
+        if (count == 0) continue;
+
+        var rules = try gpa.alloc(layout_select.LayoutRule, count);
+        errdefer gpa.free(rules);
+        var filled: usize = 0;
+        for (st.pending_rules.items) |pr| {
+            if (!std.mem.eql(u8, pr.target, t.name)) continue;
+            const parsed = layout_select.parseSelector(pr.selector) catch return error.InvalidValue;
+            rules[filled] = .{
+                .kind = parsed.kind,
+                .value = parsed.value,
+                .layout_path = pr.path,
+            };
+            filled += 1;
         }
+        layout_select.rejectDuplicateSelectors(rules) catch return error.DuplicateFlag;
+        layout_select.sortRulesCanonical(rules);
+        t.layout_rules = rules;
     }
-
-    // Canonical target order: equivalent --target argv permutations produce the
-    // same Options.targets sequence (sorted by name). Execution/diagnostics use
-    // the same order via validateTargets.
-    if (targets.items.len > 1) {
-        target_mod.sortTargetSpecsByName(targets.items);
+    // Unknown rule targets (no matching --target / default).
+    for (st.pending_rules.items) |pr| {
+        var found = false;
+        for (st.targets.items) |t| {
+            if (std.mem.eql(u8, t.name, pr.target)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return error.InvalidValue;
     }
+}
 
-    return switch (mode) {
-        .ir => .{
-            .help = false,
-            .quiet = quiet,
-            .timings = saw_timings,
-            .mode = .ir,
-            .input_dir = input_dir,
-            .out_dir = out_dir,
-            .rag_dir = null,
-            .scope = null,
-            .split_size = null,
-            .bundles_only = false,
-            .llms_path = null,
-            .html_dir = null,
-            .targets = targets,
-            .command = command,
-            .impact_id = impact_id,
-            .analysis_format = analysis_format,
-            .analysis_report = analysis_report,
-            .input_format = input_format,
-        },
-        .rag => .{
-            .help = false,
-            .quiet = quiet,
-            .timings = saw_timings,
-            .mode = .rag,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .rag_dir = rag_dir,
-            .context_dir = null,
-            .scope = scope,
-            .split_size = split_size,
-            .bundles_only = bundles_only,
-            .complete = complete,
-            .llms_path = null,
-            .html_dir = null,
-            .targets = targets,
-            .input_format = input_format,
-        },
-        .context => .{
-            .help = false,
-            .quiet = quiet,
-            .timings = saw_timings,
-            .mode = .context,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .rag_dir = null,
-            .context_dir = context_dir,
-            .scope = scope,
-            .split_size = split_size,
-            .bundles_only = false,
-            .llms_path = null,
-            .html_dir = null,
-            .targets = targets,
-            .command = command,
-            .impact_id = impact_id,
-            .analysis_format = analysis_format,
-            .analysis_report = analysis_report,
-            .input_format = input_format,
-        },
-        .llms => .{
-            .help = false,
-            .quiet = quiet,
-            .timings = saw_timings,
-            .mode = .llms,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .rag_dir = null,
-            .context_dir = null,
-            .scope = null,
-            .split_size = null,
-            .bundles_only = false,
-            .llms_path = llms_path,
-            .publication_location = publication_location,
-            .allow_markdown_links = allow_markdown_links,
-            .targets = targets,
-            .command = command,
-            .impact_id = impact_id,
-            .analysis_format = analysis_format,
-            .analysis_report = analysis_report,
-            .input_format = input_format,
-        },
-        .rss => .{
-            .help = false,
-            .quiet = quiet,
-            .timings = saw_timings,
-            .mode = .rss,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .rag_dir = null,
-            .context_dir = null,
-            .scope = null,
-            .split_size = null,
-            .bundles_only = false,
-            .llms_path = null,
-            .rss_path = rss_path,
-            .site_url = site_url,
-            .publication_location = publication_location,
-            .allow_markdown_links = allow_markdown_links,
-            .rss_title = rss_title,
-            .rss_description = rss_description,
-            .rss_limit = rss_limit,
-            .html_dir = null,
-            .targets = targets,
-            .command = command,
-            .impact_id = impact_id,
-            .analysis_format = analysis_format,
-            .analysis_report = analysis_report,
-            .input_format = input_format,
-        },
-        .html => .{
-            .help = false,
-            .quiet = quiet,
-            .timings = saw_timings,
-            .mode = .html,
-            .input_dir = input_dir,
-            .out_dir = null,
-            .rag_dir = null,
-            .context_dir = null,
-            .scope = null,
-            .split_size = null,
-            .bundles_only = false,
-            .llms_path = null,
-            .sitemap_path = if (wants_sitemap) sitemap_path else null,
-            .site_url = site_url,
-            .publication_location = publication_location,
-            .allow_markdown_links = allow_markdown_links,
-            .html_dir = if (has_explicit_targets) null else html_dir,
-            .html_layout = html_layout,
-            .owned_html_layout = owned_html_layout,
-            .incremental = saw_incremental or saw_watch,
-            .jobs = jobs,
-            .watch = saw_watch,
-            .watch_json = saw_watch_json,
-            .serve = saw_serve or serve_port != null,
-            .serve_port = serve_port,
-            .html_profile = default_profile,
-            .profile_path = profile_path,
-            .targets = targets,
-            .command = command,
-            .impact_id = impact_id,
-            .analysis_format = analysis_format,
-            .analysis_report = if (command == .check or command == .impact) analysis_report else null,
-            .report_path = if (command == .check or command == .impact) null else analysis_report,
-            .fail_on_unreferenced = fail_on_unreferenced,
-            .input_format = input_format,
-        },
+/// Construct the final `Options` for the resolved build mode. Each arm sets
+/// exactly the fields the historical hand-written literal carried; every
+/// other field stays at its `Options` default, byte-for-byte equivalent to
+/// the previous per-mode struct literals.
+fn buildOptionsForMode(
+    st: *ParseState,
+    mode: Mode,
+    default_profile: ?render.OutputProfile,
+    had_explicit_targets: bool,
+) Options {
+    var o = Options{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = st.saw_timings,
+        .mode = mode,
+        .input_dir = st.input_dir,
+        .input_format = st.inputFormat(),
+        .targets = st.targets,
     };
+    switch (mode) {
+        .ir => {
+            o.command = st.command;
+            o.impact_id = st.impact_id;
+            o.analysis_format = st.analysis_format;
+            o.analysis_report = st.analysis_report;
+            o.out_dir = st.out_dir;
+        },
+        .rag => {
+            o.rag_dir = st.rag_dir;
+            o.scope = st.scope;
+            o.split_size = st.split_size;
+            o.bundles_only = st.bundles_only;
+            o.complete = st.complete;
+        },
+        .context => {
+            o.command = st.command;
+            o.impact_id = st.impact_id;
+            o.analysis_format = st.analysis_format;
+            o.analysis_report = st.analysis_report;
+            o.context_dir = st.context_dir;
+            o.scope = st.scope;
+            o.split_size = st.split_size;
+        },
+        .llms => {
+            o.command = st.command;
+            o.impact_id = st.impact_id;
+            o.analysis_format = st.analysis_format;
+            o.analysis_report = st.analysis_report;
+            o.llms_path = st.llms_path;
+            o.publication_location = st.publication_location;
+            o.allow_markdown_links = st.allow_markdown_links;
+        },
+        .rss => {
+            o.command = st.command;
+            o.impact_id = st.impact_id;
+            o.analysis_format = st.analysis_format;
+            o.analysis_report = st.analysis_report;
+            o.rss_path = st.rss_path;
+            o.site_url = st.site_url;
+            o.publication_location = st.publication_location;
+            o.allow_markdown_links = st.allow_markdown_links;
+            o.rss_title = st.rss_title;
+            o.rss_description = st.rss_description;
+            o.rss_limit = st.rss_limit;
+        },
+        .html => {
+            const analysis_command = st.command == .check or st.command == .impact;
+            o.command = st.command;
+            o.impact_id = st.impact_id;
+            o.analysis_format = st.analysis_format;
+            o.analysis_report = if (analysis_command) st.analysis_report else null;
+            o.report_path = if (analysis_command) null else st.analysis_report;
+            o.fail_on_unreferenced = st.fail_on_unreferenced;
+            o.sitemap_path = if (st.wantsSitemap()) st.sitemap_path else null;
+            o.site_url = st.site_url;
+            o.publication_location = st.publication_location;
+            o.allow_markdown_links = st.allow_markdown_links;
+            o.html_dir = if (had_explicit_targets) null else st.html_dir;
+            o.html_layout = st.html_layout;
+            o.owned_html_layout = st.owned_html_layout;
+            o.incremental = st.saw_incremental or st.saw_watch;
+            o.jobs = st.jobs;
+            o.watch = st.saw_watch;
+            o.watch_json = st.saw_watch_json;
+            o.serve = st.saw_serve or st.serve_port != null;
+            o.serve_port = st.serve_port;
+            o.html_profile = default_profile;
+            o.profile_path = st.profile_path;
+        },
+    }
+    return o;
 }
 
 /// Read a value for `--name` or `--name=value`. Advances `i` when the value is
@@ -2256,6 +2408,32 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
     }
 }
 
+/// Flags `findBadArg` never blames: boolean switches whose presence must not
+/// absorb a failure's attribution (e.g. `--rss` plus an unknown flag, or RSS
+/// mode missing its channel metadata). Value-taking flags are intentionally
+/// NOT skipped: a missing or empty value reports the flag itself, and any
+/// other token (unknown flag, stray positional) reports itself unchanged.
+const never_blamed_flags = [_][]const u8{
+    "--quiet",
+    "--timings",
+    "--rag",
+    "--no-rag",
+    "--html",
+    "--textile",
+    "--cooklang",
+    "--key-stdin",
+    "--incremental",
+    "--watch",
+    "--fail-on-unreferenced",
+    "--context",
+    "--bundles-only",
+    "--complete",
+    "--llms",
+    "--rss",
+    "--sitemap",
+    "--allow-markdown-links",
+};
+
 /// Find a likely "bad" argv token for error messages (best-effort).
 pub fn findBadArg(args: []const []const u8) ?[]const u8 {
     var i: usize = if (args.len > 0) 1 else 0;
@@ -2263,110 +2441,12 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         const a = args[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
         if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) continue;
-        // Boolean mode/switch flags: never the bad arg — a failure elsewhere
-        // must not be misattributed to them (e.g. `--rss` plus an unknown
-        // flag, or RSS mode missing its channel metadata).
-        if (std.mem.eql(u8, a, "--quiet") or
-            std.mem.eql(u8, a, "--timings") or
-            std.mem.eql(u8, a, "--rag") or
-            std.mem.eql(u8, a, "--no-rag") or
-            std.mem.eql(u8, a, "--html") or
-            std.mem.eql(u8, a, "--textile") or
-            std.mem.eql(u8, a, "--cooklang") or
-            std.mem.eql(u8, a, "--key-stdin") or
-            std.mem.eql(u8, a, "--incremental") or
-            std.mem.eql(u8, a, "--watch") or
-            std.mem.eql(u8, a, "--fail-on-unreferenced") or
-            std.mem.eql(u8, a, "--context") or
-            std.mem.eql(u8, a, "--bundles-only") or
-            std.mem.eql(u8, a, "--complete") or
-            std.mem.eql(u8, a, "--llms") or
-            std.mem.eql(u8, a, "--rss") or
-            std.mem.eql(u8, a, "--sitemap") or
-            std.mem.eql(u8, a, "--allow-markdown-links"))
-        {
-            continue;
-        }
-        if (std.mem.eql(u8, a, "--input") or
-            std.mem.eql(u8, a, "--profile") or
-            std.mem.eql(u8, a, "--plan") or
-            std.mem.eql(u8, a, "--bundle") or
-            std.mem.eql(u8, a, "--prior") or
-            std.mem.eql(u8, a, "--created-at") or
-            std.mem.eql(u8, a, "--id") or
-            std.mem.eql(u8, a, "--factor") or
-            std.mem.eql(u8, a, "--servings") or
-            std.mem.eql(u8, a, "--out") or
-            std.mem.eql(u8, a, "--rag-dir") or
-            std.mem.eql(u8, a, "--context-dir") or
-            std.mem.eql(u8, a, "--scope") or
-            std.mem.eql(u8, a, "--split-size") or
-            std.mem.eql(u8, a, "--llms-path") or
-            std.mem.eql(u8, a, "--rss-path") or
-            std.mem.eql(u8, a, "--rss-title") or
-            std.mem.eql(u8, a, "--rss-description") or
-            std.mem.eql(u8, a, "--rss-limit") or
-            std.mem.eql(u8, a, "--site-url") or
-            std.mem.eql(u8, a, "--sitemap-path") or
-            std.mem.eql(u8, a, "--pages-base-url") or
-            std.mem.eql(u8, a, "--pages-origin") or
-            std.mem.eql(u8, a, "--pages-base-path") or
-            std.mem.eql(u8, a, "--format") or
-            std.mem.eql(u8, a, "--report") or
-            std.mem.eql(u8, a, "--theme") or
-            std.mem.eql(u8, a, "--html-dir") or
-            std.mem.eql(u8, a, "--html-layout") or
-            std.mem.eql(u8, a, "--target") or
-            std.mem.eql(u8, a, "--target-layout") or
-            std.mem.eql(u8, a, "--layout-rule") or
-            std.mem.eql(u8, a, "--jobs") or
-            std.mem.eql(u8, a, "-j"))
-        {
-            // Value may be missing or empty — report the flag name.
-            return a;
-        }
-        if (std.mem.startsWith(u8, a, "--input=") or
-            std.mem.startsWith(u8, a, "--profile=") or
-            std.mem.startsWith(u8, a, "--plan=") or
-            std.mem.startsWith(u8, a, "--bundle=") or
-            std.mem.startsWith(u8, a, "--prior=") or
-            std.mem.startsWith(u8, a, "--created-at=") or
-            std.mem.startsWith(u8, a, "--id=") or
-            std.mem.startsWith(u8, a, "--factor=") or
-            std.mem.startsWith(u8, a, "--servings=") or
-            std.mem.startsWith(u8, a, "--out=") or
-            std.mem.startsWith(u8, a, "--rag-dir=") or
-            std.mem.startsWith(u8, a, "--context-dir=") or
-            std.mem.startsWith(u8, a, "--scope=") or
-            std.mem.startsWith(u8, a, "--split-size=") or
-            std.mem.startsWith(u8, a, "--llms-path=") or
-            std.mem.startsWith(u8, a, "--rss-path=") or
-            std.mem.startsWith(u8, a, "--rss-title=") or
-            std.mem.startsWith(u8, a, "--rss-description=") or
-            std.mem.startsWith(u8, a, "--rss-limit=") or
-            std.mem.startsWith(u8, a, "--site-url=") or
-            std.mem.startsWith(u8, a, "--sitemap-path=") or
-            std.mem.startsWith(u8, a, "--pages-base-url=") or
-            std.mem.startsWith(u8, a, "--pages-origin=") or
-            std.mem.startsWith(u8, a, "--pages-base-path=") or
-            std.mem.startsWith(u8, a, "--format=") or
-            std.mem.startsWith(u8, a, "--report=") or
-            std.mem.startsWith(u8, a, "--theme=") or
-            std.mem.startsWith(u8, a, "--html-dir=") or
-            std.mem.startsWith(u8, a, "--html-layout=") or
-            std.mem.startsWith(u8, a, "--target=") or
-            std.mem.startsWith(u8, a, "--target-layout=") or
-            std.mem.startsWith(u8, a, "--layout-rule=") or
-            std.mem.startsWith(u8, a, "--jobs=") or
-            std.mem.startsWith(u8, a, "-j="))
-        {
-            return a;
-        }
-        return a;
+        for (never_blamed_flags) |f| {
+            if (std.mem.eql(u8, a, f)) break;
+        } else return a;
     }
     return null;
 }
-
 /// Dispatch parsed options through a small injectable runner.
 ///
 /// - Version: calls `runner.printVersion()` and returns success; never calls `run`.
