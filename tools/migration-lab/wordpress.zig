@@ -1512,8 +1512,7 @@ fn extractMarkdownLinks(allocator: std.mem.Allocator, body: []const u8, post_id:
 fn appendQuotedFmScalar(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
     try buf.append(allocator, '"');
     for (value) |c| {
-        if (c == '"') try buf.appendSlice(allocator, "'")
-        else if (c >= 0x20 and c != 0x7f) try buf.append(allocator, c);
+        if (c == '"') try buf.appendSlice(allocator, "'") else if (c >= 0x20 and c != 0x7f) try buf.append(allocator, c);
     }
     try buf.append(allocator, '"');
 }

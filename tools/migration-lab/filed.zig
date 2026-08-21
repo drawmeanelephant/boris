@@ -498,8 +498,7 @@ fn escapeFmValue(a: std.mem.Allocator, value: []const u8) ![]u8 {
     errdefer out.deinit(a);
     try out.append(a, '"');
     for (value) |c| {
-        if (c == '"') try out.appendSlice(a, "'")
-        else if (c >= 0x20 and c != 0x7f) try out.append(a, c);
+        if (c == '"') try out.appendSlice(a, "'") else if (c >= 0x20 and c != 0x7f) try out.append(a, c);
     }
     try out.append(a, '"');
     return try out.toOwnedSlice(a);
