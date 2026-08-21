@@ -14,6 +14,8 @@ const cache = @import("cache.zig");
 const json_out = @import("json_out.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
+const json_stream = @import("publication_json_stream.zig");
+const evidence_mod = @import("publication_evidence.zig");
 
 pub const output_path = artifact_inventory.touches_output_path;
 pub const report_format = "boris-publication-touches";
@@ -84,10 +86,7 @@ pub const Error = std.mem.Allocator.Error || error{
     TouchesWriteFailed,
 };
 
-pub const FileBinding = struct {
-    bytes: usize,
-    sha256: [64]u8,
-};
+pub const FileBinding = evidence_mod.FileBinding;
 
 /// Selector pair plus the committed evidence digest the checks report recorded
 /// for that pair. The digests are validated by recomputation over the
@@ -186,28 +185,15 @@ pub const ParsedClaims = struct {
 };
 
 fn jsonTokenText(token: std.json.Token) ?[]const u8 {
-    return switch (token) {
-        .string => |value| value,
-        .allocated_string => |value| value,
-        .number => |value| value,
-        .allocated_number => |value| value,
-        else => null,
-    };
+    return json_stream.jsonTokenText(token);
 }
 
 fn freeJsonToken(gpa: std.mem.Allocator, token: std.json.Token) void {
-    switch (token) {
-        .allocated_string => |value| gpa.free(value),
-        .allocated_number => |value| gpa.free(value),
-        else => {},
-    }
+    return json_stream.freeJsonToken(gpa, token);
 }
 
 fn nextJsonToken(reader: *std.json.Reader) Error!std.json.Token {
-    return reader.next() catch |err| switch (err) {
-        error.OutOfMemory => error.OutOfMemory,
-        else => error.InvalidClaimsReport,
-    };
+    return json_stream.nextJsonToken(Error, reader, error.InvalidClaimsReport);
 }
 
 fn nextJsonAllocToken(
@@ -215,176 +201,63 @@ fn nextJsonAllocToken(
     reader: *std.json.Reader,
     max_value_len: usize,
 ) Error!std.json.Token {
-    return reader.nextAllocMax(gpa, .alloc_if_needed, max_value_len) catch |err| switch (err) {
-        error.OutOfMemory => error.OutOfMemory,
-        else => error.InvalidClaimsReport,
-    };
+    return json_stream.nextJsonAllocToken(Error, gpa, reader, max_value_len, error.InvalidClaimsReport);
 }
 
 fn readJsonString(gpa: std.mem.Allocator, reader: *std.json.Reader) Error![]u8 {
-    const token = reader.nextAllocMax(gpa, .alloc_always, 4 * 1024 * 1024) catch |err| {
-        return switch (err) {
-            error.OutOfMemory => error.OutOfMemory,
-            else => error.InvalidClaimsReport,
-        };
-    };
-    switch (token) {
-        .allocated_string => |value| return value,
-        .string => |value| return gpa.dupe(u8, value),
-        else => {
-            freeJsonToken(gpa, token);
-            return error.InvalidClaimsReport;
-        },
-    }
+    return json_stream.readJsonString(Error, gpa, reader, error.InvalidClaimsReport);
 }
 
 fn readJsonInteger(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!u64 {
-    const token = try nextJsonAllocToken(gpa, reader, 64);
-    defer freeJsonToken(gpa, token);
-    const value = jsonTokenText(token) orelse return error.InvalidClaimsReport;
-    return std.fmt.parseInt(u64, value, 10) catch return error.InvalidClaimsReport;
+    return json_stream.readJsonInteger(Error, gpa, reader, error.InvalidClaimsReport);
 }
 
 fn readJsonBool(reader: *std.json.Reader) Error!bool {
-    return switch (try nextJsonToken(reader)) {
-        .true => true,
-        .false => false,
-        else => error.InvalidClaimsReport,
-    };
+    return json_stream.readJsonBool(Error, reader, error.InvalidClaimsReport);
 }
 
 fn validDigest(value: []const u8) bool {
-    if (value.len != 64) return false;
-    for (value) |byte| {
-        if (!((byte >= '0' and byte <= '9') or (byte >= 'a' and byte <= 'f'))) return false;
-    }
-    return true;
+    return json_stream.validDigest(value);
 }
 
 fn readJsonDigest(gpa: std.mem.Allocator, reader: *std.json.Reader) Error![64]u8 {
-    const value = try readJsonString(gpa, reader);
-    defer gpa.free(value);
-    if (!validDigest(value)) return error.InvalidClaimsReport;
-    var digest: [64]u8 = undefined;
-    @memcpy(&digest, value);
-    return digest;
+    return json_stream.readJsonDigest(Error, gpa, reader, error.InvalidClaimsReport);
 }
 
 fn readStringArray(gpa: std.mem.Allocator, reader: *std.json.Reader) Error![][]const u8 {
-    switch (try nextJsonToken(reader)) {
-        .array_begin => {},
-        else => return error.InvalidClaimsReport,
-    }
-    var values: std.ArrayList([]const u8) = .empty;
-    errdefer {
-        for (values.items) |value| gpa.free(value);
-        values.deinit(gpa);
-    }
-    while (true) {
-        const token = try nextJsonToken(reader);
-        defer freeJsonToken(gpa, token);
-        switch (token) {
-            .array_end => break,
-            .string, .allocated_string => {},
-            else => return error.InvalidClaimsReport,
-        }
-        const value = jsonTokenText(token) orelse return error.InvalidClaimsReport;
-        try values.append(gpa, try gpa.dupe(u8, value));
-    }
-    return values.toOwnedSlice(gpa);
+    return json_stream.readStringArray(Error, gpa, reader, error.InvalidClaimsReport);
 }
 
 fn containsString(values: []const []const u8, wanted: []const u8) bool {
-    for (values) |value| if (std.mem.eql(u8, value, wanted)) return true;
-    return false;
+    return json_stream.containsString(values, wanted);
 }
 
 fn knownStatus(value: []const u8) bool {
-    return containsString(&.{ "committed", "omitted-by-plan", "not-applicable" }, value);
+    return json_stream.knownStatus(value);
 }
 
 fn knownKind(value: []const u8) bool {
-    return containsString(
-        &.{ "html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms" },
-        value,
-    );
+    return json_stream.knownKind(value);
 }
 
 fn knownCheckStatus(value: []const u8) bool {
-    return containsString(&.{ "passed", "failed", "incomplete", "not-applicable" }, value);
+    return json_stream.knownCheckStatus(value);
 }
 
 fn knownCoverage(value: []const u8) bool {
-    return containsString(&.{ "complete", "incomplete", "not-applicable" }, value);
+    return json_stream.knownCoverage(value);
 }
 
 fn knownFindingCode(value: []const u8) bool {
-    return containsString(
-        &.{
-            "ARTIFACT_MISSING",         "ARTIFACT_SIZE_MISMATCH",  "ARTIFACT_DIGEST_MISMATCH",
-            "HTML_PAGE_MISSING",        "HTML_MALFORMED",          "HTML_URL_MALFORMED",
-            "HTML_LOCAL_ROUTE_MISSING", "HTML_LOCAL_ROUTE_ESCAPE", "HTML_FRAGMENT_MISSING",
-            "HTML_DUPLICATE_ID",        "SEARCH_MISSING",          "SEARCH_MALFORMED",
-            "SEARCH_DOCUMENT_MISSING",  "SEARCH_DOCUMENT_STALE",   "SEARCH_CONTENT_MISMATCH",
-        },
-        value,
-    );
+    return json_stream.knownFindingCode(value);
 }
 
 fn knownSeverity(value: []const u8) bool {
-    return containsString(&.{ "error", "warning", "info" }, value);
+    return json_stream.knownSeverity(value);
 }
 
-/// Skip one complete JSON value starting at the reader's current position,
-/// leaving the reader positioned after the value's closing token.
 fn skipJsonValue(reader: *std.json.Reader) Error!void {
-    const first = try nextJsonToken(reader);
-    switch (first) {
-        .object_begin, .array_begin => {
-            var depth: usize = 1;
-            while (depth > 0) {
-                const token = try nextJsonToken(reader);
-                switch (token) {
-                    .object_begin, .array_begin => depth += 1,
-                    .object_end, .array_end => depth -= 1,
-                    .end_of_document => return error.InvalidClaimsReport,
-                    else => {},
-                }
-            }
-        },
-        // A bare string or number that straddles a streaming chunk boundary
-        // is surfaced as a sequence of partial tokens terminated by the
-        // completing `.string` / `.number` token (std/json Scanner.zig).
-        // Consume the whole sequence; otherwise the next key read would
-        // consume the remainder of the value as a key token and fail the
-        // report (#420). Inside an object/array skip the depth loop above is
-        // already boundary-safe because it keeps reading tokens.
-        .partial_string,
-        .partial_string_escaped_1,
-        .partial_string_escaped_2,
-        .partial_string_escaped_3,
-        .partial_string_escaped_4,
-        .partial_number,
-        => {
-            while (true) {
-                const token = try nextJsonToken(reader);
-                switch (token) {
-                    .partial_string,
-                    .partial_string_escaped_1,
-                    .partial_string_escaped_2,
-                    .partial_string_escaped_3,
-                    .partial_string_escaped_4,
-                    .partial_number,
-                    => {},
-                    .string, .number => break,
-                    .end_of_document => return error.InvalidClaimsReport,
-                    else => return error.InvalidClaimsReport,
-                }
-            }
-        },
-        .end_of_document => return error.InvalidClaimsReport,
-        else => {},
-    }
+    return json_stream.skipJsonValue(Error, reader, error.InvalidClaimsReport);
 }
 
 fn parseSubjectAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!ParsedSubject {
@@ -2665,49 +2538,7 @@ fn indexOfString(values: []const []const u8, wanted: []const u8) ?usize {
 /// streaming JSON parser. A path replaced after the open can never mix
 /// evidence versions, and the bytes counted and hashed are exactly the bytes
 /// parsed.
-const EvidenceInput = struct {
-    file: Io.File = undefined,
-    pass1_buffer: [64 * 1024]u8 = undefined,
-    pass1: Io.File.Reader = undefined,
-    digest: std.crypto.hash.sha2.Sha256 = std.crypto.hash.sha2.Sha256.init(.{}),
-    count: usize = 0,
-    pass2_buffer: [64 * 1024]u8 = undefined,
-    pass2: Io.File.Reader = undefined,
-
-    fn open(self: *EvidenceInput, io: Io, root: Io.Dir, path: []const u8, missing_error: Error) Error!void {
-        self.* = .{};
-        self.file = publication_checks.openFileNoFollow(io, root, path) catch
-            return missing_error;
-        self.pass1 = self.file.readerStreaming(io, &self.pass1_buffer);
-    }
-
-    fn hashPass(self: *EvidenceInput, fail_error: Error) Error!void {
-        var chunk: [64 * 1024]u8 = undefined;
-        while (true) {
-            const n = self.pass1.interface.readSliceShort(&chunk) catch
-                return fail_error;
-            if (n == 0) break;
-            self.digest.update(chunk[0..n]);
-            self.count = std.math.add(usize, self.count, n) catch return fail_error;
-        }
-    }
-
-    fn rewindForParse(self: *EvidenceInput, io: Io, fail_error: Error) Error!void {
-        io.vtable.fileSeekTo(io.userdata, self.file, 0) catch
-            return fail_error;
-        self.pass2 = self.file.readerStreaming(io, &self.pass2_buffer);
-    }
-
-    fn close(self: *EvidenceInput, io: Io) void {
-        self.file.close(io);
-    }
-
-    fn finish(self: *EvidenceInput) FileBinding {
-        var digest: [32]u8 = undefined;
-        self.digest.final(&digest);
-        return .{ .bytes = self.count, .sha256 = cache.hexDigest(digest) };
-    }
-};
+const EvidenceInput = evidence_mod.EvidenceInput(Error);
 
 pub const NodeKind = enum {
     target,
