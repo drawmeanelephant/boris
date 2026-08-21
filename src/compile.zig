@@ -3222,6 +3222,47 @@ fn cleanupStaleOutputs(
     content_asset.scrubOrphanContentAssets(io, dist_dir, gpa, content_assets);
 }
 
+const HeadingIndexes = struct {
+    index: wikilink.HeadingIndex,
+    snapshot: HeadingHarvestSnapshot,
+
+    fn deinit(self: *HeadingIndexes, gpa: std.mem.Allocator) void {
+        self.index.deinit(gpa);
+        self.snapshot.deinit();
+    }
+};
+
+fn runHeadingHarvest(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    db: *const PageDb,
+    options: CompileOptions,
+    shared: *const SharedCompileState,
+    site: *const FrozenSite,
+    parsed_heading_harvest: ?std.json.Parsed(ParsedHeadingHarvest),
+) !HeadingIndexes {
+    // Heading id index for wiki `[[entity#heading]]` (Oliver-rendered ids only;
+    // only pages that are fragment targets are rendered for the index).
+    // Incremental: reuse harvest-cache hits so no-op builds skip rendering (#58).
+    const prior_harvest: ?*const ParsedHeadingHarvest = if (parsed_heading_harvest) |*ph| &ph.value else null;
+    if (options.timings) |t| t.start(.heading_harvest);
+    const heading_built = try buildSiteHeadingIndex(
+        io,
+        gpa,
+        content_dir,
+        db,
+        site,
+        shared,
+        options.input_format,
+        prior_harvest,
+        options.timings,
+        options.diagnostics,
+    );
+    if (options.timings) |t| t.stop(.heading_harvest);
+    return .{ .index = heading_built[0], .snapshot = heading_built[1] };
+}
+
 fn compilePagesInner(
     io: Io,
     gpa: std.mem.Allocator,
@@ -3312,28 +3353,8 @@ fn compilePagesInner(
     var cache_state = loadIncrementalCacheState(io, gpa, dist_dir, options.incremental);
     defer cache_state.deinit(gpa);
 
-    // Heading id index for wiki `[[entity#heading]]` (Oliver-rendered ids only;
-    // only pages that are fragment targets are rendered for the index).
-    // Incremental: reuse harvest-cache hits so no-op builds skip rendering (#58).
-    const prior_harvest: ?*const ParsedHeadingHarvest = if (cache_state.parsed_heading_harvest) |*ph| &ph.value else null;
-    if (options.timings) |t| t.start(.heading_harvest);
-    const heading_built = try buildSiteHeadingIndex(
-        io,
-        gpa,
-        content_dir,
-        db,
-        site,
-        shared,
-        options.input_format,
-        prior_harvest,
-        options.timings,
-        options.diagnostics,
-    );
-    if (options.timings) |t| t.stop(.heading_harvest);
-    var heading_index = heading_built[0];
-    defer heading_index.deinit(gpa);
-    var heading_snapshot = heading_built[1];
-    defer heading_snapshot.deinit();
+    var heading_indexes = try runHeadingHarvest(io, gpa, content_dir, db, options, shared, site, cache_state.parsed_heading_harvest);
+    defer heading_indexes.deinit(gpa);
 
     // Precreate output directories under staging
     {
@@ -3355,7 +3376,7 @@ fn compilePagesInner(
         page_layout_bytes,
         page_theme_material,
         site,
-        &heading_index,
+        &heading_indexes.index,
         &content_assets,
         dist_dir,
         cache_state.parsed_manifest,
@@ -3374,7 +3395,7 @@ fn compilePagesInner(
         page_layouts,
         is_dirty,
         site,
-        &heading_index,
+        &heading_indexes.index,
         &theme_bundle,
         &content_assets,
     );
@@ -3388,7 +3409,7 @@ fn compilePagesInner(
         dist_dir,
         fingerprints,
         page_sel_paths,
-        &heading_snapshot,
+        &heading_indexes.snapshot,
     );
 
     var site_overlay = try writeSearchSitemapAndStandardSite(io, gpa, db, options, stage_dir, dist_dir, prior_sitemap.marker_present);
