@@ -92,8 +92,9 @@ revise the temporary rule after its deliberate PR into `main`.
 - [`docs/RELEASE-GATE.md`](RELEASE-GATE.md): mechanical ship checks.
 - [`docs/COMPLETION-REPORT-TEMPLATE.md`](COMPLETION-REPORT-TEMPLATE.md): final
   evidence format.
-- [`CHANGELOG.md`](../CHANGELOG.md) and [`docs/changelog.d/`](changelog.d/):
-  release history and queued fragments.
+- [`CHANGELOG.md`](../CHANGELOG.md) (`[Unreleased]` + `[0.8.0]`; pre-0.8 at
+  [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md)) and
+  [`docs/changelog.d/`](changelog.d/): release history and queued fragments.
 - [`docs/AGENT-BINARY-KITS.md`](AGENT-BINARY-KITS.md): reproducible native
   handoffs; run `scripts/agent-pack.sh` from the target PR worktree and keep kits
   outside tracked product files.

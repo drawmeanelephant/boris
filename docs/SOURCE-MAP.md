@@ -54,6 +54,9 @@ Moved from [`docs/STATUS.md`](STATUS.md) per
 [#692](https://github.com/drawmeanelephant/boris/issues/692) — `STATUS.md` is
 now a phase banner + pointer table. The capability snapshot lives in
 [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md).
+`CHANGELOG.md` was slimmed per
+[#691](https://github.com/drawmeanelephant/boris/issues/691) — pre-0.8 history
+at [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md).
 
 | Document | Use it for |
 |---|---|
@@ -61,8 +64,9 @@ now a phase banner + pointer table. The capability snapshot lives in
 | [`docs/contracts/`](contracts/) | Normative compiler and artifact behavior |
 | [`docs/contracts/publication-model.md`](contracts/publication-model.md) | Canonical ownership of document facts, publication facts, migration provenance, projections, and verification claims |
 | [`docs/contracts/publication-platforms.md`](contracts/publication-platforms.md) | Target registry and verified-target adapter seam |
-| [`CHANGELOG.md`](../CHANGELOG.md) | Released-history record |
+| [`CHANGELOG.md`](../CHANGELOG.md) | Released-history record (`[Unreleased]` + `[0.8.0]`; pre-0.8 at [`CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md)) |
 | [`docs/changelog.d/`](changelog.d/) | Pending release fragments |
+| [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md) | Archived pre-0.8 history (pre-slim, not standing context) |
 | [`docs/MIGRATION.md`](MIGRATION.md) | Bounded author migration workflow |
 | [`docs/authoring-spine.md`](authoring-spine.md) | Teaching path from `boris init` to publish + verify |
 | [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration-lab commands |
@@ -75,6 +79,7 @@ now a phase banner + pointer table. The capability snapshot lives in
 | [`content/`](../content/) | Compiled public documentation site (Oliver-rendered) |
 | [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) | Where `src/` clusters live. Not a function catalog. |
 | [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md) | Archived v0.8 capability snapshot (pre-slim) |
+| [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md) | Archived pre-0.8 changelog (pre-slim, not standing context) |
 
 ## Rules
 
@@ -82,10 +87,13 @@ now a phase banner + pointer table. The capability snapshot lives in
   dossier trees were retired. Operator docs for labs live in
   [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
   [`tools/source-rag/README.md`](../tools/source-rag/README.md).
-  Historical dogfood reports and retrospectives were retired; the v0.8
-  capability snapshot lives in
-  [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md)
-  and `STATUS.md` is now a phase banner + pointer table (see #692).
+   Historical dogfood reports and retrospectives were retired; the v0.8
+   capability snapshot lives in
+   [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md)
+   and `STATUS.md` is now a phase banner + pointer table (see #692);
+   pre-0.8 history is at
+   [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md)
+   and `CHANGELOG.md` keeps only `[Unreleased]` + `[0.8.0]` (see #691).
 - A new module does not require a new Markdown file here. Add a row when
   the *job* is new.
 - If this page and a contract disagree, the contract wins. If this page

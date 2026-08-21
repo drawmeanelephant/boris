@@ -24,7 +24,7 @@ Boris is a **graph-native publication compiler** ([publisher platform](https://g
 | Normative compiler behavior | [`docs/contracts/`](contracts/) — one file per topic; index in [`contracts/README.md`](contracts/README.md) |
 | Content model and publication boundary | [`publication-model.md`](contracts/publication-model.md) |
 | Target registry (verified targets) | [`publication-platforms.md`](contracts/publication-platforms.md) — `github-pages` and `standard-site` are verified |
-| Release history | [`CHANGELOG.md`](../CHANGELOG.md) |
+| Release history | [`CHANGELOG.md`](../CHANGELOG.md) (`[Unreleased]` + `[0.8.0]`; pre-0.8 at [`CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md)) |
 | Pending release fragments | [`docs/changelog.d/`](changelog.d/) (200+ queued; release-owner work) |
 | Capability snapshot (v0.8) | [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md) |
 | Capability details (what works) | Contracts above + [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) |
