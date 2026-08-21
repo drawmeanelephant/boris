@@ -58,6 +58,51 @@ function collectSvelteSources(root) {
 const SOURCES = collectSvelteSources(SRC_ROOT);
 let globalBodiesForLint = new Map();
 
+// Scoped helper for prop-drilled dialogs: find the component usage in the
+// aggregated sources (primarily App.svelte) and return the prop's raw value
+// inside the braces, e.g. for <ResolutionDialog ... onClose={() => { pendingResolution = null; }} />
+function propValueForComponent(componentName, propName) {
+  const all = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
+  const tagStart = all.indexOf(`<${componentName}`);
+  if (tagStart === -1) return null;
+  // Find the end of the component's opening tag (/> or >), handling braces in props
+  let tagEnd = -1;
+  let depth = 0;
+  let inQuote = null;
+  for (let i = tagStart; i < all.length; i++) {
+    const ch = all[i];
+    if (inQuote) {
+      if (ch === inQuote) inQuote = null;
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+    } else if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      if (depth > 0) depth -= 1;
+    } else if (ch === '>' && depth === 0) {
+      tagEnd = i;
+      break;
+    }
+  }
+  if (tagEnd === -1) return null;
+  const tagSlice = all.slice(tagStart, tagEnd + 1);
+  const propIdx = tagSlice.indexOf(`${propName}={`);
+  if (propIdx === -1) return null;
+  let i = propIdx + propName.length + 2; // after ${
+  let d = 0;
+  const start = i;
+  for (; i < tagSlice.length; i++) {
+    const ch = tagSlice[i];
+    if (ch === '{') d += 1;
+    else if (ch === '}') {
+      if (d === 0) break;
+      d -= 1;
+      if (d < 0) break;
+    }
+  }
+  return tagSlice.slice(start, i);
+}
+
 // --- key token mapping -----------------------------------------------------
 
 const MODIFIER_KEYS = { Alt: 'altKey', Ctrl: 'ctrlKey', Meta: 'metaKey', Shift: 'shiftKey' };
@@ -447,10 +492,9 @@ function analyze(template, script, bodies) {
     if (resolveButtons.length === 0) continue;
     let closeValue = attrValue(dialog._raw ?? '', 'onclose');
     if (closeValue && closeValue.includes('onClose')) {
-      // Prop-drilled: the wired App prop is `onClose={() => { pendingResolution = null; ... }}`
-      // Check the App source for that specific prop value, not any global function
-      const appSources = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
-      const hasWiredClear = appSources.includes('ResolutionDialog') && appSources.includes('pendingResolution = null') && appSources.includes('onClose');
+      // Prop-drilled: check the specific wired App prop value, not any global
+      const wired = propValueForComponent('ResolutionDialog', 'onClose');
+      const hasWiredClear = wired !== null && wired.includes('pendingResolution = null');
       if (!hasWiredClear) closeValue = null;
       else closeValue = 'pendingResolution = null';
     }
@@ -479,9 +523,9 @@ function analyze(template, script, bodies) {
     if (!buttons.some(button => button.text.startsWith('Load disk version'))) continue; // not the conflict dialog
     let closeValue = attrValue(dialog._raw ?? '', 'onclose');
     if (closeValue && closeValue.includes('onClose')) {
-      // Prop-drilled: check the App's wired onClose for ConflictDialog
-      const appSources = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
-      const hasWiredClear = appSources.includes('ConflictDialog') && appSources.includes('conflict = null') && appSources.includes('deletedConflict = false');
+      // Prop-drilled: check the specific wired App prop
+      const wired = propValueForComponent('ConflictDialog', 'onClose');
+      const hasWiredClear = wired !== null && wired.includes('conflict = null') && wired.includes('deletedConflict = false');
       if (!hasWiredClear) closeValue = null;
       else closeValue = 'conflict = null; deletedConflict = false';
     }
@@ -542,11 +586,12 @@ function analyze(template, script, bodies) {
     const kind = buttons.some(button => button.text.startsWith('Create file')) ? 'create'
       : buttons.some(button => button.text.startsWith('Rename file')) ? 'rename' : null;
     if (!kind) continue;
-    // Prop-drilled dialogs have `onclose={onClose}` on the dialog tag (value `onClose`)
+    // Prop-drilled: check the specific wired App prop, not any occurrence
     if (dialog._raw?.includes('onClose')) {
-      const appSource = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
-      const hasGlobalClear = appSource.includes(kind === 'create' ? 'createPath = ' : 'renamePath = ');
-      if (!hasGlobalClear) problems.push(`${kind} dialog at line ${dialog._line ?? '?'} does not clear ${kind === 'create' ? 'createPath' : 'renamePath'} on close: App onClose must assign it`);
+      const componentName = kind === 'create' ? 'CreateDialog' : 'RenameDialog';
+      const wired = propValueForComponent(componentName, 'onClose');
+      const hasWiredClear = wired !== null && wired.includes(kind === 'create' ? 'createPath = ' : 'renamePath = ');
+      if (!hasWiredClear) problems.push(`${kind} dialog at line ${dialog._line ?? '?'} does not clear ${kind === 'create' ? 'createPath' : 'renamePath'} on close: App onClose must assign it`);
       continue;
     }
     const bound = (dialog._boundInputs ?? [])[0] ?? null;
