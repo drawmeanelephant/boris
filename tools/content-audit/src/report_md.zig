@@ -285,7 +285,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
                 try b.appendSlice(gpa, "| ");
                 try util.appendMarkdownEscaped(&b, gpa, c.kind);
                 try b.appendSlice(gpa, " | ");
-                try util.appendMarkdownInlineCode(&b, gpa, c.record_id);
+                try util.appendMarkdownEscaped(&b, gpa, c.record_id);
                 try b.appendSlice(gpa, " | ");
                 try util.appendMarkdownEscaped(&b, gpa, c.from);
                 try b.appendSlice(gpa, " | ");
