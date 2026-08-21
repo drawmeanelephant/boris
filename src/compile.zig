@@ -1917,21 +1917,38 @@ fn validatePrepublicationTarget(
     return stats;
 }
 
-fn compilePagesInner(
+const PageLayoutSelection = struct {
+    layouts_by_path: std.StringHashMapUnmanaged(CachedLayout),
+    page_sel_paths: []const []const u8,
+    page_layouts: []assemble.Layout,
+    page_layout_bytes: []const []const u8,
+
+    fn deinit(self: *PageLayoutSelection, gpa: std.mem.Allocator, fallback_bytes: []const u8) void {
+        var it = self.layouts_by_path.iterator();
+        while (it.next()) |e| {
+            // Fallback bytes may be borrowed from the caller; only free owned.
+            if (e.value_ptr.bytes.ptr != fallback_bytes.ptr) {
+                gpa.free(e.value_ptr.bytes);
+            }
+            if (e.value_ptr.theme_material.len > 0) gpa.free(e.value_ptr.theme_material);
+        }
+        self.layouts_by_path.deinit(gpa);
+        gpa.free(self.page_sel_paths);
+        gpa.free(self.page_layouts);
+        gpa.free(self.page_layout_bytes);
+    }
+};
+
+fn preparePageLayouts(
     io: Io,
     gpa: std.mem.Allocator,
-    db: *PageDb,
+    cwd: Io.Dir,
+    db: *const PageDb,
     layout: assemble.Layout,
     options: CompileOptions,
-    shared_opt: ?*const SharedCompileState,
     layout_bytes: []const u8,
-    site: *const FrozenSite,
-) !CompileStats {
-    const cwd = Io.Dir.cwd();
-
-    var content_dir = try cwd.openDir(io, options.content_root, .{});
-    defer content_dir.close(io);
-
+    layout_arena: std.mem.Allocator,
+) !PageLayoutSelection {
     // Layout selection: load every declared layout (fallback + rules), select per page.
     try layout_select.validateLayoutPath(options.layout_path);
     for (options.layout_rules) |rule| {
@@ -1941,13 +1958,11 @@ fn compilePagesInner(
     const declared = try layout_select.collectDeclaredLayouts(gpa, options.layout_path, options.layout_rules);
     defer gpa.free(declared);
 
-    var layout_arena_local = std.heap.ArenaAllocator.init(gpa);
-    defer layout_arena_local.deinit();
     var layouts_by_path: std.StringHashMapUnmanaged(CachedLayout) = .{};
-    defer {
+    errdefer {
         var it = layouts_by_path.iterator();
         while (it.next()) |e| {
-            // Fallback bytes may be borrowed from caller (layout_bytes); only free owned.
+            // Fallback bytes may be borrowed from the caller; only free owned.
             if (e.value_ptr.bytes.ptr != layout_bytes.ptr) {
                 gpa.free(e.value_ptr.bytes);
             }
@@ -1963,18 +1978,17 @@ fn compilePagesInner(
     });
     for (declared) |lp| {
         if (layouts_by_path.contains(lp)) continue;
-        const loaded = try loadLayoutOnce(io, cwd, lp, layout_arena_local.allocator());
+        const loaded = try loadLayoutOnce(io, cwd, lp, layout_arena);
         const bytes = try readFileAlloc(io, cwd, lp, gpa);
         try layouts_by_path.put(gpa, lp, .{ .layout = loaded, .bytes = bytes });
     }
 
-    // Per-page selection (after graph freeze; roles are on PageDb).
     const page_sel_paths = try gpa.alloc([]const u8, db.len());
-    defer gpa.free(page_sel_paths);
+    errdefer gpa.free(page_sel_paths);
     const page_layouts = try gpa.alloc(assemble.Layout, db.len());
-    defer gpa.free(page_layouts);
+    errdefer gpa.free(page_layouts);
     const page_layout_bytes = try gpa.alloc([]const u8, db.len());
-    defer gpa.free(page_layout_bytes);
+    errdefer gpa.free(page_layout_bytes);
 
     for (db.items(), 0..) |page, i| {
         const sel = layout_select.selectLayout(page.entity_id, page.role, options.layout_rules, options.layout_path) catch |err| {
@@ -2028,6 +2042,21 @@ fn compilePagesInner(
         page_layout_bytes[i] = cached.bytes;
     }
 
+    return .{
+        .layouts_by_path = layouts_by_path,
+        .page_sel_paths = page_sel_paths,
+        .page_layouts = page_layouts,
+        .page_layout_bytes = page_layout_bytes,
+    };
+}
+
+fn validateVerificationSurfaces(
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    page_layouts: []const assemble.Layout,
+    page_sel_paths: []const []const u8,
+    options: CompileOptions,
+) !void {
     // Standard.site verification is opt-in and cross-checks the offline
     // projection against the live page set before any publication: every
     // planned document record must resolve to the same canonical URL as the
@@ -2084,7 +2113,16 @@ fn compilePagesInner(
             });
         }
     }
+}
 
+fn prepareThemeBundle(
+    io: Io,
+    gpa: std.mem.Allocator,
+    cwd: Io.Dir,
+    db: *const PageDb,
+    options: CompileOptions,
+    layouts_by_path: *const std.StringHashMapUnmanaged(CachedLayout),
+) !theme_mod.ThemeBundle {
     // F9.1 theme: one root per target from the fallback layout (rules share it).
     const theme_root = theme_mod.themeRootFromLayoutPath(options.layout_path) orelse "";
     // Any selected/declared layout with asset-url requires a managed theme root.
@@ -2095,7 +2133,7 @@ fn compilePagesInner(
         }
     }
     var theme_bundle = try theme_mod.loadThemeBundle(io, gpa, cwd, theme_root);
-    defer theme_bundle.deinit();
+    errdefer theme_bundle.deinit();
     // Validate asset refs for every declared layout (stale rules cannot hide broken templates).
     {
         var it = layouts_by_path.iterator();
@@ -2110,6 +2148,17 @@ fn compilePagesInner(
         for (db.items()) |p| try outs.append(gpa, p.output_path);
         try theme_mod.checkAssetPageCollisions(theme_bundle.assets, outs.items);
     }
+    return theme_bundle;
+}
+
+fn discoverContentAssets(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    db: *const PageDb,
+    options: CompileOptions,
+    theme_bundle: *const theme_mod.ThemeBundle,
+) !content_asset.SiteAssetInventory {
     // Content-local sibling assets: discover and collide-check before any asset
     // bytes are staged. Theme + content assets publish together below.
     var source_paths = try gpa.alloc([]const u8, db.len());
@@ -2129,7 +2178,7 @@ fn compilePagesInner(
         }
         return err;
     };
-    defer content_assets.deinit();
+    errdefer content_assets.deinit();
     {
         const content_outs = try content_assets.collectOutputPaths(gpa);
         defer gpa.free(content_outs);
@@ -2174,162 +2223,386 @@ fn compilePagesInner(
             try sitemap.rejectOutputCollisions(sitemap_path, owned_paths.items);
         }
     }
+    return content_assets;
+}
 
+fn prepareThemeMaterial(
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    layouts_by_path: *const std.StringHashMapUnmanaged(CachedLayout),
+    theme_bundle: *const theme_mod.ThemeBundle,
+    page_sel_paths: []const []const u8,
+) ![][]const u8 {
     // Per-layout theme fingerprint material (footer + that layout's asset-url refs).
     {
         var it = layouts_by_path.iterator();
         while (it.next()) |e| {
             e.value_ptr.theme_material = try theme_mod.referencedAssetMaterial(
                 gpa,
-                &theme_bundle,
+                theme_bundle,
                 e.value_ptr.layout.assetPaths(),
                 e.value_ptr.layout.has_footer,
             );
         }
     }
     const page_theme_material = try gpa.alloc([]const u8, db.len());
-    defer gpa.free(page_theme_material);
+    errdefer gpa.free(page_theme_material);
     for (page_sel_paths, 0..) |lp, i| {
         page_theme_material[i] = layouts_by_path.get(lp).?.theme_material;
     }
+    return page_theme_material;
+}
 
-    // Own shared state when the caller did not supply one (single-target).
-    var local_shared: ?SharedCompileState = null;
-    defer if (local_shared) |*s| s.deinit();
-    const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
-        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format, options.timings, options.diagnostics);
-        break :blk &(local_shared.?);
+const IncrementalCacheState = struct {
+    manifest_bytes: ?[]u8 = null,
+    parsed_manifest: ?std.json.Parsed(ParsedCacheManifest) = null,
+    heading_harvest_bytes: ?[]u8 = null,
+    parsed_heading_harvest: ?std.json.Parsed(ParsedHeadingHarvest) = null,
+
+    fn deinit(self: *IncrementalCacheState, gpa: std.mem.Allocator) void {
+        if (self.parsed_heading_harvest) |ph| ph.deinit();
+        if (self.heading_harvest_bytes) |hb| gpa.free(hb);
+        if (self.parsed_manifest) |pm| pm.deinit();
+        if (self.manifest_bytes) |mb| gpa.free(mb);
+    }
+};
+
+fn loadIncrementalCacheState(
+    io: Io,
+    gpa: std.mem.Allocator,
+    dist_dir: Io.Dir,
+    incremental: bool,
+) IncrementalCacheState {
+    var state: IncrementalCacheState = .{};
+    if (!incremental) return state;
+    if (readFileAlloc(io, dist_dir, ".boris-cache/manifest.json", gpa)) |bytes| {
+        state.manifest_bytes = bytes;
+        if (std.json.parseFromSlice(ParsedCacheManifest, gpa, bytes, .{ .ignore_unknown_fields = true })) |pm| {
+            // Reject pre-P3.3 or foreign manifests so fingerprints cannot be misread.
+            if (std.mem.eql(u8, pm.value.format_version, cache.CACHE_FORMAT_VERSION)) {
+                state.parsed_manifest = pm;
+            } else {
+                pm.deinit();
+            }
+        } else |_| {}
+    } else |_| {}
+    if (readFileAlloc(io, dist_dir, ".boris-cache/heading-harvest.json", gpa)) |bytes| {
+        state.heading_harvest_bytes = bytes;
+        if (std.json.parseFromSlice(ParsedHeadingHarvest, gpa, bytes, .{ .ignore_unknown_fields = true })) |ph| {
+            if (std.mem.eql(u8, ph.value.format, HEADING_HARVEST_FORMAT)) {
+                state.parsed_heading_harvest = ph;
+            } else {
+                ph.deinit();
+            }
+        } else |_| {}
+    } else |_| {}
+    return state;
+}
+
+fn publishEvidenceReports(
+    io: Io,
+    gpa: std.mem.Allocator,
+    dist_dir: Io.Dir,
+    options: CompileOptions,
+) !void {
+    // The payload transaction, including artifacts.json as its deferred last
+    // file, is complete before checks read the target. Checks are a separate
+    // atomic report publication and never participate in that transaction.
+    if (options.timings) |t| t.start(.checks);
+    publication_checks.writeAfterCommit(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_checks,
+        .test_fail_write = options.test_fail_publication_checks_write,
+    }) catch |err| {
+        const stderr = std.debug.lockStderr(&.{});
+        defer std.debug.unlockStderr();
+        writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        return error.PublicationChecksFailed;
     };
+    if (options.timings) |t| t.stop(.checks);
 
-    if (options.validation_only) {
-        return validatePrepublicationTarget(
-            io,
+    // Claims are derived from the exact committed artifacts and checks bytes.
+    // A derivation, stale-binding, parser, I/O, or atomic-write failure keeps
+    // the committed target, inventory, and checks and leaves any prior claims
+    // report untouched; the diagnostic is emitted even under --quiet.
+    if (options.timings) |t| t.start(.claims);
+    publication_claims.writeAfterChecks(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_claims,
+        .test_fail_write = options.test_fail_publication_claims_write,
+    }) catch |err| {
+        if (options.publication_claims_failure_writer) |writer| {
+            writePublicationClaimsFailure(writer, options.target_name, err) catch {};
+        } else {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationClaimsFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
+        return error.PublicationClaimsFailed;
+    };
+    if (options.timings) |t| t.stop(.claims);
+
+    // The Touch Atlas is derived from the exact committed artifacts, checks,
+    // and claims bytes. A derivation, stale-binding, parser, I/O, or
+    // atomic-write failure keeps the committed target, inventory, checks, and
+    // claims and leaves any prior touches report untouched; the diagnostic is
+    // emitted even under --quiet.
+    if (options.timings) |t| t.start(.touches);
+    publication_touches.writeAfterClaims(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_touches,
+        .test_fail_write = options.test_fail_publication_touches_write,
+    }) catch |err| {
+        if (options.publication_touches_failure_writer) |writer| {
+            writePublicationTouchesFailure(writer, options.target_name, err) catch {};
+        } else {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationTouchesFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
+        return error.PublicationTouchesFailed;
+    };
+    if (options.timings) |t| t.stop(.touches);
+
+    // The Proof Pack is the final presentation layer, derived exclusively
+    // from the exact committed artifacts, checks, claims, and touches bytes.
+    // A derivation, stale-binding, parser, render, I/O, or transaction
+    // failure keeps the committed target and all four evidence reports and
+    // restores (or explicitly reports) the prior presentation pair; the
+    // diagnostic is emitted even under --quiet.
+    if (options.timings) |t| t.start(.proof_pack);
+    publication_proof_pack.writeAfterTouches(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_proof_pack,
+        .test_fail_json_tmp_write = options.test_fail_proof_pack_json_tmp_write,
+        .test_fail_html_tmp_write = options.test_fail_proof_pack_html_tmp_write,
+        .test_fail_preserve_prior = options.test_fail_proof_pack_preserve_prior,
+        .test_fail_install_html = options.test_fail_proof_pack_install_html,
+        .test_fail_install_json = options.test_fail_proof_pack_install_json,
+        .test_fail_restore_html = options.test_fail_proof_pack_restore_html,
+        .test_fail_restore_json = options.test_fail_proof_pack_restore_json,
+    }) catch |err| {
+        if (options.publication_proof_pack_failure_writer) |writer| {
+            writePublicationProofPackFailure(writer, options.target_name, err) catch {};
+        } else {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationProofPackFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
+        return error.PublicationProofPackFailed;
+    };
+    if (options.timings) |t| t.stop(.proof_pack);
+}
+
+const FingerprintPlan = struct {
+    fingerprints: [][]const u8,
+    is_dirty: []bool,
+
+    fn deinit(self: *FingerprintPlan, gpa: std.mem.Allocator) void {
+        for (self.fingerprints) |fp| {
+            if (fp.len > 0) gpa.free(fp);
+        }
+        gpa.free(self.fingerprints);
+        gpa.free(self.is_dirty);
+    }
+};
+
+const PageFingerprint = struct {
+    hex: []u8,
+    hashed: u64,
+};
+
+fn fingerprintPage(
+    gpa: std.mem.Allocator,
+    page: DurablePage,
+    page_idx: usize,
+    options: CompileOptions,
+    shared: *const SharedCompileState,
+    page_layouts: []const assemble.Layout,
+    page_sel_paths: []const []const u8,
+    page_layout_bytes: []const []const u8,
+    page_theme_material: []const []const u8,
+    site: *const FrozenSite,
+    heading_index: *wikilink.HeadingIndex,
+    content_assets: *const content_asset.SiteAssetInventory,
+) !PageFingerprint {
+    // Convert owned []u8 include lists to []const u8 views for the hasher.
+    const inc_owned = shared.include_bytes[page_idx];
+    const inc_views = try gpa.alloc([]const u8, inc_owned.len);
+    defer gpa.free(inc_views);
+    for (inc_owned, 0..) |b, j| inc_views[j] = b;
+
+    const page_layout = page_layouts[page_idx];
+    // Graph chrome (nav, breadcrumb, title, children) depends on the frozen site.
+    // `children` uses the same complete graph digest conservatively: it keeps
+    // add/remove/rename/title changes correct across incremental runs.
+    const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
+    const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
+    var relation_material: []u8 = &.{};
+    if (page_layout.has_relations or page_layout.has_backlinks) {
+        const relation_index = site.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
+        relation_material = try html_relations.relationMaterial(
             gpa,
-            content_dir,
-            db,
-            page_layouts,
-            options,
-            shared,
-            site,
-            &theme_bundle,
-            &content_assets,
+            site.nodes,
+            relation_index,
+            page_layout.has_relations,
+            page_layout.has_backlinks,
         );
     }
-
-    // Publication begins here. No code above this boundary creates, removes,
-    // or mutates the selected target or sibling staging tree.
-    try cwd.createDirPath(io, options.dist_dir);
-    // Re-check for symlink swap after validation (TOCTOU shrink — issue #11).
-    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, options.dist_dir);
-    var dist_dir = try cwd.openDir(io, options.dist_dir, .{ .iterate = true });
-    defer dist_dir.close(io);
-
-    var prior_sitemap = try readPriorSitemapOwnership(io, gpa, dist_dir);
-    defer prior_sitemap.deinit(gpa);
-
-    // Best-effort: remove orphan createFileAtomic temps left by interrupted runs.
-    assemble.scrubStaleAtomicTemps(io, dist_dir, gpa);
-
-    // Sibling staging: render dirty pages here; commit only after full target success.
-    const stage_rel = try stageRelForDist(gpa, options.dist_dir);
-    defer gpa.free(stage_rel);
-    cwd.deleteTree(io, stage_rel) catch {};
-    try cwd.createDirPath(io, stage_rel);
-    errdefer cwd.deleteTree(io, stage_rel) catch {};
-    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, stage_rel);
-
-    var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
-    defer stage_dir.close(io);
-
-    // Standard.site verification state shared between the pre-commit staging
-    // and the post-commit evidence report.
-    var standard_site_wke: ?standard_site_emit.WellKnownEmission = null;
-    defer if (standard_site_wke) |*wke| wke.deinit(gpa);
-    var prior_well_known_emitted = false;
-
-    // Assets are target-owned members of the same staging transaction.
-    try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
-    try content_asset.copyAssetsToOutput(io, stage_dir, &content_assets);
-
-    // Load and parse prior manifest if in incremental mode (from final dist).
-    var manifest_bytes: ?[]u8 = null;
-    defer {
-        if (manifest_bytes) |mb| gpa.free(mb);
+    defer if (relation_material.len > 0) gpa.free(relation_material);
+    // Wiki reference material from page body + transitive include fragment bodies
+    // so title/path renames dirty parents that only wiki-link via includes.
+    const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
+    // Scanners measure offsets in the body; the diagnostics contract
+    // specifies the full-source line. Shift by the frontmatter.
+    const fail_line_base = include_mod.lineBaseOfSource(shared.source_bytes[page_idx]);
+    const inc_paths = shared.include_paths[page_idx];
+    var wiki_bodies = try gpa.alloc([]const u8, 1 + inc_owned.len);
+    defer gpa.free(wiki_bodies);
+    var wiki_paths = try gpa.alloc([]const u8, 1 + inc_owned.len);
+    defer gpa.free(wiki_paths);
+    wiki_bodies[0] = body_for_wiki;
+    wiki_paths[0] = page.source_path;
+    for (inc_owned, 0..) |inc_file, j| {
+        wiki_bodies[1 + j] = include_mod.bodyOfSource(inc_file);
+        wiki_paths[1 + j] = inc_paths[j];
     }
-    var parsed_manifest: ?std.json.Parsed(ParsedCacheManifest) = null;
-    defer {
-        if (parsed_manifest) |pm| pm.deinit();
-    }
-    // Prior heading-harvest cache (#58): reuse rendered ids when harvest keys match.
-    var heading_harvest_bytes: ?[]u8 = null;
-    defer {
-        if (heading_harvest_bytes) |hb| gpa.free(hb);
-    }
-    var parsed_heading_harvest: ?std.json.Parsed(ParsedHeadingHarvest) = null;
-    defer {
-        if (parsed_heading_harvest) |ph| ph.deinit();
-    }
-
-    if (options.incremental) {
-        if (readFileAlloc(io, dist_dir, ".boris-cache/manifest.json", gpa)) |bytes| {
-            manifest_bytes = bytes;
-            if (std.json.parseFromSlice(ParsedCacheManifest, gpa, bytes, .{ .ignore_unknown_fields = true })) |pm| {
-                // Reject pre-P3.3 or foreign manifests so fingerprints cannot be misread.
-                if (std.mem.eql(u8, pm.value.format_version, cache.CACHE_FORMAT_VERSION)) {
-                    parsed_manifest = pm;
-                } else {
-                    pm.deinit();
-                }
-            } else |_| {}
-        } else |_| {}
-        if (readFileAlloc(io, dist_dir, ".boris-cache/heading-harvest.json", gpa)) |bytes| {
-            heading_harvest_bytes = bytes;
-            if (std.json.parseFromSlice(ParsedHeadingHarvest, gpa, bytes, .{ .ignore_unknown_fields = true })) |ph| {
-                if (std.mem.eql(u8, ph.value.format, HEADING_HARVEST_FORMAT)) {
-                    parsed_heading_harvest = ph;
-                } else {
-                    ph.deinit();
-                }
-            } else |_| {}
-        } else |_| {}
-    }
-
-    // Heading id index for wiki `[[entity#heading]]` (Oliver-rendered ids only;
-    // only pages that are fragment targets are rendered for the index).
-    // Incremental: reuse harvest-cache hits so no-op builds skip rendering (#58).
-    const prior_harvest: ?*const ParsedHeadingHarvest = if (parsed_heading_harvest) |*ph| &ph.value else null;
-    if (options.timings) |t| t.start(.heading_harvest);
-    const heading_built = try buildSiteHeadingIndex(
-        io,
+    var wiki_fail: wikilink.FailInfo = .{ .line_base = fail_line_base };
+    const ref_material = wikilink.referenceMaterialMulti(
         gpa,
-        content_dir,
-        db,
-        site,
-        shared,
-        options.input_format,
-        prior_harvest,
-        options.timings,
-        options.diagnostics,
-    );
-    if (options.timings) |t| t.stop(.heading_harvest);
-    var heading_index = heading_built[0];
-    defer heading_index.deinit(gpa);
-    var heading_snapshot = heading_built[1];
-    defer heading_snapshot.deinit();
+        wiki_bodies,
+        wiki_paths,
+        site.nodes,
+        &wiki_fail,
+        .{ .heading_index = heading_index, .validate_fragments = true },
+    ) catch |err| {
+        if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
+            wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail, options.diagnostics);
+            return error.ReferenceFailed;
+        }
+        return err;
+    };
+    defer gpa.free(ref_material);
 
-    // Precreate output directories under staging
+    // Validate content-local Markdown images every build (even when HTML is
+    // cached). Asset *bytes* are not fingerprint inputs: a byte-only change
+    // republishes the file without re-rendering HTML.
     {
-        var paths: std.ArrayList([]const u8) = .empty;
-        defer paths.deinit(gpa);
-        try paths.ensureTotalCapacity(gpa, db.len());
-        for (db.items()) |p| try paths.append(gpa, p.output_path);
-        try assemble.precreateOutputDirs(io, stage_dir, gpa, paths.items);
+        var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
+        const rewritten = content_asset.rewriteImageLinks(
+            gpa,
+            body_for_wiki,
+            &content_assets.pages[page_idx],
+            page.output_path,
+            &asset_fail,
+            null,
+        ) catch |err| {
+            content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail, options.diagnostics);
+            return error.AssetFailed;
+        };
+        if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
     }
 
-    // Compute fingerprints and determine which pages are dirty
+    var inc_with_ref = try gpa.alloc([]const u8, inc_views.len +
+        (if (ref_material.len > 0) @as(usize, 1) else 0) +
+        (if (relation_material.len > 0) @as(usize, 1) else 0));
+    defer gpa.free(inc_with_ref);
+    @memcpy(inc_with_ref[0..inc_views.len], inc_views);
+    var inc_with_ref_count = inc_views.len;
+    if (ref_material.len > 0) {
+        inc_with_ref[inc_with_ref_count] = ref_material;
+        inc_with_ref_count += 1;
+    }
+    if (relation_material.len > 0) {
+        inc_with_ref[inc_with_ref_count] = relation_material;
+    }
+
+    // Fingerprint uses the effective selected layout identity and bytes.
+    var fp_hashed: u64 = 0;
+    const fp_bytes = cache.computePageFingerprintThemeInputCounted(
+        options.target_name,
+        page_sel_paths[page_idx],
+        page.entity_id,
+        shared.source_bytes[page_idx],
+        inc_with_ref,
+        page_layout_bytes[page_idx],
+        nav_material,
+        page_theme_material[page_idx],
+        adapterIdentity(options.input_format),
+        &fp_hashed,
+    );
+    const hex = try fingerprintHex(fp_bytes, gpa);
+    return .{ .hex = hex, .hashed = fp_hashed };
+}
+
+fn pageOutputIsFresh(
+    io: Io,
+    gpa: std.mem.Allocator,
+    dist_dir: Io.Dir,
+    page: DurablePage,
+    options: CompileOptions,
+    fingerprint: []const u8,
+    selected_layout: []const u8,
+    parsed_manifest: ?std.json.Parsed(ParsedCacheManifest),
+) bool {
+    var output_size: u64 = 0;
+    var output_exists = false;
+    if (dist_dir.openFile(io, page.output_path, .{})) |file| {
+        if (file.stat(io)) |st| {
+            if (st.size > 0) {
+                output_exists = true;
+                output_size = st.size;
+            }
+        } else |_| {}
+        file.close(io);
+    } else |_| {}
+
+    var skip_render = false;
+    if (options.incremental) {
+        if (parsed_manifest) |pm| {
+            for (pm.value.entries) |entry| {
+                if (std.mem.eql(u8, entry.entity_id, page.entity_id) and
+                    std.mem.eql(u8, entry.output_path, page.output_path) and
+                    std.mem.eql(u8, entry.fingerprint, fingerprint) and
+                    (entry.selected_layout.len == 0 or std.mem.eql(u8, entry.selected_layout, selected_layout)))
+                {
+                    // Content-addressed output freshness: require a non-empty
+                    // digest that matches on-disk HTML. Size is a cheap
+                    // prefilter only (same-size corruption still fails digest).
+                    if (output_exists and entry.output_digest.len > 0 and
+                        (entry.output_size == 0 or entry.output_size == output_size))
+                    {
+                        if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |out_bytes| {
+                            defer gpa.free(out_bytes);
+                            const dig_hex = cache.hexDigest(cache.hashBytes(out_bytes));
+                            if (std.mem.eql(u8, entry.output_digest, &dig_hex)) {
+                                skip_render = true;
+                                break;
+                            }
+                        } else |_| {}
+                    }
+                }
+            }
+        }
+    }
+    return skip_render;
+}
+
+fn computeFingerprintsAndDirty(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    options: CompileOptions,
+    shared: *const SharedCompileState,
+    page_layouts: []const assemble.Layout,
+    page_sel_paths: []const []const u8,
+    page_layout_bytes: []const []const u8,
+    page_theme_material: []const []const u8,
+    site: *const FrozenSite,
+    heading_index: *wikilink.HeadingIndex,
+    content_assets: *const content_asset.SiteAssetInventory,
+    dist_dir: Io.Dir,
+    parsed_manifest: ?std.json.Parsed(ParsedCacheManifest),
+) !FingerprintPlan {
     const fingerprints = try gpa.alloc([]const u8, db.len());
     for (fingerprints) |*fp| fp.* = &.{};
-    defer {
+    errdefer {
         for (fingerprints) |fp| {
             if (fp.len > 0) gpa.free(fp);
         }
@@ -2338,164 +2611,43 @@ fn compilePagesInner(
 
     const is_dirty = try gpa.alloc(bool, db.len());
     @memset(is_dirty, false);
-    defer gpa.free(is_dirty);
+    errdefer gpa.free(is_dirty);
 
     if (options.timings) |t| t.start(.fingerprint);
 
     for (db.items(), 0..) |page, page_idx| {
-        // Convert owned []u8 include lists to []const u8 views for the hasher.
-        const inc_owned = shared.include_bytes[page_idx];
-        const inc_views = try gpa.alloc([]const u8, inc_owned.len);
-        defer gpa.free(inc_views);
-        for (inc_owned, 0..) |b, j| inc_views[j] = b;
-
-        const page_layout = page_layouts[page_idx];
-        // Graph chrome (nav, breadcrumb, title, children) depends on the frozen site.
-        // `children` uses the same complete graph digest conservatively: it keeps
-        // add/remove/rename/title changes correct across incremental runs.
-        const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
-        const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
-        var relation_material: []u8 = &.{};
-        if (page_layout.has_relations or page_layout.has_backlinks) {
-            const relation_index = site.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
-            relation_material = try html_relations.relationMaterial(
-                gpa,
-                site.nodes,
-                relation_index,
-                page_layout.has_relations,
-                page_layout.has_backlinks,
-            );
-        }
-        defer if (relation_material.len > 0) gpa.free(relation_material);
-        // Wiki reference material from page body + transitive include fragment bodies
-        // so title/path renames dirty parents that only wiki-link via includes.
-        const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
-        // Scanners measure offsets in the body; the diagnostics contract
-        // specifies the full-source line. Shift by the frontmatter.
-        const fail_line_base = include_mod.lineBaseOfSource(shared.source_bytes[page_idx]);
-        const inc_paths = shared.include_paths[page_idx];
-        var wiki_bodies = try gpa.alloc([]const u8, 1 + inc_owned.len);
-        defer gpa.free(wiki_bodies);
-        var wiki_paths = try gpa.alloc([]const u8, 1 + inc_owned.len);
-        defer gpa.free(wiki_paths);
-        wiki_bodies[0] = body_for_wiki;
-        wiki_paths[0] = page.source_path;
-        for (inc_owned, 0..) |inc_file, j| {
-            wiki_bodies[1 + j] = include_mod.bodyOfSource(inc_file);
-            wiki_paths[1 + j] = inc_paths[j];
-        }
-        var wiki_fail: wikilink.FailInfo = .{ .line_base = fail_line_base };
-        const ref_material = wikilink.referenceMaterialMulti(
+        const fp = try fingerprintPage(
             gpa,
-            wiki_bodies,
-            wiki_paths,
-            site.nodes,
-            &wiki_fail,
-            .{ .heading_index = &heading_index, .validate_fragments = true },
-        ) catch |err| {
-            if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
-                wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail, options.diagnostics);
-                return error.ReferenceFailed;
-            }
-            return err;
-        };
-        defer gpa.free(ref_material);
-
-        // Validate content-local Markdown images every build (even when HTML is
-        // cached). Asset *bytes* are not fingerprint inputs: a byte-only change
-        // republishes the file without re-rendering HTML.
-        {
-            var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
-            const rewritten = content_asset.rewriteImageLinks(
-                gpa,
-                body_for_wiki,
-                &content_assets.pages[page_idx],
-                page.output_path,
-                &asset_fail,
-                null,
-            ) catch |err| {
-                content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail, options.diagnostics);
-                return error.AssetFailed;
-            };
-            if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
-        }
-
-        var inc_with_ref = try gpa.alloc([]const u8, inc_views.len +
-            (if (ref_material.len > 0) @as(usize, 1) else 0) +
-            (if (relation_material.len > 0) @as(usize, 1) else 0));
-        defer gpa.free(inc_with_ref);
-        @memcpy(inc_with_ref[0..inc_views.len], inc_views);
-        var inc_with_ref_count = inc_views.len;
-        if (ref_material.len > 0) {
-            inc_with_ref[inc_with_ref_count] = ref_material;
-            inc_with_ref_count += 1;
-        }
-        if (relation_material.len > 0) {
-            inc_with_ref[inc_with_ref_count] = relation_material;
-        }
-
-        // Fingerprint uses the effective selected layout identity and bytes.
-        var fp_hashed: u64 = 0;
-        const fp_bytes = cache.computePageFingerprintThemeInputCounted(
-            options.target_name,
-            page_sel_paths[page_idx],
-            page.entity_id,
-            shared.source_bytes[page_idx],
-            inc_with_ref,
-            page_layout_bytes[page_idx],
-            nav_material,
-            page_theme_material[page_idx],
-            adapterIdentity(options.input_format),
-            &fp_hashed,
+            page,
+            page_idx,
+            options,
+            shared,
+            page_layouts,
+            page_sel_paths,
+            page_layout_bytes,
+            page_theme_material,
+            site,
+            heading_index,
+            content_assets,
         );
-        fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
+        fingerprints[page_idx] = fp.hex;
         if (options.timings) |t| {
             // Exact payload bytes fed to the fingerprint hasher, including the
             // framed length prefixes and the Textile adapter marker, reported
             // by the counted cache variant so accounting cannot drift.
-            t.bump(.hash_bytes, fp_hashed);
+            t.bump(.hash_bytes, fp.hashed);
         }
 
-        var output_size: u64 = 0;
-        var output_exists = false;
-        if (dist_dir.openFile(io, page.output_path, .{})) |file| {
-            if (file.stat(io)) |st| {
-                if (st.size > 0) {
-                    output_exists = true;
-                    output_size = st.size;
-                }
-            } else |_| {}
-            file.close(io);
-        } else |_| {}
-
-        var skip_render = false;
-        if (options.incremental) {
-            if (parsed_manifest) |pm| {
-                for (pm.value.entries) |entry| {
-                    if (std.mem.eql(u8, entry.entity_id, page.entity_id) and
-                        std.mem.eql(u8, entry.output_path, page.output_path) and
-                        std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]) and
-                        (entry.selected_layout.len == 0 or std.mem.eql(u8, entry.selected_layout, page_sel_paths[page_idx])))
-                    {
-                        // Content-addressed output freshness: require a non-empty
-                        // digest that matches on-disk HTML. Size is a cheap
-                        // prefilter only (same-size corruption still fails digest).
-                        if (output_exists and entry.output_digest.len > 0 and
-                            (entry.output_size == 0 or entry.output_size == output_size))
-                        {
-                            if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |out_bytes| {
-                                defer gpa.free(out_bytes);
-                                const dig_hex = cache.hexDigest(cache.hashBytes(out_bytes));
-                                if (std.mem.eql(u8, entry.output_digest, &dig_hex)) {
-                                    skip_render = true;
-                                    break;
-                                }
-                            } else |_| {}
-                        }
-                    }
-                }
-            }
-        }
+        const skip_render = pageOutputIsFresh(
+            io,
+            gpa,
+            dist_dir,
+            page,
+            options,
+            fingerprints[page_idx],
+            page_sel_paths[page_idx],
+            parsed_manifest,
+        );
         is_dirty[page_idx] = !skip_render;
         if (skip_render) {
             if (options.timings) |t| t.bump(.fast_path_hits, 1);
@@ -2510,7 +2662,23 @@ fn compilePagesInner(
         try expandDirtySet(gpa, is_dirty, db.items(), site.nodes, &shared.dep_index);
     }
 
-    // Compile loop — dirty pages write into staging only
+    return .{ .fingerprints = fingerprints, .is_dirty = is_dirty };
+}
+
+fn renderPages(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    stage_dir: Io.Dir,
+    db: *PageDb,
+    options: CompileOptions,
+    page_layouts: []const assemble.Layout,
+    is_dirty: []const bool,
+    site: *const FrozenSite,
+    heading_index: *wikilink.HeadingIndex,
+    theme_bundle: *theme_mod.ThemeBundle,
+    content_assets: *content_asset.SiteAssetInventory,
+) !CompileStats {
     var stats: CompileStats = .{};
 
     if (options.timings) |t| t.start(.render);
@@ -2525,9 +2693,9 @@ fn compilePagesInner(
             .options = options,
             .is_dirty = is_dirty,
             .site = site,
-            .heading_index = &heading_index,
-            .theme = &theme_bundle,
-            .content_assets = &content_assets,
+            .heading_index = heading_index,
+            .theme = theme_bundle,
+            .content_assets = content_assets,
         };
 
         const num_workers = @min(options.jobs, db.len());
@@ -2601,8 +2769,8 @@ fn compilePagesInner(
                     page_index,
                     .{
                         .site = site,
-                        .heading_index = &heading_index,
-                        .theme = &theme_bundle,
+                        .heading_index = heading_index,
+                        .theme = theme_bundle,
                         .page_assets = &content_assets.pages[page_index],
                     },
                 );
@@ -2629,6 +2797,172 @@ fn compilePagesInner(
         }
         if (rendered_reads > 0) t.bump(.page_reads, rendered_reads);
     }
+
+    return stats;
+}
+
+fn compilePagesInner(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    layout: assemble.Layout,
+    options: CompileOptions,
+    shared_opt: ?*const SharedCompileState,
+    layout_bytes: []const u8,
+    site: *const FrozenSite,
+) !CompileStats {
+    const cwd = Io.Dir.cwd();
+
+    var content_dir = try cwd.openDir(io, options.content_root, .{});
+    defer content_dir.close(io);
+
+    var layout_arena_local = std.heap.ArenaAllocator.init(gpa);
+    defer layout_arena_local.deinit();
+    var layouts = try preparePageLayouts(io, gpa, cwd, db, layout, options, layout_bytes, layout_arena_local.allocator());
+    defer layouts.deinit(gpa, layout_bytes);
+
+    const layouts_by_path = &layouts.layouts_by_path;
+    const page_sel_paths = layouts.page_sel_paths;
+    const page_layouts = layouts.page_layouts;
+    const page_layout_bytes = layouts.page_layout_bytes;
+
+    try validateVerificationSurfaces(gpa, db, layouts.page_layouts, layouts.page_sel_paths, options);
+
+    var theme_bundle = try prepareThemeBundle(io, gpa, cwd, db, options, layouts_by_path);
+    defer theme_bundle.deinit();
+    var content_assets = try discoverContentAssets(io, gpa, content_dir, db, options, &theme_bundle);
+    defer content_assets.deinit();
+    const page_theme_material = try prepareThemeMaterial(gpa, db, layouts_by_path, &theme_bundle, page_sel_paths);
+    defer gpa.free(page_theme_material);
+    const theme_root = theme_mod.themeRootFromLayoutPath(options.layout_path) orelse "";
+
+    // Own shared state when the caller did not supply one (single-target).
+    var local_shared: ?SharedCompileState = null;
+    defer if (local_shared) |*s| s.deinit();
+    const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
+        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format, options.timings, options.diagnostics);
+        break :blk &(local_shared.?);
+    };
+
+    if (options.validation_only) {
+        return validatePrepublicationTarget(
+            io,
+            gpa,
+            content_dir,
+            db,
+            page_layouts,
+            options,
+            shared,
+            site,
+            &theme_bundle,
+            &content_assets,
+        );
+    }
+
+    // Publication begins here. No code above this boundary creates, removes,
+    // or mutates the selected target or sibling staging tree.
+    try cwd.createDirPath(io, options.dist_dir);
+    // Re-check for symlink swap after validation (TOCTOU shrink — issue #11).
+    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, options.dist_dir);
+    var dist_dir = try cwd.openDir(io, options.dist_dir, .{ .iterate = true });
+    defer dist_dir.close(io);
+
+    var prior_sitemap = try readPriorSitemapOwnership(io, gpa, dist_dir);
+    defer prior_sitemap.deinit(gpa);
+
+    // Best-effort: remove orphan createFileAtomic temps left by interrupted runs.
+    assemble.scrubStaleAtomicTemps(io, dist_dir, gpa);
+
+    // Sibling staging: render dirty pages here; commit only after full target success.
+    const stage_rel = try stageRelForDist(gpa, options.dist_dir);
+    defer gpa.free(stage_rel);
+    cwd.deleteTree(io, stage_rel) catch {};
+    try cwd.createDirPath(io, stage_rel);
+    errdefer cwd.deleteTree(io, stage_rel) catch {};
+    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, stage_rel);
+
+    var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
+    defer stage_dir.close(io);
+
+    // Standard.site verification state shared between the pre-commit staging
+    // and the post-commit evidence report.
+    var standard_site_wke: ?standard_site_emit.WellKnownEmission = null;
+    defer if (standard_site_wke) |*wke| wke.deinit(gpa);
+    var prior_well_known_emitted = false;
+
+    // Assets are target-owned members of the same staging transaction.
+    try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
+    try content_asset.copyAssetsToOutput(io, stage_dir, &content_assets);
+
+    var cache_state = loadIncrementalCacheState(io, gpa, dist_dir, options.incremental);
+    defer cache_state.deinit(gpa);
+
+    // Heading id index for wiki `[[entity#heading]]` (Oliver-rendered ids only;
+    // only pages that are fragment targets are rendered for the index).
+    // Incremental: reuse harvest-cache hits so no-op builds skip rendering (#58).
+    const prior_harvest: ?*const ParsedHeadingHarvest = if (cache_state.parsed_heading_harvest) |*ph| &ph.value else null;
+    if (options.timings) |t| t.start(.heading_harvest);
+    const heading_built = try buildSiteHeadingIndex(
+        io,
+        gpa,
+        content_dir,
+        db,
+        site,
+        shared,
+        options.input_format,
+        prior_harvest,
+        options.timings,
+        options.diagnostics,
+    );
+    if (options.timings) |t| t.stop(.heading_harvest);
+    var heading_index = heading_built[0];
+    defer heading_index.deinit(gpa);
+    var heading_snapshot = heading_built[1];
+    defer heading_snapshot.deinit();
+
+    // Precreate output directories under staging
+    {
+        var paths: std.ArrayList([]const u8) = .empty;
+        defer paths.deinit(gpa);
+        try paths.ensureTotalCapacity(gpa, db.len());
+        for (db.items()) |p| try paths.append(gpa, p.output_path);
+        try assemble.precreateOutputDirs(io, stage_dir, gpa, paths.items);
+    }
+
+    var fp_plan = try computeFingerprintsAndDirty(
+        io,
+        gpa,
+        db,
+        options,
+        shared,
+        page_layouts,
+        page_sel_paths,
+        page_layout_bytes,
+        page_theme_material,
+        site,
+        &heading_index,
+        &content_assets,
+        dist_dir,
+        cache_state.parsed_manifest,
+    );
+    defer fp_plan.deinit(gpa);
+    const fingerprints = fp_plan.fingerprints;
+    const is_dirty = fp_plan.is_dirty;
+
+    const stats = try renderPages(
+        io,
+        gpa,
+        content_dir,
+        stage_dir,
+        db,
+        options,
+        page_layouts,
+        is_dirty,
+        site,
+        &heading_index,
+        &theme_bundle,
+        &content_assets,
+    );
 
     // Write cache manifest into staging (committed with the rest of the target).
     if (options.incremental) {
@@ -2941,7 +3275,7 @@ fn compilePagesInner(
     // Prefer prior incremental manifest when present; otherwise scan dist/*.html
     // against current output_path set so --watch without --incremental still prunes.
     {
-        if (parsed_manifest) |pm| {
+        if (cache_state.parsed_manifest) |pm| {
             for (pm.value.entries) |entry| {
                 if (!live_paths.contains(entry.output_path)) {
                     dist_dir.deleteFile(io, entry.output_path) catch {};
@@ -3004,89 +3338,7 @@ fn compilePagesInner(
     // Drop staging tree (errdefer also cleans on earlier failure).
     cwd.deleteTree(io, stage_rel) catch {};
 
-    // The payload transaction, including artifacts.json as its deferred last
-    // file, is complete before checks read the target. Checks are a separate
-    // atomic report publication and never participate in that transaction.
-    if (options.timings) |t| t.start(.checks);
-    publication_checks.writeAfterCommit(io, gpa, dist_dir, options.target_name, .{
-        .test_fail_execution = options.test_fail_publication_checks,
-        .test_fail_write = options.test_fail_publication_checks_write,
-    }) catch |err| {
-        const stderr = std.debug.lockStderr(&.{});
-        defer std.debug.unlockStderr();
-        writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
-        return error.PublicationChecksFailed;
-    };
-    if (options.timings) |t| t.stop(.checks);
-
-    // Claims are derived from the exact committed artifacts and checks bytes.
-    // A derivation, stale-binding, parser, I/O, or atomic-write failure keeps
-    // the committed target, inventory, and checks and leaves any prior claims
-    // report untouched; the diagnostic is emitted even under --quiet.
-    if (options.timings) |t| t.start(.claims);
-    publication_claims.writeAfterChecks(io, gpa, dist_dir, options.target_name, .{
-        .test_fail_execution = options.test_fail_publication_claims,
-        .test_fail_write = options.test_fail_publication_claims_write,
-    }) catch |err| {
-        if (options.publication_claims_failure_writer) |writer| {
-            writePublicationClaimsFailure(writer, options.target_name, err) catch {};
-        } else {
-            const stderr = std.debug.lockStderr(&.{});
-            defer std.debug.unlockStderr();
-            writePublicationClaimsFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
-        }
-        return error.PublicationClaimsFailed;
-    };
-    if (options.timings) |t| t.stop(.claims);
-
-    // The Touch Atlas is derived from the exact committed artifacts, checks,
-    // and claims bytes. A derivation, stale-binding, parser, I/O, or
-    // atomic-write failure keeps the committed target, inventory, checks, and
-    // claims and leaves any prior touches report untouched; the diagnostic is
-    // emitted even under --quiet.
-    if (options.timings) |t| t.start(.touches);
-    publication_touches.writeAfterClaims(io, gpa, dist_dir, options.target_name, .{
-        .test_fail_execution = options.test_fail_publication_touches,
-        .test_fail_write = options.test_fail_publication_touches_write,
-    }) catch |err| {
-        if (options.publication_touches_failure_writer) |writer| {
-            writePublicationTouchesFailure(writer, options.target_name, err) catch {};
-        } else {
-            const stderr = std.debug.lockStderr(&.{});
-            defer std.debug.unlockStderr();
-            writePublicationTouchesFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
-        }
-        return error.PublicationTouchesFailed;
-    };
-    if (options.timings) |t| t.stop(.touches);
-
-    // The Proof Pack is the final presentation layer, derived exclusively
-    // from the exact committed artifacts, checks, claims, and touches bytes.
-    // A derivation, stale-binding, parser, render, I/O, or transaction
-    // failure keeps the committed target and all four evidence reports and
-    // restores (or explicitly reports) the prior presentation pair; the
-    // diagnostic is emitted even under --quiet.
-    if (options.timings) |t| t.start(.proof_pack);
-    publication_proof_pack.writeAfterTouches(io, gpa, dist_dir, options.target_name, .{
-        .test_fail_execution = options.test_fail_publication_proof_pack,
-        .test_fail_json_tmp_write = options.test_fail_proof_pack_json_tmp_write,
-        .test_fail_html_tmp_write = options.test_fail_proof_pack_html_tmp_write,
-        .test_fail_preserve_prior = options.test_fail_proof_pack_preserve_prior,
-        .test_fail_install_html = options.test_fail_proof_pack_install_html,
-        .test_fail_install_json = options.test_fail_proof_pack_install_json,
-        .test_fail_restore_html = options.test_fail_proof_pack_restore_html,
-        .test_fail_restore_json = options.test_fail_proof_pack_restore_json,
-    }) catch |err| {
-        if (options.publication_proof_pack_failure_writer) |writer| {
-            writePublicationProofPackFailure(writer, options.target_name, err) catch {};
-        } else {
-            const stderr = std.debug.lockStderr(&.{});
-            defer std.debug.unlockStderr();
-            writePublicationProofPackFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
-        }
-        return error.PublicationProofPackFailed;
-    };
-    if (options.timings) |t| t.stop(.proof_pack);
+    try publishEvidenceReports(io, gpa, dist_dir, options);
 
     return stats;
 }
