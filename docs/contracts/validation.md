@@ -212,6 +212,16 @@ output write, commit, publication-evidence phase, or after inputs change. It
 means only that the observed input survived the shared prepublication authority
 defined above.
 
+## Environment notes
+
+- Generated directories (`dist/`, `rag/`, `source-rag/`, `.boris-cache/`, and
+  temporary release-gate output) are not source-of-truth or review currency.
+- Symlink-related tests may be skipped on hosts that deny symlink creation;
+  the no-follow and symlink-rejection policy itself remains normative (see
+  [html-output.md](html-output.md) § Symlink safety).
+- Default HTML assumes trusted author input because raw HTML passes through
+  unchanged per [oliver-renderer.md](oliver-renderer.md).
+
 ## Acceptance
 
 The shipped contract tests must cover valid and repeated runs, canonical

@@ -86,7 +86,7 @@ revise the temporary rule after its deliberate PR into `main`.
 ## Supporting repository map
 
 - [`README.md`](../README.md): human outcomes and CLI.
-- [`docs/STATUS.md`](STATUS.md): current phase, known gaps, and module map.
+- [`docs/STATUS.md`](STATUS.md): phase banner + pointer table (capability snapshot in `archived/capability-matrix-v0.8.md`).
 - [`docs/contracts/`](contracts/): normative IR, frontmatter, graph,
   diagnostics, and fixtures.
 - [`docs/RELEASE-GATE.md`](RELEASE-GATE.md): mechanical ship checks.

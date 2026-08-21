@@ -315,8 +315,11 @@ trees, identify relationships and unsupported constructs, materialize reviewed
 themes, and produce manual-review reports. They do not add Astro, Node, or an
 MDX runtime to Boris core.
 
-Start with [`docs/MIGRATION.md`](docs/MIGRATION.md). Current lab state is
-the Labs table in [`docs/STATUS.md`](docs/STATUS.md).
+Start with [`docs/MIGRATION.md`](docs/MIGRATION.md). Historical v0.8
+capabilities are preserved in the frozen snapshot
+[`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md)
+(2026-08-21); current normative behavior lives in [`docs/contracts/`](docs/contracts/)
+and current lab usage in [`tools/migration-lab/README.md`](tools/migration-lab/README.md).
 
 ## AI and OpenAI Build Week
 
@@ -347,7 +350,7 @@ reviewed or uploaded to an LLM when useful.
 - [x] Embeddable `compileBundle` (native + Wasm) and an example Cloudflare Worker host ([#301](https://github.com/drawmeanelephant/boris/issues/301) M0–M7). Not a verified target. Live Cloudflare smoke and isolate-peak measurement remain open on the parent issue.
 - [x] Cloudflare container hosted runner ([#300](https://github.com/drawmeanelephant/boris/issues/300)). Example only; not a verified target.
 
-Current phase and known gaps live in [`docs/STATUS.md`](docs/STATUS.md).
+Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase banner + pointer table); capability details live in [`docs/contracts/`](docs/contracts/) and the archived [v0.8 snapshot](docs/archived/capability-matrix-v0.8.md).
 
 ## Honest limitations
 
@@ -364,8 +367,8 @@ Current phase and known gaps live in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Project map
 
-- [`docs/STATUS.md`](docs/STATUS.md) — identity, current phase, and known gaps
-- [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) — where `src/` clusters live
+- [`docs/STATUS.md`](docs/STATUS.md) — phase banner + pointer table (<80 lines)
+- [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) — where `src/` clusters live and documentation map
 - [`docs/contracts/`](docs/contracts/) — normative behavior
 - [`docs/authoring-spine.md`](docs/authoring-spine.md) — init → publish → verify
 - [`docs/MIGRATION.md`](docs/MIGRATION.md) — migration workflow

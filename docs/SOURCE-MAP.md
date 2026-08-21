@@ -48,14 +48,44 @@ Cloudflare Worker host example
 Migration labs / source-RAG / search-index / docs-maintenance
 : [`tools/`](../tools/) — standalone. Not linked into the `boris` binary.
 
+## Documentation map
+
+Moved from [`docs/STATUS.md`](STATUS.md) per
+[#692](https://github.com/drawmeanelephant/boris/issues/692) — `STATUS.md` is
+now a phase banner + pointer table. The capability snapshot lives in
+[`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md).
+
+| Document | Use it for |
+|---|---|
+| [`README.md`](../README.md) | Product outcomes and quick start |
+| [`docs/contracts/`](contracts/) | Normative compiler and artifact behavior |
+| [`docs/contracts/publication-model.md`](contracts/publication-model.md) | Canonical ownership of document facts, publication facts, migration provenance, projections, and verification claims |
+| [`docs/contracts/publication-platforms.md`](contracts/publication-platforms.md) | Target registry and verified-target adapter seam |
+| [`CHANGELOG.md`](../CHANGELOG.md) | Released-history record |
+| [`docs/changelog.d/`](changelog.d/) | Pending release fragments |
+| [`docs/MIGRATION.md`](MIGRATION.md) | Bounded author migration workflow |
+| [`docs/authoring-spine.md`](authoring-spine.md) | Teaching path from `boris init` to publish + verify |
+| [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration-lab commands |
+| [`tools/search-index/README.md`](../tools/search-index/README.md) | Rendered search tool |
+| [`docs/github-pages.md`](github-pages.md) | GitHub Pages setup, location model, workflow, and evidence boundary |
+| [`docs/cloudflare-container.md`](cloudflare-container.md) | Hosted runner + Cloudflare Containers example (not a target) |
+| [`docs/standard-site.md`](standard-site.md) | Standard.site first-tester path |
+| [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
+| [`AGENTS.md`](../AGENTS.md) | Repository policy and agent constraints |
+| [`content/`](../content/) | Compiled public documentation site (Oliver-rendered) |
+| [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) | Where `src/` clusters live. Not a function catalog. |
+| [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md) | Archived v0.8 capability snapshot (pre-slim) |
+
 ## Rules
 
 - Do not grow a per-function prose twin of `src/` or `tools/`. Those
   dossier trees were retired. Operator docs for labs live in
   [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
   [`tools/source-rag/README.md`](../tools/source-rag/README.md).
-  Historical dogfood reports and retrospectives were retired; current
-  state is the Labs table in [`STATUS.md`](STATUS.md).
+  Historical dogfood reports and retrospectives were retired; the v0.8
+  capability snapshot lives in
+  [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md)
+  and `STATUS.md` is now a phase banner + pointer table (see #692).
 - A new module does not require a new Markdown file here. Add a row when
   the *job* is new.
 - If this page and a contract disagree, the contract wins. If this page
