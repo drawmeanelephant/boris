@@ -1,3 +1,7 @@
+> **Archived 2026-08-21 — issue [#693](https://github.com/drawmeanelephant/boris/issues/693).**
+> This file was moved from `docs/audits/publication-conformance/REPORT.md` to `docs/archived/audits/publication-conformance/REPORT.md`
+> as a historical record. Do not load this file as standing agent context. Git history preserves the original.
+
 # Publication conformance evidence: C01, C02, C03, C04, C05, C06, C07, C08
 
 Date: 2026-08-02

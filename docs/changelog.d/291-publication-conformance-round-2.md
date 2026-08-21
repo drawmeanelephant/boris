@@ -9,7 +9,7 @@
   (an `--incremental` first publication followed by `--incremental` rebuilds
   into the same target), the exit trap reaps every retained watcher PID, and
   the watch-failure case pins the exact exit code. Links:
-  [conformance report](/docs/audits/publication-conformance/REPORT.md),
+  [conformance report](/docs/archived/audits/publication-conformance/REPORT.md),
   [watch-mode contract](/docs/contracts/watch-mode.md),
   [content-local-assets contract](/docs/contracts/content-local-assets.md),
   [textile-compatibility contract](/docs/contracts/textile-compatibility.md).

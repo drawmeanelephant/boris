@@ -1,3 +1,7 @@
+> **Archived 2026-08-21 — issue [#693](https://github.com/drawmeanelephant/boris/issues/693).**
+> This file was moved from `docs/audits/project-health-surface.md` to `docs/archived/audits/project-health-surface.md`
+> as a historical record. Do not load this file as standing agent context. Git history preserves the original.
+
 # Boris project-health surface audit
 
 **Status:** repository audit and design input; no product behavior change
