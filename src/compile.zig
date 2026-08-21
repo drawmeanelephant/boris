@@ -76,6 +76,9 @@ const publication_claims = @import("publication_claims.zig");
 const publication_touches = @import("publication_touches.zig");
 const publication_proof_pack = @import("publication_proof_pack.zig");
 const timings = @import("timings.zig");
+const compile_stage = @import("compile_stage.zig");
+const compile_cache = @import("compile_cache.zig");
+const compile_heading = @import("compile_heading.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -877,39 +880,10 @@ pub fn renderAndPublishPage(
     });
 }
 
-pub const CacheEntry = struct {
-    entity_id: []const u8,
-    fingerprint: []const u8,
-    output_path: []const u8,
-    /// Effective selected layout path for this target/page (workspace-relative).
-    selected_layout: []const u8 = "",
-    /// On-disk output size at last successful publish (cheap prefilter).
-    output_size: u64 = 0,
-    /// Lowercase hex SHA-256 of published HTML bytes; empty forces re-render.
-    output_digest: []const u8 = "",
-};
-
-pub const CacheManifest = struct {
-    format_version: []const u8 = cache.CACHE_FORMAT_VERSION,
-    entries: []const CacheEntry,
-};
-
-pub const ParsedCacheEntry = struct {
-    entity_id: []const u8,
-    fingerprint: []const u8,
-    output_path: []const u8,
-    /// Effective selected layout; missing on older manifests forces re-render via format bump.
-    selected_layout: []const u8 = "",
-    /// Optional for older manifests; missing/zero is a cheap prefilter only.
-    output_size: u64 = 0,
-    /// Optional for older manifests; missing/empty forces re-render.
-    output_digest: []const u8 = "",
-};
-
-pub const ParsedCacheManifest = struct {
-    format_version: []const u8,
-    entries: []ParsedCacheEntry,
-};
+pub const CacheEntry = compile_cache.CacheEntry;
+pub const CacheManifest = compile_cache.CacheManifest;
+pub const ParsedCacheEntry = compile_cache.ParsedCacheEntry;
+pub const ParsedCacheManifest = compile_cache.ParsedCacheManifest;
 
 fn compareStrings(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.order(u8, a, b) == .lt;
@@ -922,58 +896,11 @@ fn collectTransitIncludes(
     list: *std.ArrayList([]const u8),
     visited: *std.StringHashMapUnmanaged(void),
 ) !void {
-    if (visited.contains(source)) return;
-    try visited.put(gpa, source, {});
-
-    if (dep_index.forward.get(source)) |deps| {
-        for (deps.items) |dep| {
-            if (dep.kind == .include) {
-                var exists = false;
-                for (list.items) |item| {
-                    if (std.mem.eql(u8, item, dep.path)) {
-                        exists = true;
-                        break;
-                    }
-                }
-                if (!exists) {
-                    try list.append(gpa, try gpa.dupe(u8, dep.path));
-                }
-                try collectTransitIncludes(gpa, dep.path, dep_index, list, visited);
-            }
-        }
-    }
+    return compile_cache.collectTransitIncludes(gpa, source, dep_index, list, visited);
 }
 
 fn writeCacheManifest(allocator: std.mem.Allocator, writer: anytype, manifest: CacheManifest) !void {
-    // Buffer via ArrayList so entity_id / paths / fingerprints go through json_out escaping.
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(allocator);
-
-    try buf.appendSlice(allocator, "{\n  \"format_version\": ");
-    try json_out.writeString(&buf, allocator, manifest.format_version);
-    try buf.appendSlice(allocator, ",\n  \"entries\": [\n");
-    for (manifest.entries, 0..) |entry, i| {
-        try buf.appendSlice(allocator, "    {\n      \"entity_id\": ");
-        try json_out.writeString(&buf, allocator, entry.entity_id);
-        try buf.appendSlice(allocator, ",\n      \"fingerprint\": ");
-        try json_out.writeString(&buf, allocator, entry.fingerprint);
-        try buf.appendSlice(allocator, ",\n      \"output_path\": ");
-        try json_out.writeString(&buf, allocator, entry.output_path);
-        try buf.appendSlice(allocator, ",\n      \"selected_layout\": ");
-        try json_out.writeString(&buf, allocator, entry.selected_layout);
-        try buf.appendSlice(allocator, ",\n      \"output_size\": ");
-        try json_out.writeUsize(&buf, allocator, @intCast(entry.output_size));
-        try buf.appendSlice(allocator, ",\n      \"output_digest\": ");
-        try json_out.writeString(&buf, allocator, entry.output_digest);
-        try buf.appendSlice(allocator, "\n    }");
-        if (i + 1 < manifest.entries.len) {
-            try buf.appendSlice(allocator, ",\n");
-        } else {
-            try buf.append(allocator, '\n');
-        }
-    }
-    try buf.appendSlice(allocator, "  ]\n}\n");
-    try writer.writeAll(buf.items);
+    return compile_cache.writeCacheManifest(allocator, writer, manifest);
 }
 
 /// Site compile: layout → promote PageDb → graph freeze → whiteboard loop → dist/.
@@ -1285,8 +1212,87 @@ pub fn compileHtmlSiteMulti(
     var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format, base_options.timings, base_options.diagnostics);
     defer shared.deinit();
 
-    // Preflight layout selection for every target/page before any target publishes
-    // (RFC §5: ambiguous globs and mixed roots must not leave partial publications).
+    try preflightValidateLayouts(gpa, plans, &db, base_options);
+
+    // Layout templates cached by path (per-target layouts share the same arena).
+    var layout_arena = std.heap.ArenaAllocator.init(gpa);
+    defer layout_arena.deinit();
+    var layout_cache: std.StringHashMapUnmanaged(CachedLayout) = .{};
+    defer layout_cache.deinit(gpa);
+
+    var any_failed = false;
+    var any_io_failed = false;
+    var any_usage_failed = false;
+    // Aggregate page statistics across targets (watch `--watch-json` reports
+    // the total written for the initial build; rebuild values are optional).
+    var total_stats: CompileStats = .{};
+    for (plans) |plan| {
+        const load_failed = try loadLayoutsForPlan(io, gpa, plan, &layout_cache, layout_arena.allocator(), &base_options, &any_failed, &any_io_failed);
+        if (load_failed) continue;
+
+        if (compileOneTarget(io, gpa, &db, plan, base_options, &shared, &site, &layout_cache)) |st| {
+            total_stats.pages_written += st.pages_written;
+            total_stats.pages_attempted += st.pages_attempted;
+            if (st.peak_whiteboard_capacity > total_stats.peak_whiteboard_capacity) {
+                total_stats.peak_whiteboard_capacity = st.peak_whiteboard_capacity;
+            }
+            if (st.last_reset_capacity > total_stats.last_reset_capacity) {
+                total_stats.last_reset_capacity = st.last_reset_capacity;
+            }
+        } else |err| {
+            if (err != error.IncludeFailed and err != error.ReferenceFailed and
+                err != error.ComponentFailed and err != error.GraphValidationFailed and err != error.AmbiguousGlob and
+                err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
+            {
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
+                const msg = try std.fmt.allocPrint(gpa, "target '{s}' compilation failed: {s}", .{ plan.name, @errorName(err) });
+                defer gpa.free(msg);
+                appendHtmlDiagnostic(&base_options, .{
+                    .severity = .error_,
+                    .code = layoutCodeFor(err),
+                    .message = msg,
+                    .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+                    .source_path = plan.layout_path,
+                });
+            }
+            any_failed = true;
+            if (err == error.AmbiguousGlob or err == error.MixedThemeRoots or
+                err == error.DuplicateSelector or err == error.LayoutSelectionFailed or
+                err == error.InvalidSiteUrl or err == error.InvalidSitemapPath or
+                err == error.SitemapOutputCollision or err == error.SitemapSiteUrlRequired or
+                err == error.SitemapSiteUrlWithoutOutput or err == error.AmbiguousSitemapTargets)
+            {
+                any_usage_failed = true;
+            } else {
+                any_io_failed = any_io_failed or !isContentCompileFailure(err);
+            }
+            if (base_options.timings) |t| t.stopAll();
+            continue;
+        }
+    }
+
+    // Free layout bytes (arena owns Layout views into raw; bytes are GPA).
+    var it = layout_cache.iterator();
+    while (it.next()) |entry| {
+        gpa.free(entry.value_ptr.bytes);
+        if (entry.value_ptr.theme_material.len > 0) gpa.free(entry.value_ptr.theme_material);
+    }
+
+    if (any_failed) {
+        if (any_usage_failed) return error.LayoutSelectionFailed;
+        if (any_io_failed) return error.MultiTargetIoFailed;
+        return error.MultiTargetCompilationFailed;
+    }
+    return total_stats;
+}
+
+
+fn preflightValidateLayouts(
+    gpa: std.mem.Allocator,
+    plans: []const target_mod.TargetPlan,
+    db: *const PageDb,
+    base_options: CompileOptions,
+) !void {
     for (plans) |plan| {
         target_mod.rejectMixedThemeRoots(plan.layout_path, plan.layout_rules) catch |err| {
             if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' mixed theme roots in layout rules: {s}\n", .{ plan.name, @errorName(err) });
@@ -1326,137 +1332,83 @@ pub fn compileHtmlSiteMulti(
             };
         }
     }
+}
 
-    // Layout templates cached by path (per-target layouts share the same arena).
-    var layout_arena = std.heap.ArenaAllocator.init(gpa);
-    defer layout_arena.deinit();
-    var layout_cache: std.StringHashMapUnmanaged(CachedLayout) = .{};
-    defer layout_cache.deinit(gpa);
+fn loadLayoutsForPlan(
+    io: Io,
+    gpa: std.mem.Allocator,
+    plan: target_mod.TargetPlan,
+    layout_cache: *std.StringHashMapUnmanaged(CachedLayout),
+    layout_arena: std.mem.Allocator,
+    base_options: *const CompileOptions,
+    any_failed: *bool,
+    any_io_failed: *bool,
+) !bool {
+    const declared = layout_select.collectDeclaredLayouts(gpa, plan.layout_path, plan.layout_rules) catch {
+        any_failed.* = true;
+        any_io_failed.* = true;
+        return true;
+    };
+    defer gpa.free(declared);
 
-    var any_failed = false;
-    var any_io_failed = false;
-    var any_usage_failed = false;
-    // Aggregate page statistics across targets (watch `--watch-json` reports
-    // the total written for the initial build; rebuild values are optional).
-    var total_stats: CompileStats = .{};
-    for (plans) |plan| {
-        var target_options = base_options;
-        target_options.target_name = plan.name;
-        target_options.dist_dir = plan.output_dir;
-        target_options.layout_path = plan.layout_path;
-        target_options.layout_rules = plan.layout_rules;
-        target_options.output_profile = plan.html_profile orelse base_options.output_profile;
-
-        // Load every declared layout (fallback + rules), even if no page selects it.
-        const declared = layout_select.collectDeclaredLayouts(gpa, plan.layout_path, plan.layout_rules) catch {
-            any_failed = true;
-            any_io_failed = true;
-            continue;
+    for (declared) |lp| {
+        const gop = try layout_cache.getOrPut(gpa, lp);
+        if (gop.found_existing) continue;
+        const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena) catch |err| {
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+            const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
+            defer gpa.free(msg);
+            appendHtmlDiagnostic(base_options, .{
+                .severity = .error_,
+                .code = layoutCodeFor(err),
+                .message = msg,
+                .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+                .source_path = lp,
+            });
+            any_failed.* = true;
+            any_io_failed.* = any_io_failed.* or !isContentCompileFailure(err);
+            _ = layout_cache.remove(lp);
+            return true;
         };
-        defer gpa.free(declared);
-
-        var load_failed = false;
-        for (declared) |lp| {
-            const gop = try layout_cache.getOrPut(gpa, lp);
-            if (gop.found_existing) continue;
-            const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena.allocator()) catch |err| {
-                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
-                const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
-                defer gpa.free(msg);
-                appendHtmlDiagnostic(&base_options, .{
-                    .severity = .error_,
-                    .code = layoutCodeFor(err),
-                    .message = msg,
-                    .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
-                    .source_path = lp,
-                });
-                any_failed = true;
-                any_io_failed = any_io_failed or !isContentCompileFailure(err);
-                _ = layout_cache.remove(lp);
-                load_failed = true;
-                break;
-            };
-            const bytes = readFileAlloc(io, Io.Dir.cwd(), lp, gpa) catch |err| {
-                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
-                const msg = try std.fmt.allocPrint(gpa, "failed to read layout {s}: {s}", .{ lp, @errorName(err) });
-                defer gpa.free(msg);
-                appendHtmlDiagnostic(&base_options, .{
-                    .severity = .error_,
-                    .code = .EIO,
-                    .message = msg,
-                    .remediation = "Check the layout path spelling and file permissions",
-                    .source_path = lp,
-                });
-                any_failed = true;
-                any_io_failed = true;
-                _ = layout_cache.remove(lp);
-                load_failed = true;
-                break;
-            };
-            gop.value_ptr.* = .{ .layout = layout, .bytes = bytes };
-        }
-        if (load_failed) continue;
-
-        const cached = layout_cache.get(plan.layout_path).?;
-        if (compilePagesWithSharedAndSite(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes, &site)) |st| {
-            total_stats.pages_written += st.pages_written;
-            total_stats.pages_attempted += st.pages_attempted;
-            if (st.peak_whiteboard_capacity > total_stats.peak_whiteboard_capacity) {
-                total_stats.peak_whiteboard_capacity = st.peak_whiteboard_capacity;
-            }
-            if (st.last_reset_capacity > total_stats.last_reset_capacity) {
-                total_stats.last_reset_capacity = st.last_reset_capacity;
-            }
-        } else |err| {
-            if (err != error.IncludeFailed and err != error.ReferenceFailed and
-                err != error.ComponentFailed and err != error.GraphValidationFailed and err != error.AmbiguousGlob and
-                err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
-            {
-                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
-                const msg = try std.fmt.allocPrint(gpa, "target '{s}' compilation failed: {s}", .{ plan.name, @errorName(err) });
-                defer gpa.free(msg);
-                appendHtmlDiagnostic(&base_options, .{
-                    .severity = .error_,
-                    .code = layoutCodeFor(err),
-                    .message = msg,
-                    .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
-                    .source_path = plan.layout_path,
-                });
-            }
-            any_failed = true;
-            if (err == error.AmbiguousGlob or err == error.MixedThemeRoots or
-                err == error.DuplicateSelector or err == error.LayoutSelectionFailed or
-                err == error.InvalidSiteUrl or err == error.InvalidSitemapPath or
-                err == error.SitemapOutputCollision or err == error.SitemapSiteUrlRequired or
-                err == error.SitemapSiteUrlWithoutOutput or err == error.AmbiguousSitemapTargets)
-            {
-                any_usage_failed = true;
-            } else {
-                any_io_failed = any_io_failed or !isContentCompileFailure(err);
-            }
-            // A failing target can return mid-phase with a timer left active.
-            // Without this, the next target's idempotent `start` inherits the
-            // stale timestamp and the eventual duration absorbs the failure
-            // tail plus unrelated work. Close any leaked phases before moving
-            // on so each target's phases time independently.
-            if (base_options.timings) |t| t.stopAll();
-            continue;
-        }
+        const bytes = readFileAlloc(io, Io.Dir.cwd(), lp, gpa) catch |err| {
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+            const msg = try std.fmt.allocPrint(gpa, "failed to read layout {s}: {s}", .{ lp, @errorName(err) });
+            defer gpa.free(msg);
+            appendHtmlDiagnostic(base_options, .{
+                .severity = .error_,
+                .code = .EIO,
+                .message = msg,
+                .remediation = "Check the layout path spelling and file permissions",
+                .source_path = lp,
+            });
+            any_failed.* = true;
+            any_io_failed.* = true;
+            _ = layout_cache.remove(lp);
+            return true;
+        };
+        gop.value_ptr.* = .{ .layout = layout, .bytes = bytes };
     }
+    return false;
+}
 
-    // Free layout bytes (arena owns Layout views into raw; bytes are GPA).
-    var it = layout_cache.iterator();
-    while (it.next()) |entry| {
-        gpa.free(entry.value_ptr.bytes);
-        if (entry.value_ptr.theme_material.len > 0) gpa.free(entry.value_ptr.theme_material);
-    }
-
-    if (any_failed) {
-        if (any_usage_failed) return error.LayoutSelectionFailed;
-        if (any_io_failed) return error.MultiTargetIoFailed;
-        return error.MultiTargetCompilationFailed;
-    }
-    return total_stats;
+fn compileOneTarget(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    plan: target_mod.TargetPlan,
+    base_options: CompileOptions,
+    shared: *const SharedCompileState,
+    site: *const FrozenSite,
+    layout_cache: *std.StringHashMapUnmanaged(CachedLayout),
+) !CompileStats {
+    const cached = layout_cache.get(plan.layout_path).?;
+    var target_options = base_options;
+    target_options.target_name = plan.name;
+    target_options.dist_dir = plan.output_dir;
+    target_options.layout_path = plan.layout_path;
+    target_options.layout_rules = plan.layout_rules;
+    target_options.output_profile = plan.html_profile orelse base_options.output_profile;
+    return try compilePagesWithSharedAndSite(io, gpa, db, cached.layout, target_options, shared, cached.bytes, site);
 }
 
 /// Run the canonical HTML source/target prepublication phases without writing
@@ -1639,154 +1591,34 @@ pub fn compilePagesWithSharedAndSite(
 }
 
 fn fingerprintHex(fp_bytes: [32]u8, gpa: std.mem.Allocator) ![]u8 {
-    var fp_hex: [64]u8 = undefined;
-    const hex_chars = "0123456789abcdef";
-    for (fp_bytes, 0..) |b, i| {
-        fp_hex[i * 2] = hex_chars[b >> 4];
-        fp_hex[i * 2 + 1] = hex_chars[b & 0x0f];
-    }
-    return try gpa.dupe(u8, &fp_hex);
+    return compile_cache.fingerprintHex(fp_bytes, gpa);
 }
 
-/// Collect owned entity ids that are targets of any `[[entity#heading]]` in the site
-/// (page bodies + transitive include bodies). Empty when no fragment links exist.
+const HEADING_HARVEST_FORMAT = compile_heading.HEADING_HARVEST_FORMAT;
+const ParsedHeadingHarvestEntry = compile_heading.ParsedHeadingHarvestEntry;
+const ParsedHeadingHarvest = compile_heading.ParsedHeadingHarvest;
+const HeadingHarvestWriteEntry = compile_heading.HeadingHarvestWriteEntry;
+const HeadingHarvestSnapshot = compile_heading.HeadingHarvestSnapshot;
+
 fn collectFragmentTargetSet(
     gpa: std.mem.Allocator,
     db: *const PageDb,
     shared: *const SharedCompileState,
 ) !std.StringHashMapUnmanaged(void) {
-    var targets: std.StringHashMapUnmanaged(void) = .{};
-    errdefer {
-        var it = targets.keyIterator();
-        while (it.next()) |k| gpa.free(k.*);
-        targets.deinit(gpa);
-    }
-
-    var seen: std.StringHashMapUnmanaged(void) = .{};
-    defer seen.deinit(gpa);
-    var raw_ids: std.ArrayList([]const u8) = .empty;
-    defer raw_ids.deinit(gpa);
-
-    for (db.items(), 0..) |page, page_idx| {
-        raw_ids.clearRetainingCapacity();
-        seen.clearRetainingCapacity();
-
-        const body = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
-        var fail: wikilink.FailInfo = .{ .line_base = include_mod.lineBaseOfSource(shared.source_bytes[page_idx]) };
-        try wikilink.collectFragmentTargetIds(body, gpa, &raw_ids, &seen, &fail, page.source_path);
-
-        const inc_owned = shared.include_bytes[page_idx];
-        const inc_paths = shared.include_paths[page_idx];
-        for (inc_owned, 0..) |inc_file, j| {
-            const inc_body = include_mod.bodyOfSource(inc_file);
-            try wikilink.collectFragmentTargetIds(inc_body, gpa, &raw_ids, &seen, &fail, inc_paths[j]);
-        }
-
-        for (raw_ids.items) |id| {
-            // Dupe before insert: `id` is a view into source/include bytes, not
-            // gpa-owned. Inserting it first and duping after would leave a
-            // non-owned key in the map if the dupe fails, and the errdefer above
-            // frees every key — an invalid free on the OOM path.
-            if (targets.contains(id)) continue;
-            const owned = try gpa.dupe(u8, id);
-            errdefer gpa.free(owned);
-            try targets.put(gpa, owned, {});
-        }
-    }
-    return targets;
+    return compile_heading.collectFragmentTargetSet(gpa, db.items(), shared.source_bytes, shared.include_bytes, shared.include_paths);
 }
 
-/// Side-cache format for heading harvest (separate from page manifest so we
-/// do not force a fingerprint-format bump). See #58.
-const HEADING_HARVEST_FORMAT = "boris-heading-harvest-v1";
-
-const ParsedHeadingHarvestEntry = struct {
-    entity_id: []const u8 = "",
-    harvest_key: []const u8 = "",
-    ids: []const []const u8 = &.{},
-};
-
-const ParsedHeadingHarvest = struct {
-    format: []const u8 = "",
-    entries: []ParsedHeadingHarvestEntry = &.{},
-};
-
-const HeadingHarvestWriteEntry = struct {
-    entity_id: []u8,
-    harvest_key: []u8,
-    ids: [][]u8,
-};
-
-const HeadingHarvestSnapshot = struct {
-    /// Owned entry records for the just-built index (needed pages only).
-    entries: []HeadingHarvestWriteEntry,
-    gpa: std.mem.Allocator,
-
-    fn deinit(self: *HeadingHarvestSnapshot) void {
-        for (self.entries) |*e| {
-            self.gpa.free(e.entity_id);
-            self.gpa.free(e.harvest_key);
-            for (e.ids) |id| self.gpa.free(id);
-            self.gpa.free(e.ids);
-        }
-        self.gpa.free(self.entries);
-        self.* = undefined;
-    }
-};
-
-/// Content-addressed key for a page's harvested heading ids: source + transitive
-/// include bodies + input adapter identity. Unchanged key ⇒ reusable ids without rendering.
 fn headingHarvestKey(
     entity_id: []const u8,
     source_bytes: []const u8,
     include_bytes: []const []const u8,
     input_material: []const u8,
 ) [32]u8 {
-    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    var len_buf: [8]u8 = undefined;
-    const updateLen = struct {
-        fn go(h: *std.crypto.hash.sha2.Sha256, len: u64, buf: *[8]u8) void {
-            std.mem.writeInt(u64, buf, len, .little);
-            h.update(buf);
-        }
-    }.go;
-    updateLen(&hasher, entity_id.len, &len_buf);
-    hasher.update(entity_id);
-    updateLen(&hasher, source_bytes.len, &len_buf);
-    hasher.update(source_bytes);
-    updateLen(&hasher, include_bytes.len, &len_buf);
-    for (include_bytes) |b| {
-        updateLen(&hasher, b.len, &len_buf);
-        hasher.update(b);
-    }
-    updateLen(&hasher, input_material.len, &len_buf);
-    hasher.update(input_material);
-    var out: [32]u8 = undefined;
-    hasher.final(&out);
-    return out;
+    return compile_heading.headingHarvestKey(entity_id, source_bytes, include_bytes, input_material);
 }
 
 fn writeHeadingHarvestCache(allocator: std.mem.Allocator, writer: anytype, entries: []const HeadingHarvestWriteEntry) !void {
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(allocator);
-    try buf.appendSlice(allocator, "{\n  \"format\": ");
-    try json_out.writeString(&buf, allocator, HEADING_HARVEST_FORMAT);
-    try buf.appendSlice(allocator, ",\n  \"entries\": [\n");
-    for (entries, 0..) |e, i| {
-        try buf.appendSlice(allocator, "    {\n      \"entity_id\": ");
-        try json_out.writeString(&buf, allocator, e.entity_id);
-        try buf.appendSlice(allocator, ",\n      \"harvest_key\": ");
-        try json_out.writeString(&buf, allocator, e.harvest_key);
-        try buf.appendSlice(allocator, ",\n      \"ids\": [");
-        for (e.ids, 0..) |id, j| {
-            try json_out.writeString(&buf, allocator, id);
-            if (j + 1 < e.ids.len) try buf.appendSlice(allocator, ", ");
-        }
-        try buf.appendSlice(allocator, "]\n    }");
-        if (i + 1 < entries.len) try buf.appendSlice(allocator, ",\n") else try buf.append(allocator, '\n');
-    }
-    try buf.appendSlice(allocator, "  ]\n}\n");
-    try writer.writeAll(buf.items);
+    return compile_heading.writeHeadingHarvestCache(allocator, writer, entries);
 }
 
 /// Harvest Oliver-rendered heading ids for pages that are wiki-fragment targets.
@@ -1809,137 +1641,7 @@ fn buildSiteHeadingIndex(
     recorder: ?*timings.Recorder,
     sink: ?*diag.Collector,
 ) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
-    var index: wikilink.HeadingIndex = .{};
-    errdefer index.deinit(gpa);
-
-    var needed = try collectFragmentTargetSet(gpa, db, shared);
-    defer {
-        var it = needed.keyIterator();
-        while (it.next()) |k| gpa.free(k.*);
-        needed.deinit(gpa);
-    }
-
-    var snapshot: HeadingHarvestSnapshot = .{ .entries = &.{}, .gpa = gpa };
-    errdefer snapshot.deinit();
-
-    if (needed.count() == 0) return .{ index, snapshot };
-
-    // entity_id → prior entry
-    var prior_map: std.StringHashMapUnmanaged(*const ParsedHeadingHarvestEntry) = .{};
-    defer prior_map.deinit(gpa);
-    if (prior_harvest) |ph| {
-        if (std.mem.eql(u8, ph.format, HEADING_HARVEST_FORMAT)) {
-            for (ph.entries) |*e| {
-                if (e.entity_id.len == 0 or e.harvest_key.len == 0) continue;
-                try prior_map.put(gpa, e.entity_id, e);
-            }
-        }
-    }
-
-    var write_list: std.ArrayList(HeadingHarvestWriteEntry) = .empty;
-    errdefer {
-        for (write_list.items) |*e| {
-            gpa.free(e.entity_id);
-            gpa.free(e.harvest_key);
-            for (e.ids) |id| gpa.free(id);
-            gpa.free(e.ids);
-        }
-        write_list.deinit(gpa);
-    }
-
-    var doc_arena = std.heap.ArenaAllocator.init(gpa);
-    defer doc_arena.deinit();
-
-    // The adapter identity is part of a page's cache key: changing which
-    // language produced the Markdown must invalidate the fingerprint.
-    const input_material: []const u8 = adapterIdentity(input_format);
-
-    for (db.items(), 0..) |page, page_idx| {
-        if (!needed.contains(page.entity_id)) continue;
-
-        const inc_owned = shared.include_bytes[page_idx];
-        const inc_views = try gpa.alloc([]const u8, inc_owned.len);
-        defer gpa.free(inc_views);
-        for (inc_owned, 0..) |b, j| inc_views[j] = b;
-
-        const key_bytes = headingHarvestKey(
-            page.entity_id,
-            shared.source_bytes[page_idx],
-            inc_views,
-            input_material,
-        );
-        const key_hex = cache.hexDigest(key_bytes);
-
-        // Cache hit: reuse prior ids (no re-render).
-        if (prior_map.get(page.entity_id)) |prior| {
-            if (std.mem.eql(u8, prior.harvest_key, &key_hex)) {
-                if (recorder) |t| t.bump(.fast_path_hits, 1);
-                try index.putOwned(gpa, page.entity_id, prior.ids);
-                const ent_id = try gpa.dupe(u8, page.entity_id);
-                errdefer gpa.free(ent_id);
-                const hk = try gpa.dupe(u8, &key_hex);
-                errdefer gpa.free(hk);
-                const ids_owned = try gpa.alloc([]u8, prior.ids.len);
-                errdefer {
-                    for (ids_owned) |id| gpa.free(id);
-                    gpa.free(ids_owned);
-                }
-                for (prior.ids, 0..) |id, i| ids_owned[i] = try gpa.dupe(u8, id);
-                try write_list.append(gpa, .{
-                    .entity_id = ent_id,
-                    .harvest_key = hk,
-                    .ids = ids_owned,
-                });
-                continue;
-            }
-        }
-
-        _ = doc_arena.reset(.free_all);
-        const arena = doc_arena.allocator();
-        const source = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
-        if (recorder) |t| t.bump(.page_reads, 1);
-        const html = try html_body.renderSource(io, gpa, content_dir, &doc_arena, source, page.source_path, page.output_path, .{
-            .input_format = input_format,
-            .nodes = site.nodes,
-            // Do not validate fragments while building the index they depend on.
-            .diagnostics = sink,
-        });
-
-        var ids: std.ArrayList([]const u8) = .empty;
-        defer {
-            for (ids.items) |id| gpa.free(id);
-            ids.deinit(gpa);
-        }
-        // collectHeadingIds allocates id copies on gpa (not the page arena).
-        try html_toc.collectHeadingIds(gpa, html, &ids);
-        try index.putOwned(gpa, page.entity_id, ids.items);
-
-        const ent_id = try gpa.dupe(u8, page.entity_id);
-        errdefer gpa.free(ent_id);
-        const hk = try gpa.dupe(u8, &key_hex);
-        errdefer gpa.free(hk);
-        const ids_owned = try gpa.alloc([]u8, ids.items.len);
-        errdefer {
-            for (ids_owned) |id| gpa.free(id);
-            gpa.free(ids_owned);
-        }
-        for (ids.items, 0..) |id, i| ids_owned[i] = try gpa.dupe(u8, id);
-        try write_list.append(gpa, .{
-            .entity_id = ent_id,
-            .harvest_key = hk,
-            .ids = ids_owned,
-        });
-    }
-
-    // Deterministic entry order for the cache file.
-    std.mem.sort(HeadingHarvestWriteEntry, write_list.items, {}, struct {
-        fn less(_: void, a: HeadingHarvestWriteEntry, b: HeadingHarvestWriteEntry) bool {
-            return std.mem.order(u8, a.entity_id, b.entity_id) == .lt;
-        }
-    }.less);
-
-    snapshot.entries = try write_list.toOwnedSlice(gpa);
-    return .{ index, snapshot };
+    return compile_heading.buildSiteHeadingIndex(io, gpa, content_dir, db.items(), site.nodes, shared.source_bytes, shared.include_bytes, shared.include_paths, input_format, prior_harvest, recorder, sink);
 }
 
 fn expandDirtySet(
@@ -1949,71 +1651,24 @@ fn expandDirtySet(
     nodes: []const graph_mod.Node,
     dep_index: *const dependency.DependencyIndex,
 ) !void {
-    // Both lookups are built once. Previously the node scan inside
-    // getAffectedPages and the entity-id scan below were linear, and both ran
-    // once per dirty page — quadratic in page count on a cold incremental
-    // build, where every page is dirty.
-    var lookup = try cache.NodeLookup.init(gpa, nodes);
-    defer lookup.deinit();
-
-    var by_entity_id: std.StringHashMapUnmanaged(usize) = .{};
-    defer by_entity_id.deinit(gpa);
-    try by_entity_id.ensureTotalCapacity(gpa, @intCast(pages.len));
-    for (pages, 0..) |page, idx| {
-        // First writer wins, matching the previous scan's `break` on first match.
-        if (!by_entity_id.contains(page.entity_id)) {
-            by_entity_id.putAssumeCapacity(page.entity_id, idx);
-        }
-    }
-
-    for (pages, 0..) |page, page_idx| {
-        if (!is_dirty[page_idx]) continue;
-        const affected = try cache.getAffectedPagesIndexed(gpa, page.source_path, &lookup, dep_index);
-        defer {
-            for (affected) |id| gpa.free(id);
-            gpa.free(affected);
-        }
-        for (affected) |id| {
-            if (by_entity_id.get(id)) |candidate_idx| is_dirty[candidate_idx] = true;
-        }
-    }
+    return compile_cache.expandDirtySet(gpa, is_dirty, pages, nodes, dep_index);
 }
 
 /// Sibling staging directory for a target: `{dist_dir}.boris-stage`.
 fn stageRelForDist(gpa: std.mem.Allocator, dist_dir: []const u8) ![]u8 {
-    return try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{dist_dir});
+    return compile_cache.stageRelForDist(gpa, dist_dir);
 }
 
-const sitemap_ownership_path = ".boris-cache/sitemap-output-path";
+const sitemap_ownership_path = compile_cache.sitemap_ownership_path;
 
-const PriorSitemapOwnership = struct {
-    marker_present: bool = false,
-    path: ?[]u8 = null,
-
-    fn deinit(self: *PriorSitemapOwnership, gpa: std.mem.Allocator) void {
-        if (self.path) |path| gpa.free(path);
-        self.* = undefined;
-    }
-};
+const PriorSitemapOwnership = compile_cache.PriorSitemapOwnership;
 
 fn readPriorSitemapOwnership(
     io: Io,
     gpa: std.mem.Allocator,
     dist_dir: Io.Dir,
 ) !PriorSitemapOwnership {
-    const bytes = readFileAlloc(io, dist_dir, sitemap_ownership_path, gpa) catch |err| switch (err) {
-        error.FileNotFound => return .{},
-        else => return err,
-    };
-    defer gpa.free(bytes);
-    if (bytes.len == 0 or bytes[bytes.len - 1] != '\n') return error.SitemapOwnershipCorrupt;
-    const value = std.mem.trimEnd(u8, bytes, "\r\n");
-    if (value.len == 0) return .{ .marker_present = true };
-    sitemap.validateOutputPath(value) catch return error.SitemapOwnershipCorrupt;
-    return .{
-        .marker_present = true,
-        .path = try gpa.dupe(u8, value),
-    };
+    return compile_cache.readPriorSitemapOwnership(io, gpa, dist_dir);
 }
 
 fn stageSitemapOwnership(
@@ -2021,62 +1676,13 @@ fn stageSitemapOwnership(
     stage_dir: Io.Dir,
     current_path: ?[]const u8,
 ) !void {
-    var atomic = try stage_dir.createFileAtomic(io, sitemap_ownership_path, .{
-        .replace = true,
-        .make_path = true,
-    });
-    defer atomic.deinit(io);
-    var buffer: [1024]u8 = undefined;
-    var writer = atomic.file.writer(io, &buffer);
-    if (current_path) |path| try writer.interface.writeAll(path);
-    try writer.interface.writeAll("\n");
-    try writer.interface.flush();
-    try atomic.replace(io);
+    return compile_cache.stageSitemapOwnership(io, stage_dir, current_path);
 }
 
-/// Publish all files under `stage_dir` into `final_dir` via same-parent rename.
 fn ensureValidParentDirs(io: Io, final_dir: Io.Dir, parent_rel: []const u8) !void {
-    if (parent_rel.len == 0 or std.mem.eql(u8, parent_rel, ".")) return;
-
-    var start: usize = 0;
-    while (start < parent_rel.len) {
-        if (parent_rel[start] == '/' or parent_rel[start] == '\\') {
-            start += 1;
-            continue;
-        }
-        const slash = std.mem.indexOfAnyPos(u8, parent_rel, start, "/\\") orelse parent_rel.len;
-        const progressive = parent_rel[0..slash];
-        if (progressive.len > 0 and !std.mem.eql(u8, progressive, ".") and !std.mem.eql(u8, progressive, "..")) {
-            if (final_dir.statFile(io, progressive, .{ .follow_symlinks = false })) |st| {
-                if (st.kind == .sym_link or st.kind != .directory) {
-                    return error.TargetOutputSymlink;
-                }
-            } else |err| switch (err) {
-                error.FileNotFound => {
-                    final_dir.createDir(io, progressive, .default_dir) catch |mk_err| switch (mk_err) {
-                        error.PathAlreadyExists => {
-                            const re_st = final_dir.statFile(io, progressive, .{ .follow_symlinks = false }) catch return mk_err;
-                            if (re_st.kind == .sym_link or re_st.kind != .directory) {
-                                return error.TargetOutputSymlink;
-                            }
-                        },
-                        else => return mk_err,
-                    };
-                },
-                else => return err,
-            }
-        }
-        if (slash >= parent_rel.len) break;
-        start = slash + 1;
-    }
+    return compile_stage.ensureValidParentDirs(io, final_dir, parent_rel);
 }
 
-/// Creates intermediate directories under `final_dir` as needed, rejecting any
-/// symlinks or non-directory components along destination parent paths (H-03).
-///
-/// Prefer rename (atomic-ish on same filesystem). On `error.CrossDevice` (and
-/// only that), fall back to `copyFile` + delete source. Cross-volume **atomic**
-/// replace is still not claimed — the fallback is best-effort completeness.
 fn publishStageFile(
     io: Io,
     source_dir: Io.Dir,
@@ -2084,37 +1690,20 @@ fn publishStageFile(
     final_dir: Io.Dir,
     final_path: []const u8,
 ) !void {
-    if (std.fs.path.dirname(final_path)) |parent| {
-        if (parent.len > 0) try ensureValidParentDirs(io, final_dir, parent);
-    }
-    source_dir.rename(source_path, final_dir, final_path, io) catch |err| switch (err) {
-        error.CrossDevice => {
-            try source_dir.copyFile(source_path, final_dir, final_path, io, .{
-                .make_path = false,
-                .replace = true,
-            });
-            source_dir.deleteFile(io, source_path) catch {};
-        },
-        else => return err,
-    };
+    return compile_stage.publishStageFile(io, source_dir, source_path, final_dir, final_path);
 }
 
 fn publishPathsEqual(left: []const u8, right: []const u8) bool {
+    // Delegated to compile_stage's internal helper; kept for any direct callers.
     if (left.len != right.len) return false;
     for (left, right) |left_byte, right_byte| {
         if (left_byte == right_byte) continue;
-        if ((left_byte == '/' and right_byte == '\\') or
-            (left_byte == '\\' and right_byte == '/')) continue;
+        if ((left_byte == '/' and right_byte == '\\') or (left_byte == '\\' and right_byte == '/')) continue;
         return false;
     }
     return true;
 }
 
-/// Publish all files under `stage_dir` into `final_dir` via same-parent rename.
-/// When `deferred_path` is set, that file is committed only after every other
-/// staged payload has replaced successfully. The HTML coordinator uses this
-/// for the artifact inventory so a later payload replacement failure cannot
-/// expose an inventory for a partially committed target.
 fn publishStageTree(
     io: Io,
     gpa: std.mem.Allocator,
@@ -2122,24 +1711,7 @@ fn publishStageTree(
     final_dir: Io.Dir,
     deferred_path: ?[]const u8,
 ) !void {
-    var walker = try stage_dir.walkSelectively(gpa);
-    defer walker.deinit();
-
-    while (try walker.next(io)) |entry| {
-        if (entry.kind == .directory) {
-            try walker.enter(io, entry);
-            continue;
-        }
-        if (entry.kind != .file) continue;
-        if (deferred_path) |path| {
-            if (publishPathsEqual(entry.path, path)) continue;
-        }
-        try publishStageFile(io, entry.dir, entry.basename, final_dir, entry.path);
-    }
-
-    if (deferred_path) |path| {
-        try publishStageFile(io, stage_dir, path, final_dir, path);
-    }
+    return compile_stage.publishStageTree(io, gpa, stage_dir, final_dir, deferred_path);
 }
 
 /// Complete the source/compiler validity work for one selected HTML target
