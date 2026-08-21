@@ -235,6 +235,8 @@ const modules = [_]Module{
     .{ .name = "layout_select_hostile_test.zig", .class = .other },
     .{ .name = "link_audit.zig", .class = .other },
     .{ .name = "main.zig", .class = .other },
+    .{ .name = "main_dispatch.zig", .class = .other },
+    .{ .name = "main_profile_loader.zig", .class = .other },
     .{ .name = "nostr.zig", .class = .other },
     .{ .name = "nostr_emit.zig", .class = .other },
     .{ .name = "nostr_keys.zig", .class = .other },
