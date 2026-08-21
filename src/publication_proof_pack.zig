@@ -245,6 +245,80 @@ const Model = struct {
     bindings: Inputs,
 };
 
+fn validateAllBindings(
+    artifacts_binding: FileBinding,
+    checks_binding: FileBinding,
+    claims_binding: FileBinding,
+    touches_binding: FileBinding,
+    inventory: *const artifact_inventory.Inventory,
+    parsed_checks: *const ParsedChecks,
+    parsed_claims: *const ParsedClaims,
+    parsed_touches: *const ParsedTouches,
+) Error!void {
+    _ = touches_binding;
+    if (!bindingEqual(parsed_checks.artifact_binding, artifacts_binding) or
+        parsed_checks.artifact_count != inventory.records.len)
+        return error.StaleArtifactsBinding;
+    if (!bindingEqual(parsed_claims.artifact_binding, artifacts_binding) or
+        parsed_claims.artifact_count != inventory.records.len)
+        return error.StaleArtifactsBinding;
+    if (!bindingEqual(parsed_claims.checks_binding, checks_binding) or
+        parsed_claims.check_count != parsed_checks.checks.len or
+        parsed_claims.finding_count != parsed_checks.findings.len)
+        return error.StaleChecksBinding;
+    if (!bindingEqual(parsed_touches.artifacts_binding, artifacts_binding) or
+        parsed_touches.artifact_count != inventory.records.len)
+        return error.StaleArtifactsBinding;
+    if (!bindingEqual(parsed_touches.checks_binding, checks_binding) or
+        parsed_touches.check_count != parsed_checks.checks.len or
+        parsed_touches.finding_count != parsed_checks.findings.len)
+        return error.StaleChecksBinding;
+    if (!bindingEqual(parsed_touches.claims_binding, claims_binding) or
+        parsed_touches.claim_count != parsed_claims.claims.len or
+        parsed_touches.limitation_count != parsed_claims.limitations.len)
+        return error.StaleClaimsBinding;
+}
+
+fn validateSemantics(
+    gpa: std.mem.Allocator,
+    inventory: *const artifact_inventory.Inventory,
+    parsed_checks: *const ParsedChecks,
+    parsed_claims: *const ParsedClaims,
+    parsed_touches: *const ParsedTouches,
+    checks_binding: FileBinding,
+) Error!void {
+    try publication_touches.validateChecksAgainstInventory(gpa, inventory, &parsed_checks.checks);
+    try publication_touches.validateClaimsAgainstChecks(parsed_checks, checks_binding, parsed_claims);
+    try publication_touches.validateGraph(gpa, inventory, parsed_checks, parsed_claims, parsed_touches.nodes, parsed_touches.edges);
+}
+
+fn renderPairAndInstall(
+    gpa: std.mem.Allocator,
+    io: Io,
+    root: Io.Dir,
+    model: *const Model,
+    artifacts_binding: FileBinding,
+    checks_binding: FileBinding,
+    claims_binding: FileBinding,
+    touches_binding: FileBinding,
+    options: Options,
+) Error!void {
+    const json_bytes = renderJson(gpa, model, artifacts_binding, checks_binding, claims_binding, touches_binding) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.NoSpaceLeft => unreachable,
+        error.InvalidChecksReport => return error.InvalidChecksReport,
+    };
+    var json_digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(json_bytes, &json_digest, .{});
+    const json_sha256 = cache.hexDigest(json_digest);
+    const html_bytes = renderHtml(gpa, model, json_sha256) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.NoSpaceLeft => unreachable,
+        error.InvalidChecksReport => return error.InvalidChecksReport,
+    };
+    try installPair(io, root, json_bytes, html_bytes, options);
+}
+
 /// Write `proof-pack.json` and `index.html` after the Touch Atlas commits.
 /// Every output is derived from the exact committed artifacts, checks,
 /// claims, and touches bytes; a derivation, stale-binding, parser, render,
@@ -308,43 +382,8 @@ pub fn writeAfterTouches(
     );
     const touches_binding = touches_input.finish();
 
-    // Direct bindings must agree exactly with every embedded binding.
-    if (!bindingEqual(parsed_checks.artifact_binding, artifacts_binding) or
-        parsed_checks.artifact_count != inventory.records.len)
-        return error.StaleArtifactsBinding;
-    if (!bindingEqual(parsed_claims.artifact_binding, artifacts_binding) or
-        parsed_claims.artifact_count != inventory.records.len)
-        return error.StaleArtifactsBinding;
-    if (!bindingEqual(parsed_claims.checks_binding, checks_binding) or
-        parsed_claims.check_count != parsed_checks.checks.len or
-        parsed_claims.finding_count != parsed_checks.findings.len)
-        return error.StaleChecksBinding;
-    if (!bindingEqual(parsed_touches.artifacts_binding, artifacts_binding) or
-        parsed_touches.artifact_count != inventory.records.len)
-        return error.StaleArtifactsBinding;
-    if (!bindingEqual(parsed_touches.checks_binding, checks_binding) or
-        parsed_touches.check_count != parsed_checks.checks.len or
-        parsed_touches.finding_count != parsed_checks.findings.len)
-        return error.StaleChecksBinding;
-    if (!bindingEqual(parsed_touches.claims_binding, claims_binding) or
-        parsed_touches.claim_count != parsed_claims.claims.len or
-        parsed_touches.limitation_count != parsed_claims.limitations.len)
-        return error.StaleClaimsBinding;
-
-    // Semantic validation, in strict order: check semantics against the
-    // canonical inventory, full claim evidence parity, then prove the
-    // committed Touch Atlas graph is exactly the canonical derived graph
-    // (node order, edge order, directions, and cardinality).
-    try publication_touches.validateChecksAgainstInventory(arena_gpa, &inventory, &parsed_checks.checks);
-    try publication_touches.validateClaimsAgainstChecks(&parsed_checks, checks_binding, &parsed_claims);
-    try publication_touches.validateGraph(
-        arena_gpa,
-        &inventory,
-        &parsed_checks,
-        &parsed_claims,
-        parsed_touches.nodes,
-        parsed_touches.edges,
-    );
+    try validateAllBindings(artifacts_binding, checks_binding, claims_binding, touches_binding, &inventory, &parsed_checks, &parsed_claims, &parsed_touches);
+    try validateSemantics(arena_gpa, &inventory, &parsed_checks, &parsed_claims, &parsed_touches, checks_binding);
 
     const model = Model{
         .arena = arena,
@@ -362,24 +401,7 @@ pub fn writeAfterTouches(
         },
     };
 
-    const json_bytes = renderJson(arena_gpa, &model, artifacts_binding, checks_binding, claims_binding, touches_binding) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.NoSpaceLeft => unreachable,
-        error.InvalidChecksReport => return error.InvalidChecksReport,
-    };
-    var json_digest: [32]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(json_bytes, &json_digest, .{});
-    const json_sha256 = cache.hexDigest(json_digest);
-
-    const html_bytes = renderHtml(arena_gpa, &model, json_sha256) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.NoSpaceLeft => unreachable,
-        error.InvalidChecksReport => return error.InvalidChecksReport,
-    };
-
-    // First-slice staged transaction. Both outputs are fully rendered before
-    // any disk write; the two files are one logical generation.
-    try installPair(io, root, json_bytes, html_bytes, options);
+    try renderPairAndInstall(arena_gpa, io, root, &model, artifacts_binding, checks_binding, claims_binding, touches_binding, options);
 }
 
 // ---------------------------------------------------------------------------
