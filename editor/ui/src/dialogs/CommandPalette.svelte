@@ -20,7 +20,8 @@
     onQueryChange,
     onKeydown,
     onBackdropClick,
-    onClose,
+    onDialogClose,
+    onCancel,
     onExecute
   }: {
     dialog: HTMLDialogElement | undefined;
@@ -40,7 +41,8 @@
     onQueryChange: (value: string) => void;
     onKeydown: (event: KeyboardEvent) => void;
     onBackdropClick: (event: MouseEvent) => void;
-    onClose: () => void;
+    onDialogClose: () => void;
+    onCancel: () => void;
     onExecute: (item: PaletteItem) => void;
   } = $props();
 
@@ -65,7 +67,7 @@
   bind:this={dialog}
   onkeydown={onKeydown}
   onclick={onBackdropClick}
-  onclose={onClose}
+  onclose={onDialogClose}
   aria-labelledby="palette-heading"
 >
   <h2 id="palette-heading">Commands</h2>
@@ -103,6 +105,6 @@
     <p>No commands match “{paletteQuery}”.</p>
   {/if}
   <div class="dialog-actions">
-    <button type="button" onclick={onClose}>Cancel<kbd>Esc</kbd></button>
+    <button type="button" onclick={onCancel}>Cancel<kbd>Esc</kbd></button>
   </div>
 </dialog>

@@ -1627,7 +1627,8 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   onQueryChange={(v) => paletteQuery = v}
   onKeydown={paletteKeydown}
   onBackdropClick={handlePaletteBackdrop}
-  onClose={() => paletteDialog.close()}
+  onDialogClose={restoreDialogFocus}
+  onCancel={() => paletteDialog.close()}
   onExecute={executePaletteItem}
 />
 
