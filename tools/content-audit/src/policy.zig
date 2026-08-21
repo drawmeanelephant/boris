@@ -60,8 +60,15 @@ pub const Policy = struct {
         while (eit.next()) |e| gpa.free(e.value_ptr.*);
         self.eligible_collections.deinit(gpa);
         self.poetry_collections.deinit(gpa);
+        var dit = self.density_bands.iterator();
+        while (dit.next()) |e| gpa.free(e.value_ptr.*);
         self.density_bands.deinit(gpa);
         self.exact_mappings.deinit(gpa);
+        if (self.excluded_statuses.len > 0) gpa.free(self.excluded_statuses);
+        if (self.excluded_ids.len > 0) gpa.free(self.excluded_ids);
+        if (self.mapping_relation_kinds.len > 0) gpa.free(self.mapping_relation_kinds);
+        if (self.placeholder.exact_lines.len > 0) gpa.free(self.placeholder.exact_lines);
+        if (self.placeholder.title_prefixes.len > 0) gpa.free(self.placeholder.title_prefixes);
     }
 
     pub fn defaultRelationKinds(self: *const Policy) []const []const u8 {
@@ -142,13 +149,13 @@ fn collectStrings(gpa: std.mem.Allocator, v: std.json.Value) PolicyError![]const
     return try out.toOwnedSlice(gpa);
 }
 
-/// Parse a policy from raw JSON bytes. On success the returned policy owns
-/// references into `json_bytes`, so the caller must keep both alive; pass a
-/// retain allocator that owns both when that matters.
+/// Parse a policy from raw JSON bytes. The JSON parse is leaky: every string
+/// the returned policy retains (map keys, type lists, collection names) is
+/// allocated from `gpa` and valid for the lifetime of that allocator, never
+/// freed by a `defer parsed.deinit()`. `json_bytes` need not outlive the call;
+/// `gpa` must (the CLI passes its process arena).
 pub fn parse(gpa: std.mem.Allocator, json_bytes: []const u8) PolicyError!Policy {
-    var parsed = std.json.parseFromSlice(std.json.Value, gpa, json_bytes, .{}) catch return error.InvalidJson;
-    defer parsed.deinit();
-    const root = parsed.value;
+    const root = std.json.parseFromSliceLeaky(std.json.Value, gpa, json_bytes, .{}) catch return error.InvalidJson;
     if (root != .object) return error.InvalidShape;
 
     var policy: Policy = .{};
@@ -446,4 +453,55 @@ test "explicit empty population objects are valid" {
     var policy = try parse(a, json);
     try std.testing.expectEqual(@as(usize, 0), policy.eligible_collections.count());
     try std.testing.expectEqual(@as(usize, 0), policy.poetry_collections.count());
+}
+
+test "retained policy strings survive heavy post-parse allocation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Multi-entry policy so many keys/values are retained from the JSON parse.
+    const json =
+        \\{
+        \\  "schema_version": 1,
+        \\  "eligible_collections": {
+        \\    "c0": ["aphorism"], "c1": ["haiku"], "c2": ["limerick"],
+        \\    "c3": ["aphorism"], "c4": ["haiku"], "c5": ["limerick"],
+        \\    "c6": ["aphorism"], "c7": ["haiku"], "c8": ["limerick"],
+        \\    "c9": ["aphorism"], "c10": ["haiku"], "c11": ["limerick"]
+        \\  },
+        \\  "poetry_collections": {
+        \\    "p0": "aphorism", "p1": "haiku", "p2": "limerick",
+        \\    "p3": "aphorism", "p4": "haiku", "p5": "limerick",
+        \\    "p6": "aphorism", "p7": "haiku", "p8": "limerick",
+        \\    "p9": "aphorism", "p10": "haiku", "p11": "limerick"
+        \\  },
+        \\  "excluded_statuses": ["draft", "review", "published"],
+        \\  "excluded_ids": ["skip-a", "skip-b"],
+        \\  "density_bands": { "haiku": [1, 5, 8] },
+        \\  "exact_mappings": { "haiku/one": "src/one" },
+        \\  "mapping_relation_kinds": ["relates_to", "embeds"]
+        \\}
+    ;
+    var policy = try parse(a, json);
+
+    // Churn the allocator hard after parsing. The leaky JSON parse keeps every
+    // retained key/value alive in `a`; a non-leaky parse that freed its tree
+    // before returning would let these allocations recycle the freed strings.
+    var i: usize = 0;
+    while (i < 2000) : (i += 1) {
+        const chunk = try a.alloc(u8, 32);
+        @memset(chunk, 0x5a);
+    }
+
+    try std.testing.expectEqualStrings("haiku", policy.poetryTypeOfCollection("p1").?);
+    try std.testing.expectEqualStrings("limerick", policy.poetryTypeOfCollection("p11").?);
+    try std.testing.expectEqualStrings("aphorism", policy.poetryTypeOfCollection("p9").?);
+    try std.testing.expect(policy.isPoetryCollection("p4"));
+    try std.testing.expect(policy.isEligibleSourceCollection("c7"));
+    try std.testing.expect(policy.isExcludedStatus("review"));
+    try std.testing.expect(policy.isExcludedId("skip-b"));
+    try std.testing.expectEqualStrings("src/one", policy.exactMappingOwner("haiku/one").?);
+    try std.testing.expectEqual(@as(usize, 3), policy.density_bands.get("haiku").?.len);
+    try std.testing.expect(policy.relationKindCounts("embeds"));
+    try std.testing.expectEqualStrings("aphorism", policy.expectedTypesForCollection("c9").?[0]);
 }

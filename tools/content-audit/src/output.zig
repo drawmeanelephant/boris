@@ -16,11 +16,6 @@
 const std = @import("std");
 const util = @import("util.zig");
 
-fn pathExists(io: std.Io, root: std.Io.Dir, rel: []const u8) bool {
-    _ = root.statFile(io, rel, .{}) catch return false;
-    return true;
-}
-
 fn dirIsEmpty(io: std.Io, dir: std.Io.Dir) bool {
     var it = dir.iterate();
     return (it.next(io) catch return false) == null;

@@ -245,7 +245,8 @@ pub const help_text =
     \\  1  findings selected by --fail-on were present
     \\  2  usage error
     \\  3  I/O or output-ownership error
-    \\  4  malformed source, policy, or previous-report contract
+    \\  4  malformed policy or previous-report contract (malformed source files
+    \\     are reported as findings and can trigger exit 1)
     \\
     \\Examples:
     \\  zig build --build-file tools/content-audit/build.zig run -- \

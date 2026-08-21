@@ -18,6 +18,16 @@ const ListWriter = struct {
     }
 };
 
+test "path prefix classification requires a segment boundary" {
+    try std.testing.expect(scanner.hasPathPrefix("src/alpha.zig", "src"));
+    try std.testing.expect(scanner.hasPathPrefix("src", "src"));
+    try std.testing.expect(!scanner.hasPathPrefix("srch/alpha.zig", "src"));
+    try std.testing.expect(!scanner.hasPathPrefix("src-x/alpha.zig", "src"));
+    try std.testing.expect(scanner.hasPathPrefix("docs/contracts/foo.md", "docs/contracts"));
+    try std.testing.expect(!scanner.hasPathPrefix("docs/contracts-extra/foo.md", "docs/contracts"));
+    try std.testing.expect(scanner.hasPathPrefix("docs/anything.md", "docs/"));
+}
+
 test "valid repo scan & relationships" {
     const io = std.testing.io;
     var sc = scanner.Scanner.init(std.testing.allocator, .{

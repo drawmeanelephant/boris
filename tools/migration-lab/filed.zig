@@ -449,7 +449,10 @@ fn appendJson(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !voi
         '\n' => try buf.appendSlice(a, "\\n"),
         '\r' => try buf.appendSlice(a, "\\r"),
         '\t' => try buf.appendSlice(a, "\\t"),
-        else => try buf.append(a, c),
+        else => if (c < 0x20) {
+            var esc: [6]u8 = undefined;
+            try buf.appendSlice(a, try std.fmt.bufPrint(&esc, "\\u{x:0>4}", .{c}));
+        } else try buf.append(a, c),
     };
     try buf.append(a, '"');
 }
@@ -471,8 +474,40 @@ fn decidedParent(r: Record) ?[]const u8 {
     };
 }
 
+/// Quote a closed-Boris frontmatter scalar when it contains YAML-significant or
+/// control characters; otherwise return it verbatim. Embedded double quotes are
+/// replaced with a single quote (Boris closed FM has no backslash escapes) and
+/// control characters are dropped, so hostile source titles cannot inject keys
+/// or emit invalid YAML downstream.
+fn escapeFmValue(a: std.mem.Allocator, value: []const u8) ![]u8 {
+    var needs_quote = false;
+    for (value) |c| {
+        if (c == ':' or c == '#' or c == '"' or c == '\'' or c == '[' or c == ']' or
+            c == ',' or c == '&' or c == '<' or c == '>' or c == '{' or c == '}' or
+            c == '\\' or c == '`' or c == '!' or c == '@' or c == '$' or c == '%' or c == '^' or
+            c == '*' or c == '(' or c == ')' or c == '=' or c == '+' or c == ';' or c == '?' or
+            c == '/' or c < 0x20 or c == 0x7f)
+        {
+            needs_quote = true;
+            break;
+        }
+    }
+    if (!needs_quote and value.len > 0 and (value[0] == ' ' or value[value.len - 1] == ' ')) needs_quote = true;
+    if (!needs_quote) return try a.dupe(u8, value);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    try out.append(a, '"');
+    for (value) |c| {
+        if (c == '"') try out.appendSlice(a, "'") else if (c >= 0x20 and c != 0x7f) try out.append(a, c);
+    }
+    try out.append(a, '"');
+    return try out.toOwnedSlice(a);
+}
+
 fn emitPage(a: std.mem.Allocator, r: Record) ![]u8 {
     const parent = decidedParent(r);
+    const title_e = try escapeFmValue(a, r.title);
+    defer a.free(title_e);
     if (parent) |p| {
         return try std.fmt.allocPrint(a,
             \\---
@@ -489,7 +524,7 @@ fn emitPage(a: std.mem.Allocator, r: Record) ![]u8 {
             \\  parent_normalization: {s}
             \\-->
             \\{s}
-        , .{ r.id, r.title, p, collectionName(r.collection), format_id, r.source_path, tool_version, statusName(r.parent_norm.status), r.body });
+        , .{ r.id, title_e, p, collectionName(r.collection), format_id, r.source_path, tool_version, statusName(r.parent_norm.status), r.body });
     }
     return try std.fmt.allocPrint(a,
         \\---
@@ -505,7 +540,7 @@ fn emitPage(a: std.mem.Allocator, r: Record) ![]u8 {
         \\  parent_normalization: {s}
         \\-->
         \\{s}
-    , .{ r.id, r.title, collectionName(r.collection), format_id, r.source_path, tool_version, statusName(r.parent_norm.status), r.body });
+    , .{ r.id, title_e, collectionName(r.collection), format_id, r.source_path, tool_version, statusName(r.parent_norm.status), r.body });
 }
 
 fn emitIndex(a: std.mem.Allocator, collection: Collection) ![]u8 {
@@ -802,6 +837,34 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 // ---------------------------------------------------------------------------
 // Unit tests — pure parent normalization
 // ---------------------------------------------------------------------------
+
+test "filed: escapeFmValue quotes YAML-significant titles" {
+    const a = std.testing.allocator;
+
+    const e1 = try escapeFmValue(a, "WordPress: A Guide");
+    defer a.free(e1);
+    try std.testing.expectEqualStrings("\"WordPress: A Guide\"", e1);
+
+    const e2 = try escapeFmValue(a, "leading [ bracket");
+    defer a.free(e2);
+    try std.testing.expectEqualStrings("\"leading [ bracket\"", e2);
+
+    const e3 = try escapeFmValue(a, "embedded\"quote");
+    defer a.free(e3);
+    try std.testing.expectEqualStrings("\"embedded'quote\"", e3);
+
+    const e4 = try escapeFmValue(a, "plain");
+    defer a.free(e4);
+    try std.testing.expectEqualStrings("plain", e4);
+}
+
+test "filed: appendJson escapes control characters and quotes" {
+    const a = std.testing.allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(a);
+    try appendJson(&buf, a, "a\"b\\c\x01");
+    try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\u0001\"", buf.items);
+}
 
 test "parent normalize: parentEntry only" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

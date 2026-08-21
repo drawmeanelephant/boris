@@ -10,7 +10,8 @@
 //!   1  findings selected by --fail-on were present
 //!   2  usage error
 //!   3  I/O or output-ownership error
-//!   4  malformed source, policy, or previous-report contract
+//!   4  malformed policy or previous-report contract (malformed source files
+//!      are reported as findings and can trigger exit 1)
 
 const std = @import("std");
 const util = @import("util.zig");
@@ -205,14 +206,16 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
         };
     };
 
-    // Delta comparison.
+    // Delta comparison. The parse is leaky so the `record_id`/`from`/`to`/
+    // `previous_policy_digest` strings `compareDelta` retains into the audit
+    // live in the process arena for the run's lifetime instead of pointing
+    // into a tree that a `defer parsed.deinit()` would free.
     if (previous_bytes) |prev| {
-        var parsed = std.json.parseFromSlice(std.json.Value, gpa, prev, .{}) catch {
+        const prev_root = std.json.parseFromSliceLeaky(std.json.Value, gpa, prev, .{}) catch {
             diag("boris-content-audit: previous report is not valid JSON\n", .{});
             return @intFromEnum(ExitCode.contract);
         };
-        defer parsed.deinit();
-        audit_mod.compareDelta(&audit, gpa, parsed.value, options.collections) catch |err| {
+        audit_mod.compareDelta(&audit, gpa, prev_root, options.collections) catch |err| {
             diag("boris-content-audit: previous report incompatible: {s}\n", .{@errorName(err)});
             return @intFromEnum(ExitCode.contract);
         };
