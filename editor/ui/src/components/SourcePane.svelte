@@ -462,18 +462,26 @@
           {/each}
         </ul>
       {/if}
+        {#if plan.publication?.target === 'github-pages'}
+          <p class="fallback-notice">GitHub Pages is the verified target. Deploy stays in the official Actions workflow: resolve location, fail closed on URL disagreement, upload only inventory-verified files. This editor does not run that workflow.</p>
+        {:else if plan.publication?.target === 'standard-site'}
+          <p class="fallback-notice">Standard.site is a verified first-tester target. Plan and publish stay on the Boris CLI. The editor does not log in or publish.</p>
+        {:else if plan.publication?.target}
+          <p class="fallback-notice">{plan.publication.target} is declared in the plan. The editor does not add a platform adapter or treat this as a verified deploy.</p>
+        {/if}
     {/if}
     {#if publicationPayload?.proof}
       {@const proof = publicationPayload.proof}
       <h3>Local evidence</h3>
-      <p>The Proof Pack at <code>{proof.path}</code> is target-local presentation of committed artifacts, checks, and claims.</p>
+      <p>The Proof Pack at <code>{proof.path}</code> is target-local presentation of committed artifacts, checks, and claims. It does not verify a deployed site.</p>
       <dl>
         <div><dt>Target</dt><dd>{proof.target}</dd></div>
         <div><dt>Presentation status</dt><dd>{proof.overall_presentation_status}</dd></div>
-        <div><dt>Counts</dt><dd>{proof.artifacts_total} artifacts · {proof.checks_total} checks</dd></div>
+        <div><dt>Counts</dt><dd>{proof.artifacts_total} artifacts · {proof.checks_total} checks · {proof.findings_total} findings · {proof.claims_total} claims</dd></div>
       </dl>
+        <p>Limitation <code>no-deployment-verification</code> is part of every Proof Pack. Local build verification and deployed-site verification are different facts.</p>
     {:else}
-      <p>No local Proof Pack at <code>dist/_boris/proof/proof-pack.json</code> yet. Build HTML to produce evidence.</p>
+      <p>No local Proof Pack at <code>dist/_boris/proof/proof-pack.json</code> yet. Build HTML to produce evidence; that still is not a deploy.</p>
     {/if}
   </section>
 </section>
