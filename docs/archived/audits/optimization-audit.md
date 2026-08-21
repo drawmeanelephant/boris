@@ -1,3 +1,7 @@
+> **Archived 2026-08-21 — issue [#693](https://github.com/drawmeanelephant/boris/issues/693).**
+> This file was moved from `docs/audits/optimization-audit.md` to `docs/archived/audits/optimization-audit.md`
+> as a historical record. Do not load this file as standing agent context. Git history preserves the original.
+
 # Boris Optimization Audit
 
 Audit date: 2026-08-11

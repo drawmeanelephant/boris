@@ -1,3 +1,7 @@
+> **Archived 2026-08-21 — issue [#693](https://github.com/drawmeanelephant/boris/issues/693).**
+> This file was moved from `docs/audits/test-throughput-audit.md` to `docs/archived/audits/test-throughput-audit.md`
+> as a historical record. Do not load this file as standing agent context. Git history preserves the original.
+
 # Boris test-throughput audit
 
 Status: repository audit, 2026-08-02

@@ -295,8 +295,8 @@ Boris performance should be measured on a stated machine, toolchain, content
 tree, optimization mode, and worker count. A single fast run is not a
 benchmark.
 
-No committed benchmark harness exists yet (see
-[`docs/audits/optimization-audit.md`](docs/audits/optimization-audit.md));
+No committed benchmark harness exists yet (see the archived
+[`optimization audit`](docs/archived/audits/optimization-audit.md));
 until one lands, numbers in issues and audits should name the machine,
 toolchain, content tree, optimization mode, and worker count they were
 measured with.

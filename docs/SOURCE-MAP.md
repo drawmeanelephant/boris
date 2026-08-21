@@ -57,6 +57,9 @@ now a phase banner + pointer table. The capability snapshot lives in
 `CHANGELOG.md` was slimmed per
 [#691](https://github.com/drawmeanelephant/boris/issues/691) — pre-0.8 history
 at [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md).
+Completed audits were archived per
+[#693](https://github.com/drawmeanelephant/boris/issues/693) — see
+[`docs/archived/audits/`](archived/audits/).
 
 | Document | Use it for |
 |---|---|
@@ -80,6 +83,7 @@ at [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md).
 | [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) | Where `src/` clusters live. Not a function catalog. |
 | [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md) | Archived v0.8 capability snapshot (pre-slim) |
 | [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md) | Archived pre-0.8 changelog (pre-slim, not standing context) |
+| [`docs/archived/audits/`](archived/audits/) | Archived completed audits (see `archived/audits/README.md`; fixtures remain in `docs/audits/`) |
 
 ## Rules
 

@@ -8,7 +8,7 @@
 ## Architecture guardrails (normative)
 - **Zig 0.16 is the product core; Svelte 5 is the editor host only.** No new npm deps, no store migration, no design-system rewrite.
 - **Security boundary** `editor/src/security.zig:8` stays in `lib/api.ts` only (sole place setting `X-Boris-Editor-Token`).
-- **Single stylesheet** `styles.css` stays single file; components reuse existing class names (`project-pane`, `source-pane`, `graph-pane`, `recipe-pane`, `problem-group`, `preview-frame`, `workspace-rail`, etc.) so `docs/audits/editor-browser-audit.md` PASS is preserved.
+- **Single stylesheet** `styles.css` stays single file; components reuse existing class names (`project-pane`, `source-pane`, `graph-pane`, `recipe-pane`, `problem-group`, `preview-frame`, `workspace-rail`, etc.) so `docs/archived/audits/editor-browser-audit.md` PASS is preserved.
 - **Lifted state** stays in `App.svelte` orchestrator (~250 lines goal): owns `token`+`api<T>`+timers (host 5s/disk 3s/validate 1s/recovery 3s/save-refresh 300ms) and prop-drills/callbacks. Each pane owns its DOM slice.
 - **No contract change** except fixing a moved-type import if a host test imports a moved type (none today). No `main` backport.
 
