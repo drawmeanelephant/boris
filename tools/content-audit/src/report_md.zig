@@ -39,14 +39,20 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     try b.appendSlice(gpa, "# Poetry content audit\n\n");
     try b.print(gpa, "- Tool: `{s}` (schema {d})\n", .{ util.format_id, util.report_schema_version });
     try b.print(gpa, "- Mode: `poetry`\n", .{});
-    try b.print(gpa, "- Source root label: `{s}` (content-root relative; absolute host paths never emitted)\n", .{audit.source_root_label});
-    if (audit.source_revision) |r| try b.print(gpa, "- Source revision: `{s}`\n", .{r});
+    try b.appendSlice(gpa, "- Source root label: ");
+    try util.appendMarkdownInlineCode(&b, gpa, audit.source_root_label);
+    try b.appendSlice(gpa, " (content-root relative; absolute host paths never emitted)\n");
+    if (audit.source_revision) |r| {
+        try b.appendSlice(gpa, "- Source revision: ");
+        try util.appendMarkdownInlineCode(&b, gpa, r);
+        try b.appendSlice(gpa, "\n");
+    }
     try b.print(gpa, "- Policy digest: `{s}`\n", .{audit.policy_digest});
     if (opts.collections.len > 0) {
         try b.appendSlice(gpa, "- Collection filter (scoped): ");
         for (opts.collections, 0..) |c, i| {
             if (i > 0) try b.appendSlice(gpa, ", ");
-            try b.appendSlice(gpa, c);
+            try util.appendMarkdownEscaped(&b, gpa, c);
         }
         try b.appendSlice(gpa, "\n- **Scope:** every total, verse total, coverage row, density figure, alignment count, exception, delta change, and per-record row in this report is restricted to the physical collections listed above. No global figure appears beside filtered rows.\n");
     } else {
@@ -94,10 +100,14 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     for (audit.coverage_rows) |*row| {
         if (!isSelected(opts, row.collection)) continue;
         const pct: f64 = if (row.expected > 0) @as(f64, @floatFromInt(row.substantive())) / @as(f64, @floatFromInt(row.expected)) * 100.0 else 0.0;
-        try b.print(gpa, "| {s} | {s} | {d} | {d} | {d} | {d} | {d} | {d} | {d} | {d} | {d:.1}% |\n", .{
-            row.collection,          row.type_name,           row.expected,          row.missing,   row.present_empty,
-            row.present_placeholder, row.present_substantive, row.ambiguous_mapping, row.malformed, row.structural(),
-            pct,
+        try b.appendSlice(gpa, "| ");
+        try util.appendMarkdownEscaped(&b, gpa, row.collection);
+        try b.appendSlice(gpa, " | ");
+        try util.appendMarkdownEscaped(&b, gpa, row.type_name);
+        try b.print(gpa, " | {d} | {d} | {d} | {d} | {d} | {d} | {d} | {d} | {d:.1}% |\n", .{
+            row.expected,            row.missing,             row.present_empty,
+            row.present_placeholder, row.present_substantive, row.ambiguous_mapping,
+            row.malformed,           row.structural(),        pct,
         });
     }
     try b.appendSlice(gpa, "\n");
@@ -135,7 +145,9 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     try b.appendSlice(gpa, "## 4. Totals by poetry type\n\n");
     try b.appendSlice(gpa, "| Type | Records | Verse units | Placeholder units | Substantive units | Malformed units |\n|---|---:|---:|---:|---:|---:|\n");
     for (scoped_stats) |st| {
-        try b.print(gpa, "| {s} | {d} | {d} | {d} | {d} | {d} |\n", .{ st.type_name, st.records, st.verse_units, st.placeholder_units, st.substantive_units, st.malformed_units });
+        try b.appendSlice(gpa, "| ");
+        try util.appendMarkdownEscaped(&b, gpa, st.type_name);
+        try b.print(gpa, " | {d} | {d} | {d} | {d} | {d} |\n", .{ st.records, st.verse_units, st.placeholder_units, st.substantive_units, st.malformed_units });
     }
     try b.appendSlice(gpa, "\n");
 
@@ -144,7 +156,9 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     defer gpa.free(scoped_density);
     try b.appendSlice(gpa, "## 5. Density distribution\n\n");
     for (scoped_density) |td| {
-        try b.print(gpa, "### {s}\n\n", .{td.type_name});
+        try b.appendSlice(gpa, "### ");
+        try util.appendMarkdownEscaped(&b, gpa, td.type_name);
+        try b.appendSlice(gpa, "\n\n");
         if (audit.policy.density_bands.get(td.type_name)) |bands| {
             try b.appendSlice(gpa, "Policy exact-count bands: `");
             for (bands, 0..) |n, i| {
@@ -166,7 +180,9 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     try b.appendSlice(gpa, "## 6. Lowest-density and highest-density records\n\n");
     for (scoped_density) |td| {
         if (td.lowest.len == 0) continue;
-        try b.print(gpa, "### {s}\n\n", .{td.type_name});
+        try b.appendSlice(gpa, "### ");
+        try util.appendMarkdownEscaped(&b, gpa, td.type_name);
+        try b.appendSlice(gpa, "\n\n");
         try b.print(gpa, "Lowest ({d} units): ", .{td.lowest_count});
         try appendIdList(&b, gpa, td.lowest);
         try b.appendSlice(gpa, "\n\n");
@@ -184,7 +200,11 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
         const v = rec.verse orelse continue;
         if (v.complete_count > 0 and v.substantive_count == 0) {
             ph_found = true;
-            try b.print(gpa, "- `{s}` ({s}): {d} placeholder unit(s)\n", .{ rec.id orelse rec.source_path, rec.poetry_type.?, v.complete_count });
+            try b.appendSlice(gpa, "- ");
+            try util.appendMarkdownInlineCode(&b, gpa, rec.id orelse rec.source_path);
+            try b.appendSlice(gpa, " (");
+            try util.appendMarkdownEscaped(&b, gpa, rec.poetry_type.?);
+            try b.print(gpa, "): {d} placeholder unit(s)\n", .{v.complete_count});
         }
     }
     if (!ph_found) try b.appendSlice(gpa, "None.\n");
@@ -198,7 +218,11 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
         if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         if (rec.alignment == .orphan) {
             orph_found = true;
-            try b.print(gpa, "- `{s}` ({s})\n", .{ rec.id orelse rec.source_path, rec.poetry_type.? });
+            try b.appendSlice(gpa, "- ");
+            try util.appendMarkdownInlineCode(&b, gpa, rec.id orelse rec.source_path);
+            try b.appendSlice(gpa, " (");
+            try util.appendMarkdownEscaped(&b, gpa, rec.poetry_type.?);
+            try b.appendSlice(gpa, ")\n");
         }
     }
     if (!orph_found) try b.appendSlice(gpa, "None.\n");
@@ -212,12 +236,15 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
         if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         if (rec.alignment == .ambiguous or rec.alignment == .duplicate_mapping or rec.alignment == .mapping_disagreement) {
             amb_found = true;
-            try b.print(gpa, "- `{s}`: {s}", .{ rec.id orelse rec.source_path, rec.alignment.?.jsonName() });
+            try b.appendSlice(gpa, "- ");
+            try util.appendMarkdownInlineCode(&b, gpa, rec.id orelse rec.source_path);
+            try b.print(gpa, ": {s}", .{rec.alignment.?.jsonName()});
             if (rec.claims.len > 0) {
                 try b.appendSlice(gpa, " (claimed by ");
                 for (rec.claims, 0..) |c, i| {
                     if (i > 0) try b.appendSlice(gpa, ", ");
-                    try b.print(gpa, "`{s}` via {s}", .{ c.owner_id, c.evidence.jsonName() });
+                    try util.appendMarkdownInlineCode(&b, gpa, c.owner_id);
+                    try b.print(gpa, " via {s}", .{c.evidence.jsonName()});
                 }
                 try b.appendSlice(gpa, ")");
             }
@@ -236,7 +263,11 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
         for (rec.coverage_types, rec.coverage_classes) |t, cls| {
             if (cls == .missing) {
                 miss_found = true;
-                try b.print(gpa, "- `{s}` is missing a `{s}`\n", .{ rec.id orelse rec.source_path, t });
+                try b.appendSlice(gpa, "- ");
+                try util.appendMarkdownInlineCode(&b, gpa, rec.id orelse rec.source_path);
+                try b.appendSlice(gpa, " is missing a ");
+                try util.appendMarkdownInlineCode(&b, gpa, t);
+                try b.appendSlice(gpa, "\n");
             }
         }
     }
@@ -251,7 +282,15 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
         } else {
             try b.appendSlice(gpa, "| Kind | Record | From | To |\n|---|---|---|---|\n");
             for (changes) |c| {
-                try b.print(gpa, "| {s} | `{s}` | {s} | {s} |\n", .{ c.kind, c.record_id, c.from, c.to });
+                try b.appendSlice(gpa, "| ");
+                try util.appendMarkdownEscaped(&b, gpa, c.kind);
+                try b.appendSlice(gpa, " | ");
+                try util.appendMarkdownEscaped(&b, gpa, c.record_id);
+                try b.appendSlice(gpa, " | ");
+                try util.appendMarkdownEscaped(&b, gpa, c.from);
+                try b.appendSlice(gpa, " | ");
+                try util.appendMarkdownEscaped(&b, gpa, c.to);
+                try b.appendSlice(gpa, " |\n");
             }
             try b.appendSlice(gpa, "\n");
         }
@@ -259,12 +298,28 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
         try b.appendSlice(gpa, "No previous report supplied; delta mode not run. Rerun with `--previous-report=<report.json>` to compare.\n\n");
     }
 
-    // 12. Reproduction
+    // 12. Reproduction — fence length adapts to backticks in the reproduction
+    // string so a hostile --revision cannot break out of the code block.
     try b.appendSlice(gpa, "## 12. Reproduction command\n\n");
     if (opts.reproduction.len > 0) {
-        try b.appendSlice(gpa, "```\n");
+        var max_run: usize = 0;
+        var cur: usize = 0;
+        for (opts.reproduction) |c| {
+            if (c == '`') {
+                cur += 1;
+                if (cur > max_run) max_run = cur;
+            } else {
+                cur = 0;
+            }
+        }
+        var fence_len: usize = 3;
+        if (max_run >= fence_len) fence_len = max_run + 1;
+        for (0..fence_len) |_| try b.append(gpa, '`');
+        try b.append(gpa, '\n');
         try b.appendSlice(gpa, opts.reproduction);
-        try b.appendSlice(gpa, "\n```\n\n");
+        try b.append(gpa, '\n');
+        for (0..fence_len) |_| try b.append(gpa, '`');
+        try b.appendSlice(gpa, "\n\n");
     } else {
         try b.appendSlice(gpa, "Re-run the audit with the same flags used to produce this report; see the tool README.\n\n");
     }
@@ -276,6 +331,6 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
 fn appendIdList(b: *std.ArrayList(u8), gpa: std.mem.Allocator, ids: []const []const u8) !void {
     for (ids, 0..) |id, i| {
         if (i > 0) try b.appendSlice(gpa, ", ");
-        try b.print(gpa, "`{s}`", .{id});
+        try util.appendMarkdownInlineCode(b, gpa, id);
     }
 }

@@ -127,6 +127,54 @@ pub fn appendHtmlEscaped(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []c
     };
 }
 
+/// Escape untrusted text for Markdown table cells and plain prose.
+/// Neutralizes `|` (column breakout), `` ` `` (code-span breakout),
+/// `\` (escape prefix), line breaks (row breakout), and HTML (`<`, `>`,
+/// `&`) which GitHub renders inside Markdown (including tables).
+pub fn appendMarkdownEscaped(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+    for (s) |c| switch (c) {
+        '|' => try buf.appendSlice(gpa, "\\|"),
+        '`' => try buf.appendSlice(gpa, "\\`"),
+        '\\' => try buf.appendSlice(gpa, "\\\\"),
+        '&' => try buf.appendSlice(gpa, "&amp;"),
+        '<' => try buf.appendSlice(gpa, "&lt;"),
+        '>' => try buf.appendSlice(gpa, "&gt;"),
+        '\n', '\r' => try buf.append(gpa, ' '),
+        else => try buf.append(gpa, c),
+    };
+}
+
+/// Append `s` as a Markdown inline-code span with a fence that cannot be
+/// broken by backticks inside `s`. Uses the shortest fence longer than any
+/// backtick run in `s`, exactly as CommonMark specifies for code spans.
+pub fn appendMarkdownInlineCode(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+    var max_run: usize = 0;
+    var cur: usize = 0;
+    for (s) |c| {
+        if (c == '`') {
+            cur += 1;
+            if (cur > max_run) max_run = cur;
+        } else {
+            cur = 0;
+        }
+    }
+    const fence_len = max_run + 1;
+    for (0..fence_len) |_| try buf.append(gpa, '`');
+    // CommonMark: pad with a single space when content starts/ends with
+    // space or backtick so the fence is unambiguous.
+    const needs_pad = s.len > 0 and (s[0] == ' ' or s[0] == '`' or s[s.len - 1] == ' ' or s[s.len - 1] == '`');
+    if (needs_pad) try buf.append(gpa, ' ');
+    for (s) |c| {
+        if (c == '\n' or c == '\r') {
+            try buf.append(gpa, ' ');
+        } else {
+            try buf.append(gpa, c);
+        }
+    }
+    if (needs_pad) try buf.append(gpa, ' ');
+    for (0..fence_len) |_| try buf.append(gpa, '`');
+}
+
 pub fn sortStrings(gpa: std.mem.Allocator, items: [][]const u8) void {
     _ = gpa;
     std.mem.sort([]const u8, items, {}, struct {
