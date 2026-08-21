@@ -114,8 +114,14 @@ fn emitIndex(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const
     try b.appendSlice(gpa, "<section><table><caption>Run metadata</caption><tbody>");
     try b.print(gpa, "<tr><th scope=\"row\">Tool</th><td><code>{s}</code> (schema {d})</td></tr>", .{ util.format_id, util.report_schema_version });
     try b.print(gpa, "<tr><th scope=\"row\">Mode</th><td>poetry</td></tr>", .{});
-    try b.print(gpa, "<tr><th scope=\"row\">Source root label</th><td><code>{s}</code></td></tr>", .{audit.source_root_label});
-    if (audit.source_revision) |r| try b.print(gpa, "<tr><th scope=\"row\">Source revision</th><td><code>{s}</code></td></tr>", .{r});
+    try b.appendSlice(gpa, "<tr><th scope=\"row\">Source root label</th><td><code>");
+    try util.appendHtmlEscaped(&b, gpa, audit.source_root_label);
+    try b.appendSlice(gpa, "</code></td></tr>");
+    if (audit.source_revision) |r| {
+        try b.appendSlice(gpa, "<tr><th scope=\"row\">Source revision</th><td><code>");
+        try util.appendHtmlEscaped(&b, gpa, r);
+        try b.appendSlice(gpa, "</code></td></tr>");
+    }
     try b.print(gpa, "<tr><th scope=\"row\">Policy digest</th><td><code>{s}</code></td></tr>", .{audit.policy_digest});
     if (opts.collections.len > 0) {
         try b.appendSlice(gpa, "<tr><th scope=\"row\">Collection filter (scoped)</th><td>");
@@ -192,9 +198,15 @@ fn emitCoverage(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *co
     try b.appendSlice(gpa, "<section><table><caption>Coverage matrix by source collection and poetry type</caption><thead><tr><th scope=\"col\">Collection</th><th scope=\"col\">Type</th><th scope=\"col\">Expected</th><th scope=\"col\">Missing</th><th scope=\"col\">Empty</th><th scope=\"col\">Placeholder</th><th scope=\"col\">Substantive</th><th scope=\"col\">Ambiguous</th><th scope=\"col\">Malformed</th><th scope=\"col\">Structural</th></tr></thead><tbody>");
     for (audit.coverage_rows) |*row| {
         if (!isSelected(opts, row.collection)) continue;
-        try b.print(gpa, "<tr><td><code>{s}</code></td><td>{s}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td></tr>", .{
-            row.collection,          row.type_name,           row.expected,          row.missing,   row.present_empty,
-            row.present_placeholder, row.present_substantive, row.ambiguous_mapping, row.malformed, row.structural(),
+        try b.appendSlice(gpa, "<tr><td><code>");
+        try util.appendHtmlEscaped(&b, gpa, row.collection);
+        try b.appendSlice(gpa, "</code></td><td>");
+        try util.appendHtmlEscaped(&b, gpa, row.type_name);
+        try b.appendSlice(gpa, "</td>");
+        try b.print(gpa, "<td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td><td>{d}</td></tr>", .{
+            row.expected,            row.missing,             row.present_empty,
+            row.present_placeholder, row.present_substantive, row.ambiguous_mapping,
+            row.malformed,           row.structural(),
         });
     }
     try b.appendSlice(gpa, "</tbody></table></section>");
@@ -214,7 +226,9 @@ fn emitDensity(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *con
     try pageHeader(&b, gpa, "density.html", "Density");
 
     for (scoped_density) |td| {
-        try b.print(gpa, "<section><h3>{s}</h3>", .{td.type_name});
+        try b.appendSlice(gpa, "<section><h3>");
+        try util.appendHtmlEscaped(&b, gpa, td.type_name);
+        try b.appendSlice(gpa, "</h3>");
         if (audit.policy.density_bands.get(td.type_name)) |bands| {
             try b.appendSlice(gpa, "<p>Exact-count bands: ");
             for (bands, 0..) |n, i| {
@@ -232,12 +246,16 @@ fn emitDensity(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *con
             try b.print(gpa, "<p>Lowest ({d}): ", .{td.lowest_count});
             for (td.lowest, 0..) |id, i| {
                 if (i > 0) try b.appendSlice(gpa, ", ");
-                try b.print(gpa, "<code>{s}</code>", .{id});
+                try b.appendSlice(gpa, "<code>");
+                try util.appendHtmlEscaped(&b, gpa, id);
+                try b.appendSlice(gpa, "</code>");
             }
             try b.print(gpa, "</p><p>Highest ({d}): ", .{td.highest_count});
             for (td.highest, 0..) |id, i| {
                 if (i > 0) try b.appendSlice(gpa, ", ");
-                try b.print(gpa, "<code>{s}</code>", .{id});
+                try b.appendSlice(gpa, "<code>");
+                try util.appendHtmlEscaped(&b, gpa, id);
+                try b.appendSlice(gpa, "</code>");
             }
             try b.appendSlice(gpa, "</p>");
         }
