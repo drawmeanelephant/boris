@@ -57,7 +57,7 @@ This routing exception does not relax product policy.
 - Do not commit generated or ignored outputs (`dist/`, `rag/`, `source-rag/`, Zig
   caches) as merge currency. Keep unrelated dirty files and worktrees intact.
 - All substantive work, including blocked work, ends with the full evidence block
-  in [`docs/COMPLETION-REPORT-TEMPLATE.md`](docs/COMPLETION-REPORT-TEMPLATE.md).
+  in [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) (pointer at [`docs/COMPLETION-REPORT-TEMPLATE.md`](docs/COMPLETION-REPORT-TEMPLATE.md)).
 - **Binary handoffs:** Before creating a build or packaging workflow, use
   [`scripts/agent-pack.sh`](scripts/agent-pack.sh) from the target PR worktree.
   Keep generated handoff kits outside tracked product files. See
