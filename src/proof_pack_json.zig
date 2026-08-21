@@ -1,13 +1,8 @@
 const std = @import("std");
 const json_out = @import("json_out.zig");
-const artifact_inventory = @import("artifact_inventory.zig");
 const publication_touches = @import("publication_touches.zig");
 
 const FileBinding = publication_touches.FileBinding;
-const Model = struct {
-    // minimal forwarding for helpers that need model – actual Model lives in proof_pack
-    // This file only provides pure helpers, not rendering
-};
 
 pub fn writeStringArray(
     out: *std.ArrayList(u8),

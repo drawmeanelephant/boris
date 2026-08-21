@@ -17,6 +17,20 @@ pub const Error = std.mem.Allocator.Error || error{
     RemoveJsonFailed,
 };
 
+pub const Options = struct {
+    test_fail_json_tmp_write: bool = false,
+    test_fail_html_tmp_write: bool = false,
+    test_fail_preserve_prior: bool = false,
+    test_fail_preserve_json: bool = false,
+    test_fail_preserve_after: bool = false,
+    test_fail_install_html: bool = false,
+    test_fail_install_json: bool = false,
+    test_fail_restore_html: bool = false,
+    test_fail_restore_json: bool = false,
+    test_fail_remove_html: bool = false,
+    test_fail_remove_json: bool = false,
+};
+
 pub const PairState = struct {
     json_original_existed: bool,
     html_original_existed: bool,
@@ -36,8 +50,8 @@ pub fn writeTmpFile(
     root: Io.Dir,
     path: []const u8,
     bytes: []const u8,
-    fail_error: anyerror,
-) anyerror!void {
+    fail_error: Error,
+) Error!void {
     var atomic = root.createFileAtomic(io, path, .{ .replace = true, .make_path = true }) catch {
         return fail_error;
     };
@@ -54,8 +68,8 @@ pub fn verifyTmpBytes(
     root: Io.Dir,
     path: []const u8,
     expected: []const u8,
-    fail_error: anyerror,
-) anyerror!void {
+    fail_error: Error,
+) Error!void {
     var file = root.openFile(io, path, .{}) catch return fail_error;
     defer file.close(io);
     var reader_buffer: [64 * 1024]u8 = undefined;
@@ -80,7 +94,7 @@ pub fn installPair(
     root: Io.Dir,
     json_bytes: []const u8,
     html_bytes: []const u8,
-    options: anytype,
+    options: Options,
 ) Error!void {
     try writeTmpFile(io, root, artifact_inventory.proof_pack_tmp_path, json_bytes, error.JsonTmpWriteFailed);
     if (options.test_fail_json_tmp_write) return error.JsonTmpWriteFailed;
@@ -142,7 +156,7 @@ pub fn rollbackPair(
     io: Io,
     root: Io.Dir,
     state: *const PairState,
-    options: anytype,
+    options: Options,
 ) Error!void {
     if (state.html_preserved) {
         if (options.test_fail_restore_html) return error.RestoreHtmlFailed;
