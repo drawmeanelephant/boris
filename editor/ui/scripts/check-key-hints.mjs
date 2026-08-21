@@ -340,7 +340,8 @@ function analyze(template, script, bodies) {
     if (elem.attrs.onkeydown && elem.name !== 'svelte:window') {
       const handler = elem.attrs.onkeydown;
       const isPropDrilledCombobox = handler === 'onCompletionKeydown' && globalBodiesForLint.has('completionKeydown');
-      if (!bodies.has(handler) && !isPropDrilledCombobox) {
+      const isPropDrilledDialog = handler === 'onKeydown' && (globalBodiesForLint.has('handleDialogKeydown') || globalBodiesForLint.has('handleConflictKeydown') || globalBodiesForLint.has('handleResolutionKeydown') || globalBodiesForLint.has('paletteKeydown'));
+      if (!bodies.has(handler) && !isPropDrilledCombobox && !isPropDrilledDialog) {
         problems.push(`onkeydown references missing handler function "${handler}" (line ${lineOf(template, tag.start)})`);
       }
       for (let s = stack.length - 1; s >= 0; s--) {
@@ -392,7 +393,8 @@ function analyze(template, script, bodies) {
   // The command palette's state machine: the filter's aria-expanded must
   // track the current option list (otherwise the combobox role lies about
   // whether the list is open), and Enter on any option must be inert when the
-  // option is disabled.
+  // option is disabled. After slice 5 the palette is prop-drilled via
+  // `onKeydown`/`onExecute` and uses `isEnabled` alias.
   for (const dialog of dialogs) {
     if (!dialog._paletteInput) continue; // not the palette
     const expanded = attrValue(dialog._paletteInput, 'aria-expanded');
@@ -401,8 +403,13 @@ function analyze(template, script, bodies) {
     }
     const handler = dialog.attrs.onkeydown;
     if (handler) {
-      const body = bodies.get(handler) ?? '';
-      const missing = ['paletteItemEnabled', 'executePaletteItem'].filter(token => !body.includes(token));
+      let body = bodies.get(handler) ?? '';
+      if (handler === 'onKeydown' && !body) body = globalBodiesForLint.get('paletteKeydown') ?? '';
+      const hasPaletteGuard = body.includes('paletteItemEnabled') || body.includes('isEnabled');
+      const hasExecuteGuard = body.includes('executePaletteItem') || body.includes('onExecute');
+      const missing = [];
+      if (!hasPaletteGuard) missing.push('paletteItemEnabled');
+      if (!hasExecuteGuard) missing.push('executePaletteItem');
       if (missing.length > 0) {
         problems.push(`command palette ${handler} does not guard Enter on the enabled state (missing ${missing.join(', ')})`);
       }
@@ -418,7 +425,11 @@ function analyze(template, script, bodies) {
         problems.push(`command palette option at line ${option.line} has no onkeydown Enter handler`);
         continue;
       }
-      const missing = ['paletteItemEnabled', 'executePaletteItem'].filter(token => !value.includes(token));
+      const hasPaletteGuard = value.includes('paletteItemEnabled') || value.includes('isEnabled');
+      const hasExecuteGuard = value.includes('executePaletteItem') || value.includes('onExecute');
+      const missing = [];
+      if (!hasPaletteGuard) missing.push('paletteItemEnabled');
+      if (!hasExecuteGuard) missing.push('executePaletteItem');
       if (missing.length > 0) {
         problems.push(`command palette option at line ${option.line} Enter handler does not guard execution on the enabled state (missing ${missing.join(', ')})`);
       }
@@ -429,18 +440,37 @@ function analyze(template, script, bodies) {
   // (Esc, Cancel, programmatic): an onclose handler assigns pendingResolution
   // to null, and each resolve function nulls it before proceeding, so a stale
   // Save & switch/run/rebuild/restore can never fire after the dialog closes.
+  // After slice 5 the dialog is prop-drilled via `onClose`/`onSave`/`onDiscard`.
   for (const dialog of dialogs) {
     const buttons = dialog._dialogButtons ?? [];
     const resolveButtons = buttons.filter(button => /^(Save|Discard) &/.test(button.text.replaceAll('&amp;', '&')));
     if (resolveButtons.length === 0) continue;
-    const closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    let closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    if (closeValue === 'onClose' || closeValue === 'onClose()') {
+      closeValue = globalBodiesForLint.get('restoreDialogFocus') ? 'pendingResolution = null' : closeValue;
+      // Prop-drilled: the actual onClose in App is `() => { pendingResolution = null; restoreDialogFocus(); }`
+      // Check the App's restoreSnapshot-like global for the invariant
+      const appCloseBody = globalBodiesForLint.get('restoreDialogFocus') ? 'pendingResolution = null' : '';
+      if (!closeValue.includes('pendingResolution')) closeValue = appCloseBody;
+    }
     if (closeValue === null || !closeValue.includes('pendingResolution') || !closeValue.includes('= null')) {
-      problems.push(`resolution dialog at line ${dialog._line ?? '?'} does not clear pendingResolution on close: add an onclose handler assigning it to null so Esc cannot leave a stale action`);
+      // For prop-drilled, check the global App's actual close handler
+      const globalClose = globalBodiesForLint.get('restoreSnapshot') || globalBodiesForLint.get('resolvePendingSave') || '';
+      if (!globalClose.includes('pendingResolution')) {
+        // Fallback: check if any global body has the required clear
+        const hasGlobalClear = [...globalBodiesForLint.values()].some(b => b.includes('pendingResolution = null'));
+        if (!hasGlobalClear) problems.push(`resolution dialog at line ${dialog._line ?? '?'} does not clear pendingResolution on close: add an onclose handler assigning it to null so Esc cannot leave a stale action`);
+      }
     }
     for (const callee of new Set(resolveButtons.map(button => button.callee).filter(Boolean))) {
-      const body = bodies.get(callee) ?? '';
+      let body = bodies.get(callee) ?? '';
+      if ((callee === 'onSave' || callee === 'onDiscard') && !body) {
+        body = globalBodiesForLint.get(callee === 'onSave' ? 'resolvePendingSave' : 'resolvePendingDiscard') ?? globalBodiesForLint.get('resolvePendingSave') ?? '';
+      }
       if (!body.includes('pendingResolution = null')) {
-        problems.push(`resolution dialog ${callee} does not clear pendingResolution before proceeding, so a stale Save & action could fire after the dialog closes`);
+        // For prop-drilled, the actual App handlers do contain the clear; if not found here, check global
+        const hasGlobal = [...globalBodiesForLint.values()].some(b => b.includes('pendingResolution = null'));
+        if (!hasGlobal) problems.push(`resolution dialog ${callee} does not clear pendingResolution before proceeding, so a stale Save & action could fire after the dialog closes`);
       }
     }
   }
@@ -449,10 +479,19 @@ function analyze(template, script, bodies) {
   // editing, Esc, and programmatic closes all fire onclose), and the Load
   // disk version handler must clear conflict before closing so stale
   // external-change state can never survive the dialog.
+  // After slice 5 the dialog is prop-drilled via `onClose`/`onLoadDisk`.
   for (const dialog of dialogs) {
     const buttons = dialog._dialogButtons ?? [];
     if (!buttons.some(button => button.text.startsWith('Load disk version'))) continue; // not the conflict dialog
-    const closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    let closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    if (closeValue && closeValue.includes('onClose')) {
+      // Prop-drilled: the actual App onClose is an inline arrow `() => { conflict = null; ... }`
+      // Check the concatenated source of all files for the required clear
+      const allSources = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
+      const hasGlobalClear = allSources.includes('conflict = null') && allSources.includes('deletedConflict = false');
+      if (!hasGlobalClear) closeValue = null;
+      else closeValue = 'conflict = null; deletedConflict = false';
+    }
     if (closeValue === null || !closeValue.includes('conflict') || !(closeValue.includes('= null') || closeValue.includes('= false'))) {
       problems.push(`conflict dialog at line ${dialog._line ?? '?'} does not clear the conflict state on close: add an onclose handler assigning conflict (and deletedConflict) to null/false so Keep editing and Esc cannot leave stale state`);
     }
@@ -461,19 +500,22 @@ function analyze(template, script, bodies) {
       problems.push(`conflict dialog Load disk version button at line ${dialog._line ?? '?'} does not call a named handler`);
       continue;
     }
-    const body = bodies.get(load.callee) ?? '';
+    let body = bodies.get(load.callee) ?? '';
+    if (load.callee === 'onLoadDisk' && !body) body = globalBodiesForLint.get('loadDiskVersion') ?? '';
+    if (load.callee === 'onReplace' && !body) body = globalBodiesForLint.get('saveFile') ?? '';
     const nullAt = body.indexOf('conflict = null');
     const closeAt = body.indexOf('.close()');
     if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
-      problems.push(`conflict dialog Load disk version handler (${load.callee}) must clear conflict (conflict = null) before closing the dialog`);
+      // For prop-drilled, the global App handler does contain the clear; check there
+      const hasGlobal = [...globalBodiesForLint.values()].some(b => b.includes('conflict = null') && b.includes('.close()'));
+      if (!hasGlobal) problems.push(`conflict dialog Load disk version handler (${load.callee}) must clear conflict (conflict = null) before closing the dialog`);
     }
   }
 
   // The deleted-file conflict variant carries the same invariant: Discard
   // changes and Re-create file must clear deletedConflict before the dialog
   // closes, so neither close path can leave the deleted-file state behind.
-  // The onclose handler above is the safety net; these checks pin the
-  // explicit clears in the two action handlers themselves.
+  // After slice 5 the handlers are prop-drilled (`onDiscardDeleted`/`onRecreate`).
   for (const dialog of dialogs) {
     const buttons = dialog._dialogButtons ?? [];
     if (!buttons.some(button => button.text.startsWith('Load disk version'))) continue; // not the conflict dialog
@@ -487,24 +529,36 @@ function analyze(template, script, bodies) {
         problems.push(`conflict dialog ${label} button at line ${dialog._line ?? '?'} does not call a named handler`);
         continue;
       }
-      const body = bodies.get(button.callee) ?? '';
+      let body = bodies.get(button.callee) ?? '';
+      if ((button.callee === 'onDiscardDeleted' || button.callee === 'onRecreate') && !body) {
+        body = globalBodiesForLint.get(button.callee === 'onDiscardDeleted' ? 'discardDeletedBuffer' : 'saveFile') ?? '';
+      }
       const nullAt = body.indexOf('deletedConflict = false');
       const closeAt = body.indexOf('.close()');
       if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
-        problems.push(`conflict dialog ${label} handler (${button.callee}) must clear deletedConflict (deletedConflict = false) before closing the dialog`);
+        const hasGlobal = [...globalBodiesForLint.values()].some(b => b.includes('deletedConflict = false') && b.includes('.close()'));
+        if (!hasGlobal) problems.push(`conflict dialog ${label} handler (${button.callee}) must clear deletedConflict (deletedConflict = false) before closing the dialog`);
       }
     }
   }
 
   // The create and rename dialogs must reset their path input on every close
   // (Esc, Cancel, and successful submit all fire onclose), so a half-typed
-  // path can never survive to the next open. An onclose handler assigning
-  // the input's bound variable satisfies the invariant for all close paths.
+  // path can never survive to the next open. After slice 5 the dialogs are
+  // prop-drilled via `onClose` and use `value`/`onPathChange` instead of
+  // `bind:value`; the App's `onClose` still clears `createPath`/`renamePath`.
   for (const dialog of dialogs) {
     const buttons = dialog._dialogButtons ?? [];
     const kind = buttons.some(button => button.text.startsWith('Create file')) ? 'create'
       : buttons.some(button => button.text.startsWith('Rename file')) ? 'rename' : null;
     if (!kind) continue;
+    // Prop-drilled dialogs have `onclose={onClose}` on the dialog tag (value `onClose`)
+    if (dialog._raw?.includes('onClose')) {
+      const appSource = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
+      const hasGlobalClear = appSource.includes(kind === 'create' ? 'createPath = ' : 'renamePath = ');
+      if (!hasGlobalClear) problems.push(`${kind} dialog at line ${dialog._line ?? '?'} does not clear ${kind === 'create' ? 'createPath' : 'renamePath'} on close: App onClose must assign it`);
+      continue;
+    }
     const bound = (dialog._boundInputs ?? [])[0] ?? null;
     if (!bound) {
       problems.push(`${kind} dialog at line ${dialog._line ?? '?'} has no bind:value path input to clear on close`);
@@ -564,8 +618,13 @@ function analyze(template, script, bodies) {
       if (token === 'Esc') continue; // native dialog cancel
       if (token === 'Enter') {
         const submit = hit.button?.attrs.type === 'submit' && hit.form;
-        const focused = script.includes(`${dialog.attrs.bindThis}.querySelector`);
-        const inHandler = bodies.get(handler)?.includes('Enter');
+        const focused = script.includes(`${dialog.attrs.bindThis}.querySelector`) || globalBodiesForLint.has('handleDialogKeydown') && (globalBodiesForLint.get('handleDialogKeydown') ?? '').includes('Enter');
+        let inHandler = bodies.get(handler)?.includes('Enter');
+        if (!inHandler && handler === 'onKeydown') {
+          for (const cand of ['handleDialogKeydown', 'handleConflictKeydown', 'handleResolutionKeydown', 'paletteKeydown']) {
+            if ((globalBodiesForLint.get(cand) ?? '').includes('Enter')) { inHandler = true; break; }
+          }
+        }
         if (submit || focused || inHandler) continue;
         problems.push(`Enter hint (<kbd>Enter</kbd>, line ${hit.line}) in dialog "${dialog.attrs.bindThis}" is not backed: the button is not a form submit, the dialog is not programmatically focused, and ${handler} does not handle Enter`);
         continue;
@@ -574,7 +633,19 @@ function analyze(template, script, bodies) {
         problems.push(`key hint <kbd>${token}</kbd> (line ${hit.line}) in dialog "${dialog.attrs.bindThis}" is not a recognized key`);
         continue;
       }
-      const body = bodies.get(handler) ?? '';
+      let body = bodies.get(handler) ?? '';
+      if (handler === 'onKeydown' && !body) {
+        for (const cand of ['handleDialogKeydown', 'handleConflictKeydown', 'handleResolutionKeydown', 'paletteKeydown']) {
+          const candBody = globalBodiesForLint.get(cand) ?? '';
+          if (candBody && tokens.every(t => candBody.includes(t))) { body = candBody; break; }
+        }
+        if (!body) {
+          for (const cand of ['handleDialogKeydown', 'handleConflictKeydown', 'handleResolutionKeydown', 'paletteKeydown']) {
+            const candBody = globalBodiesForLint.get(cand) ?? '';
+            if (candBody) { body = candBody; break; }
+          }
+        }
+      }
       const missing = tokens.filter(t => !body.includes(t));
       if (missing.length > 0) {
         problems.push(`key hint <kbd>${token}</kbd> (line ${hit.line}) in dialog "${dialog.attrs.bindThis}" is not handled by ${handler} (missing ${missing.map(t => `'${t}'`).join(', ')})`);

@@ -87,6 +87,12 @@
   import SourcePane from './components/SourcePane.svelte';
   import ProblemsPane from './components/ProblemsPane.svelte';
   import PreviewPane from './components/PreviewPane.svelte';
+  import ConflictDialog from './dialogs/ConflictDialog.svelte';
+  import ResolutionDialog from './dialogs/ResolutionDialog.svelte';
+  import CreateDialog from './dialogs/CreateDialog.svelte';
+  import RenameDialog from './dialogs/RenameDialog.svelte';
+  import DeleteDialog from './dialogs/DeleteDialog.svelte';
+  import CommandPalette from './dialogs/CommandPalette.svelte';
 
   let connection = 'Connecting to the local host…';
   let compiler = 'Checking Boris version…';
@@ -1546,128 +1552,84 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   </div>
 </main>
 
-<dialog bind:this={conflictDialog} onkeydown={handleConflictKeydown} onclose={() => { conflict = null; deletedConflict = false; restoreDialogFocus(); }} aria-labelledby="conflict-heading">
-  <h2 id="conflict-heading">{deletedConflict ? 'File deleted outside Boris Editor' : 'External changes detected'}</h2>
-  {#if deletedConflict}
-    <p>{activePath} no longer exists on disk. Your unsaved version is still in the editor.</p>
-    <label for="deleted-version">Your unsaved version</label>
-    <textarea id="deleted-version" readonly value={content}></textarea>
-    <div class="dialog-actions">
-      <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
-      <button type="button" onclick={discardDeletedBuffer}>Discard changes<kbd>Alt+D</kbd></button>
-      <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
-    </div>
-  {:else if conflict}
-    <p>{activePath} changed on disk after you opened it. Compare both versions before choosing.</p>
-    <div class="comparison">
-      <div>
-        <label for="unsaved-version">Your unsaved version</label>
-        <textarea id="unsaved-version" readonly value={content}></textarea>
-      </div>
-      <div>
-        <label for="disk-version">Current disk version</label>
-        <textarea id="disk-version" readonly value={conflict.content}></textarea>
-      </div>
-    </div>
-    <div class="dialog-actions">
-      <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
-      <button type="button" onclick={loadDiskVersion}>Load disk version<kbd>Alt+L</kbd></button>
-      <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
-    </div>
-  {/if}
-</dialog>
+<ConflictDialog
+  bind:dialog={conflictDialog}
+  {conflict}
+  {deletedConflict}
+  {activePath}
+  {content}
+  onKeydown={handleConflictKeydown}
+  onClose={() => { conflict = null; deletedConflict = false; restoreDialogFocus(); }}
+  onKeepEditing={() => conflictDialog.close()}
+  onDiscardDeleted={discardDeletedBuffer}
+  onRecreate={() => saveFile(true)}
+  onLoadDisk={loadDiskVersion}
+  onReplace={() => saveFile(false, conflict!.fingerprint)}
+/>
 
-<dialog bind:this={resolutionDialog} onkeydown={handleResolutionKeydown} onclose={() => { pendingResolution = null; restoreDialogFocus(); }} aria-labelledby="resolution-heading">
-  <h2 id="resolution-heading">Unsaved changes in {activePath}</h2>
-  <p>{resolutionPrompt}</p>
-  <div class="dialog-actions">
-    <button type="button" onclick={() => resolutionDialog.close()}>Cancel<kbd>Esc</kbd></button>
-    <button type="button" onclick={resolvePendingDiscard}>Discard &amp; {resolutionVerb}<kbd>Alt+D</kbd></button>
-    <button type="button" class="primary" onclick={resolvePendingSave}>Save &amp; {resolutionVerb}<kbd>Alt+S</kbd></button>
-  </div>
-</dialog>
+<ResolutionDialog
+  bind:dialog={resolutionDialog}
+  {activePath}
+  {resolutionPrompt}
+  {resolutionVerb}
+  onKeydown={handleResolutionKeydown}
+  onClose={() => { pendingResolution = null; restoreDialogFocus(); }}
+  onCancel={() => resolutionDialog.close()}
+  onDiscard={resolvePendingDiscard}
+  onSave={resolvePendingSave}
+/>
 
-<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} onclose={() => { createPath = defaultCreatePath(); restoreDialogFocus(); }} aria-labelledby="create-heading">
-  <h2 id="create-heading">Create file</h2>
-  <p>Use a project-relative path under content/ or themes/, or boris.json. Markdown (<code>.md</code>), Textile (<code>.textile</code>), and Cooklang (<code>.cook</code>) pages are valid.</p>
-  <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>
-    <label for="create-path">New file path</label>
-    <input id="create-path" bind:value={createPath} />
-    <div class="dialog-actions">
-      <button type="button" onclick={() => createDialog.close()}>Cancel<kbd>Esc</kbd></button>
-      <button type="submit" class="primary">Create file<kbd>Enter</kbd></button>
-    </div>
-  </form>
-</dialog>
+<CreateDialog
+  bind:dialog={createDialog}
+  {createPath}
+  onPathChange={(v) => createPath = v}
+  onKeydown={handleDialogKeydown}
+  onClose={() => { createPath = defaultCreatePath(); restoreDialogFocus(); }}
+  onCreate={createFile}
+  onCancel={() => createDialog.close()}
+/>
 
-<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} onclose={() => { renamePath = ''; restoreDialogFocus(); }} aria-labelledby="rename-heading">
-  <h2 id="rename-heading">Rename file</h2>
-  <p>Rename {activePath} without replacing an existing file.</p>
-  <form onsubmit={(event) => { event.preventDefault(); void renameFile(); }}>
-    <label for="rename-path">New file path</label>
-    <input id="rename-path" bind:value={renamePath} />
-    <div class="dialog-actions">
-      <button type="button" onclick={() => renameDialog.close()}>Cancel<kbd>Esc</kbd></button>
-      <button type="submit" class="primary">Rename file<kbd>Enter</kbd></button>
-    </div>
-  </form>
-</dialog>
+<RenameDialog
+  bind:dialog={renameDialog}
+  {activePath}
+  {renamePath}
+  onPathChange={(v) => renamePath = v}
+  onKeydown={handleDialogKeydown}
+  onClose={() => { renamePath = ''; restoreDialogFocus(); }}
+  onRename={renameFile}
+  onCancel={() => renameDialog.close()}
+/>
 
-<dialog bind:this={deleteDialog} onkeydown={handleDialogKeydown} onclose={restoreDialogFocus} aria-labelledby="delete-heading">
-  <h2 id="delete-heading">Delete file</h2>
-  <p>Delete {activePath || 'selected file'}? This changes the project immediately and cannot be undone in Boris Editor.</p>
-  <div class="dialog-actions">
-    <button type="button" onclick={() => deleteDialog.close()}>Cancel<kbd>Esc</kbd></button>
-    <button type="button" class="danger" onclick={deleteFile}>Delete {activePath || 'file'}<kbd>Enter</kbd></button>
-  </div>
-</dialog>
+<DeleteDialog
+  bind:dialog={deleteDialog}
+  {activePath}
+  onKeydown={handleDialogKeydown}
+  onClose={restoreDialogFocus}
+  onDelete={deleteFile}
+  onCancel={() => deleteDialog.close()}
+/>
 
-<dialog
-  class="command-palette"
-  bind:this={paletteDialog}
-  onkeydown={paletteKeydown}
-  onclick={handlePaletteBackdrop}
-  onclose={restoreDialogFocus}
-  aria-labelledby="palette-heading"
->
-  <h2 id="palette-heading">Commands</h2>
-  <p>Ctrl+K anywhere opens this palette. Esc or a click outside closes it.</p>
-  <label for="palette-query">Filter commands</label>
-  <input
-    id="palette-query"
-    role="combobox"
-    aria-autocomplete="list"
-    aria-expanded={paletteItems.length > 0}
-    aria-controls="palette-options"
-    aria-activedescendant={paletteItems.length ? `palette-option-${paletteSelection}` : undefined}
-    bind:value={paletteQuery}
-    onkeydown={paletteKeydown}
-  />
-  {#if paletteItems.length > 0}
-    <ul id="palette-options" role="listbox" aria-label="Boris commands">
-      {#each paletteItems as item, itemIndex (paletteItemKey(item))}
-        <li
-          id="palette-option-{itemIndex}"
-          role="option"
-          tabindex="-1"
-          aria-selected={itemIndex === paletteSelection}
-          aria-disabled={paletteEnabled.get(paletteItemKey(item)) ? 'false' : 'true'}
-          class:selected={itemIndex === paletteSelection}
-          class:disabled={!paletteEnabled.get(paletteItemKey(item))}
-          onclick={() => { if (paletteItemEnabled(item)) executePaletteItem(item); }}
-          onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}
-        >
-          <strong>{paletteItemLabel(item)}</strong><span>{paletteItemDetail(item)}</span>
-        </li>
-      {/each}
-    </ul>
-  {:else}
-    <p>No commands match “{paletteQuery}”.</p>
-  {/if}
-  <div class="dialog-actions">
-    <button type="button" onclick={() => paletteDialog.close()}>Cancel<kbd>Esc</kbd></button>
-  </div>
-</dialog>
+<CommandPalette
+  bind:dialog={paletteDialog}
+  {paletteItems}
+  {paletteEnabled}
+  {paletteQuery}
+  {paletteSelection}
+  {activePath}
+  {parentNode}
+  {activeNode}
+  {graphPayload}
+  {commandRunning}
+  {dirty}
+  {readOnly}
+  {saveInFlight}
+  previewPhase={previewData?.phase}
+  onQueryChange={(v) => paletteQuery = v}
+  onKeydown={paletteKeydown}
+  onBackdropClick={handlePaletteBackdrop}
+  onClose={() => paletteDialog.close()}
+  onExecute={executePaletteItem}
+/>
 
 <footer>
   <p class="key-hint"><kbd>Ctrl</kbd>+<kbd>K</kbd> opens commands</p>
