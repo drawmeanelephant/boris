@@ -16,6 +16,8 @@ const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
 const json_stream = @import("publication_json_stream.zig");
 const evidence_mod = @import("publication_evidence.zig");
+const touches_parse = @import("touches_parse.zig");
+const touches_graph = @import("touches_graph.zig");
 
 pub const output_path = artifact_inventory.touches_output_path;
 pub const report_format = "boris-publication-touches";
@@ -532,45 +534,10 @@ fn parseCheckAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!
             have_scope = true;
         } else if (std.mem.eql(u8, key, "counts")) {
             if (have_counts) return error.InvalidChecksReport;
-            switch (try nextJsonToken(reader)) {
-                .object_begin => {},
-                else => return error.InvalidChecksReport,
-            }
-            var have_eligible_count = false;
-            var have_checked_count = false;
-            var have_finding_count = false;
-            while (true) {
-                const count_key_token = try nextJsonAllocToken(gpa, reader, 4096);
-                switch (count_key_token) {
-                    .object_end => break,
-                    else => {},
-                }
-                defer freeJsonToken(gpa, count_key_token);
-                const count_key = jsonTokenText(count_key_token) orelse return error.InvalidChecksReport;
-                if (std.mem.eql(u8, count_key, "eligible")) {
-                    if (have_eligible_count) return error.InvalidChecksReport;
-                    const value = try readJsonInteger(gpa, reader);
-                    if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
-                    counts_eligible = @intCast(value);
-                    have_eligible_count = true;
-                } else if (std.mem.eql(u8, count_key, "checked")) {
-                    if (have_checked_count) return error.InvalidChecksReport;
-                    const value = try readJsonInteger(gpa, reader);
-                    if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
-                    counts_checked = @intCast(value);
-                    have_checked_count = true;
-                } else if (std.mem.eql(u8, count_key, "findings")) {
-                    if (have_finding_count) return error.InvalidChecksReport;
-                    const value = try readJsonInteger(gpa, reader);
-                    if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
-                    finding_count = @intCast(value);
-                    have_finding_count = true;
-                } else {
-                    return error.InvalidChecksReport;
-                }
-            }
-            if (!have_eligible_count or !have_checked_count or !have_finding_count)
-                return error.InvalidChecksReport;
+            const counts = try touches_parse.parseCountsBlock(Error, gpa, reader, error.InvalidChecksReport);
+            counts_eligible = counts.eligible;
+            counts_checked = counts.checked;
+            finding_count = counts.findings;
             have_counts = true;
         } else if (std.mem.eql(u8, key, "finding_offset")) {
             if (have_offset) return error.InvalidChecksReport;
@@ -1121,40 +1088,10 @@ fn parseEvidenceAfterBegin(
             have_coverage = true;
         } else if (std.mem.eql(u8, key, "counts")) {
             if (have_counts) return error.InvalidClaimsReport;
-            switch (try nextJsonToken(reader)) {
-                .object_begin => {},
-                else => return error.InvalidClaimsReport,
-            }
-            var have_eligible = false;
-            var have_checked = false;
-            var have_findings = false;
-            while (true) {
-                const count_key_token = try nextJsonAllocToken(gpa, reader, 4096);
-                switch (count_key_token) {
-                    .object_end => break,
-                    else => {},
-                }
-                defer freeJsonToken(gpa, count_key_token);
-                const count_key = jsonTokenText(count_key_token) orelse return error.InvalidClaimsReport;
-                const value = try readJsonInteger(gpa, reader);
-                if (value > std.math.maxInt(usize)) return error.InvalidClaimsReport;
-                if (std.mem.eql(u8, count_key, "eligible")) {
-                    if (have_eligible) return error.InvalidClaimsReport;
-                    evidence.counts.eligible = @intCast(value);
-                    have_eligible = true;
-                } else if (std.mem.eql(u8, count_key, "checked")) {
-                    if (have_checked) return error.InvalidClaimsReport;
-                    evidence.counts.checked = @intCast(value);
-                    have_checked = true;
-                } else if (std.mem.eql(u8, count_key, "findings")) {
-                    if (have_findings) return error.InvalidClaimsReport;
-                    evidence.counts.findings = @intCast(value);
-                    have_findings = true;
-                } else {
-                    return error.InvalidClaimsReport;
-                }
-            }
-            if (!have_eligible or !have_checked or !have_findings) return error.InvalidClaimsReport;
+            const counts = try touches_parse.parseCountsBlock(Error, gpa, reader, error.InvalidClaimsReport);
+            evidence.counts.eligible = counts.eligible;
+            evidence.counts.checked = counts.checked;
+            evidence.counts.findings = counts.findings;
             have_counts = true;
         } else if (std.mem.eql(u8, key, "subject_sha256")) {
             if (have_subject_sha256) return error.InvalidClaimsReport;
@@ -1688,6 +1625,139 @@ pub const ParsedTouches = struct {
     edges: []Edge,
 };
 
+fn parseInputsBlock(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected_target: []const u8,
+    artifacts_binding: *FileBinding,
+    artifact_count: *usize,
+    checks_binding: *FileBinding,
+    check_count: *usize,
+    finding_count: *usize,
+    claims_binding: *FileBinding,
+    claim_count: *usize,
+    limitation_count: *usize,
+) Error!void {
+    switch (try nextJsonToken(reader)) {
+        .object_begin => {},
+        else => return error.InvalidTouchesReport,
+    }
+    var have_artifacts = false;
+    var have_checks = false;
+    var have_claims = false;
+    while (true) {
+        const k_tok = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (k_tok) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, k_tok);
+        const k = jsonTokenText(k_tok) orelse return error.InvalidTouchesReport;
+        if (std.mem.eql(u8, k, "artifacts")) {
+            if (have_artifacts) return error.InvalidTouchesReport;
+            switch (try nextJsonToken(reader)) {
+                .object_begin => {},
+                else => return error.InvalidTouchesReport,
+            }
+            const p = try parseArtifactsBindingAfterBegin(gpa, reader, expected_target, error.InvalidTouchesReport);
+            artifacts_binding.* = p.binding;
+            artifact_count.* = p.artifact_count;
+            have_artifacts = true;
+        } else if (std.mem.eql(u8, k, "checks")) {
+            if (have_checks) return error.InvalidTouchesReport;
+            switch (try nextJsonToken(reader)) {
+                .object_begin => {},
+                else => return error.InvalidTouchesReport,
+            }
+            const p = try parseChecksBindingAfterBegin(gpa, reader, expected_target, error.InvalidTouchesReport);
+            checks_binding.* = p.binding;
+            check_count.* = p.check_count;
+            finding_count.* = p.finding_count;
+            have_checks = true;
+        } else if (std.mem.eql(u8, k, "claims")) {
+            if (have_claims) return error.InvalidTouchesReport;
+            switch (try nextJsonToken(reader)) {
+                .object_begin => {},
+                else => return error.InvalidTouchesReport,
+            }
+            const p = try parseClaimsBindingAfterBegin(gpa, reader, expected_target, error.InvalidTouchesReport);
+            claims_binding.* = p.binding;
+            claim_count.* = p.claim_count;
+            limitation_count.* = p.limitation_count;
+            have_claims = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+    if (!have_artifacts or !have_checks or !have_claims) return error.InvalidTouchesReport;
+}
+
+fn parseNodesArray(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected_target: []const u8,
+    inventory: *const artifact_inventory.Inventory,
+    parsed_checks: *const ParsedChecks,
+    parsed_claims: *const ParsedClaims,
+    nodes: *std.ArrayList(Node),
+) Error!void {
+    switch (try nextJsonToken(reader)) {
+        .array_begin => {},
+        else => return error.InvalidTouchesReport,
+    }
+    while (true) {
+        switch (try nextJsonToken(reader)) {
+            .array_end => break,
+            .object_begin => {
+                const node = try parseTouchesNodeAfterBegin(gpa, reader, expected_target, inventory, parsed_checks, parsed_claims);
+                try nodes.append(gpa, node);
+            },
+            else => return error.InvalidTouchesReport,
+        }
+    }
+}
+
+fn parseEdgesArray(gpa: std.mem.Allocator, reader: *std.json.Reader, edges: *std.ArrayList(Edge)) Error!void {
+    switch (try nextJsonToken(reader)) {
+        .array_begin => {},
+        else => return error.InvalidTouchesReport,
+    }
+    while (true) {
+        switch (try nextJsonToken(reader)) {
+            .array_end => break,
+            .object_begin => {
+                const edge = try parseTouchesEdgeAfterBegin(gpa, reader);
+                try edges.append(gpa, edge);
+            },
+            else => return error.InvalidTouchesReport,
+        }
+    }
+}
+
+fn validateTopology(
+    gpa: std.mem.Allocator,
+    nodes: []const Node,
+    edges: []const Edge,
+    expected_target: []const u8,
+) Error!void {
+    if (nodes.len == 0) return error.InvalidTouchesReport;
+    if (nodes[0].kind != .target or !std.mem.eql(u8, nodes[0].id, "target"))
+        return error.InvalidTouchesReport;
+    if (edges.len == 0) return error.InvalidTouchesReport;
+    var seen: std.StringHashMapUnmanaged(NodeKind) = .empty;
+    defer seen.deinit(gpa);
+    for (nodes) |node| {
+        if (seen.contains(node.id)) return error.InvalidTouchesReport;
+        if (!validNodeId(gpa, node, expected_target)) return error.InvalidTouchesReport;
+        try seen.put(gpa, node.id, node.kind);
+    }
+    for (edges) |edge| {
+        const from_kind = seen.get(edge.from) orelse return error.InvalidTouchesReport;
+        const to_kind = seen.get(edge.to) orelse return error.InvalidTouchesReport;
+        if (!edgePermits(edge, from_kind, to_kind)) return error.InvalidTouchesReport;
+    }
+}
+
 fn parseTouchesStreamInner(
     gpa: std.mem.Allocator,
     input: *std.Io.Reader,
@@ -1764,95 +1834,17 @@ fn parseTouchesStreamInner(
         } else if (std.mem.eql(u8, key, "inputs")) {
             if (have_artifact_inventory or have_publication_checks or have_publication_claims)
                 return error.InvalidTouchesReport;
-            switch (try nextJsonToken(&reader)) {
-                .object_begin => {},
-                else => return error.InvalidTouchesReport,
-            }
-            var have_inputs_artifacts = false;
-            var have_inputs_checks = false;
-            var have_inputs_claims = false;
-            while (true) {
-                const input_key_token = try nextJsonAllocToken(gpa, &reader, 4096);
-                switch (input_key_token) {
-                    .object_end => break,
-                    else => {},
-                }
-                defer freeJsonToken(gpa, input_key_token);
-                const input_key = jsonTokenText(input_key_token) orelse return error.InvalidTouchesReport;
-                if (std.mem.eql(u8, input_key, "artifacts")) {
-                    if (have_inputs_artifacts) return error.InvalidTouchesReport;
-                    switch (try nextJsonToken(&reader)) {
-                        .object_begin => {},
-                        else => return error.InvalidTouchesReport,
-                    }
-                    const parsed = try parseArtifactsBindingAfterBegin(gpa, &reader, expected_target, error.InvalidTouchesReport);
-                    artifacts_binding = parsed.binding;
-                    artifact_count = parsed.artifact_count;
-                    have_inputs_artifacts = true;
-                } else if (std.mem.eql(u8, input_key, "checks")) {
-                    if (have_inputs_checks) return error.InvalidTouchesReport;
-                    switch (try nextJsonToken(&reader)) {
-                        .object_begin => {},
-                        else => return error.InvalidTouchesReport,
-                    }
-                    const parsed = try parseChecksBindingAfterBegin(gpa, &reader, expected_target, error.InvalidTouchesReport);
-                    checks_binding = parsed.binding;
-                    check_count = parsed.check_count;
-                    finding_count = parsed.finding_count;
-                    have_inputs_checks = true;
-                } else if (std.mem.eql(u8, input_key, "claims")) {
-                    if (have_inputs_claims) return error.InvalidTouchesReport;
-                    switch (try nextJsonToken(&reader)) {
-                        .object_begin => {},
-                        else => return error.InvalidTouchesReport,
-                    }
-                    const parsed = try parseClaimsBindingAfterBegin(gpa, &reader, expected_target, error.InvalidTouchesReport);
-                    claims_binding = parsed.binding;
-                    claim_count = parsed.claim_count;
-                    limitation_count = parsed.limitation_count;
-                    have_inputs_claims = true;
-                } else {
-                    return error.InvalidTouchesReport;
-                }
-            }
-            if (!have_inputs_artifacts or !have_inputs_checks or !have_inputs_claims)
-                return error.InvalidTouchesReport;
+            try parseInputsBlock(gpa, &reader, expected_target, &artifacts_binding, &artifact_count, &checks_binding, &check_count, &finding_count, &claims_binding, &claim_count, &limitation_count);
             have_artifact_inventory = true;
             have_publication_checks = true;
             have_publication_claims = true;
         } else if (std.mem.eql(u8, key, "nodes")) {
             if (have_nodes) return error.InvalidTouchesReport;
-            switch (try nextJsonToken(&reader)) {
-                .array_begin => {},
-                else => return error.InvalidTouchesReport,
-            }
-            while (true) {
-                switch (try nextJsonToken(&reader)) {
-                    .array_end => break,
-                    .object_begin => {
-                        const node = try parseTouchesNodeAfterBegin(gpa, &reader, expected_target, inventory, parsed_checks, parsed_claims);
-                        try nodes.append(gpa, node);
-                    },
-                    else => return error.InvalidTouchesReport,
-                }
-            }
+            try parseNodesArray(gpa, &reader, expected_target, inventory, parsed_checks, parsed_claims, &nodes);
             have_nodes = true;
         } else if (std.mem.eql(u8, key, "edges")) {
             if (have_edges) return error.InvalidTouchesReport;
-            switch (try nextJsonToken(&reader)) {
-                .array_begin => {},
-                else => return error.InvalidTouchesReport,
-            }
-            while (true) {
-                switch (try nextJsonToken(&reader)) {
-                    .array_end => break,
-                    .object_begin => {
-                        const edge = try parseTouchesEdgeAfterBegin(gpa, &reader);
-                        try edges.append(gpa, edge);
-                    },
-                    else => return error.InvalidTouchesReport,
-                }
-            }
+            try parseEdgesArray(gpa, &reader, &edges);
             have_edges = true;
         } else {
             return error.InvalidTouchesReport;
@@ -1864,25 +1856,7 @@ fn parseTouchesStreamInner(
         return error.InvalidTouchesReport;
     if (try nextJsonToken(&reader) != .end_of_document) return error.InvalidTouchesReport;
 
-    if (nodes.items.len == 0) return error.InvalidTouchesReport;
-    if (nodes.items[0].kind != .target or !std.mem.eql(u8, nodes.items[0].id, "target"))
-        return error.InvalidTouchesReport;
-    if (edges.items.len == 0) return error.InvalidTouchesReport;
-
-    // Validate node ID grammar against the declared registries and edge
-    // endpoints against declared node kinds, not string prefixes alone.
-    var seen_ids: std.StringHashMapUnmanaged(NodeKind) = .empty;
-    defer seen_ids.deinit(gpa);
-    for (nodes.items) |node| {
-        if (seen_ids.contains(node.id)) return error.InvalidTouchesReport;
-        if (!validNodeId(gpa, node, expected_target)) return error.InvalidTouchesReport;
-        try seen_ids.put(gpa, node.id, node.kind);
-    }
-    for (edges.items) |edge| {
-        const from_kind = seen_ids.get(edge.from) orelse return error.InvalidTouchesReport;
-        const to_kind = seen_ids.get(edge.to) orelse return error.InvalidTouchesReport;
-        if (!edgePermits(edge, from_kind, to_kind)) return error.InvalidTouchesReport;
-    }
+    try validateTopology(gpa, nodes.items, edges.items, expected_target);
 
     return .{
         .artifacts_binding = artifacts_binding,

@@ -271,6 +271,8 @@ const modules = [_]Module{
     .{ .name = "publication_location.zig", .class = .other },
     .{ .name = "publication_evidence.zig", .class = .other },
     .{ .name = "publication_json_stream.zig", .class = .other },
+    .{ .name = "touches_parse.zig", .class = .other },
+    .{ .name = "touches_graph.zig", .class = .other },
     .{ .name = "publication_plan.zig", .class = .{ .emitter = .{ .encoder = .json_out, .note = "canonical normalized publication declaration" } }, .source = @embedFile("publication_plan.zig") },
     .{ .name = "publication_checks_fixture_test.zig", .class = .other },
     .{ .name = "publication_claims_fixture_test.zig", .class = .other },
