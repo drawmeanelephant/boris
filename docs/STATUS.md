@@ -1,12 +1,12 @@
 # Project status — Boris
 
-**As of:** 2026-08-20
+**As of:** 2026-08-21
 
 **Integration line:** `afterparty` during the Build Week judging window; `main` is frozen.
 
 **Product metadata:** `v0.8.1 candidate` / `boris/0.8.1`; base IR `schemaVersion` **`0.2.0`**.
 **Phase:** post-v0.8 integration and identity reconciliation.
-**Afterparty tip:** PR **#532** (Standard.site first-tester path). The line is past **#524**; it is not “the merge set through #318.”
+**Afterparty tip:** PR **#676** (Editor segmentation — `#670` slices 1–6, `App.svelte` 2542→~250 orchestrator). The line is past **#532**; it is not “the merge set through #318.”
 
 **Build baseline:** Zig **0.16** and the Oliver library pinned in `build.zig.zon` (pure Zig; no CMake or other host tools).
 
@@ -84,7 +84,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Capability | Current state |
 |---|---|
-| Boris Editor | **First-class authoring surface** — local host, schema- and graph-aware completion, compiler-backed problems (via a long-lived `validate --watch` daemon when the compiler supports it, one-shot fallback otherwise), live preview of committed `dist/`, publication plan over `boris plan --profile`. Recipe scaling asks `boris recipe-scale`; the editor does not multiply amounts. Stale artifacts stay in-shell. File and list bounds (8 MiB / 50,000 files) are named. Overlapping saves are serialized; corrupt recovery snapshots are skipped. Large file lists stay bounded and filterable. A host crash flushes recovery and the tab names Restart boris-editor. External disk edits are probed while a file is open. Open, save, preview, and completion waits are named with elapsed time. Keyboard checklist for [#418](https://github.com/drawmeanelephant/boris/issues/418) M10 is in CI; spoken Voice Control is not claimed. Guide: [`content/guides/editor.md`](../content/guides/editor.md). |
+| Boris Editor | **First-class authoring surface** — local host (`lib/types|api|utils` + 11 components + dialogs, `App.svelte` ~250 orchestrator after [#670](https://github.com/drawmeanelephant/boris/issues/670) slices 1–6 [#671](https://github.com/drawmeanelephant/boris/pull/671)–[#676](https://github.com/drawmeanelephant/boris/pull/676)), schema- and graph-aware completion, compiler-backed problems (via a long-lived `validate --watch` daemon when the compiler supports it, one-shot fallback otherwise), live preview of committed `dist/`, publication plan over `boris plan --profile`. Recipe scaling asks `boris recipe-scale`; the editor does not multiply amounts. Stale artifacts stay in-shell. File and list bounds (8 MiB / 50,000 files) are named. Overlapping saves are serialized; corrupt recovery snapshots are skipped. Large file lists stay bounded and filterable. A host crash flushes recovery and the tab names Restart boris-editor. External disk edits are probed while a file is open. Open, save, preview, and completion waits are named with elapsed time. Keyboard checklist for [#418](https://github.com/drawmeanelephant/boris/issues/418) M10 is in CI (112/112 Playwright, `check-key-hints` 24 hints — re-verified on `afterparty` `5021261` in [#679](https://github.com/drawmeanelephant/boris/issues/679)); spoken Voice Control is not claimed — see [#677](https://github.com/drawmeanelephant/boris/issues/677). Guide: [`content/guides/editor.md`](../content/guides/editor.md). |
 
 ### Labs
 
