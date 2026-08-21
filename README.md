@@ -381,7 +381,7 @@ Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase ban
 - [`editor/`](editor/) — local compiler-backed editor
 - [`themes/`](themes/) — shipped first-class themes
 - [`examples/`](examples/) — sample sites and unfinished theme studies
-- [`CHANGELOG.md`](CHANGELOG.md) — release history
+- [`CHANGELOG.md`](CHANGELOG.md) — release history (`[Unreleased]` + `[0.8.0]`; pre-0.8 at [`docs/archived/CHANGELOG-pre-0.8.md`](docs/archived/CHANGELOG-pre-0.8.md))
 
 ## License
 

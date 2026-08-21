@@ -10,8 +10,8 @@ direction lives in [`docs/ARCHITECTURE-DIRECTION.md`](docs/ARCHITECTURE-DIRECTIO
 Before every substantive task:
 
 1. Skim [`docs/STATUS.md`](docs/STATUS.md) (phase banner + pointer table), then
-   the top of [`CHANGELOG.md`](CHANGELOG.md) (`[Unreleased]` and latest
-   release).
+   [`CHANGELOG.md`](CHANGELOG.md) (`[Unreleased]` and `[0.8.0]`; pre-0.8 history
+   at [`docs/archived/CHANGELOG-pre-0.8.md`](docs/archived/CHANGELOG-pre-0.8.md) is not standing context).
 2. Read the relevant [`docs/contracts/`](docs/contracts/) file for compiler
    semantics; contracts are **normative**.
 3. Capture `git status --short`, current branch, and relevant worktree ownership;
@@ -147,7 +147,8 @@ Use [`README.md`](README.md) for outcomes and CLI, [`docs/contracts/`](docs/cont
 for normative behavior, [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) for ship
 checks, and [`docs/STATUS.md`](docs/STATUS.md) (phase banner + pointer table) for
 phase and pointers. Capability details live in contracts and
-[`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md).
+[`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md);
+pre-0.8 history is in [`docs/archived/CHANGELOG-pre-0.8.md`](docs/archived/CHANGELOG-pre-0.8.md).
 Do not copy contracts into policy; open the source of truth.
 
 Need to find a module? [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) is the

@@ -169,7 +169,7 @@ Supporting / historical drafts may also remain in this tree. Prefer linking the
 | [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
 | [../authoring-spine.md](../authoring-spine.md) | Non-normative teaching path (init → publish → verify) that links into contracts |
 | [../STATUS.md](../STATUS.md) | Phase banner + pointer table (capability snapshot in [`../archived/capability-matrix-v0.8.md`](../archived/capability-matrix-v0.8.md)) |
-| [`../../CHANGELOG.md`](../../CHANGELOG.md) | Shipped history; removed campaign reviews are not normative |
+| [`../../CHANGELOG.md`](../../CHANGELOG.md) | Shipped history (`[Unreleased]` + `[0.8.0]`; pre-0.8 at [`../archived/CHANGELOG-pre-0.8.md`](../archived/CHANGELOG-pre-0.8.md)); removed campaign reviews are not normative |
 
 ## Fixture corpus
 
