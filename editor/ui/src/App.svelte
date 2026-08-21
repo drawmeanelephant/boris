@@ -85,6 +85,8 @@
   import RecoveryBanner from './components/RecoveryBanner.svelte';
   import ProjectPane from './components/ProjectPane.svelte';
   import SourcePane from './components/SourcePane.svelte';
+  import ProblemsPane from './components/ProblemsPane.svelte';
+  import PreviewPane from './components/PreviewPane.svelte';
 
   let connection = 'Connecting to the local host…';
   let compiler = 'Checking Boris version…';
@@ -1517,167 +1519,30 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   />
 
   <div class="workspace-rail">
-  <section id="problems" class="problems-pane" aria-labelledby="problems-heading">
-    <div class="problems-heading">
-      <div>
-        <h2 id="problems-heading">Problems</h2>
-        <p>Every result below comes from the Boris CLI or one of its published artifacts.</p>
-      </div>
-      {#if commandResult}
-        <p class:failure={commandResult.failure_class !== 'success'} class="command-result">
-          {failureLabel(commandResult.failure_class, commandResult.exit_code)}
-        </p>
-      {/if}
-    </div>
-    {#if validateDaemon}
-      <div class="validation-state-line">
-        <p class="validation-state" role="status" aria-label="Validation state" aria-live="polite">{validationStatusLabel(validateState)}</p>
-        <span class="validation-meta" aria-label="Validation cycle and report age">{validationCycleLabel(validateState)}</span>
-      </div>
-    {/if}
-    {#if problemsNotice.text}
-      <p class="problems-notice" role="status" aria-label="Problems notice" aria-live="polite">{problemsNotice.text}</p>
-    {/if}
-    {#if dirty && ((commandResult?.problems.length ?? 0) > 0 || problemsNotice.clean)}
-      <p class="warning-text">Problems reflect saved files; the open buffer has unsaved changes.</p>
-    {/if}
-    <div class="command-bar" aria-label="Boris commands">
-      <button type="button" disabled={commandRunning} onclick={() => runCommand('validate')}>Validate project</button>
-      <button type="button" disabled={commandRunning} onclick={() => runCommand('ir_build')}>Build diagnostics</button>
-      <button type="button" disabled={commandRunning} onclick={() => runCommand('html_build')}>Build HTML</button>
-      <button type="button" disabled={commandRunning} onclick={() => runCommand('check')}>Check graph</button>
-    </div>
-    <div class="impact-command">
-      <label for="impact-id">Impact entity or source endpoint</label>
-      <div>
-        <input id="impact-id" bind:value={impactId} disabled={commandRunning} />
-        <button type="button" disabled={commandRunning} onclick={() => runCommand('impact')}>Run impact</button>
-      </div>
-    </div>
-    {#if dirty}
-      <p class="warning-text">Boris commands read repository files from disk. Choose Save &amp; run or Discard &amp; run to resolve the unsaved buffer.</p>
-    {/if}
-    <p role="status" aria-label="Boris command status" aria-live="polite">{commandStatus}</p>
-
-    {#if commandResult?.used_stderr_fallback}
-      <p class="fallback-notice">Machine-readable diagnostics were unavailable for this command. Boris stderr was used; reported source positions are labeled best-effort.</p>
-    {/if}
-
-    {#if commandResult && commandResult.problems.length === 0 && !problemsNotice.text}
-      <p>No Boris diagnostics were reported by the last command.</p>
-    {/if}
-
-    <div class="problem-groups" aria-label="Boris diagnostic groups">
-      {#each problemGroups as group, groupIndex (group.key)}
-        <section class="problem-group" aria-labelledby="problem-group-{groupIndex}">
-          <h3 id="problem-group-{groupIndex}">{group.label}</h3>
-          <ul>
-            {#each group.problems as problem}
-              <li class="problem-card">
-                <p>{problem.message}</p>
-                {#if staleProblems.has(problem)}
-                  <p class="warning-text">Possibly stale — the open buffer changed this region since the report.</p>
-                {/if}
-                {#if problem.remediation}<p><strong>Remediation:</strong> {problem.remediation}</p>{/if}
-                <p class="confidence">
-                  {problem.position_confidence === 'exact'
-                    ? 'Exact compiler-reported source position'
-                    : problem.position_confidence === 'best_effort'
-                      ? (problem.source_path?.endsWith('.cook') && problem.code !== 'ECOOKLANG'
-                        ? 'Position approximate: graph diagnostic on adapted Markdown, not the .cook line'
-                        : 'Best-effort source position')
-                      : 'No source position reported'}
-                </p>
-                <div class="problem-actions">
-                  {#if problem.source_path}
-                    <button type="button" onclick={() => navigateToProblem(problem)}>Go to {problemLocationLabel(problem)}</button>
-                  {/if}
-                  <button type="button" aria-label={packetCopyLabel(problem)} onclick={() => copyDiagnosticPacket(problem)}>
-                    {copiedPacketKey === packetCopyKey(problem) ? 'Copied!' : packetCopyLabel(problem)}
-                  </button>
-                </div>
-              </li>
-            {/each}
-          </ul>
-        </section>
-      {/each}
-    </div>
-
-    {#if commandResult && commandResult.findings.length > 0}
-      <section class="analysis-results" aria-labelledby="analysis-findings-heading">
-        <h3 id="analysis-findings-heading">Analysis findings</h3>
-        <ul>
-          {#each commandResult.findings as finding}
-            <li>
-              <span>{finding.code} · {finding.endpoint_type} {finding.value} · count {finding.count}</span>
-              {#if finding.source_path}
-                <button type="button" onclick={() => navigateToProblem(finding)}>Go to {problemLocationLabel(finding)}</button>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      </section>
-    {/if}
-
-    {#if commandResult?.mode === 'impact' && commandResult.impact.length > 0}
-      <section class="analysis-results" aria-labelledby="impact-results-heading">
-        <h3 id="impact-results-heading">Impact results</h3>
-        <ul>
-          {#each commandResult.impact as endpoint}
-            <li>{endpoint.endpoint_type}: {endpoint.value}</li>
-          {/each}
-        </ul>
-      </section>
-    {/if}
-  </section>
-
-  <section id="preview" aria-labelledby="preview-heading">
-    <div class="preview-heading">
-      <div>
-        <h2 id="preview-heading">Preview</h2>
-        <p>The frame serves unchanged files from Boris's committed <code>dist/</code> output.</p>
-      </div>
-      <div class="preview-actions" aria-label="Preview actions">
-        <button type="button" disabled={previewData?.phase === 'running'} onclick={() => rebuildPreview('manual')}>Rebuild preview</button>
-        {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
-          <a class="button-link" href={previewData.preview_url} target="_blank" rel="noreferrer">Open preview in new tab</a>
-        {/if}
-      </div>
-    </div>
-    <fieldset class="preview-viewports" aria-label="Preview width">
-      <legend>Preview width</legend>
-      <label><input type="radio" name="preview-width" value="full" bind:group={previewWidth} /> Full pane</label>
-      <label><input type="radio" name="preview-width" value="375" bind:group={previewWidth} /> 375px</label>
-      <label><input type="radio" name="preview-width" value="768" bind:group={previewWidth} /> 768px</label>
-      <label><input type="radio" name="preview-width" value="1440" bind:group={previewWidth} /> 1440px</label>
-    </fieldset>
-    <details class="preview-a11y">
-      <summary>Accessibility review aid</summary>
-      <p>This list does not replace Voice Control, VoiceOver, or a real audit.</p>
-      <ul>
-        <li>Open the preview in a new tab and run Voice Control “Show names”.</li>
-        <li>Tab through the compiled page without a pointer.</li>
-        <li>Check that status is not color-only.</li>
-      </ul>
-    </details>
-    <p class="preview-state" class:current={previewData?.phase === 'success'} class:failure={previewData?.phase === 'failed' || previewData?.phase === 'stale'}>
-      <strong>{previewData?.phase ?? 'idle'}:</strong> {previewState}
-    </p>
-    {#if previewData?.used_stderr_fallback}
-      <p class="fallback-notice">Rich HTML diagnostics are unavailable; this failure message comes from bounded Boris stderr.</p>
-    {/if}
-    {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
-      <div class="preview-frame" class:constrained={previewWidth !== 'full'} style={previewWidth === 'full' ? undefined : `width:${previewWidth}px`}>
-        <iframe
-          title="Boris site preview"
-          src={`${previewData.preview_url}&generation=${previewData.generation}`}
-          sandbox="allow-same-origin"
-        ></iframe>
-      </div>
-    {:else}
-      <p>No valid Boris preview output is available yet.</p>
-    {/if}
-  </section>
+    <ProblemsPane
+    {problemsNotice}
+    {problemGroups}
+    {staleProblems}
+    {commandResult}
+    {validateDaemon}
+    {validateState}
+    {commandStatus}
+    {dirty}
+    {commandRunning}
+    {impactId}
+    {copiedPacketKey}
+    onRunCommand={runCommand}
+    onImpactInput={(v) => impactId = v}
+    onNavigate={navigateToProblem}
+    onCopyPacket={copyDiagnosticPacket}
+  />
+    <PreviewPane
+    {previewData}
+    {previewState}
+    {previewWidth}
+    onRebuild={() => rebuildPreview('manual')}
+    onWidthChange={(w) => previewWidth = w}
+  />
   </div>
 </main>
 
