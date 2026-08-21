@@ -322,6 +322,62 @@ fn freeParsedCheck(gpa: std.mem.Allocator, check: ParsedCheck) void {
     for (check.scope.supporting_kinds) |value| gpa.free(value);
 }
 
+const Counts = struct {
+    eligible: usize,
+    checked: usize,
+    findings: usize,
+};
+
+fn parseCountsBlock(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!Counts {
+    switch (try nextJsonToken(reader)) {
+        .object_begin => {},
+        else => return error.InvalidChecksReport,
+    }
+    var have_eligible_count = false;
+    var have_checked_count = false;
+    var have_finding_count = false;
+    var eligible_count: usize = 0;
+    var checked_count: usize = 0;
+    var finding_count: usize = 0;
+    while (true) {
+        const count_key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (count_key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, count_key_token);
+        const count_key = jsonTokenText(count_key_token) orelse return error.InvalidChecksReport;
+        if (std.mem.eql(u8, count_key, "eligible")) {
+            if (have_eligible_count) return error.InvalidChecksReport;
+            const value = try readJsonInteger(gpa, reader);
+            if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
+            eligible_count = @intCast(value);
+            have_eligible_count = true;
+        } else if (std.mem.eql(u8, count_key, "checked")) {
+            if (have_checked_count) return error.InvalidChecksReport;
+            const value = try readJsonInteger(gpa, reader);
+            if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
+            checked_count = @intCast(value);
+            have_checked_count = true;
+        } else if (std.mem.eql(u8, count_key, "findings")) {
+            if (have_finding_count) return error.InvalidChecksReport;
+            const value = try readJsonInteger(gpa, reader);
+            if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
+            finding_count = @intCast(value);
+            have_finding_count = true;
+        } else {
+            return error.InvalidChecksReport;
+        }
+    }
+    if (!have_eligible_count or !have_checked_count or !have_finding_count)
+        return error.InvalidChecksReport;
+    return .{
+        .eligible = eligible_count,
+        .checked = checked_count,
+        .findings = finding_count,
+    };
+}
+
 fn parseCheckAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!ParsedCheck {
     var check: ParsedCheck = undefined;
     check.id = &.{};
@@ -398,45 +454,10 @@ fn parseCheckAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!
             have_scope = true;
         } else if (std.mem.eql(u8, key, "counts")) {
             if (have_counts) return error.InvalidChecksReport;
-            switch (try nextJsonToken(reader)) {
-                .object_begin => {},
-                else => return error.InvalidChecksReport,
-            }
-            var have_eligible_count = false;
-            var have_checked_count = false;
-            var have_finding_count = false;
-            while (true) {
-                const count_key_token = try nextJsonAllocToken(gpa, reader, 4096);
-                switch (count_key_token) {
-                    .object_end => break,
-                    else => {},
-                }
-                defer freeJsonToken(gpa, count_key_token);
-                const count_key = jsonTokenText(count_key_token) orelse return error.InvalidChecksReport;
-                if (std.mem.eql(u8, count_key, "eligible")) {
-                    if (have_eligible_count) return error.InvalidChecksReport;
-                    const value = try readJsonInteger(gpa, reader);
-                    if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
-                    eligible_count = @intCast(value);
-                    have_eligible_count = true;
-                } else if (std.mem.eql(u8, count_key, "checked")) {
-                    if (have_checked_count) return error.InvalidChecksReport;
-                    const value = try readJsonInteger(gpa, reader);
-                    if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
-                    checked_count = @intCast(value);
-                    have_checked_count = true;
-                } else if (std.mem.eql(u8, count_key, "findings")) {
-                    if (have_finding_count) return error.InvalidChecksReport;
-                    const value = try readJsonInteger(gpa, reader);
-                    if (value > std.math.maxInt(usize)) return error.InvalidChecksReport;
-                    finding_count = @intCast(value);
-                    have_finding_count = true;
-                } else {
-                    return error.InvalidChecksReport;
-                }
-            }
-            if (!have_eligible_count or !have_checked_count or !have_finding_count)
-                return error.InvalidChecksReport;
+            const counts = try parseCountsBlock(gpa, reader);
+            eligible_count = counts.eligible;
+            checked_count = counts.checked;
+            finding_count = counts.findings;
             have_counts = true;
         } else if (std.mem.eql(u8, key, "finding_offset")) {
             if (have_offset) return error.InvalidChecksReport;
@@ -578,10 +599,7 @@ fn countArrayElements(reader: *std.json.Reader) Error!usize {
     }
 }
 
-/// Validate complete check-state consistency: every combination must be
-/// contract-coherent, and impossible or self-contradicting states are
-/// rejected as `InvalidChecksReport`.
-fn validateCheckState(checks: *const [3]ParsedCheck) Error!void {
+fn validateCoverage(checks: *const [3]ParsedCheck) Error!void {
     for (checks) |check| {
         if (check.counts.checked > check.counts.eligible) return error.InvalidChecksReport;
         const coverage_agrees = if (std.mem.eql(u8, check.status, "passed") or
@@ -595,7 +613,9 @@ fn validateCheckState(checks: *const [3]ParsedCheck) Error!void {
             false;
         if (!coverage_agrees) return error.InvalidChecksReport;
     }
+}
 
+fn validateEligibility(checks: *const [3]ParsedCheck) Error!void {
     // artifact-integrity and rendered-html are selected for every valid
     // inventory; a not-applicable report for either is self-contradicting.
     for (checks[0..2]) |check| {
@@ -621,6 +641,14 @@ fn validateCheckState(checks: *const [3]ParsedCheck) Error!void {
             search.counts.findings != 0)
             return error.InvalidChecksReport;
     }
+}
+
+/// Validate complete check-state consistency: every combination must be
+/// contract-coherent, and impossible or self-contradicting states are
+/// rejected as `InvalidChecksReport`.
+fn validateCheckState(checks: *const [3]ParsedCheck) Error!void {
+    try validateCoverage(checks);
+    try validateEligibility(checks);
 }
 
 /// Strictly parse the committed checks report. Only canonical check metadata
@@ -899,6 +927,71 @@ fn writeClaimScope(out: *std.ArrayList(u8), gpa: std.mem.Allocator, scope: Scope
     try out.appendSlice(gpa, "\n      }");
 }
 
+fn writeHeader(
+    out: *std.ArrayList(u8),
+    gpa: std.mem.Allocator,
+    target: []const u8,
+    artifact_binding: FileBinding,
+    inventory: *const artifact_inventory.Inventory,
+    checks_binding: FileBinding,
+    checks: *const ParsedChecks,
+) !void {
+    try out.appendSlice(gpa, "{\n  \"format\": ");
+    try json_out.writeString(out, gpa, report_format);
+    try out.appendSlice(gpa, ",\n  \"schema_version\": ");
+    try json_out.writeUsize(out, gpa, schema_version);
+    try out.appendSlice(gpa, ",\n  \"target\": ");
+    try json_out.writeString(out, gpa, target);
+    try out.appendSlice(gpa, ",\n  \"artifact_inventory\": ");
+    try writeArtifactInventoryBlock(out, gpa, artifact_binding, inventory);
+    try out.appendSlice(gpa, ",\n  \"publication_checks\": ");
+    try writePublicationChecksBlock(out, gpa, checks_binding, target, checks);
+    try out.appendSlice(gpa, ",\n  \"claims\": [");
+}
+
+fn writeClaimsArray(
+    out: *std.ArrayList(u8),
+    gpa: std.mem.Allocator,
+    checks: *const ParsedChecks,
+    checks_binding: FileBinding,
+) !void {
+    for (checks.checks, 0..) |check, index| {
+        const derivation = derive(check);
+        try out.appendSlice(gpa, if (index == 0) "\n" else ",\n");
+        try out.appendSlice(gpa, "    {\n      \"id\": ");
+        try json_out.writeString(out, gpa, claim_ids[index]);
+        try out.appendSlice(gpa, ",\n      \"statement\": ");
+        try json_out.writeString(out, gpa, claim_statements[index]);
+        try out.appendSlice(gpa, ",\n      \"status\": ");
+        try json_out.writeString(out, gpa, derivation.status.name());
+        try out.appendSlice(gpa, ",\n      \"evidence\": ");
+        try writeClaimEvidence(out, gpa, check, derivation, &checks_binding.sha256);
+        try out.appendSlice(gpa, ",\n      \"scope\": ");
+        try writeClaimScope(out, gpa, check.scope);
+        try out.appendSlice(gpa, ",\n      \"limitation_ids\": ");
+        try writeStringArray(out, gpa, claim_limitation_ids[index]);
+        try out.appendSlice(gpa, "\n    }");
+    }
+}
+
+fn writeLimitationsArray(
+    out: *std.ArrayList(u8),
+    gpa: std.mem.Allocator,
+) !void {
+    for (limitation_ids, limitation_rows, 0..) |id, row, index| {
+        try out.appendSlice(gpa, if (index == 0) "\n" else ",\n");
+        try out.appendSlice(gpa, "    {\n      \"id\": ");
+        try json_out.writeString(out, gpa, id);
+        try out.appendSlice(gpa, ",\n      \"statement\": ");
+        try json_out.writeString(out, gpa, row.statement);
+        try out.appendSlice(gpa, ",\n      \"applies_to_claims\": ");
+        try writeStringArray(out, gpa, row.applies_to_claims);
+        try out.appendSlice(gpa, ",\n      \"source\": ");
+        try json_out.writeString(out, gpa, row.source);
+        try out.appendSlice(gpa, "\n    }");
+    }
+}
+
 fn writeReport(
     gpa: std.mem.Allocator,
     target: []const u8,
@@ -910,49 +1003,23 @@ fn writeReport(
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
 
-    try out.appendSlice(gpa, "{\n  \"format\": ");
-    try json_out.writeString(&out, gpa, report_format);
-    try out.appendSlice(gpa, ",\n  \"schema_version\": ");
-    try json_out.writeUsize(&out, gpa, schema_version);
-    try out.appendSlice(gpa, ",\n  \"target\": ");
-    try json_out.writeString(&out, gpa, target);
-    try out.appendSlice(gpa, ",\n  \"artifact_inventory\": ");
-    try writeArtifactInventoryBlock(&out, gpa, artifact_binding, inventory);
-    try out.appendSlice(gpa, ",\n  \"publication_checks\": ");
-    try writePublicationChecksBlock(&out, gpa, checks_binding, target, checks);
-    try out.appendSlice(gpa, ",\n  \"claims\": [");
-    for (checks.checks, 0..) |check, index| {
-        const derivation = derive(check);
-        try out.appendSlice(gpa, if (index == 0) "\n" else ",\n");
-        try out.appendSlice(gpa, "    {\n      \"id\": ");
-        try json_out.writeString(&out, gpa, claim_ids[index]);
-        try out.appendSlice(gpa, ",\n      \"statement\": ");
-        try json_out.writeString(&out, gpa, claim_statements[index]);
-        try out.appendSlice(gpa, ",\n      \"status\": ");
-        try json_out.writeString(&out, gpa, derivation.status.name());
-        try out.appendSlice(gpa, ",\n      \"evidence\": ");
-        try writeClaimEvidence(&out, gpa, check, derivation, &checks_binding.sha256);
-        try out.appendSlice(gpa, ",\n      \"scope\": ");
-        try writeClaimScope(&out, gpa, check.scope);
-        try out.appendSlice(gpa, ",\n      \"limitation_ids\": ");
-        try writeStringArray(&out, gpa, claim_limitation_ids[index]);
-        try out.appendSlice(gpa, "\n    }");
-    }
+    try writeHeader(&out, gpa, target, artifact_binding, inventory, checks_binding, checks);
+    try writeClaimsArray(&out, gpa, checks, checks_binding);
     try out.appendSlice(gpa, "\n  ],\n  \"limitations\": [");
-    for (limitation_ids, limitation_rows, 0..) |id, row, index| {
-        try out.appendSlice(gpa, if (index == 0) "\n" else ",\n");
-        try out.appendSlice(gpa, "    {\n      \"id\": ");
-        try json_out.writeString(&out, gpa, id);
-        try out.appendSlice(gpa, ",\n      \"statement\": ");
-        try json_out.writeString(&out, gpa, row.statement);
-        try out.appendSlice(gpa, ",\n      \"applies_to_claims\": ");
-        try writeStringArray(&out, gpa, row.applies_to_claims);
-        try out.appendSlice(gpa, ",\n      \"source\": ");
-        try json_out.writeString(&out, gpa, row.source);
-        try out.appendSlice(gpa, "\n    }");
-    }
+    try writeLimitationsArray(&out, gpa);
     try out.appendSlice(gpa, "\n  ]\n}\n");
     return out.toOwnedSlice(gpa);
+}
+
+fn deriveReport(
+    gpa: std.mem.Allocator,
+    target: []const u8,
+    artifact_binding: FileBinding,
+    inventory: *const artifact_inventory.Inventory,
+    checks_binding: FileBinding,
+    checks: *const ParsedChecks,
+) ![]u8 {
+    return writeReport(gpa, target, artifact_binding, inventory, checks_binding, checks);
 }
 
 /// Read the committed inventory and checks report, derive the fixed claims
@@ -996,7 +1063,7 @@ pub fn writeAfterChecks(
         return error.StaleChecksBinding;
     if (parsed_checks.artifact_count != inventory.records.len) return error.StaleChecksBinding;
 
-    const report = writeReport(
+    const report = deriveReport(
         report_gpa,
         target,
         artifact_binding,
@@ -1055,7 +1122,7 @@ pub fn renderFromBytes(
         return error.StaleChecksBinding;
     if (parsed_checks.artifact_count != inventory.records.len) return error.StaleChecksBinding;
 
-    const report = writeReport(
+    const report = deriveReport(
         report_gpa,
         target,
         artifact_binding,
