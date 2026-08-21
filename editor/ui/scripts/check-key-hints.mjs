@@ -446,31 +446,25 @@ function analyze(template, script, bodies) {
     const resolveButtons = buttons.filter(button => /^(Save|Discard) &/.test(button.text.replaceAll('&amp;', '&')));
     if (resolveButtons.length === 0) continue;
     let closeValue = attrValue(dialog._raw ?? '', 'onclose');
-    if (closeValue === 'onClose' || closeValue === 'onClose()') {
-      closeValue = globalBodiesForLint.get('restoreDialogFocus') ? 'pendingResolution = null' : closeValue;
-      // Prop-drilled: the actual onClose in App is `() => { pendingResolution = null; restoreDialogFocus(); }`
-      // Check the App's restoreSnapshot-like global for the invariant
-      const appCloseBody = globalBodiesForLint.get('restoreDialogFocus') ? 'pendingResolution = null' : '';
-      if (!closeValue.includes('pendingResolution')) closeValue = appCloseBody;
+    if (closeValue && closeValue.includes('onClose')) {
+      // Prop-drilled: the wired App prop is `onClose={() => { pendingResolution = null; ... }}`
+      // Check the App source for that specific prop value, not any global function
+      const appSources = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
+      const hasWiredClear = appSources.includes('ResolutionDialog') && appSources.includes('pendingResolution = null') && appSources.includes('onClose');
+      if (!hasWiredClear) closeValue = null;
+      else closeValue = 'pendingResolution = null';
     }
     if (closeValue === null || !closeValue.includes('pendingResolution') || !closeValue.includes('= null')) {
-      // For prop-drilled, check the global App's actual close handler
-      const globalClose = globalBodiesForLint.get('restoreSnapshot') || globalBodiesForLint.get('resolvePendingSave') || '';
-      if (!globalClose.includes('pendingResolution')) {
-        // Fallback: check if any global body has the required clear
-        const hasGlobalClear = [...globalBodiesForLint.values()].some(b => b.includes('pendingResolution = null'));
-        if (!hasGlobalClear) problems.push(`resolution dialog at line ${dialog._line ?? '?'} does not clear pendingResolution on close: add an onclose handler assigning it to null so Esc cannot leave a stale action`);
-      }
+      problems.push(`resolution dialog at line ${dialog._line ?? '?'} does not clear pendingResolution on close: add an onclose handler assigning it to null so Esc cannot leave a stale action`);
     }
     for (const callee of new Set(resolveButtons.map(button => button.callee).filter(Boolean))) {
       let body = bodies.get(callee) ?? '';
       if ((callee === 'onSave' || callee === 'onDiscard') && !body) {
-        body = globalBodiesForLint.get(callee === 'onSave' ? 'resolvePendingSave' : 'resolvePendingDiscard') ?? globalBodiesForLint.get('resolvePendingSave') ?? '';
+        const wired = callee === 'onSave' ? 'resolvePendingSave' : 'resolvePendingDiscard';
+        body = globalBodiesForLint.get(wired) ?? '';
       }
       if (!body.includes('pendingResolution = null')) {
-        // For prop-drilled, the actual App handlers do contain the clear; if not found here, check global
-        const hasGlobal = [...globalBodiesForLint.values()].some(b => b.includes('pendingResolution = null'));
-        if (!hasGlobal) problems.push(`resolution dialog ${callee} does not clear pendingResolution before proceeding, so a stale Save & action could fire after the dialog closes`);
+        problems.push(`resolution dialog ${callee} does not clear pendingResolution before proceeding, so a stale Save & action could fire after the dialog closes`);
       }
     }
   }
@@ -485,11 +479,10 @@ function analyze(template, script, bodies) {
     if (!buttons.some(button => button.text.startsWith('Load disk version'))) continue; // not the conflict dialog
     let closeValue = attrValue(dialog._raw ?? '', 'onclose');
     if (closeValue && closeValue.includes('onClose')) {
-      // Prop-drilled: the actual App onClose is an inline arrow `() => { conflict = null; ... }`
-      // Check the concatenated source of all files for the required clear
-      const allSources = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
-      const hasGlobalClear = allSources.includes('conflict = null') && allSources.includes('deletedConflict = false');
-      if (!hasGlobalClear) closeValue = null;
+      // Prop-drilled: check the App's wired onClose for ConflictDialog
+      const appSources = SOURCES.map(f => { try { return readFileSync(f, 'utf8'); } catch { return ''; } }).join('\n');
+      const hasWiredClear = appSources.includes('ConflictDialog') && appSources.includes('conflict = null') && appSources.includes('deletedConflict = false');
+      if (!hasWiredClear) closeValue = null;
       else closeValue = 'conflict = null; deletedConflict = false';
     }
     if (closeValue === null || !closeValue.includes('conflict') || !(closeValue.includes('= null') || closeValue.includes('= false'))) {
@@ -506,9 +499,7 @@ function analyze(template, script, bodies) {
     const nullAt = body.indexOf('conflict = null');
     const closeAt = body.indexOf('.close()');
     if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
-      // For prop-drilled, the global App handler does contain the clear; check there
-      const hasGlobal = [...globalBodiesForLint.values()].some(b => b.includes('conflict = null') && b.includes('.close()'));
-      if (!hasGlobal) problems.push(`conflict dialog Load disk version handler (${load.callee}) must clear conflict (conflict = null) before closing the dialog`);
+      problems.push(`conflict dialog Load disk version handler (${load.callee}) must clear conflict (conflict = null) before closing the dialog`);
     }
   }
 
@@ -536,8 +527,7 @@ function analyze(template, script, bodies) {
       const nullAt = body.indexOf('deletedConflict = false');
       const closeAt = body.indexOf('.close()');
       if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
-        const hasGlobal = [...globalBodiesForLint.values()].some(b => b.includes('deletedConflict = false') && b.includes('.close()'));
-        if (!hasGlobal) problems.push(`conflict dialog ${label} handler (${button.callee}) must clear deletedConflict (deletedConflict = false) before closing the dialog`);
+        problems.push(`conflict dialog ${label} handler (${button.callee}) must clear deletedConflict (deletedConflict = false) before closing the dialog`);
       }
     }
   }
