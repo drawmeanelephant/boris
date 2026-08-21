@@ -2801,6 +2801,427 @@ fn renderPages(
     return stats;
 }
 
+fn writeIncrementalCaches(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    options: CompileOptions,
+    stage_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    fingerprints: []const []const u8,
+    page_sel_paths: []const []const u8,
+    heading_snapshot: *const HeadingHarvestSnapshot,
+) !void {
+    if (!options.incremental) return;
+    if (options.test_fail_cache_publish) return error.TestInjectedCachePublishFailure;
+
+    var cache_entries = try gpa.alloc(CacheEntry, db.len());
+    defer gpa.free(cache_entries);
+    // Owned hex digests live only for the manifest write below.
+    var output_digests = try gpa.alloc([]u8, db.len());
+    for (output_digests) |*d| d.* = &.{};
+    defer {
+        for (output_digests) |d| {
+            if (d.len > 0) gpa.free(d);
+        }
+        gpa.free(output_digests);
+    }
+    for (db.items(), 0..) |page, page_idx| {
+        var out_size: u64 = 0;
+        var out_digest: []const u8 = "";
+        // Prefer staged (just-written) bytes; fall back to final dist for cached pages.
+        const maybe_bytes: ?[]u8 = if (readFileAlloc(io, stage_dir, page.output_path, gpa)) |b|
+            b
+        else |_| if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
+        if (maybe_bytes) |bytes| {
+            defer gpa.free(bytes);
+            out_size = bytes.len;
+            const dig_hex = cache.hexDigest(cache.hashBytes(bytes));
+            output_digests[page_idx] = try gpa.dupe(u8, &dig_hex);
+            out_digest = output_digests[page_idx];
+        }
+        cache_entries[page_idx] = .{
+            .entity_id = page.entity_id,
+            .fingerprint = fingerprints[page_idx],
+            .output_path = page.output_path,
+            .selected_layout = page_sel_paths[page_idx],
+            .output_size = out_size,
+            .output_digest = out_digest,
+        };
+    }
+
+    var atomic_manifest = try stage_dir.createFileAtomic(io, ".boris-cache/manifest.json", .{
+        .replace = true,
+        .make_path = true,
+    });
+    defer atomic_manifest.deinit(io);
+
+    var m_buf: [4096]u8 = undefined;
+    var m_writer = atomic_manifest.file.writer(io, &m_buf);
+    try writeCacheManifest(gpa, &m_writer.interface, .{
+        .format_version = cache.CACHE_FORMAT_VERSION,
+        .entries = cache_entries,
+    });
+    try m_writer.flush();
+
+    try atomic_manifest.replace(io);
+
+    // Persist heading harvest for the next incremental run (#58).
+    {
+        var atomic_hh = try stage_dir.createFileAtomic(io, ".boris-cache/heading-harvest.json", .{
+            .replace = true,
+            .make_path = true,
+        });
+        defer atomic_hh.deinit(io);
+        var hh_buf: [4096]u8 = undefined;
+        var hh_writer = atomic_hh.file.writer(io, &hh_buf);
+        try writeHeadingHarvestCache(gpa, &hh_writer.interface, heading_snapshot.entries);
+        try hh_writer.flush();
+        try atomic_hh.replace(io);
+    }
+}
+
+const SiteOverlay = struct {
+    live_page_paths: [][]const u8,
+    wke: ?standard_site_emit.WellKnownEmission,
+    prior_emitted: bool,
+
+    fn deinit(self: *SiteOverlay, gpa: std.mem.Allocator) void {
+        gpa.free(self.live_page_paths);
+        if (self.wke) |*w| w.deinit(gpa);
+    }
+};
+
+fn writeSearchSitemapAndStandardSite(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    options: CompileOptions,
+    stage_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    prior_sitemap_marker_present: bool,
+) !SiteOverlay {
+    var live_page_paths = try gpa.alloc([]const u8, db.len());
+    errdefer gpa.free(live_page_paths);
+    for (db.items(), 0..) |page, page_idx| live_page_paths[page_idx] = page.output_path;
+
+    // Search is public surface, so it obeys the same publication rule as the
+    // sitemap below: a `status: draft` page is not advertised. It gets its own
+    // slice rather than filtering `live_page_paths`, because the link audit
+    // needs the *complete* output set.
+    var search_page_paths: std.ArrayList([]const u8) = .empty;
+    defer search_page_paths.deinit(gpa);
+    try search_page_paths.ensureTotalCapacity(gpa, live_page_paths.len);
+    for (db.items()) |page| {
+        if (page.status == .draft) continue;
+        search_page_paths.appendAssumeCapacity(page.output_path);
+    }
+    if (options.timings) |t| t.start(.search);
+    try search_index.writeOverlay(io, gpa, stage_dir, dist_dir, search_page_paths.items, false);
+    if (options.timings) |t| t.stop(.search);
+
+    var sitemap_page_paths: std.ArrayList([]const u8) = .empty;
+    defer sitemap_page_paths.deinit(gpa);
+    if (options.sitemap_path) |sitemap_path| {
+        for (db.items()) |page| {
+            if (page.status == .draft) continue;
+            try sitemap_page_paths.append(gpa, page.output_path);
+        }
+        try sitemap.writeOverlay(
+            io,
+            gpa,
+            stage_dir,
+            dist_dir,
+            sitemap_path,
+            options.site_url.?,
+            sitemap_page_paths.items,
+        );
+        if (options.test_fail_after_sitemap_stage) return error.TestInjectedSitemapFailure;
+    }
+    if (options.sitemap_path != null or prior_sitemap_marker_present) {
+        try stageSitemapOwnership(io, stage_dir, options.sitemap_path);
+    }
+
+    var wke: ?standard_site_emit.WellKnownEmission = null;
+    errdefer if (wke) |*w| w.deinit(gpa);
+    var prior_emitted = false;
+    if (options.standard_site_verification) |ctx| {
+        prior_emitted = (try standard_site_emit.readPriorOwnership(io, gpa, dist_dir)).emitted;
+        wke = try standard_site_emit.writeWellKnownOverlay(io, gpa, stage_dir, ctx.surfaces);
+        try standard_site_emit.stageOwnership(io, stage_dir, ctx.surfaces.well_known.emittable);
+    }
+
+    return .{ .live_page_paths = live_page_paths, .wke = wke, .prior_emitted = prior_emitted };
+}
+
+fn auditOutputLinks(
+    io: Io,
+    gpa: std.mem.Allocator,
+    options: CompileOptions,
+    stage_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    live_page_paths: []const []const u8,
+    theme_bundle: *const theme_mod.ThemeBundle,
+    content_assets: *const content_asset.SiteAssetInventory,
+) !void {
+    var audit_assets: std.ArrayList([]const u8) = .empty;
+    defer audit_assets.deinit(gpa);
+    const audit_content_outs = try content_assets.collectOutputPaths(gpa);
+    defer gpa.free(audit_content_outs);
+    try audit_assets.appendSlice(gpa, audit_content_outs);
+    for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
+    if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
+
+    var findings: std.ArrayList(link_audit.Finding) = .empty;
+    defer link_audit.freeFindings(gpa, &findings);
+    var link_audit_opts = link_audit.Options{
+        .publication_location = options.publication_location,
+        .allow_markdown_literals = options.allow_markdown_literals,
+    };
+    if (options.timings) |t| {
+        link_audit_opts.resolution_counter = t.counterPtr(.link_resolutions);
+        link_audit_opts.fast_path_counter = t.counterPtr(.fast_path_hits);
+    }
+    if (options.timings) |t| t.start(.link_audit);
+    try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, link_audit_opts, &findings);
+    if (options.timings) |t| t.stop(.link_audit);
+    if (findings.items.len != 0) return reportLinkAuditFindings(options.diagnostics, findings.items);
+}
+
+fn writeInventoryOverlay(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    options: CompileOptions,
+    stage_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    theme_bundle: *const theme_mod.ThemeBundle,
+    content_assets: *const content_asset.SiteAssetInventory,
+) !void {
+    var inventory_specs: std.ArrayList(artifact_inventory.Spec) = .empty;
+    defer inventory_specs.deinit(gpa);
+    try inventory_specs.ensureTotalCapacity(
+        gpa,
+        db.len() + theme_bundle.assets.len + content_assets.pages.len + 2,
+    );
+    for (db.items()) |page| {
+        try inventory_specs.append(gpa, .{
+            .path = page.output_path,
+            .kind = .html_page,
+            .producer = "html-render",
+            .required = true,
+            .allow_live = true,
+        });
+    }
+    for (theme_bundle.assets) |asset| {
+        try inventory_specs.append(gpa, .{
+            .path = asset.rel_path,
+            .kind = .theme_asset,
+            .producer = "theme-assets",
+            .required = true,
+        });
+    }
+    for (content_assets.pages) |page_assets| {
+        for (page_assets.entries) |asset| {
+            try inventory_specs.append(gpa, .{
+                .path = asset.output_rel,
+                .kind = .content_asset,
+                .producer = "content-assets",
+                .required = true,
+            });
+        }
+    }
+    try inventory_specs.append(gpa, .{
+        .path = search_index.output_path,
+        .kind = .rendered_search,
+        .producer = "rendered-search",
+        .required = true,
+        .format_version = "1",
+    });
+    if (options.sitemap_path) |sitemap_path| {
+        try inventory_specs.append(gpa, .{
+            .path = sitemap_path,
+            .kind = .sitemap,
+            .producer = "sitemap",
+            .required = true,
+            .format_version = "1",
+        });
+    }
+    if (options.test_fail_before_inventory_write) return error.TestInjectedInventoryWriteFailure;
+    if (options.timings) |t| t.start(.inventory);
+    try artifact_inventory.writeOverlay(
+        io,
+        gpa,
+        stage_dir,
+        dist_dir,
+        options.target_name,
+        inventory_specs.items,
+    );
+    if (options.timings) |t| t.stop(.inventory);
+}
+
+fn commitStagedTree(
+    io: Io,
+    gpa: std.mem.Allocator,
+    cwd: Io.Dir,
+    stage_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    prior_sitemap_path: ?[]const u8,
+    sitemap_path: ?[]const u8,
+    dist_dir_rel: []const u8,
+) !void {
+    // Move an obsolete compiler-owned sitemap aside immediately before commit.
+    // A failed commit restores it; a successful commit removes the backup with
+    // checked I/O rather than leaving best-effort post-commit debris.
+    const sitemap_backup_rel = try std.fmt.allocPrint(gpa, "{s}.boris-sitemap-prev", .{dist_dir_rel});
+    defer gpa.free(sitemap_backup_rel);
+    var sitemap_backed_up = false;
+    const sitemap_changed = if (prior_sitemap_path) |old|
+        sitemap_path == null or !std.mem.eql(u8, old, sitemap_path.?)
+    else
+        false;
+    if (sitemap_changed) {
+        cwd.deleteFile(io, sitemap_backup_rel) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+        if (dist_dir.statFile(io, prior_sitemap_path.?, .{ .follow_symlinks = false })) |stat| {
+            if (stat.kind == .sym_link) return error.TargetOutputSymlink;
+            if (stat.kind != .file) return error.SitemapOwnershipCorrupt;
+            try dist_dir.rename(prior_sitemap_path.?, cwd, sitemap_backup_rel, io);
+            sitemap_backed_up = true;
+        } else |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        }
+    }
+
+    // Search, sitemap, and ownership metadata are members of the same staged
+    // target commit as HTML.
+    publishStageTree(io, gpa, stage_dir, dist_dir, artifact_inventory.output_path) catch |err| {
+        if (sitemap_backed_up) {
+            try cwd.rename(sitemap_backup_rel, dist_dir, prior_sitemap_path.?, io);
+        }
+        return err;
+    };
+    if (sitemap_backed_up) try cwd.deleteFile(io, sitemap_backup_rel);
+}
+
+fn publishStandardSiteReport(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    dist_dir: Io.Dir,
+    page_layouts: []const assemble.Layout,
+    ctx: *const standard_site_emit.VerificationContext,
+    wke: *const standard_site_emit.WellKnownEmission,
+    prior_emitted: bool,
+) !void {
+    if (prior_emitted and !ctx.surfaces.well_known.emittable) {
+        dist_dir.deleteFile(io, standard_site.well_known_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+    }
+    var doc_emissions: std.ArrayList(standard_site_emit.DocumentEmission) = .empty;
+    defer {
+        for (doc_emissions.items) |d| d.deinit(gpa);
+        doc_emissions.deinit(gpa);
+    }
+    for (db.items(), 0..) |p, i| {
+        const at_uri = standard_site_emit.documentAtUri(gpa, ctx.surfaces, p.entity_id) orelse continue;
+        try doc_emissions.append(gpa, .{
+            .entity_id = try gpa.dupe(u8, p.entity_id),
+            .at_uri = try gpa.dupe(u8, at_uri),
+            .status = if (page_layouts[i].has_head) .emitted else .not_verified,
+        });
+    }
+    const report_json = try standard_site_emit.renderReport(gpa, wke, doc_emissions.items);
+    defer gpa.free(report_json);
+    try standard_site_emit.writeReport(io, dist_dir, report_json);
+}
+
+fn cleanupStaleOutputs(
+    io: Io,
+    gpa: std.mem.Allocator,
+    dist_dir: Io.Dir,
+    db: *const PageDb,
+    options: CompileOptions,
+    theme_bundle: *const theme_mod.ThemeBundle,
+    content_assets: *const content_asset.SiteAssetInventory,
+    theme_root: []const u8,
+    parsed_manifest: ?std.json.Parsed(ParsedCacheManifest),
+) !void {
+    // Live page-output set for this build. Shared by stale cleanup AND the theme
+    // scrub below, so a page published under `assets/` is never mistaken for an
+    // orphan theme asset.
+    var live_paths: std.StringHashMapUnmanaged(void) = .{};
+    defer live_paths.deinit(gpa);
+    for (db.items()) |p| {
+        try live_paths.put(gpa, p.output_path, {});
+    }
+    if (options.sitemap_path) |path| try live_paths.put(gpa, path, {});
+
+    if (parsed_manifest) |pm| {
+        for (pm.value.entries) |entry| {
+            if (!live_paths.contains(entry.output_path)) {
+                dist_dir.deleteFile(io, entry.output_path) catch {};
+            }
+        }
+    } else if (!options.incremental) {
+        // Full rebuild: remove html outputs under dist that are not in this build.
+        // Skip live theme-owned assets (e.g. assets/embed.html): copyAssetsToOutput
+        // publishes them into dist/, and they are not page outputs. Orphan theme
+        // assets are handled by scrubOrphanThemeAssets below (#61).
+        // Skip content-local `*.assets/**` files (including .html embeds).
+        var theme_html_assets: std.StringHashMapUnmanaged(void) = .{};
+        defer theme_html_assets.deinit(gpa);
+        for (theme_bundle.assets) |a| {
+            if (std.mem.endsWith(u8, a.rel_path, ".html")) {
+                try theme_html_assets.put(gpa, a.rel_path, {});
+            }
+        }
+        var content_html_assets: std.StringHashMapUnmanaged(void) = .{};
+        defer content_html_assets.deinit(gpa);
+        for (content_assets.pages) |page_bundle| {
+            for (page_bundle.entries) |e| {
+                if (std.mem.endsWith(u8, e.output_rel, ".html")) {
+                    try content_html_assets.put(gpa, e.output_rel, {});
+                }
+            }
+        }
+        var walker = try dist_dir.walk(gpa);
+        defer walker.deinit();
+        while (try walker.next(io)) |entry| {
+            if (entry.kind != .file) continue;
+            if (!std.mem.endsWith(u8, entry.path, ".html")) continue;
+            if (std.mem.startsWith(u8, entry.path, ".boris-cache")) continue;
+            if (theme_html_assets.contains(entry.path)) continue;
+            if (content_html_assets.contains(entry.path)) continue;
+            if (content_asset.isContentLocalOutputPath(entry.path)) continue;
+            // The Proof Pack presentation pair is a committed generation,
+            // not a stale page output: the pair transaction snapshots the
+            // exact prior state and restores it on failure, so the walker
+            // must never delete `index.html` out from under it.
+            if (std.mem.eql(u8, entry.path, artifact_inventory.proof_index_output_path)) continue;
+            if (!live_paths.contains(entry.path)) {
+                dist_dir.deleteFile(io, entry.path) catch {};
+            }
+        }
+    }
+
+    // F9.2: when a managed theme owns `assets/`, drop files removed or renamed
+    // in the theme inventory so prior dist does not retain orphans — but never a
+    // live page output published under assets/.
+    if (theme_root.len > 0) {
+        theme_mod.scrubOrphanThemeAssets(io, dist_dir, gpa, theme_bundle.assets, &live_paths);
+    }
+
+    // Content-local sibling assets: drop removed/renamed files under `*.assets/`.
+    // Theme-owned `assets/` is never touched.
+    content_asset.scrubOrphanContentAssets(io, dist_dir, gpa, content_assets);
+}
+
 fn compilePagesInner(
     io: Io,
     gpa: std.mem.Allocator,
@@ -2884,12 +3305,6 @@ fn compilePagesInner(
     var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
     defer stage_dir.close(io);
 
-    // Standard.site verification state shared between the pre-commit staging
-    // and the post-commit evidence report.
-    var standard_site_wke: ?standard_site_emit.WellKnownEmission = null;
-    defer if (standard_site_wke) |*wke| wke.deinit(gpa);
-    var prior_well_known_emitted = false;
-
     // Assets are target-owned members of the same staging transaction.
     try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
     try content_asset.copyAssetsToOutput(io, stage_dir, &content_assets);
@@ -2964,376 +3379,32 @@ fn compilePagesInner(
         &content_assets,
     );
 
-    // Write cache manifest into staging (committed with the rest of the target).
-    if (options.incremental) {
-        if (options.test_fail_cache_publish) {
-            return error.TestInjectedCachePublishFailure;
-        }
-
-        var cache_entries = try gpa.alloc(CacheEntry, db.len());
-        defer gpa.free(cache_entries);
-        // Owned hex digests live only for the manifest write below.
-        var output_digests = try gpa.alloc([]u8, db.len());
-        for (output_digests) |*d| d.* = &.{};
-        defer {
-            for (output_digests) |d| {
-                if (d.len > 0) gpa.free(d);
-            }
-            gpa.free(output_digests);
-        }
-        for (db.items(), 0..) |page, page_idx| {
-            var out_size: u64 = 0;
-            var out_digest: []const u8 = "";
-            // Prefer staged (just-written) bytes; fall back to final dist for cached pages.
-            const maybe_bytes: ?[]u8 = if (readFileAlloc(io, stage_dir, page.output_path, gpa)) |b|
-                b
-            else |_| if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
-            if (maybe_bytes) |bytes| {
-                defer gpa.free(bytes);
-                out_size = bytes.len;
-                const dig_hex = cache.hexDigest(cache.hashBytes(bytes));
-                output_digests[page_idx] = try gpa.dupe(u8, &dig_hex);
-                out_digest = output_digests[page_idx];
-            }
-            cache_entries[page_idx] = .{
-                .entity_id = page.entity_id,
-                .fingerprint = fingerprints[page_idx],
-                .output_path = page.output_path,
-                .selected_layout = page_sel_paths[page_idx],
-                .output_size = out_size,
-                .output_digest = out_digest,
-            };
-        }
-
-        var atomic_manifest = try stage_dir.createFileAtomic(io, ".boris-cache/manifest.json", .{
-            .replace = true,
-            .make_path = true,
-        });
-        defer atomic_manifest.deinit(io);
-
-        var m_buf: [4096]u8 = undefined;
-        var m_writer = atomic_manifest.file.writer(io, &m_buf);
-        try writeCacheManifest(gpa, &m_writer.interface, .{
-            .format_version = cache.CACHE_FORMAT_VERSION,
-            .entries = cache_entries,
-        });
-        try m_writer.flush();
-
-        try atomic_manifest.replace(io);
-
-        // Persist heading harvest for the next incremental run (#58).
-        {
-            var atomic_hh = try stage_dir.createFileAtomic(io, ".boris-cache/heading-harvest.json", .{
-                .replace = true,
-                .make_path = true,
-            });
-            defer atomic_hh.deinit(io);
-            var hh_buf: [4096]u8 = undefined;
-            var hh_writer = atomic_hh.file.writer(io, &hh_buf);
-            try writeHeadingHarvestCache(gpa, &hh_writer.interface, heading_snapshot.entries);
-            try hh_writer.flush();
-            try atomic_hh.replace(io);
-        }
-    }
-
-    // Commit: rename staged files into final dist (final untouched until this point).
-    // Search is produced from the complete live-page overlay before this commit:
-    // dirty pages come from stage_dir, cached pages from dist_dir, and removed
-    // pages are excluded by the current PageDb output set.
-    var live_page_paths = try gpa.alloc([]const u8, db.len());
-    defer gpa.free(live_page_paths);
-    for (db.items(), 0..) |page, page_idx| live_page_paths[page_idx] = page.output_path;
-
-    // Search is public surface, so it obeys the same publication rule as the
-    // sitemap below: a `status: draft` page is not advertised. It gets its own
-    // slice rather than filtering `live_page_paths`, because the link audit
-    // needs the *complete* output set — drafts still render to HTML, so
-    // dropping them from the audit input would both skip auditing draft pages
-    // and report every link that points at one as EROUTEMISSING.
-    var search_page_paths: std.ArrayList([]const u8) = .empty;
-    defer search_page_paths.deinit(gpa);
-    try search_page_paths.ensureTotalCapacity(gpa, live_page_paths.len);
-    for (db.items()) |page| {
-        if (page.status == .draft) continue;
-        search_page_paths.appendAssumeCapacity(page.output_path);
-    }
-    if (options.timings) |t| t.start(.search);
-    try search_index.writeOverlay(io, gpa, stage_dir, dist_dir, search_page_paths.items, false);
-    if (options.timings) |t| t.stop(.search);
-
-    var sitemap_page_paths: std.ArrayList([]const u8) = .empty;
-    defer sitemap_page_paths.deinit(gpa);
-    if (options.sitemap_path) |sitemap_path| {
-        for (db.items()) |page| {
-            if (page.status == .draft) continue;
-            try sitemap_page_paths.append(gpa, page.output_path);
-        }
-        try sitemap.writeOverlay(
-            io,
-            gpa,
-            stage_dir,
-            dist_dir,
-            sitemap_path,
-            options.site_url.?,
-            sitemap_page_paths.items,
-        );
-        if (options.test_fail_after_sitemap_stage) return error.TestInjectedSitemapFailure;
-    }
-    if (options.sitemap_path != null or prior_sitemap.marker_present) {
-        try stageSitemapOwnership(io, stage_dir, options.sitemap_path);
-    }
-
-    // Standard.site verification surfaces are members of the same staged
-    // target commit: the well-known file (root/custom-domain sites) or the
-    // exact-bytes sideband artifact (limited for base-path deployments), plus
-    // the ownership marker the next build reads to remove its own decoy. The
-    // report itself is written after commit, alongside the other proof
-    // artifacts. A base-path build never stages a plausible `.well-known`
-    // file; it records the limitation instead.
-    if (options.standard_site_verification) |ctx| {
-        prior_well_known_emitted = (try standard_site_emit.readPriorOwnership(io, gpa, dist_dir)).emitted;
-        standard_site_wke = try standard_site_emit.writeWellKnownOverlay(io, gpa, stage_dir, ctx.surfaces);
-        try standard_site_emit.stageOwnership(io, stage_dir, ctx.surfaces.well_known.emittable);
-    }
-
-    // Output link audit: every published local `href`/`src` must resolve to an
-    // output this build intends to keep. It runs on the same staged/live
-    // overlay as search, before the commit below, so a failure leaves the
-    // published tree untouched. Codes are the v0.3 closed set in
-    // `docs/contracts/diagnostics.md`.
-    //
-    // The intended set is pages plus published assets. Resolving against the
-    // filesystem instead would accept a stale file that this build's own
-    // cleanup is about to delete.
-    {
-        var audit_assets: std.ArrayList([]const u8) = .empty;
-        defer audit_assets.deinit(gpa);
-        const audit_content_outs = try content_assets.collectOutputPaths(gpa);
-        defer gpa.free(audit_content_outs);
-        try audit_assets.appendSlice(gpa, audit_content_outs);
-        for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
-        if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
-
-        var findings: std.ArrayList(link_audit.Finding) = .empty;
-        defer link_audit.freeFindings(gpa, &findings);
-        var link_audit_opts = link_audit.Options{
-            .publication_location = options.publication_location,
-            .allow_markdown_literals = options.allow_markdown_literals,
-        };
-        if (options.timings) |t| {
-            link_audit_opts.resolution_counter = t.counterPtr(.link_resolutions);
-            link_audit_opts.fast_path_counter = t.counterPtr(.fast_path_hits);
-        }
-        if (options.timings) |t| t.start(.link_audit);
-        try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, link_audit_opts, &findings);
-        if (options.timings) |t| t.stop(.link_audit);
-        if (findings.items.len != 0) return reportLinkAuditFindings(options.diagnostics, findings.items);
-    }
-
-    // Build the inventory from authoritative producer paths and the staged/live
-    // overlay. Page HTML may legitimately come from the live target on an
-    // incremental no-change build; copied assets and generated projections are
-    // required to be present in this build's stage.
-    var inventory_specs: std.ArrayList(artifact_inventory.Spec) = .empty;
-    defer inventory_specs.deinit(gpa);
-    try inventory_specs.ensureTotalCapacity(
-        gpa,
-        db.len() + theme_bundle.assets.len + content_assets.pages.len + 2,
-    );
-    for (db.items()) |page| {
-        try inventory_specs.append(gpa, .{
-            .path = page.output_path,
-            .kind = .html_page,
-            .producer = "html-render",
-            .required = true,
-            .allow_live = true,
-        });
-    }
-    for (theme_bundle.assets) |asset| {
-        try inventory_specs.append(gpa, .{
-            .path = asset.rel_path,
-            .kind = .theme_asset,
-            .producer = "theme-assets",
-            .required = true,
-        });
-    }
-    for (content_assets.pages) |page_assets| {
-        for (page_assets.entries) |asset| {
-            try inventory_specs.append(gpa, .{
-                .path = asset.output_rel,
-                .kind = .content_asset,
-                .producer = "content-assets",
-                .required = true,
-            });
-        }
-    }
-    try inventory_specs.append(gpa, .{
-        .path = search_index.output_path,
-        .kind = .rendered_search,
-        .producer = "rendered-search",
-        .required = true,
-        .format_version = "1",
-    });
-    if (options.sitemap_path) |sitemap_path| {
-        try inventory_specs.append(gpa, .{
-            .path = sitemap_path,
-            .kind = .sitemap,
-            .producer = "sitemap",
-            .required = true,
-            .format_version = "1",
-        });
-    }
-    if (options.test_fail_before_inventory_write) return error.TestInjectedInventoryWriteFailure;
-    if (options.timings) |t| t.start(.inventory);
-    try artifact_inventory.writeOverlay(
+    try writeIncrementalCaches(
         io,
         gpa,
+        db,
+        options,
         stage_dir,
         dist_dir,
-        options.target_name,
-        inventory_specs.items,
+        fingerprints,
+        page_sel_paths,
+        &heading_snapshot,
     );
-    if (options.timings) |t| t.stop(.inventory);
 
-    // Move an obsolete compiler-owned sitemap aside immediately before commit.
-    // A failed commit restores it; a successful commit removes the backup with
-    // checked I/O rather than leaving best-effort post-commit debris.
-    const sitemap_backup_rel = try std.fmt.allocPrint(gpa, "{s}.boris-sitemap-prev", .{options.dist_dir});
-    defer gpa.free(sitemap_backup_rel);
-    var sitemap_backed_up = false;
-    const sitemap_changed = if (prior_sitemap.path) |old|
-        options.sitemap_path == null or !std.mem.eql(u8, old, options.sitemap_path.?)
-    else
-        false;
-    if (sitemap_changed) {
-        cwd.deleteFile(io, sitemap_backup_rel) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        };
-        if (dist_dir.statFile(io, prior_sitemap.path.?, .{ .follow_symlinks = false })) |stat| {
-            if (stat.kind == .sym_link) return error.TargetOutputSymlink;
-            if (stat.kind != .file) return error.SitemapOwnershipCorrupt;
-            try dist_dir.rename(prior_sitemap.path.?, cwd, sitemap_backup_rel, io);
-            sitemap_backed_up = true;
-        } else |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        }
-    }
+    var site_overlay = try writeSearchSitemapAndStandardSite(io, gpa, db, options, stage_dir, dist_dir, prior_sitemap.marker_present);
+    defer site_overlay.deinit(gpa);
+    try auditOutputLinks(io, gpa, options, stage_dir, dist_dir, site_overlay.live_page_paths, &theme_bundle, &content_assets);
+    try writeInventoryOverlay(io, gpa, db, options, stage_dir, dist_dir, &theme_bundle, &content_assets);
 
-    // Search, sitemap, and ownership metadata are members of the same staged
-    // target commit as HTML.
-    publishStageTree(io, gpa, stage_dir, dist_dir, artifact_inventory.output_path) catch |err| {
-        if (sitemap_backed_up) {
-            try cwd.rename(sitemap_backup_rel, dist_dir, prior_sitemap.path.?, io);
-        }
-        return err;
-    };
-    if (sitemap_backed_up) try cwd.deleteFile(io, sitemap_backup_rel);
+    try commitStagedTree(io, gpa, cwd, stage_dir, dist_dir, prior_sitemap.path, options.sitemap_path, options.dist_dir);
 
     // Standard.site verification evidence, derived from the exact committed
-    // bytes and written post-commit like the other proof artifacts. A limited
-    // (base-path) build removes the decoy well-known file it emitted in an
-    // earlier root-site build — and only that file, never a user-managed one.
+    // bytes and written post-commit like the other proof artifacts.
     if (options.standard_site_verification) |ctx| {
-        if (prior_well_known_emitted and !ctx.surfaces.well_known.emittable) {
-            dist_dir.deleteFile(io, standard_site.well_known_path) catch |err| switch (err) {
-                error.FileNotFound => {},
-                else => return err,
-            };
-        }
-        const wke = standard_site_wke.?;
-        var doc_emissions: std.ArrayList(standard_site_emit.DocumentEmission) = .empty;
-        defer {
-            for (doc_emissions.items) |d| d.deinit(gpa);
-            doc_emissions.deinit(gpa);
-        }
-        for (db.items(), 0..) |p, i| {
-            const at_uri = standard_site_emit.documentAtUri(gpa, ctx.surfaces, p.entity_id) orelse continue;
-            try doc_emissions.append(gpa, .{
-                .entity_id = try gpa.dupe(u8, p.entity_id),
-                .at_uri = try gpa.dupe(u8, at_uri),
-                .status = if (page_layouts[i].has_head) .emitted else .not_verified,
-            });
-        }
-        const report_json = try standard_site_emit.renderReport(gpa, &wke, doc_emissions.items);
-        defer gpa.free(report_json);
-        try standard_site_emit.writeReport(io, dist_dir, report_json);
+        try publishStandardSiteReport(io, gpa, db, dist_dir, page_layouts, ctx, &site_overlay.wke.?, site_overlay.prior_emitted);
     }
 
-    // Live page-output set for this build. Shared by stale cleanup AND the theme
-    // scrub below, so a page published under `assets/` is never mistaken for an
-    // orphan theme asset.
-    var live_paths: std.StringHashMapUnmanaged(void) = .{};
-    defer live_paths.deinit(gpa);
-    for (db.items()) |p| {
-        try live_paths.put(gpa, p.output_path, {});
-    }
-    if (options.sitemap_path) |path| try live_paths.put(gpa, path, {});
-
-    // Stale cleanup: drop published HTML for pages no longer in PageDb.
-    // Prefer prior incremental manifest when present; otherwise scan dist/*.html
-    // against current output_path set so --watch without --incremental still prunes.
-    {
-        if (cache_state.parsed_manifest) |pm| {
-            for (pm.value.entries) |entry| {
-                if (!live_paths.contains(entry.output_path)) {
-                    dist_dir.deleteFile(io, entry.output_path) catch {};
-                }
-            }
-        } else if (!options.incremental) {
-            // Full rebuild: remove html outputs under dist that are not in this build.
-            // Skip live theme-owned assets (e.g. assets/embed.html): copyAssetsToOutput
-            // publishes them into dist/, and they are not page outputs. Orphan theme
-            // assets are handled by scrubOrphanThemeAssets below (#61).
-            // Skip content-local `*.assets/**` files (including .html embeds).
-            var theme_html_assets: std.StringHashMapUnmanaged(void) = .{};
-            defer theme_html_assets.deinit(gpa);
-            for (theme_bundle.assets) |a| {
-                if (std.mem.endsWith(u8, a.rel_path, ".html")) {
-                    try theme_html_assets.put(gpa, a.rel_path, {});
-                }
-            }
-            var content_html_assets: std.StringHashMapUnmanaged(void) = .{};
-            defer content_html_assets.deinit(gpa);
-            for (content_assets.pages) |page_bundle| {
-                for (page_bundle.entries) |e| {
-                    if (std.mem.endsWith(u8, e.output_rel, ".html")) {
-                        try content_html_assets.put(gpa, e.output_rel, {});
-                    }
-                }
-            }
-            var walker = try dist_dir.walk(gpa);
-            defer walker.deinit();
-            while (try walker.next(io)) |entry| {
-                if (entry.kind != .file) continue;
-                if (!std.mem.endsWith(u8, entry.path, ".html")) continue;
-                if (std.mem.startsWith(u8, entry.path, ".boris-cache")) continue;
-                if (theme_html_assets.contains(entry.path)) continue;
-                if (content_html_assets.contains(entry.path)) continue;
-                if (content_asset.isContentLocalOutputPath(entry.path)) continue;
-                // The Proof Pack presentation pair is a committed generation,
-                // not a stale page output: the pair transaction snapshots the
-                // exact prior state and restores it on failure, so the walker
-                // must never delete `index.html` out from under it.
-                if (std.mem.eql(u8, entry.path, artifact_inventory.proof_index_output_path)) continue;
-                if (!live_paths.contains(entry.path)) {
-                    dist_dir.deleteFile(io, entry.path) catch {};
-                }
-            }
-        }
-    }
-
-    // F9.2: when a managed theme owns `assets/`, drop files removed or renamed
-    // in the theme inventory so prior dist does not retain orphans — but never a
-    // live page output published under assets/.
-    if (theme_root.len > 0) {
-        theme_mod.scrubOrphanThemeAssets(io, dist_dir, gpa, theme_bundle.assets, &live_paths);
-    }
-
-    // Content-local sibling assets: drop removed/renamed files under `*.assets/`.
-    // Theme-owned `assets/` is never touched.
-    content_asset.scrubOrphanContentAssets(io, dist_dir, gpa, &content_assets);
+    try cleanupStaleOutputs(io, gpa, dist_dir, db, options, &theme_bundle, &content_assets, theme_root, cache_state.parsed_manifest);
 
     // Drop staging tree (errdefer also cleans on earlier failure).
     cwd.deleteTree(io, stage_rel) catch {};
