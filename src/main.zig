@@ -51,6 +51,8 @@ const atproto_session_std = @import("atproto_session_std.zig");
 const standard_site_smoke = @import("standard_site_smoke.zig");
 const recipe_scale = @import("recipe_scale.zig");
 const recipe_scale_view = @import("recipe_scale_view.zig");
+const main_profile_loader = @import("main_profile_loader.zig");
+const main_dispatch = @import("main_dispatch.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
@@ -138,6 +140,107 @@ pub fn runPipelineWithReport(io: Io, gpa: std.mem.Allocator, opts: Options, envi
     return runPipelineTimed(io, gpa, opts, true, environ).code;
 }
 
+fn handlePlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runPublicationPlan(io, gpa, opts, recorder);
+}
+fn handleStandardSitePublish(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    return runStandardSitePublish(io, gpa, opts, environ.?);
+}
+fn handleStandardSitePlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return runStandardSitePlan(io, gpa, opts);
+}
+fn handleStandardSiteRecords(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return runStandardSiteRecords(io, gpa, opts);
+}
+fn handleStandardSiteVerify(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return runStandardSiteVerify(io, gpa, opts);
+}
+fn handleStandardSiteLogin(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    return runStandardSiteLogin(io, gpa, opts, environ.?);
+}
+fn handleStandardSiteSessions(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    return runStandardSiteSessions(io, gpa, opts, environ.?);
+}
+fn handleStandardSiteLogout(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    return runStandardSiteLogout(io, gpa, opts, environ.?);
+}
+fn handleStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    return runStandardSiteSmoke(io, gpa, opts, environ.?);
+}
+fn handleNostrPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runNostrPlan(io, gpa, opts, recorder);
+}
+fn handleNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return runNostrSign(io, gpa, opts);
+}
+fn handleNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return runNostrPublish(io, gpa, opts);
+}
+fn handleInit(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return runInit(io, gpa, opts);
+}
+fn handleRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return runRecipeScale(io, gpa, opts);
+}
+fn handleValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runValidate(io, gpa, opts, recorder);
+}
+fn handleValidateWatch(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return runValidateWatch(io, gpa, opts);
+}
+fn handleIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runIntelligence(io, gpa, opts, recorder);
+}
+fn handleRag(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runRag(io, gpa, opts, recorder);
+}
+fn handleContext(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runContext(io, gpa, opts, recorder);
+}
+fn handleLlms(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runLlms(io, gpa, opts, recorder);
+}
+fn handleRss(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runRss(io, gpa, opts, recorder);
+}
+fn handleHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runHtml(io, gpa, opts, recorder);
+}
+fn handleIr(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runPipelineIr(io, gpa, opts, recorder);
+}
+
 fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report: bool, environ: ?*std.process.Environ.Map) struct { code: ExitCode } {
     var recorder: ?timings.Recorder = null;
     if (opts.timings) recorder = timings.Recorder.init(io);
@@ -146,53 +249,38 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
         if (recorder) |*r| {
             r.stopAll();
             if (print_report) {
-                const label: []const u8 = switch (opts.command) {
-                    .validate, .check, .impact, .plan, .nostr_plan => @tagName(opts.command),
-                    else => @tagName(opts.mode),
-                };
+                const label = main_dispatch.commandLabel(opts);
                 printTimingsReport(io, gpa, r, label) catch {};
             }
         }
     }
 
-    const code: ExitCode = if (opts.command == .plan)
-        runPublicationPlan(io, gpa, opts, recorder_ptr)
-    else if (opts.command == .standard_site)
-        switch (opts.standard_site_command) {
-            .publish => runStandardSitePublish(io, gpa, opts, environ orelse return .{ .code = .session }),
-            .plan => runStandardSitePlan(io, gpa, opts),
-            .records => runStandardSiteRecords(io, gpa, opts),
-            .verify => runStandardSiteVerify(io, gpa, opts),
-            .login => runStandardSiteLogin(io, gpa, opts, environ orelse return .{ .code = .session }),
-            .sessions => runStandardSiteSessions(io, gpa, opts, environ orelse return .{ .code = .session }),
-            .logout => runStandardSiteLogout(io, gpa, opts, environ orelse return .{ .code = .session }),
-            .smoke => runStandardSiteSmoke(io, gpa, opts, environ orelse return .{ .code = .session }),
-        }
-    else if (opts.command == .nostr_plan)
-        runNostrPlan(io, gpa, opts, recorder_ptr)
-    else if (opts.command == .nostr_sign)
-        runNostrSign(io, gpa, opts)
-    else if (opts.command == .nostr_publish)
-        runNostrPublish(io, gpa, opts)
-    else if (opts.command == .init)
-        runInit(io, gpa, opts)
-    else if (opts.command == .recipe_scale)
-        runRecipeScale(io, gpa, opts)
-    else if (opts.command == .validate)
-        if (opts.watch) runValidateWatch(io, gpa, opts) else runValidate(io, gpa, opts, recorder_ptr)
-    else if (opts.command == .check or opts.command == .impact)
-        runIntelligence(io, gpa, opts, recorder_ptr)
-    else switch (opts.mode) {
-        .rag => runRag(io, gpa, opts, recorder_ptr),
-        .context => runContext(io, gpa, opts, recorder_ptr),
-        .llms => runLlms(io, gpa, opts, recorder_ptr),
-        .rss => runRss(io, gpa, opts, recorder_ptr),
-        .html => runHtml(io, gpa, opts, recorder_ptr),
-        .ir => s: {
-            break :s runPipelineIr(io, gpa, opts, recorder_ptr);
-        },
+    const handlers = main_dispatch.Handlers{
+        .plan = handlePlan,
+        .standard_site_publish = handleStandardSitePublish,
+        .standard_site_plan = handleStandardSitePlan,
+        .standard_site_records = handleStandardSiteRecords,
+        .standard_site_verify = handleStandardSiteVerify,
+        .standard_site_login = handleStandardSiteLogin,
+        .standard_site_sessions = handleStandardSiteSessions,
+        .standard_site_logout = handleStandardSiteLogout,
+        .standard_site_smoke = handleStandardSiteSmoke,
+        .nostr_plan = handleNostrPlan,
+        .nostr_sign = handleNostrSign,
+        .nostr_publish = handleNostrPublish,
+        .init = handleInit,
+        .recipe_scale = handleRecipeScale,
+        .validate = handleValidate,
+        .validate_watch = handleValidateWatch,
+        .intelligence = handleIntelligence,
+        .rag = handleRag,
+        .context = handleContext,
+        .llms = handleLlms,
+        .rss = handleRss,
+        .html = handleHtml,
+        .ir = handleIr,
     };
-
+    const code = main_dispatch.dispatchCommand(io, gpa, opts, recorder_ptr, environ, handlers);
     return .{ .code = code };
 }
 
@@ -336,45 +424,21 @@ pub fn runInit(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     _ = recorder;
     const profile_path = opts.profile_path orelse return .usage;
-    const profile_bytes = Io.Dir.cwd().readFileAlloc(
-        io,
-        profile_path,
-        gpa,
-        .limited(publication_profile.max_profile_bytes + 1),
-    ) catch |err| switch (err) {
-        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
-        else => {
-            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
-            return .io_error;
-        },
-    };
-    defer gpa.free(profile_bytes);
-
-    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
-        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
-        return .io_error;
-    };
-    defer gpa.free(cwd_path);
-
-    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
     const profile_input_format: ?publication_profile.InputFormat = if (opts.profile_input_format_override) |format| switch (format) {
         .markdown => .markdown,
         .textile => .textile,
         .cook => .cook,
     } else null;
-
-    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+    var request: publication_profile.PublicationRequest = undefined;
+    const code = main_profile_loader.loadProfileRequest(gpa, io, profile_path, .{
         .input = opts.profile_input_override,
         .input_format = profile_input_format,
         .html_output = opts.profile_html_output_override,
         .jobs = opts.jobs,
         .incremental = opts.incremental,
         .quiet = opts.quiet,
-    }) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
+    }, &request);
+    if (code != .success) return code;
     defer request.deinit(gpa);
 
     const bytes = publication_plan.render(gpa, &request.plan) catch |err| {
@@ -404,42 +468,18 @@ pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorde
 /// the content actually says. It still opens no socket and reads no key.
 pub fn runNostrPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const profile_path = opts.profile_path orelse return .usage;
-    const profile_bytes = Io.Dir.cwd().readFileAlloc(
-        io,
-        profile_path,
-        gpa,
-        .limited(publication_profile.max_profile_bytes + 1),
-    ) catch |err| switch (err) {
-        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
-        else => {
-            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
-            return .io_error;
-        },
-    };
-    defer gpa.free(profile_bytes);
-
-    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
-        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
-        return .io_error;
-    };
-    defer gpa.free(cwd_path);
-
-    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
     const profile_input_format: ?publication_profile.InputFormat = if (opts.profile_input_format_override) |format| switch (format) {
         .markdown => .markdown,
         .textile => .textile,
         .cook => .cook,
     } else null;
-
-    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+    var request: publication_profile.PublicationRequest = undefined;
+    const load_code = main_profile_loader.loadProfileRequest(gpa, io, profile_path, .{
         .input = opts.profile_input_override,
         .input_format = profile_input_format,
         .quiet = opts.quiet,
-    }) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
+    }, &request);
+    if (load_code != .success) return load_code;
     defer request.deinit(gpa);
 
     const config = request.plan.nostr orelse {
@@ -507,11 +547,7 @@ pub fn runNostrPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*t
 }
 
 fn reportPublicationPlanConfigError(err: anyerror) ExitCode {
-    std.debug.print("error: invalid publication profile: {s}\n", .{@errorName(err)});
-    return switch (err) {
-        error.OutOfMemory => .io_error,
-        else => .usage,
-    };
+    return main_profile_loader.reportPublicationPlanConfigError(err);
 }
 
 /// Maximum committed Standard.site plan artifact bytes (the plan embeds
@@ -1159,35 +1195,13 @@ fn loadHtmlVerification(
     out: *?HtmlVerification,
 ) ExitCode {
     const profile_path = opts.profile_path orelse return .success;
-    const profile_bytes = Io.Dir.cwd().readFileAlloc(
-        io,
-        profile_path,
-        gpa,
-        .limited(publication_profile.max_profile_bytes + 1),
-    ) catch |err| switch (err) {
-        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
-        else => {
-            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
-            return .io_error;
-        },
-    };
-    defer gpa.free(profile_bytes);
-
-    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
-        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
-        return .io_error;
-    };
-    defer gpa.free(cwd_path);
-    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
-    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+    var request: publication_profile.PublicationRequest = undefined;
+    const load_code = main_profile_loader.loadProfileRequest(gpa, io, profile_path, .{
         .jobs = opts.jobs,
         .incremental = opts.incremental,
         .quiet = opts.quiet,
-    }) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
+    }, &request);
+    if (load_code != .success) return load_code;
     defer request.deinit(gpa);
 
     const publication = request.plan.publication orelse return .success;
@@ -1197,8 +1211,8 @@ fn loadHtmlVerification(
     }
 
     var proj: StandardSiteProjection = undefined;
-    const code = buildStandardSiteProjection(io, gpa, opts, &proj);
-    if (code != .success) return code;
+    const proj_code = buildStandardSiteProjection(io, gpa, opts, &proj);
+    if (proj_code != .success) return proj_code;
     var surfaces: standard_site.VerificationSurfaces = undefined;
     const surf_code = buildStandardSiteSurfaces(gpa, proj.targetConfig(), &proj.projection, &surfaces);
     if (surf_code != .success) {
@@ -1229,35 +1243,13 @@ fn loadHtmlNostr(
     out: *?HtmlNostr,
 ) ExitCode {
     const profile_path = opts.profile_path orelse return .success;
-    const profile_bytes = Io.Dir.cwd().readFileAlloc(
-        io,
-        profile_path,
-        gpa,
-        .limited(publication_profile.max_profile_bytes + 1),
-    ) catch |err| switch (err) {
-        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
-        else => {
-            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
-            return .io_error;
-        },
-    };
-    defer gpa.free(profile_bytes);
-
-    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
-        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
-        return .io_error;
-    };
-    defer gpa.free(cwd_path);
-    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
-    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+    var request: publication_profile.PublicationRequest = undefined;
+    const code = main_profile_loader.loadProfileRequest(gpa, io, profile_path, .{
         .jobs = opts.jobs,
         .incremental = opts.incremental,
         .quiet = opts.quiet,
-    }) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
+    }, &request);
+    if (code != .success) return code;
 
     const nostr_cfg = request.plan.nostr orelse {
         request.deinit(gpa);
@@ -1298,37 +1290,13 @@ fn deinitVerificationSurfaces(gpa: std.mem.Allocator, surfaces: *standard_site.V
 /// matching exit code.
 fn buildStandardSiteProjection(io: Io, gpa: std.mem.Allocator, opts: Options, out: *StandardSiteProjection) ExitCode {
     const profile_path = opts.profile_path orelse return .usage;
-    const profile_bytes = Io.Dir.cwd().readFileAlloc(
-        io,
-        profile_path,
-        gpa,
-        .limited(publication_profile.max_profile_bytes + 1),
-    ) catch |err| switch (err) {
-        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
-        else => {
-            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
-            return .io_error;
-        },
-    };
-    defer gpa.free(profile_bytes);
-
-    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
-        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
-        return .io_error;
-    };
-    defer gpa.free(cwd_path);
-
-    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
-
-    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+    var request: publication_profile.PublicationRequest = undefined;
+    const load_code = main_profile_loader.loadProfileRequest(gpa, io, profile_path, .{
         .jobs = opts.jobs,
         .incremental = opts.incremental,
         .quiet = opts.quiet,
-    }) catch |err| {
-        return reportPublicationPlanConfigError(err);
-    };
+    }, &request);
+    if (load_code != .success) return load_code;
     var transferred = false;
     defer if (!transferred) request.deinit(gpa);
 
