@@ -13,42 +13,20 @@
     RecoveryList,
     ErrorResponse,
     CommandMode,
-    FailureClass,
     PendingResolution,
     PaletteItem,
     Problem,
     AnalysisFinding,
-    ImpactEndpoint,
-    PublicationSite,
-    PublicationIdentity,
-    PublicationTarget,
     PublicationPlan,
-    PublicationProfile,
-    PublicationProof,
     PublicationPayload,
     CommandResult,
-    ProblemGroup,
-    JsonSchemaProperty,
-    CompletionEntity,
-    CompletionIndex,
     AuthoringPayload,
     CompletionKind,
     Suggestion,
     PreviewState,
-    GraphEndpoint,
-    RecipeQuantity,
-    RecipeIngredient,
-    RecipeItem,
-    RecipeFacet,
-    RecipeScaleAmount,
-    RecipeScaleQuantity,
     RecipeScaleView,
     GraphNode,
-    GraphEdge,
-    GraphNav,
-    GraphDocument,
-    GraphPayload,
-    GraphLink
+    GraphPayload
   } from './lib/types';
   import { visibleFileLimit, unfilteredPaletteEntryLimit } from './lib/types';
   import {
@@ -62,23 +40,18 @@
     nodeForId,
     navForNode,
     graphLinksForIndices,
-    endpointPath,
     outgoingGraphLinks,
     incomingGraphLinks,
     wikiLinksInSource,
     quantityLabel,
-    displayQuantity,
     escapeHtml,
     sourceOffset,
     packetCopyKey,
-    packetCopyLabel,
-    problemLocationLabel,
-    schemaHint,
     completionSuggestions,
-    validationStatusLabel,
-    reportAgeLabel,
-    validationCycleLabel,
-    fileTreeAnnouncement
+    fileTreeAnnouncement,
+    defaultCreatePath,
+    paletteItemLabel,
+    paletteItemKey
   } from './lib/utils';
   import Header from './components/Header.svelte';
   import SectionNav from './components/SectionNav.svelte';
@@ -363,7 +336,7 @@
       project = health.project.content
         ? `Project found${health.project.publication_profile ? ' with boris.json' : ''}${inputMode === 'cooklang' ? '; Cooklang tree (--cooklang)' : inputMode === 'textile' ? '; Textile tree (--textile)' : ''}.`
         : 'This folder is not a Boris project.';
-      createPath = defaultCreatePath();
+      createPath = defaultCreatePath(inputMode);
       files = filesResult.data.files;
       if (authoringResult.response.ok) setAuthoring(authoringResult.data);
       else authoringStatus = 'Boris authoring vocabulary is unavailable.';
@@ -1138,14 +1111,8 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     }
   }
 
-  function defaultCreatePath(): string {
-    if (inputMode === 'cooklang') return 'content/new-recipe.cook';
-    if (inputMode === 'textile') return 'content/new-page.textile';
-    return 'content/new-page.md';
-  }
-
   function openCreateDialog() {
-    createPath = defaultCreatePath();
+    createPath = defaultCreatePath(inputMode);
     openModal(createDialog);
   }
 
@@ -1164,20 +1131,6 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     if (!needle) return true;
     return paletteItemLabel(item).toLocaleLowerCase().includes(needle)
       || paletteItemDetail(item).toLocaleLowerCase().includes(needle);
-  }
-
-  function paletteItemLabel(item: PaletteItem): string {
-    if (item.kind === 'create') return 'Create file';
-    if (item.kind === 'rename') return 'Rename file';
-    if (item.kind === 'delete') return 'Delete file';
-    if (item.kind === 'save') return 'Save file';
-    if (item.kind === 'command') return commandLabel(item.mode);
-    if (item.kind === 'preview') return 'Rebuild preview';
-    if (item.kind === 'source') return 'Focus source pane';
-    if (item.kind === 'parent') return 'Go to parent';
-    if (item.kind === 'impact-here') return 'Run impact on this page';
-    if (item.kind === 'entity') return `Go to ${item.id}`;
-    return 'Open file';
   }
 
   function paletteItemDetail(item: PaletteItem): string {
@@ -1204,13 +1157,6 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     if (item.kind === 'command') return !commandRunning;
     if (dirty) return false;
     return item.kind === 'create' || activePath !== '';
-  }
-
-  function paletteItemKey(item: PaletteItem): string {
-    if (item.kind === 'open') return `open:${item.path}`;
-    if (item.kind === 'entity') return `entity:${item.id}`;
-    if (item.kind === 'command') return `command:${item.mode}`;
-    return item.kind;
   }
 
   function paletteEnabledIndices(): number[] {
@@ -1252,7 +1198,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     skipFocusRestore = true;
     paletteDialog.close();
     if (item.kind === 'create') {
-      createPath = defaultCreatePath();
+      createPath = defaultCreatePath(inputMode);
       createDialog.showModal();
     } else if (item.kind === 'rename') {
       renamePath = activePath;
@@ -1584,7 +1530,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   {createPath}
   onPathChange={(v) => createPath = v}
   onKeydown={handleDialogKeydown}
-  onClose={() => { createPath = defaultCreatePath(); restoreDialogFocus(); }}
+  onClose={() => { createPath = defaultCreatePath(inputMode); restoreDialogFocus(); }}
   onCreate={createFile}
   onCancel={() => createDialog.close()}
 />

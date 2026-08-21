@@ -1,6 +1,13 @@
 <script lang="ts">
   import type { CommandResult, Problem, ProblemGroup, ValidateState } from '../lib/types';
-  import { failureLabel, problemLocationLabel, packetCopyLabel } from '../lib/utils';
+  import {
+    failureLabel,
+    problemLocationLabel,
+    packetCopyLabel,
+    packetCopyKey,
+    validationStatusLabel,
+    validationCycleLabel
+  } from '../lib/utils';
 
   let {
     problemsNotice,
@@ -35,35 +42,6 @@
     onNavigate: (problem: Problem) => void;
     onCopyPacket: (problem: Problem) => void;
   } = $props();
-
-  function validationStatusLabel(state: ValidateState | null): string {
-    if (!state) return '';
-    const cycle = state.cycle ?? 0;
-    const count = state.problems_count ?? 0;
-    switch (state.state) {
-      case 'idle': return 'Validation is idle. Run Validate project to start the daemon.';
-      case 'running': return 'Validation is running the first cycle…';
-      case 'success': return `Validation passed (cycle ${cycle}).`;
-      case 'failed': return `Validation failed — ${count} problem${count === 1 ? '' : 's'} (cycle ${cycle}).`;
-      case 'stale': return 'Validation daemon is restarting with backoff.';
-      default: return '';
-    }
-  }
-  function reportAgeLabel(ageMs: number | null | undefined): string {
-    if (ageMs == null) return 'Report age: —';
-    if (ageMs < 1000) return 'Report age: <1s';
-    if (ageMs < 60_000) return `Report age: ${Math.floor(ageMs / 1000)}s`;
-    const minutes = Math.floor(ageMs / 60_000);
-    const seconds = Math.floor((ageMs % 60_000) / 1000);
-    return `Report age: ${minutes}m ${seconds}s`;
-  }
-  function validationCycleLabel(state: ValidateState | null): string {
-    if (!state || state.cycle === undefined) return 'Cycle: — · Report age: —';
-    return `Cycle ${state.cycle} · ${reportAgeLabel(state.report_age_ms)}`;
-  }
-  function packetCopyKey(problem: Problem): string {
-    return `${problem.code ?? ''}\0${problem.source_path ?? ''}\0${problem.line ?? ''}\0${problem.column ?? ''}\0${problem.packet}`;
-  }
 </script>
 
 <section id="problems" class="problems-pane" aria-labelledby="problems-heading">
