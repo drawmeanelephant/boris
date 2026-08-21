@@ -11,10 +11,6 @@ const proof_json = @import("proof_pack_json.zig");
 const proof_html = @import("proof_pack_html.zig");
 const proof_txn = @import("proof_pack_transaction.zig");
 
-comptime {
-    _ = proof_txn;
-}
-
 pub const output_path = artifact_inventory.proof_pack_output_path;
 pub const index_output_path = artifact_inventory.proof_index_output_path;
 pub const report_format = "boris-publication-proof-pack";
@@ -321,7 +317,20 @@ fn renderPairAndInstall(
         error.NoSpaceLeft => unreachable,
         error.InvalidChecksReport => return error.InvalidChecksReport,
     };
-    try installPair(io, root, json_bytes, html_bytes, options);
+    const txn_options = proof_txn.Options{
+        .test_fail_json_tmp_write = options.test_fail_json_tmp_write,
+        .test_fail_html_tmp_write = options.test_fail_html_tmp_write,
+        .test_fail_preserve_prior = options.test_fail_preserve_prior,
+        .test_fail_preserve_json = options.test_fail_preserve_json,
+        .test_fail_preserve_after = options.test_fail_preserve_after,
+        .test_fail_install_html = options.test_fail_install_html,
+        .test_fail_install_json = options.test_fail_install_json,
+        .test_fail_restore_html = options.test_fail_restore_html,
+        .test_fail_restore_json = options.test_fail_restore_json,
+        .test_fail_remove_html = options.test_fail_remove_html,
+        .test_fail_remove_json = options.test_fail_remove_json,
+    };
+    try proof_txn.installPair(io, root, json_bytes, html_bytes, txn_options);
 }
 
 /// Write `proof-pack.json` and `index.html` after the Touch Atlas commits.
@@ -1491,65 +1500,8 @@ fn renderHtmlRelationships(out: *std.ArrayList(u8), gpa: std.mem.Allocator, mode
 }
 
 // ---------------------------------------------------------------------------
-// First-slice staged transaction.
+// Staged transaction helpers — delegated to proof_pack_transaction.zig.
 // ---------------------------------------------------------------------------
-
-fn pathExists(io: Io, root: Io.Dir, path: []const u8) bool {
-    root.access(io, path, .{}) catch return false;
-    return true;
-}
-
-fn writeTmpFile(
-    io: Io,
-    root: Io.Dir,
-    path: []const u8,
-    bytes: []const u8,
-    fail_error: Error,
-) Error!void {
-    var atomic = root.createFileAtomic(io, path, .{ .replace = true, .make_path = true }) catch {
-        return fail_error;
-    };
-    defer atomic.deinit(io);
-    var buffer: [4096]u8 = undefined;
-    var writer = atomic.file.writer(io, &buffer);
-    writer.interface.writeAll(bytes) catch return fail_error;
-    writer.interface.flush() catch return fail_error;
-    atomic.replace(io) catch return fail_error;
-}
-
-/// Stream-compare a temporary file against the already-rendered expected
-/// bytes without allocating a second output-sized buffer. The comparison
-/// detects different bytes, a truncated temporary file, extra trailing
-/// bytes, and read failure, all reported as the handled `fail_error`. There
-/// is no Proof Pack byte maximum on this path. (A read-failure probe after
-/// the expected bytes also catches a file that grew mid-read.)
-fn verifyTmpBytes(
-    io: Io,
-    root: Io.Dir,
-    path: []const u8,
-    expected: []const u8,
-    fail_error: Error,
-) Error!void {
-    var file = root.openFile(io, path, .{}) catch return fail_error;
-    defer file.close(io);
-    var reader_buffer: [64 * 1024]u8 = undefined;
-    var reader = file.readerStreaming(io, &reader_buffer);
-
-    var index: usize = 0;
-    var chunk: [64 * 1024]u8 = undefined;
-    while (index < expected.len) {
-        const remaining = expected.len - index;
-        const want = chunk[0..@min(chunk.len, remaining)];
-        const n = reader.interface.readSliceShort(want) catch return fail_error;
-        if (n == 0) return fail_error; // truncated temporary file
-        if (!std.mem.eql(u8, chunk[0..n], expected[index .. index + n])) return fail_error;
-        index += n;
-    }
-    // Any byte past the expected length is an extra-trailing-bytes failure.
-    var probe: [1]u8 = undefined;
-    const extra = reader.interface.readSliceShort(&probe) catch return fail_error;
-    if (extra != 0) return fail_error;
-}
 
 fn readFileAlloc(io: Io, root: Io.Dir, gpa: std.mem.Allocator, path: []const u8) ![]u8 {
     var file = try root.openFile(io, path, .{});
@@ -1557,159 +1509,6 @@ fn readFileAlloc(io: Io, root: Io.Dir, gpa: std.mem.Allocator, path: []const u8)
     var reader_buffer: [64 * 1024]u8 = undefined;
     var reader = file.readerStreaming(io, &reader_buffer);
     return reader.interface.allocRemaining(gpa, .limited(64 * 1024 * 1024));
-}
-
-/// Exact original-state tracker for the pair transaction. Every boolean is
-/// derived from the observed filesystem state before any rename, so rollback
-/// can restore the exact original existence and bytes of both paths.
-const PairState = struct {
-    /// The committed `proof-pack.json` existed when the generation began.
-    json_original_existed: bool,
-    /// The committed `index.html` existed when the generation began.
-    html_original_existed: bool,
-    /// The original `proof-pack.json` was moved to `.prev`.
-    json_preserved: bool,
-    /// The original `index.html` was moved to `.prev`.
-    html_preserved: bool,
-    /// A new `index.html` was renamed into place.
-    html_installed: bool,
-    /// A new `proof-pack.json` was renamed into place.
-    json_installed: bool,
-};
-
-/// The first-slice generation transaction:
-///
-/// 1. write and verify both temporary sibling files (streaming compare);
-/// 2. snapshot the original pair state;
-/// 3. move the current pair aside in the contract order (`index.html` first,
-///    then `proof-pack.json`); any failure here rolls back every preservation
-///    rename that already succeeded;
-/// 4. install `index.html` first;
-/// 5. install the authoritative `proof-pack.json` last (commit point);
-/// 6. delete the `.prev` files.
-///
-/// On a synchronous failure, rollback restores the exact original state:
-/// an originally-present file is restored from `.prev`; an originally-absent
-/// file has any newly installed current file removed, so a new file is never
-/// left paired with an absent or stale partner. When rollback itself fails,
-/// the `.prev` files are kept and the specific restore/remove error is
-/// propagated so the caller reports the pair as possibly split or absent.
-/// This transaction makes no multi-file atomic-visibility claim.
-fn installPair(
-    io: Io,
-    root: Io.Dir,
-    json_bytes: []const u8,
-    html_bytes: []const u8,
-    options: Options,
-) Error!void {
-
-    // 1. Write and verify both temporary files. The verification streams the
-    // sibling against the exact committed bytes, so a partial, truncated,
-    // altered, or extended temporary write is a handled synchronous failure
-    // without a second output-sized allocation.
-    try writeTmpFile(io, root, artifact_inventory.proof_pack_tmp_path, json_bytes, error.JsonTmpWriteFailed);
-    if (options.test_fail_json_tmp_write) return error.JsonTmpWriteFailed;
-    try verifyTmpBytes(io, root, artifact_inventory.proof_pack_tmp_path, json_bytes, error.JsonTmpWriteFailed);
-    try writeTmpFile(io, root, artifact_inventory.proof_index_tmp_path, html_bytes, error.HtmlTmpWriteFailed);
-    if (options.test_fail_html_tmp_write) return error.HtmlTmpWriteFailed;
-    try verifyTmpBytes(io, root, artifact_inventory.proof_index_tmp_path, html_bytes, error.HtmlTmpWriteFailed);
-
-    // 2. Snapshot the exact original state before any rename.
-    var state = PairState{
-        .json_original_existed = pathExists(io, root, artifact_inventory.proof_pack_output_path),
-        .html_original_existed = pathExists(io, root, artifact_inventory.proof_index_output_path),
-        .json_preserved = false,
-        .html_preserved = false,
-        .html_installed = false,
-        .json_installed = false,
-    };
-
-    // 3. Preserve the current pair in the contract order: `index.html` first,
-    // then `proof-pack.json`. A failure before the first rename leaves
-    // nothing to roll back; a failure after a rename restores every rename
-    // that already succeeded.
-    if (options.test_fail_preserve_prior) return error.PreservePriorFailed;
-    if (state.html_original_existed) {
-        root.rename(artifact_inventory.proof_index_output_path, root, artifact_inventory.proof_index_prev_path, io) catch return error.PreserveHtmlFailed;
-        state.html_preserved = true;
-    }
-    if (options.test_fail_preserve_json) {
-        rollbackPair(io, root, &state, options) catch |err| return err;
-        return error.PreserveJsonFailed;
-    }
-    if (state.json_original_existed) {
-        root.rename(artifact_inventory.proof_pack_output_path, root, artifact_inventory.proof_pack_prev_path, io) catch {
-            rollbackPair(io, root, &state, options) catch |err| return err;
-            return error.PreserveJsonFailed;
-        };
-        state.json_preserved = true;
-    }
-    if (options.test_fail_preserve_after) {
-        rollbackPair(io, root, &state, options) catch |err| return err;
-        return error.PreserveAfterFailed;
-    }
-
-    // 4. Install the new `index.html` first. The fault injection fires after
-    // the rename (which may have completed), so recovery must remove a newly
-    // installed HTML whose prior state was absent or restore a preserved one.
-    root.rename(artifact_inventory.proof_index_tmp_path, root, artifact_inventory.proof_index_output_path, io) catch {
-        rollbackPair(io, root, &state, options) catch |err| return err;
-        return error.InstallHtmlFailed;
-    };
-    state.html_installed = true;
-    if (options.test_fail_install_html) {
-        rollbackPair(io, root, &state, options) catch |err| return err;
-        return error.InstallHtmlFailed;
-    }
-
-    // 5. Install the authoritative `proof-pack.json` last (commit point).
-    root.rename(artifact_inventory.proof_pack_tmp_path, root, artifact_inventory.proof_pack_output_path, io) catch {
-        rollbackPair(io, root, &state, options) catch |err| return err;
-        return error.InstallJsonFailed;
-    };
-    state.json_installed = true;
-    if (options.test_fail_install_json) {
-        rollbackPair(io, root, &state, options) catch |err| return err;
-        return error.InstallJsonFailed;
-    }
-
-    // 6. Delete the `.prev` siblings after full success. They are removed
-    // unconditionally (not only when this run preserved a prior pair): a
-    // previous failed run can leave durable `.prev` files behind when its own
-    // restoration failed, and `.prev` files must never survive a successful
-    // generation.
-    root.deleteFile(io, artifact_inventory.proof_index_prev_path) catch {};
-    root.deleteFile(io, artifact_inventory.proof_pack_prev_path) catch {};
-}
-
-/// Restore the exact original pair state. For each member: when the original
-/// file existed (and was preserved), rename its `.prev` file back into place;
-/// when the original file did not exist, remove any newly installed current
-/// file so nothing is left where nothing was before. The specific restore or
-/// remove error is returned on failure so the caller can report the pair as
-/// possibly split or absent.
-fn rollbackPair(
-    io: Io,
-    root: Io.Dir,
-    state: *const PairState,
-    options: Options,
-) Error!void {
-    if (state.html_preserved) {
-        if (options.test_fail_restore_html) return error.RestoreHtmlFailed;
-        root.rename(artifact_inventory.proof_index_prev_path, root, artifact_inventory.proof_index_output_path, io) catch return error.RestoreHtmlFailed;
-    } else if (state.html_installed) {
-        // The original had no `index.html`; remove the newly installed file.
-        if (options.test_fail_remove_html) return error.RemoveHtmlFailed;
-        root.deleteFile(io, artifact_inventory.proof_index_output_path) catch return error.RemoveHtmlFailed;
-    }
-    if (state.json_preserved) {
-        if (options.test_fail_restore_json) return error.RestoreJsonFailed;
-        root.rename(artifact_inventory.proof_pack_prev_path, root, artifact_inventory.proof_pack_output_path, io) catch return error.RestoreJsonFailed;
-    } else if (state.json_installed) {
-        // The original had no `proof-pack.json`; remove the newly installed file.
-        if (options.test_fail_remove_json) return error.RemoveJsonFailed;
-        root.deleteFile(io, artifact_inventory.proof_pack_output_path) catch return error.RemoveJsonFailed;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2586,8 +2385,8 @@ test "transaction fault injection preserves the prior pair at every phase" {
         error.RestoreHtmlFailed,
         writeAfterTouches(io, gpa, dir, "default", .{ .test_fail_install_html = true, .test_fail_restore_html = true }),
     );
-    try std.testing.expect(pathExists(io, dir, artifact_inventory.proof_index_prev_path));
-    try std.testing.expect(pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
+    try std.testing.expect(proof_txn.pathExists(io, dir, artifact_inventory.proof_index_prev_path));
+    try std.testing.expect(proof_txn.pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
     // The prior run already left both outputs absent (its restoration failed),
     // so this run preserves nothing: the install-json fault surfaces directly
     // and the durable `.prev` evidence from the failed restoration remains.
@@ -2595,15 +2394,15 @@ test "transaction fault injection preserves the prior pair at every phase" {
         error.InstallJsonFailed,
         writeAfterTouches(io, gpa, dir, "default", .{ .test_fail_install_json = true, .test_fail_restore_json = true }),
     );
-    try std.testing.expect(pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
+    try std.testing.expect(proof_txn.pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
 
     // A clean re-run restores a matching digest pair and deletes the leftovers.
     var after = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
     defer after.deinit(gpa);
     try std.testing.expectEqualSlices(u8, prior.json, after.json);
     try std.testing.expectEqualSlices(u8, prior.html, after.html);
-    try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_index_prev_path));
-    try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
+    try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_index_prev_path));
+    try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
 }
 
 /// Exact original-state capture for the transaction state matrix: the
@@ -2616,10 +2415,10 @@ const CapturedPairState = struct {
 
     fn capture(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) !CapturedPairState {
         return .{
-            .json_exists = pathExists(io, dir, output_path),
-            .html_exists = pathExists(io, dir, index_output_path),
-            .json_bytes = if (pathExists(io, dir, output_path)) try readFileAlloc(io, dir, gpa, output_path) else &.{},
-            .html_bytes = if (pathExists(io, dir, index_output_path)) try readFileAlloc(io, dir, gpa, index_output_path) else &.{},
+            .json_exists = proof_txn.pathExists(io, dir, output_path),
+            .html_exists = proof_txn.pathExists(io, dir, index_output_path),
+            .json_bytes = if (proof_txn.pathExists(io, dir, output_path)) try readFileAlloc(io, dir, gpa, output_path) else &.{},
+            .html_bytes = if (proof_txn.pathExists(io, dir, index_output_path)) try readFileAlloc(io, dir, gpa, index_output_path) else &.{},
         };
     }
 
@@ -2632,8 +2431,8 @@ const CapturedPairState = struct {
     /// same existence for both paths and the same bytes for every file that
     /// existed. A file that was absent must be absent again.
     fn expectEqual(self: *const CapturedPairState, io: Io, gpa: std.mem.Allocator, dir: Io.Dir) !void {
-        try std.testing.expectEqual(self.json_exists, pathExists(io, dir, output_path));
-        try std.testing.expectEqual(self.html_exists, pathExists(io, dir, index_output_path));
+        try std.testing.expectEqual(self.json_exists, proof_txn.pathExists(io, dir, output_path));
+        try std.testing.expectEqual(self.html_exists, proof_txn.pathExists(io, dir, index_output_path));
         if (self.json_exists) {
             const after = try readFileAlloc(io, dir, gpa, output_path);
             defer gpa.free(after);
@@ -2690,8 +2489,8 @@ test "transaction state matrix: every handled failure restores the exact origina
             try std.testing.expectError(case.err, writeAfterTouches(io, gpa, dir, "default", case.options));
             try original.expectEqual(io, gpa, dir);
             // A successful rollback must not leave durable `.prev` files.
-            try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_index_prev_path));
-            try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
+            try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_index_prev_path));
+            try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
         }
     }
 }
@@ -2717,8 +2516,8 @@ test "transaction rollback failures surface specific recovery errors and keep .p
             error.RestoreHtmlFailed,
             writeAfterTouches(io, gpa, dir, "default", .{ .test_fail_install_html = true, .test_fail_restore_html = true }),
         );
-        try std.testing.expect(pathExists(io, dir, artifact_inventory.proof_index_prev_path));
-        try std.testing.expect(pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
+        try std.testing.expect(proof_txn.pathExists(io, dir, artifact_inventory.proof_index_prev_path));
+        try std.testing.expect(proof_txn.pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
     }
     {
         var tmp = std.testing.tmpDir(.{});
@@ -2733,8 +2532,8 @@ test "transaction rollback failures surface specific recovery errors and keep .p
         );
         // HTML was restored first; the JSON restore failed, leaving the JSON
         // `.prev` durable.
-        try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_index_prev_path));
-        try std.testing.expect(pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
+        try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_index_prev_path));
+        try std.testing.expect(proof_txn.pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
     }
 
     // Remove failures need a newly installed file whose prior state was
@@ -2753,8 +2552,8 @@ test "transaction rollback failures surface specific recovery errors and keep .p
             writeAfterTouches(io, gpa, dir, "default", .{ .test_fail_install_html = true, .test_fail_remove_html = true }),
         );
         // No `.prev` to preserve: nothing originally existed.
-        try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_index_prev_path));
-        try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
+        try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_index_prev_path));
+        try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
     }
     {
         var tmp = std.testing.tmpDir(.{});
@@ -2769,8 +2568,8 @@ test "transaction rollback failures surface specific recovery errors and keep .p
             error.RemoveJsonFailed,
             writeAfterTouches(io, gpa, dir, "default", .{ .test_fail_install_json = true, .test_fail_remove_json = true }),
         );
-        try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_index_prev_path));
-        try std.testing.expect(!pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
+        try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_index_prev_path));
+        try std.testing.expect(!proof_txn.pathExists(io, dir, artifact_inventory.proof_pack_prev_path));
     }
 }
 
@@ -2784,34 +2583,34 @@ test "streaming temporary verification detects mismatch, truncation, extension, 
     const path = artifact_inventory.proof_pack_tmp_path;
 
     // Exact match passes.
-    try writeTmpFile(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed);
-    try verifyTmpBytes(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed);
+    try proof_txn.writeTmpFile(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed);
+    try proof_txn.verifyTmpBytes(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed);
 
     // Different bytes fail.
-    try writeTmpFile(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed);
+    try proof_txn.writeTmpFile(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed);
     try std.testing.expectError(
         error.JsonTmpWriteFailed,
-        verifyTmpBytes(io, tmp.dir, path, "hello worle", error.JsonTmpWriteFailed),
+        proof_txn.verifyTmpBytes(io, tmp.dir, path, "hello worle", error.JsonTmpWriteFailed),
     );
 
     // A truncated temporary file fails.
-    try writeTmpFile(io, tmp.dir, path, "hello", error.JsonTmpWriteFailed);
+    try proof_txn.writeTmpFile(io, tmp.dir, path, "hello", error.JsonTmpWriteFailed);
     try std.testing.expectError(
         error.JsonTmpWriteFailed,
-        verifyTmpBytes(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed),
+        proof_txn.verifyTmpBytes(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed),
     );
 
     // Extra trailing bytes fail.
-    try writeTmpFile(io, tmp.dir, path, "hello world extra", error.JsonTmpWriteFailed);
+    try proof_txn.writeTmpFile(io, tmp.dir, path, "hello world extra", error.JsonTmpWriteFailed);
     try std.testing.expectError(
         error.JsonTmpWriteFailed,
-        verifyTmpBytes(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed),
+        proof_txn.verifyTmpBytes(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed),
     );
 
     // A read failure (missing file) fails.
     try std.testing.expectError(
         error.JsonTmpWriteFailed,
-        verifyTmpBytes(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed),
+        proof_txn.verifyTmpBytes(io, tmp.dir, path, "hello world", error.JsonTmpWriteFailed),
     );
 }
 
@@ -2827,8 +2626,8 @@ test "streaming temporary verification spans reader-buffer boundaries" {
     const bytes = try gpa.alloc(u8, size);
     defer gpa.free(bytes);
     for (bytes, 0..) |*b, i| b.* = @intCast((i % 251) & 0xff);
-    try writeTmpFile(io, tmp.dir, path, bytes, error.JsonTmpWriteFailed);
-    try verifyTmpBytes(io, tmp.dir, path, bytes, error.JsonTmpWriteFailed);
+    try proof_txn.writeTmpFile(io, tmp.dir, path, bytes, error.JsonTmpWriteFailed);
+    try proof_txn.verifyTmpBytes(io, tmp.dir, path, bytes, error.JsonTmpWriteFailed);
 
     // An altered byte past the first chunk is still caught.
     const altered = try gpa.dupe(u8, bytes);
@@ -2836,7 +2635,7 @@ test "streaming temporary verification spans reader-buffer boundaries" {
     altered[size - 1] ^= 1;
     try std.testing.expectError(
         error.JsonTmpWriteFailed,
-        verifyTmpBytes(io, tmp.dir, path, altered, error.JsonTmpWriteFailed),
+        proof_txn.verifyTmpBytes(io, tmp.dir, path, altered, error.JsonTmpWriteFailed),
     );
 
     // A file shorter than the expected payload fails (truncation past a
@@ -2847,15 +2646,15 @@ test "streaming temporary verification spans reader-buffer boundaries" {
     @memset(longer[size..], 0x7f);
     try std.testing.expectError(
         error.JsonTmpWriteFailed,
-        verifyTmpBytes(io, tmp.dir, path, longer, error.JsonTmpWriteFailed),
+        proof_txn.verifyTmpBytes(io, tmp.dir, path, longer, error.JsonTmpWriteFailed),
     );
 
     // Extra trailing bytes beyond the expected length are caught: write the
     // extended file to disk and expect only the original payload.
-    try writeTmpFile(io, tmp.dir, path, longer, error.JsonTmpWriteFailed);
+    try proof_txn.writeTmpFile(io, tmp.dir, path, longer, error.JsonTmpWriteFailed);
     try std.testing.expectError(
         error.JsonTmpWriteFailed,
-        verifyTmpBytes(io, tmp.dir, path, bytes, error.JsonTmpWriteFailed),
+        proof_txn.verifyTmpBytes(io, tmp.dir, path, bytes, error.JsonTmpWriteFailed),
     );
 }
 

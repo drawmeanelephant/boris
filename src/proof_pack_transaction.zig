@@ -40,7 +40,7 @@ pub const PairState = struct {
     json_installed: bool,
 };
 
-fn pathExists(io: Io, root: Io.Dir, path: []const u8) bool {
+pub fn pathExists(io: Io, root: Io.Dir, path: []const u8) bool {
     root.access(io, path, .{}) catch return false;
     return true;
 }
