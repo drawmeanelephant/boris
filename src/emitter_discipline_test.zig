@@ -350,6 +350,9 @@ const modules = [_]Module{
     .{ .name = "watch.zig", .class = .other },
     .{ .name = "wikilink.zig", .class = .other },
     .{ .name = "ws_client.zig", .class = .other },
+    .{ .name = "compile_stage.zig", .class = .other },
+    .{ .name = "compile_cache.zig", .class = .other },
+    .{ .name = "compile_heading.zig", .class = .other },
 };
 
 /// Formatting calls that write caller-supplied bytes with no encoder between.
