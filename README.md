@@ -315,9 +315,11 @@ trees, identify relationships and unsupported constructs, materialize reviewed
 themes, and produce manual-review reports. They do not add Astro, Node, or an
 MDX runtime to Boris core.
 
-Start with [`docs/MIGRATION.md`](docs/MIGRATION.md). Current lab state is
-the v0.8 snapshot in [`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md)
-and normative behavior in [`docs/contracts/`](docs/contracts/).
+Start with [`docs/MIGRATION.md`](docs/MIGRATION.md). Historical v0.8
+capabilities are preserved in the frozen snapshot
+[`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md)
+(2026-08-21); current normative behavior lives in [`docs/contracts/`](docs/contracts/)
+and current lab usage in [`tools/migration-lab/README.md`](tools/migration-lab/README.md).
 
 ## AI and OpenAI Build Week
 
