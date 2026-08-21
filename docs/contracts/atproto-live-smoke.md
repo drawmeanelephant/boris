@@ -103,32 +103,35 @@ in the last result artifact. Nothing else is ever eligible.
   reported and never fails the run.
 - One server implementation is never treated as normative protocol truth; the
   result records what was exercised, not a certification.
-- The account's authorization server must grant `include:site.standard.authFull`
-  (Standard.site's permission set). As of 2026-08-15, bsky.social's OAuth
-  provider issues only Bluesky's own permission sets, so authorizing a
-  bsky.social account succeeds in the browser but the returned scope omits the
-  Standard.site permission; Boris fails closed with exit 6 (`compatibility`,
-  `InvalidTokenResponse`) and zero writes. A live OAuth smoke therefore
-  requires a PDS whose authorization server registers the Standard.site
-  permission set (for example, a self-hosted PDS). A live smoke against a
-  bsky.social account can complete through the opt-in app-password credential
-  path ([`atproto-app-password.md`](atproto-app-password.md)); the OAuth scope
-  limitation itself remains accurate.
+- The account's authorization server must grant the requested granular scopes
+  (`atproto`, `repo:site.standard.document`, `repo:site.standard.publication`).
+  Granular permissions are implemented in bsky.social and the self-hosted PDS
+  distribution, so the live smoke is the verification that a given provider
+  grants these collection scopes. A provider that omits any requested token
+  fails closed with exit 6 (`compatibility`, `InvalidTokenResponse`) and zero
+  writes. A live smoke against a bsky.social account can also complete through
+  the opt-in app-password credential path
+  ([`atproto-app-password.md`](atproto-app-password.md)).
 - No load testing, provider certification, or permanent demo account is in
   scope.
 
 ### PDS OAuth scope support
 
-`include:site.standard.authFull` is a third-party permission set: the account's
-authorization server must register it before it can grant it, and there is no
-network-wide registry of who does. Findings as of 2026-08-15:
+Boris now requests granular repository scopes (`atproto`,
+`repo:site.standard.document`, `repo:site.standard.publication`), which are
+implemented in bsky.social and the self-hosted PDS distribution. This replaces
+the previous `include:site.standard.authFull` permission-set request: a
+permission set must be registered by the account's authorization server before
+it can be granted, and there is no network-wide registry of who does. Findings
+from the permission-set era, as of 2026-08-15:
 
-- **bsky.social — reads records, does not grant the scope.** Bluesky's AppView
-ingests `site.standard.*` records and renders enhanced link cards
+- **bsky.social — reads records; did not grant the permission set.** Bluesky's
+AppView ingests `site.standard.*` records and renders enhanced link cards
 ([atproto discussion #4978](https://github.com/bluesky-social/atproto/discussions/4978),
-May 2026), but that is record *reading*; its OAuth provider issues only
+May 2026), but that is record *reading*; its OAuth provider granted only
 Bluesky's own permission sets. A live smoke against a bsky.social account on
 2026-08-15 authorized in the browser and failed the scope check with exit 6.
+Granular-scope granting on bsky.social is the live smoke's verification target.
 - **Leaflet — requests the scope via OAuth.** Leaflet's OAuth client requests
 `include:site.standard.authFull` alongside Bluesky scopes (its February 2026
 OAuth-scope commit), which confirms the scope spelling but means Standard.site
@@ -141,11 +144,12 @@ why they work against bsky.social while Boris's OAuth flow does not.
 implementation list documents clients and indexers, not PDS providers; the
 Standard.site author's own OAuth deployment (andromeda.social) is self-hosted.
 
-Net: a live OAuth smoke today requires a self-hosted PDS whose OAuth provider
-registers the Standard.site permission set. bsky.social cannot complete an
-OAuth smoke, but a live smoke can complete against bsky.social through the
-explicit, opt-in app-password path (`standard-site login --app-password`);
-Boris never falls back to a credential inside the OAuth flow.
+Net: the granular request removes the self-hosted-PDS requirement for the
+OAuth path; the live smoke now verifies whether bsky.social grants the two
+collection scopes. Independent of that, a live smoke can complete against
+bsky.social through the explicit, opt-in app-password path (`standard-site
+login --app-password`); Boris never falls back to a credential inside the OAuth
+flow.
 
 A recorded passing app-password run against bsky.social (2026-08-16) lives at
 [`fixtures/standard-site-live-smoke/`](fixtures/standard-site-live-smoke/README.md).

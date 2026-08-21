@@ -249,8 +249,9 @@ redirect, original verifier, and `authorization_code` grant type with the same
 DPoP key. The current Authorization Server nonce from PAR is sent immediately;
 one `use_dpop_nonce` retry is allowed. Success requires status 200, JSON, one
 fresh `DPoP-Nonce`, token type `DPoP`, `sub` exactly equal to the account DID,
-positive `expires_in`, and a bounded granted scope containing both `atproto` and
-`include:site.standard.authFull`. Partial grants fail instead of producing a
+positive `expires_in`, and a bounded granted scope containing every requested
+scope token (`atproto`, `repo:site.standard.document`,
+`repo:site.standard.publication`). Partial grants fail instead of producing a
 session that cannot safely publish. Access and optional refresh tokens remain
 opaque and bounded to 16 KiB each.
 
@@ -477,27 +478,28 @@ PKCE S256, pushed authorization requests, and DPoP. Its resolved account can
 begin with a handle, `did:plc`, or `did:web`, and it requests exactly:
 
 ```text
-atproto include:site.standard.authFull
+atproto repo:site.standard.document repo:site.standard.publication
 ```
 
-The Standard.site permission is defined by its
-[permission contract](https://standard.site/docs/permissions/). The implemented
-flow follows the current
+The two collection scopes are granular repository permissions over exactly the
+records Boris publishes. Granular permissions are implemented in bsky.social
+and the self-hosted PDS distribution (the upstream auth-scopes rollout), so
+this request does not depend on the account's authorization server registering
+a third-party permission set. The implemented flow follows the current
 [AT Protocol OAuth profile](https://atproto.com/specs/oauth) and keeps the
 expected DID, resolved PDS, authorization-server issuer, exact client ID,
 granted scopes, tokens, and DPoP key bound as one session.
 
-`include:site.standard.authFull` is a third-party permission set: the
-account's authorization server must register it, or the grant will omit it and
-the token exchange fails closed as a compatibility error. As of 2026-08-15,
-bsky.social's authorization server issues only Bluesky's own permission sets,
-so a browser authorization of a bsky.social account succeeds while the returned
-scope lacks `include:site.standard.authFull`; Boris rejects it
-(`InvalidTokenResponse`, exit 6) rather than publishing with a session that
-cannot write `site.standard.*` records. Publishing against bsky.social
-therefore requires either a PDS whose authorization server supports the
-Standard.site permission set or the explicit opt-in app-password credential
-path ([`atproto-app-password.md`](atproto-app-password.md)).
+Boris previously requested the `include:site.standard.authFull` permission set
+(defined by the [Standard.site permission
+contract](https://standard.site/docs/permissions/)). A third-party permission
+set must be registered by the account's authorization server before it can be
+granted; as of 2026-08-15 bsky.social issued only Bluesky's own permission
+sets, so a browser authorization succeeded while the returned scope omitted
+the set and Boris failed closed (`InvalidTokenResponse`, exit 6). The granular
+request removes that dependency. The live smoke verifies that the provider
+grants the collection scopes; the explicit opt-in app-password credential path
+([`atproto-app-password.md`](atproto-app-password.md)) remains the fallback.
 
 Local interactive v1 uses an ephemeral IPv4 loopback callback and the ATProto
 localhost client-metadata convention. Authorization-server support for that

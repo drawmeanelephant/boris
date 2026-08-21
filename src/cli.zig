@@ -2301,9 +2301,9 @@ pub fn printStandardSiteUsage() void {
         \\  --session-root PATH                    Override the 0600 session store
         \\
         \\First testers: see docs/standard-site.md. App passwords grant broad
-        \\account write — use a dedicated test identity. OAuth against
-        \\bsky.social fails closed (exit 6): the provider does not grant
-        \\site.standard.authFull.
+        \\account write — use a dedicated test identity. OAuth requests granular
+        \\repo scopes (site.standard.document, site.standard.publication); a live
+        \\smoke against bsky.social confirms the grant.
         \\
     , .{});
 }

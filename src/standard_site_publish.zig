@@ -388,7 +388,7 @@ const MockHost = struct {
                 if (self.token_calls == 1) {
                     return self.respond(allocator, value, 400, &headers, "{\"error\":\"use_dpop_nonce\"}");
                 }
-                return self.respond(allocator, value, 200, &headers, "{\"access_token\":\"ACCESS-TOKEN-SECRET\",\"token_type\":\"DPoP\",\"sub\":\"" ++ test_oid ++ "\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":3600}");
+                return self.respond(allocator, value, 200, &headers, "{\"access_token\":\"ACCESS-TOKEN-SECRET\",\"token_type\":\"DPoP\",\"sub\":\"" ++ test_oid ++ "\",\"scope\":\"atproto repo:site.standard.document repo:site.standard.publication\",\"expires_in\":3600}");
             }
             if (hasPath(url, self.declared_pds, "/xrpc/com.atproto.repo.putRecord")) {
                 if (!hasDpop(value.headers)) return error.UnexpectedRequest;

@@ -48,19 +48,20 @@ is deprecated only for *user-facing* applications, not for the CLI-tool niche
 Boris occupies. The original basis of the non-goal — "app passwords are
 deprecated, therefore unsupported" — no longer holds.
 
-**OAuth is unusable against the dominant PDS.** Boris requires the
-`include:site.standard.authFull` permission set, but bsky.social's
-authorization server grants only Bluesky's own permission sets, so a browser
-authorization succeeds while the returned scope omits the Standard.site
-permission, and Boris fails closed (`InvalidTokenResponse`, exit 6). This was
-observed on 2026-08-15 with a dedicated bsky.social test identity. This is a
-scope-grant gap,
-not an infrastructure requirement: Boris's OAuth client is already a public
-loopback client with no server-side component, so no hosted service is
-involved on either path. The consequence is that the
-whole publish → session → smoke chain is theoretical for the typical user: only
-a self-hosted PDS that registers the Standard.site permission set can complete
-an OAuth publish today.
+**OAuth now requests granular scopes, not a permission set.** Boris previously
+required the `include:site.standard.authFull` permission set, which
+bsky.social's authorization server did not grant (it issued only Bluesky's own
+permission sets), so a browser authorization succeeded while the returned scope
+omitted the Standard.site permission and Boris failed closed
+(`InvalidTokenResponse`, exit 6) — observed on 2026-08-15 with a dedicated
+bsky.social test identity. Boris now requests granular repository scopes
+(`repo:site.standard.document`, `repo:site.standard.publication`), which are
+implemented in bsky.social and the self-hosted PDS distribution; the live smoke
+verifies the grant. This is a scope-grant question, not an infrastructure
+requirement: Boris's OAuth client is already a public loopback client with no
+server-side component, so no hosted service is involved on either path. Until
+the granular grant is verified, the app-password path remains the documented
+way to complete publish → session → smoke against bsky.social.
 
 App-password sessions carry full account write access with no per-lexicon scope
 gate, which is why the Standard.site ecosystem (Sequoia and scripted
@@ -81,7 +82,8 @@ This decision is the first rung of a ladder, not a replacement for OAuth:
 2. **v1.x / v2.** A public/native OAuth client, if browser-consent login is
    wanted. Boris's current OAuth core already has this shape (public loopback
    client); the remaining work is static client metadata, not running a
-   service. The `include:site.standard.authFull` permission set matters here.
+   service. The granular repository scopes matter here (the `include:` permission set
+remains the future UX when providers register third-party sets).
 3. **Future, only with a concrete product reason.** A confidential OAuth
    client or backend-for-frontend (BFF) infrastructure.
 4. **Never a Boris requirement.** Operating a PDS.
@@ -162,8 +164,9 @@ Standard.site scope, and names the provider action that ends it.
 
 Adding this path is not free; the RFC records the cost rather than hiding it.
 
-- **Least privilege.** OAuth grants exactly `include:site.standard.authFull`.
-  An app password grants broad account write. The scope check that today makes
+- **Least privilege.** OAuth grants exactly the two collection scopes
+  (`repo:site.standard.document`, `repo:site.standard.publication`). An app
+  password grants broad account write. The scope check that today makes
   bsky.social "fail safely" does not exist on this path.
 - **Client binding.** An OAuth token is DPoP-bound to Boris's key seed and only
   refreshes for Boris. A leaked app password or its `refreshJwt` is usable by
