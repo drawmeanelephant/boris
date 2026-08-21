@@ -22,6 +22,12 @@ tree docs/contracts/fixtures/*/content/*
 #   expected trees and byte-exact reports, same reason as content/.
 tree docs/contracts/fixtures/*/expected/*
 
+# tree docs/archived/* — historical archives (issue #690): ROADMAP-post-f8.md
+#   was moved from docs/ROADMAP-post-f8.md to docs/archived/; its internal
+#   relative links were valid at the original location and are not active
+#   navigation. Keep archived files out of the live doc-link guard.
+tree docs/archived/*
+
 # link docs/contracts/v0.1-overview.md|apex-abi.md — archival by intent:
 #   the doc itself records its removed Apex-era paths (superseded by Oliver)
 #   as a deliberate record; the target file is gone by design.

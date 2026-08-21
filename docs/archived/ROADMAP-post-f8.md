@@ -1,8 +1,13 @@
 # Roadmap — post Feature 8 (historical draft + current direction)
 
+> **Archived 2026-08-21 — issue [#690](https://github.com/drawmeanelephant/boris/issues/690).**
+> This file was moved from `docs/ROADMAP-post-f8.md` to `docs/archived/ROADMAP-post-f8.md`
+> as a historical record. Living direction is in [`../STATUS.md`](../STATUS.md).
+> Do not load this file as standing agent context.
+
 **As of:** 2026-07-21 · current product release candidate **v0.8.0** / base IR
 **0.2.0** · historical planning record · not a substitute for
-[`STATUS.md`](STATUS.md)
+[`../STATUS.md`](../STATUS.md)
 **Current direction:** `v0.8.0` packages post-v0.7 release hardening,
 source-RAG upload ergonomics, migration review tooling, and the Oliver renderer
 pinned in `build.zig.zon` (compiler `boris/0.8.0`). Through v0.8.0 the tree
@@ -14,8 +19,8 @@ limited to further real-site dogfood, archive-friendly layouts, user-facing
 documentation packaging, source-RAG ergonomics/publication safety, and
 measurement only after a reproducible need.
 
-Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
-[`AGENTS.md`](../AGENTS.md). Living phase: [`STATUS.md`](STATUS.md).
+Normative behavior: [`docs/contracts/`](../contracts/). Hard constraints:
+[`AGENTS.md`](../../AGENTS.md). Living phase: [`STATUS.md`](../STATUS.md).
 
 ### Historical direction after v0.5.1
 
