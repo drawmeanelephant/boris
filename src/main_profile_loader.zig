@@ -74,10 +74,6 @@ pub fn readProfileRequest(
     defer gpa.free(cwd_path);
 
     const workspace = try publication_profile.profileWorkspace(gpa, cwd_path, profile_path);
-    errdefer {
-        var w = workspace;
-        w.deinit(gpa);
-    }
 
     return try publication_profile.parseBytes(gpa, workspace, profile_bytes, overrides);
 }
@@ -130,10 +126,6 @@ pub fn loadProfileRequest(
     const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
         return reportPublicationPlanConfigError(err);
     };
-    errdefer {
-        var w = workspace;
-        w.deinit(gpa);
-    }
 
     const request = publication_profile.parseBytes(gpa, workspace, profile_bytes, overrides) catch |err| {
         return reportPublicationPlanConfigError(err);
