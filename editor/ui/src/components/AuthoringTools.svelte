@@ -13,6 +13,7 @@
     readOnly,
     onKindChange,
     onQueryChange,
+    onSelect,
     onInsert,
     onRefresh,
     onCompletionKeydown,
@@ -28,6 +29,7 @@
     readOnly: boolean;
     onKindChange: (kind: CompletionKind) => void;
     onQueryChange: (query: string) => void;
+    onSelect: (index: number) => void;
     onInsert: (suggestion: Suggestion | undefined) => void;
     onRefresh: () => void;
     onCompletionKeydown: (event: KeyboardEvent) => void;
@@ -91,7 +93,7 @@
           tabindex="-1"
           aria-selected={suggestionIndex === selectedSuggestion}
           class:selected={suggestionIndex === selectedSuggestion}
-          onclick={() => onInsert(suggestion)}
+          onclick={() => onSelect(suggestionIndex)}
           onkeydown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();

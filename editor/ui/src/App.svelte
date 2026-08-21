@@ -1495,6 +1495,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     onSave={() => saveFile()}
     onUndo={undo}
     onRedo={redo}
+    onSelect={(i) => selectedSuggestion = i}
     onInsert={insertSuggestion}
     onKindChange={(k) => { completionKind = k; void changeCompletionKind(); }}
     onQueryChange={(q) => { completionQuery = q; completionOpen = true; }}

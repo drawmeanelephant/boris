@@ -61,6 +61,7 @@
     onSave,
     onUndo,
     onRedo,
+    onSelect,
     onInsert,
     onKindChange,
     onQueryChange,
@@ -125,6 +126,7 @@
     onSave: () => void;
     onUndo: () => void;
     onRedo: () => void;
+    onSelect: (index: number) => void;
     onInsert: (suggestion: Suggestion | undefined) => void;
     onKindChange: (kind: CompletionKind) => void;
     onQueryChange: (query: string) => void;
@@ -186,6 +188,7 @@
       {readOnly}
       onKindChange={onKindChange}
       onQueryChange={onQueryChange}
+      onSelect={onSelect}
       onInsert={onInsert}
       onRefresh={onRefresh}
       onCompletionKeydown={onCompletionKeydown}
