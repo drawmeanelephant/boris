@@ -116,7 +116,7 @@ zig build test  # baseline
 
 **Goal:** Extract without behavioral change:
 
-- `src/publication_json_stream.zig` — pure helpers `jsonTokenText`, `freeJsonToken`, `nextJsonToken(e, Error)`, `nextJsonAllocToken`, `readJsonString/ Integer/Bool`, `validDigest`, `readJsonDigest`, `readStringArray`, `containsString`, `knownStatus/Kind/Coverage` (parameterize `Error` type; touches passes `InvalidTouchesReport`, claims passes `InvalidClaimsReport`).
+- `src/publication_json_stream.zig` — pure helpers `jsonTokenText`, `freeJsonToken`, `nextJsonToken(e, Error)`, `nextJsonAllocToken`, `readJsonString/ Integer/Bool`, `validDigest`, `readJsonDigest`, `readStringArray`, `containsString`, `knownStatus/Kind/Coverage` (parameterize `Error` type; claims passes `InvalidChecksReport`, touches passes `InvalidClaimsReport` — keep `parseChecksStream:1380` `InvalidClaimsReport => InvalidChecksReport` and `parseTouchesStream:1799` `InvalidClaimsReport => InvalidTouchesReport` remaps at call sites, not inside helper).
 - `src/publication_evidence.zig` — `EvidenceInput` (file, two streaming readers, sha256, count), `open/missing_error`, `hashPass/fail_error`, `rewindForParse`, `finish` → `FileBinding`; helper `bindingEqual`.
 
 **Touched:** `src/publication_claims.zig:176-320`, `src/publication_touches.zig:188-340`, `src/publication_proof_pack.zig:103-145`, all call sites `parseScopeAfterBegin:307`, `parseChecksStream:698`, `writeAfterChecks:1077`.
