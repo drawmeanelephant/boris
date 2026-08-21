@@ -534,7 +534,8 @@ neutral category, and `stripped: true`.
 | [`fixtures/filed-parent-conflict/`](fixtures/filed-parent-conflict/) | Conflict + invalid parent values (no silent pick) |
 
 A bounded Filed.fyi adoption pass was recorded historically; current lab
-state is the Labs table in [`docs/STATUS.md`](../../docs/STATUS.md).
+state is the v0.8 snapshot in
+[`docs/archived/capability-matrix-v0.8.md`](../../docs/archived/capability-matrix-v0.8.md).
 
 ## Starlight read-only dogfood (locale-dir + root-locale)
 
@@ -667,8 +668,8 @@ Every later duplicate remains visible with `proposed_kind: "relates_to"`,
 it does not consume another product-limit slot. Here `proposed_kind` records a
 defensible semantic mapping, not eligibility for automatic emission.
 
-Bounded real-site relationship-candidate results are summarized on the Labs
-table in [`docs/STATUS.md`](../../docs/STATUS.md).
+Bounded real-site relationship-candidate results are summarized in the v0.8
+snapshot [`docs/archived/capability-matrix-v0.8.md`](../../docs/archived/capability-matrix-v0.8.md).
 
 ### Boundary classes
 

@@ -404,6 +404,22 @@ On the OS/filesystem where `zig build test` runs:
   destination may see `error.AccessDenied` during replace.
 - IR JSON publication atomicity (separate staging path under `.boris/`).
 
+### Environment and review notes
+
+- HTML (and IR/RAG when applicable) publication uses staging and same-directory
+  rename where the filesystem supports it; cross-volume whole-tree atomicity is
+  not claimed (see above).
+- Generated directories (`dist/`, `rag/`, `source-rag/`, `.boris-cache/`, and
+  temporary release-gate output) are not source-of-truth or review currency;
+  only tracked sources determine correctness.
+- `--jobs` is bounded HTML rendering; graph discovery, resolution, and commit
+  phases remain coordinated for deterministic output (see
+  [parallel-rendering.md](parallel-rendering.md)).
+- Symlink-related tests may be skipped on hosts that deny symlink creation.
+- Default HTML assumes trusted author input because raw HTML passes through
+  unchanged per [oliver-renderer.md](oliver-renderer.md) (author policy, not a
+  renderer bug).
+
 ### Symlink safety below output root (H-03)
 
 During staged file publication (`publishStageTree`), every destination parent path component relative to the output root is validated with no-follow semantics (`statFile` with `follow_symlinks = false`). If any parent component along the destination path is a symlink or a non-directory file, publication immediately fails with `error.TargetOutputSymlink`. Symlinked parent directories below the output root are rejected and never traversed or followed.

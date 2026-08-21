@@ -6,9 +6,12 @@ implementations must match.
 
 ## Status note
 
-Normative contracts are in force. Implementation status and the post-P2/P3
-roadmap are tracked in [`docs/STATUS.md`](../STATUS.md). Presence of a contract
-is **not** proof that every surface is the default CLI product.
+Normative contracts are in force. Current phase and pointers live in
+[`docs/STATUS.md`](../STATUS.md) (phase banner + pointer table, <80 lines);
+capability details live in this directory and the archived snapshot
+[`capability-matrix-v0.8.md`](../archived/capability-matrix-v0.8.md).
+Presence of a contract is **not** proof that every surface is the default CLI
+product.
 
 | Layer | Status (post-P2 / post-P3) |
 |-------|-------------|
@@ -165,7 +168,7 @@ Supporting / historical drafts may also remain in this tree. Prefer linking the
 | [acceptance.md](acceptance.md) | v0.1 acceptance checklist |
 | [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
 | [../authoring-spine.md](../authoring-spine.md) | Non-normative teaching path (init → publish → verify) that links into contracts |
-| [../STATUS.md](../STATUS.md) | Living status + next work |
+| [../STATUS.md](../STATUS.md) | Phase banner + pointer table (capability snapshot in [`../archived/capability-matrix-v0.8.md`](../archived/capability-matrix-v0.8.md)) |
 | [`../../CHANGELOG.md`](../../CHANGELOG.md) | Shipped history; removed campaign reviews are not normative |
 
 ## Fixture corpus

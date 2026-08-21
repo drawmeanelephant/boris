@@ -9,8 +9,9 @@ direction lives in [`docs/ARCHITECTURE-DIRECTION.md`](docs/ARCHITECTURE-DIRECTIO
 
 Before every substantive task:
 
-1. Skim [`docs/STATUS.md`](docs/STATUS.md), then the top of
-   [`CHANGELOG.md`](CHANGELOG.md) (`[Unreleased]` and latest release).
+1. Skim [`docs/STATUS.md`](docs/STATUS.md) (phase banner + pointer table), then
+   the top of [`CHANGELOG.md`](CHANGELOG.md) (`[Unreleased]` and latest
+   release).
 2. Read the relevant [`docs/contracts/`](docs/contracts/) file for compiler
    semantics; contracts are **normative**.
 3. Capture `git status --short`, current branch, and relevant worktree ownership;
@@ -75,9 +76,10 @@ Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the
   legacy `parentEntry` and `parent_entry` are unknown keys (`EFRONTMATTER`).
 - Favor a shippable `dist/` site, fail-loud validated graph, and measured claims.
   The normal pipeline is discover/scan → parse → Oliver render → compile → assemble →
-  optional projection or target publish. Consult [`docs/STATUS.md`](docs/STATUS.md)
-  for the current surface and
-  [`docs/ARCHITECTURE-DIRECTION.md`](docs/ARCHITECTURE-DIRECTION.md) for future
+  optional projection or target publish. Consult [`docs/contracts/`](docs/contracts/)
+  and [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) for the current surface and
+  [`docs/STATUS.md`](docs/STATUS.md) (phase banner + pointer table) and
+  [`docs/ARCHITECTURE-DIRECTION.md`](docs/ARCHITECTURE-DIRECTION.md) for
   direction.
 - **Publication targets are a registry**, not a surprise. GitHub Pages and
   Standard.site are verified targets (`boris plan`, `boris standard-site`).
@@ -90,7 +92,9 @@ Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the
 - **Migration labs and source-RAG tools are standalone.** They live in the repo
   story and are not compiled into the `boris` runtime. Do not widen author
   grammar from a lab finding.
-- Product identity is recorded in [`docs/STATUS.md`](docs/STATUS.md) (issue
+- Product identity is recorded in
+  [`docs/contracts/publication-model.md`](docs/contracts/publication-model.md)
+  and summarized in [`docs/STATUS.md`](docs/STATUS.md) (issue
   [#538](https://github.com/drawmeanelephant/boris/issues/538)): **publisher
   platform**, not “bookseller with annexes” and not “two products, one repo.”
 
@@ -127,7 +131,10 @@ and a changelog fragment.
   published schema.
 - Feature/fix PRs add a uniquely named fragment under
   [`docs/changelog.d/`](docs/changelog.d/README.md), not a shared `CHANGELOG.md`
-  edit. Update `docs/STATUS.md` only when phase, primary CLI, or known gaps move.
+  edit. Update `docs/STATUS.md` only when phase, integration line, or the
+  "What's next" list moves — it is a phase banner + pointer table (<80 lines);
+  capability details live in [`docs/contracts/`](docs/contracts/) and the
+  archived snapshot [`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md).
   Extend focused fixtures/unit tests; `zig build test` is the baseline gate.
 - Prefer `std`, in-memory single-pass arena-friendly work, explicit structures
   (`Page`, frontmatter, parse-time Aside/component tokens), and established module
@@ -138,8 +145,10 @@ and a changelog fragment.
 
 Use [`README.md`](README.md) for outcomes and CLI, [`docs/contracts/`](docs/contracts/)
 for normative behavior, [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) for ship
-checks, and [`docs/STATUS.md`](docs/STATUS.md) for current scope. Do not copy
-contracts into policy; open the source of truth.
+checks, and [`docs/STATUS.md`](docs/STATUS.md) (phase banner + pointer table) for
+phase and pointers. Capability details live in contracts and
+[`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md).
+Do not copy contracts into policy; open the source of truth.
 
 Need to find a module? [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) is the
 hallway. Contracts and `src/` remain authority. Do not recreate a
