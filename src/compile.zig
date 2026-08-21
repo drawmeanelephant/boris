@@ -1286,7 +1286,6 @@ pub fn compileHtmlSiteMulti(
     return total_stats;
 }
 
-
 fn preflightValidateLayouts(
     gpa: std.mem.Allocator,
     plans: []const target_mod.TargetPlan,
