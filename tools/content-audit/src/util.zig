@@ -257,36 +257,17 @@ pub fn hasSymlinkComponentAbs(io: std.Io, abs: []const u8) bool {
             dir.close(io);
             return true;
         } else |_| {}
-        const next = dir.openDir(io, part, .{}) catch {
+        const next = dir.openDir(io, part, .{}) catch |err| {
             dir.close(io);
-            return false; // first missing component: nothing below can be a symlink
+            // A missing component (or a non-directory) means the walk reached
+            // the end of the existing path, so nothing below can be a symlink.
+            // Any other error (e.g. permission denied) means safety cannot be
+            // proven, so fail closed rather than ending the walk early.
+            return err != error.FileNotFound and err != error.NotDir;
         };
         dir.close(io);
         dir = next;
     }
     dir.close(io);
     return false;
-}
-
-/// Resolve a relative path under a root into its canonical absolute path.
-/// Refuses `..` escaping and symlink components (used for overlap checks).
-pub fn canonicalPath(io: std.Io, gpa: std.mem.Allocator, root: std.Io.Dir, rel: []const u8) ![]u8 {
-    _ = io;
-    const owned = try gpa.dupe(u8, rel);
-    var parts = std.mem.splitScalar(u8, owned, '/');
-    var out: std.ArrayList([]const u8) = .empty;
-    defer out.deinit(gpa);
-    while (parts.next()) |part| {
-        if (part.len == 0 or eql(part, ".")) continue;
-        if (eql(part, "..")) return error.PathEscapesRoot;
-        try out.append(gpa, part);
-    }
-    var buf: std.ArrayList(u8) = .empty;
-    errdefer buf.deinit(gpa);
-    try buf.appendSlice(gpa, root.path orelse "/");
-    for (out.items) |part| {
-        if (buf.items.len > 0 and buf.items[buf.items.len - 1] != '/') try buf.append(gpa, '/');
-        try buf.appendSlice(gpa, part);
-    }
-    return try buf.toOwnedSlice(gpa);
 }

@@ -6,6 +6,7 @@
 const std = @import("std");
 const Io = std.Io;
 const semantics = @import("migration_semantics.zig");
+const publication = @import("publication.zig");
 
 pub const format_id = "boris-astro-migration-lab";
 pub const schema_version: u32 = 1;
@@ -2266,12 +2267,26 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     const md = try emitMarkdown(gpa, report);
     defer gpa.free(md);
 
-    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
-    var out = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
+    // Write into a validated, owned stage and only then replace the output, so
+    // a reused or nested --out cannot silently clobber unrelated files.
+    var output_publication = try publication.Publication.begin(
+        io,
+        gpa,
+        opts.out_dir,
+        &.{opts.root_dir},
+        format_id,
+    );
+    defer {
+        output_publication.abandon(io, gpa);
+        output_publication.deinit(gpa);
+    }
+    var out = try Io.Dir.cwd().openDir(io, output_publication.stage_path, .{});
     defer out.close(io);
 
     try writeBytes(io, out, "report.json", json);
     try writeBytes(io, out, "REPORT.md", md);
+
+    try output_publication.commit(io, gpa);
 
     if (!opts.quiet) {
         std.debug.print("migration-lab: wrote {s}/report.json and {s}/REPORT.md\n", .{ opts.out_dir, opts.out_dir });

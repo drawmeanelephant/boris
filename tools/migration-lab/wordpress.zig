@@ -464,9 +464,23 @@ pub fn extractAttr(open_tag: []const u8, attr: []const u8) []const u8 {
     return "";
 }
 
+/// True when `target` is exactly the bare `post_name`, or its final path
+/// segment equals `post_name` (preceded by `/`). Rejects plain suffix matches
+/// like `…xcontact` for a post named `contact`.
+pub fn postNameMatchesTarget(post_name: []const u8, target: []const u8) bool {
+    if (post_name.len == 0) return false;
+    if (std.mem.eql(u8, target, post_name)) return true;
+    if (target.len < post_name.len + 1) return false;
+    return target[target.len - post_name.len - 1] == '/' and
+        std.mem.eql(u8, target[target.len - post_name.len ..], post_name);
+}
+
 fn nextItemSlice(xml: []const u8, from: usize) ?struct { slice: []const u8, next: usize } {
-    const open = std.mem.indexOfPos(u8, xml, from, "<item>") orelse
-        std.mem.indexOfPos(u8, xml, from, "<item ");
+    // Take the earliest of the bare and attributed open forms so an attributed
+    // `<item wp:post_id="…">` that precedes a bare `<item>` is never skipped.
+    const bare = std.mem.indexOfPos(u8, xml, from, "<item>");
+    const attr = std.mem.indexOfPos(u8, xml, from, "<item ");
+    const open = if (bare != null and attr != null) @min(bare.?, attr.?) else (bare orelse attr);
     if (open == null) return null;
     const start = open.?;
     // Find true end of open tag
@@ -1491,6 +1505,19 @@ fn extractMarkdownLinks(allocator: std.mem.Allocator, body: []const u8, post_id:
 // Frontmatter emission
 // ---------------------------------------------------------------------------
 
+/// Append `value` as a double-quoted YAML scalar. Boris closed frontmatter has
+/// no backslash escape sequences, so embedded double quotes are replaced with a
+/// single quote and control characters (< 0x20 and DEL) are dropped rather than
+/// replayed into the emitted document.
+fn appendQuotedFmScalar(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) !void {
+    try buf.append(allocator, '"');
+    for (value) |c| {
+        if (c == '"') try buf.appendSlice(allocator, "'")
+        else if (c >= 0x20 and c != 0x7f) try buf.append(allocator, c);
+    }
+    try buf.append(allocator, '"');
+}
+
 pub fn escapeFmValue(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
     // Quote if contains special chars (including HTML leftovers after entity decode).
     var needs_quote = false;
@@ -1505,17 +1532,20 @@ pub fn escapeFmValue(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
         }
     }
     if (!needs_quote and value.len > 0 and (value[0] == ' ' or value[value.len - 1] == ' ')) needs_quote = true;
-    // Non-ASCII (Unicode titles) are fine unquoted for Boris closed FM, but
-    // multi-byte with spaces already handled; keep simple ASCII check above.
+    // Control characters always force quoting (and are dropped by the quoted
+    // path) so no NUL/tab/raw-newline ever reaches emitted frontmatter.
+    if (!needs_quote) {
+        for (value) |c| {
+            if (c < 0x20 or c == 0x7f) {
+                needs_quote = true;
+                break;
+            }
+        }
+    }
     if (!needs_quote) return try allocator.dupe(u8, value);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
-    try out.append(allocator, '"');
-    for (value) |c| {
-        if (c == '"') try out.appendSlice(allocator, "'") // no escape sequences in Boris dquoted; drop raw quotes
-        else if (c != '\n' and c != '\r') try out.append(allocator, c);
-    }
-    try out.append(allocator, '"');
+    try appendQuotedFmScalar(&out, allocator, value);
     return try out.toOwnedSlice(allocator);
 }
 
@@ -1548,7 +1578,9 @@ pub fn buildFrontmatter(
             if (safe) {
                 try buf.appendSlice(allocator, t);
             } else {
-                try buf.print(allocator, "\"{s}\"", .{t});
+                // Flow-sequence tokens must always be quoted; neutralize any
+                // embedded quote/control character so it cannot break out.
+                try appendQuotedFmScalar(&buf, allocator, t);
             }
         }
         try buf.appendSlice(allocator, "]\n");
@@ -3017,6 +3049,27 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         meta.output_path = try proposeOutputPath(retain, meta.entity_id);
     }
 
+    // Two items sharing slug *and* numeric id would still collide after the
+    // `--{post_id}` suffix. Rerun the pairwise pass and add the unique meta
+    // index so no emitted page can silently overwrite another.
+    const still_colliding = try gpa.alloc(bool, metas.items.len);
+    defer gpa.free(still_colliding);
+    @memset(still_colliding, false);
+    for (metas.items, 0..) |meta, index| {
+        for (metas.items[index + 1 ..], index + 1..) |other, other_index| {
+            if (std.mem.eql(u8, meta.output_path, other.output_path)) {
+                still_colliding[index] = true;
+                still_colliding[other_index] = true;
+            }
+        }
+    }
+    for (metas.items, 0..) |*meta, index| {
+        if (!still_colliding[index]) continue;
+        const original_entity = meta.entity_id;
+        meta.entity_id = try std.fmt.allocPrint(retain, "{s}--{d}", .{ original_entity, index });
+        meta.output_path = try proposeOutputPath(retain, meta.entity_id);
+    }
+
     // Sort metas by entity_id for deterministic emission
     std.mem.sort(ItemMeta, metas.items, {}, struct {
         fn less(_: void, a: ItemMeta, b: ItemMeta) bool {
@@ -3371,7 +3424,11 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                 const preserved_comments_path = try std.fmt.allocPrint(retain, "content/_preserved/comments-{s}.md", .{item.post_id});
                 var cbody: std.ArrayList(u8) = .empty;
                 try cbody.appendSlice(retain, "---\n");
-                try cbody.print(retain, "title: \"Comments for post {s}\"\n", .{item.post_id});
+                const comments_title = try std.fmt.allocPrint(retain, "Comments for post {s}", .{item.post_id});
+                defer retain.free(comments_title);
+                const comments_title_e = try escapeFmValue(retain, comments_title);
+                defer retain.free(comments_title_e);
+                try cbody.print(retain, "title: {s}\n", .{comments_title_e});
                 try cbody.appendSlice(retain, "status: draft\n");
                 try cbody.appendSlice(retain, "tags: [preserved, wordpress, comments]\n");
                 try cbody.appendSlice(retain, "---\n\n");
@@ -3481,7 +3538,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                             resolved.status = try retain.dupe(u8, "ok");
                             break;
                         }
-                        if (it2.post_name.len > 0 and (std.mem.endsWith(u8, lnk.target, it2.post_name) or std.mem.endsWith(u8, lnk.target, try std.fmt.allocPrint(retain, "{s}/", .{it2.post_name})))) {
+                        // Match only on a path-segment boundary (see
+                        // `postNameMatchesTarget`): a bare suffix match would let
+                        // `…xcontact` resolve against an unrelated `contact` post.
+                        if (postNameMatchesTarget(it2.post_name, lnk.target)) {
                             resolved.resolved_post_id = try retain.dupe(u8, it2.post_id);
                             resolved.status = try retain.dupe(u8, "ok");
                             break;
@@ -3865,7 +3925,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 
             var body: std.ArrayList(u8) = .empty;
             try body.appendSlice(retain, "---\n");
-            try body.print(retain, "title: {s}\n", .{if (item.title.len > 0) item.title else safe_id});
+            const preserved_title = if (item.title.len > 0) item.title else safe_id;
+            const preserved_title_e = try escapeFmValue(retain, preserved_title);
+            defer retain.free(preserved_title_e);
+            try body.print(retain, "title: {s}\n", .{preserved_title_e});
             try body.appendSlice(retain, "status: draft\n");
             try body.appendSlice(retain, "tags: [preserved, wordpress]\n");
             try body.appendSlice(retain, "---\n\n");

@@ -10,7 +10,7 @@
 //!   - normative bounds: 1 MiB source, 64 KiB frontmatter block, 32 fields,
 //!     title 512 bytes, summary 1,024 bytes, id/parent 255 bytes plus path
 //!     shape, 32 tags, 64-byte tag tokens, closed status vocabulary,
-//!     duplicate-key rejection, BOM rejection, LF/CRLF fences.
+//!     duplicate known-key rejection, BOM rejection, LF/CRLF fences.
 //!
 //! Rejected forms (never half-parsed): leading-indent nested mappings, YAML
 //! sequence lines, single-quoted scalars, flow mappings/sequences on scalar
@@ -63,8 +63,6 @@ pub const Parsed = struct {
     unknown_keys: []const []const u8 = &.{},
     /// Byte offset where the body begins (0 when no frontmatter).
     body_offset: usize = 0,
-    /// Line number of the first field line (for diagnostics; 1-based).
-    first_field_line: usize = 0,
 };
 
 pub const ParseIssue = union(enum) {
@@ -228,8 +226,11 @@ pub fn parse(gpa: std.mem.Allocator, src: []const u8) error{OutOfMemory}!ParseRe
     // BOM policy: a leading UTF-8 BOM is rejected (never stripped, never
     // tolerated), matching the contract's EINVALIDUTF8 family.
     if (src.len >= 3 and src[0] == 0xEF and src[1] == 0xBB and src[2] == 0xBF) return .{ .err = .bom_rejected };
-    if (!std.unicode.utf8ValidateSlice(src)) return .{ .err = .invalid_utf8 };
+    // Size is checked before UTF-8 so an oversized file with an invalid tail
+    // is classified `oversized` (and the full scan is skipped) rather than
+    // misreported as `invalid_utf8`.
     if (src.len > max_source_bytes) return .{ .err = .oversized };
+    if (!std.unicode.utf8ValidateSlice(src)) return .{ .err = .invalid_utf8 };
 
     const lines = splitLines(gpa, src) catch return error.OutOfMemory;
     defer gpa.free(lines);
@@ -243,7 +244,6 @@ pub fn parse(gpa: std.mem.Allocator, src: []const u8) error{OutOfMemory}!ParseRe
     var index: usize = 0;
     if (lines.len > 0 and isFenceLine(lines[0])) {
         parsed.has_frontmatter = true;
-        parsed.first_field_line = 2;
         index = 1;
         var closed = false;
         var fm_bytes: usize = 0;
@@ -489,6 +489,16 @@ test "invalid utf8 rejected" {
     const a = arena.allocator();
     const src = [_]u8{ '-', '-', '-', '\n', 'a', 0xff, '\n' };
     try expectIssue(a, &src, .invalid_utf8);
+}
+
+test "oversized classification wins over invalid utf8 in the tail" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const src = try a.alloc(u8, max_source_bytes + 16);
+    @memset(src, 'a');
+    src[max_source_bytes + 4] = 0xff; // invalid byte beyond the size bound
+    try expectIssue(a, src, .oversized);
 }
 
 test "leading BOM rejected" {

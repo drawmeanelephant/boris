@@ -22,6 +22,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const publication = @import("publication.zig");
 
 pub const format_id = "boris-starlight-migration-lab";
 pub const schema_version: u32 = 1;
@@ -407,8 +408,13 @@ fn parseFrontmatterLite(allocator: std.mem.Allocator, raw: []const u8, fallback_
         };
     }
     const start: usize = if (std.mem.startsWith(u8, raw, "---\r\n")) 5 else 4;
-    const end_pat = if (std.mem.indexOfPos(u8, raw, start, "\n---\r\n") != null) "\n---\r\n" else "\n---\n";
-    const end_start = std.mem.indexOfPos(u8, raw, start, end_pat) orelse {
+    // Find the earliest terminator rather than choosing the line ending by a
+    // whole-file probe: a body containing a CRLF `---` must not shift the
+    // close to a later position and swallow the real body as frontmatter.
+    const lf_end = std.mem.indexOfPos(u8, raw, start, "\n---\n");
+    const crlf_end = std.mem.indexOfPos(u8, raw, start, "\n---\r\n");
+    const end_start: ?usize = if (lf_end) |l| if (crlf_end) |c| @min(l, c) else l else crlf_end;
+    const end_start_idx = end_start orelse {
         return .{
             .title = fallback_title,
             .frontmatter = raw,
@@ -417,8 +423,9 @@ fn parseFrontmatterLite(allocator: std.mem.Allocator, raw: []const u8, fallback_
             .all_keys = &.{},
         };
     };
-    const frontmatter = raw[start..end_start];
-    const body = raw[end_start + end_pat.len ..];
+    const end_pat = if (std.mem.startsWith(u8, raw[end_start_idx..], "\n---\r\n")) "\n---\r\n" else "\n---\n";
+    const frontmatter = raw[start..end_start_idx];
+    const body = raw[end_start_idx + end_pat.len ..];
 
     var title: []const u8 = fallback_title;
     var unmapped: std.ArrayList([]const u8) = .empty;
@@ -1343,6 +1350,25 @@ fn parseAttribute(allocator: std.mem.Allocator, tag: []const u8, name: []const u
     return null;
 }
 
+/// Neutralize an untrusted JSX attribute value before replaying it into an
+/// emitted Boris component or Markdown. Quotes and angle brackets are replaced
+/// and control characters dropped so a hostile value cannot break out of an
+/// attribute or inject raw HTML downstream.
+fn sanitizeComponentAttr(a: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    for (value) |c| {
+        switch (c) {
+            '"' => try out.appendSlice(a, "'"),
+            '<' => try out.appendSlice(a, "&lt;"),
+            '>' => try out.appendSlice(a, "&gt;"),
+            '\n', '\r', '\t' => try out.append(a, ' '),
+            else => if (c >= 0x20 and c != 0x7f) try out.append(a, c),
+        }
+    }
+    return try out.toOwnedSlice(a);
+}
+
 fn isDynamicAssetAttribute(name: []const u8) bool {
     const names = [_][]const u8{ "src", "srcSet", "srcset", "poster", "data-src", "data-srcset" };
     for (names) |candidate| {
@@ -1568,11 +1594,12 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                     try rewritten_to_buf.appendSlice(a, "\">");
 
                     if (raw_title) |t| {
+                        const safe_t = try sanitizeComponentAttr(a, t);
                         try out.appendSlice(a, "**");
-                        try out.appendSlice(a, t);
+                        try out.appendSlice(a, safe_t);
                         try out.appendSlice(a, "**\n\n");
                         try rewritten_to_buf.appendSlice(a, " (title: ");
-                        try rewritten_to_buf.appendSlice(a, t);
+                        try rewritten_to_buf.appendSlice(a, safe_t);
                         try rewritten_to_buf.appendSlice(a, ")");
                     }
 
@@ -1616,7 +1643,7 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<TabItem").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const label = (try parseAttribute(a, tag_text, "label")) orelse "Tab";
+                const label = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "label")) orelse "Tab");
                 try out.appendSlice(a, "<Details summary=\"Tab: ");
                 try out.appendSlice(a, label);
                 try out.appendSlice(a, "\" open=\"true\">\n");
@@ -1662,8 +1689,9 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<Card").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const title = (try parseAttribute(a, tag_text, "title")) orelse "Card";
-                const icon = try parseAttribute(a, tag_text, "icon");
+                const title = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "title")) orelse "Card");
+                const icon_raw = try parseAttribute(a, tag_text, "icon");
+                const icon = if (icon_raw) |ic| try sanitizeComponentAttr(a, ic) else null;
                 try out.appendSlice(a, "### [Card] ");
                 try out.appendSlice(a, title);
                 if (icon) |ic| {
@@ -1713,7 +1741,8 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
                 const type_attr = (try parseAttribute(a, tag_text, "type")) orelse (try parseAttribute(a, tag_text, "kind")) orelse "note";
-                const title = try parseAttribute(a, tag_text, "title");
+                const title_raw = try parseAttribute(a, tag_text, "title");
+                const title = if (title_raw) |t| try sanitizeComponentAttr(a, t) else null;
 
                 var is_valid_kind = false;
                 var normalized_kind: []const u8 = "note";
@@ -1740,16 +1769,22 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                         .review_reason = "manual_review_required",
                         .rewritten_to = try std.fmt.allocPrint(a, "unsupported type='{s}'", .{type_attr}),
                     });
-                } else {
-                    try events.append(a, .{
-                        .kind = "component_mapping",
-                        .target = "Aside",
-                        .line = line_no,
-                        .resolution = "rewritten",
-                        .review_reason = if (title != null) "lossy_explicit_approximation" else "safe_mechanical_mapping",
-                        .rewritten_to = try std.fmt.allocPrint(a, "<Aside kind=\"{s}\">", .{normalized_kind}),
-                    });
+                    // Never re-type an unsupported Aside to a default kind; emit
+                    // a review placeholder instead of a normalized component.
+                    try out.appendSlice(a, "<!-- boris-migration-review: unsupported Aside type -->\n");
+                    pos = if (has_newline) end + 1 else end;
+                    line_no += 1;
+                    continue;
                 }
+
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "Aside",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = if (title != null) "lossy_explicit_approximation" else "safe_mechanical_mapping",
+                    .rewritten_to = try std.fmt.allocPrint(a, "<Aside kind=\"{s}\">", .{normalized_kind}),
+                });
 
                 try out.appendSlice(a, "<Aside kind=\"");
                 try out.appendSlice(a, normalized_kind);
@@ -1774,7 +1809,7 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<Badge").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const text = (try parseAttribute(a, tag_text, "text")) orelse "Badge";
+                const text = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "text")) orelse "Badge");
                 try out.appendSlice(a, "**[");
                 try out.appendSlice(a, text);
                 try out.appendSlice(a, "]**");
@@ -1796,7 +1831,7 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<Icon").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const name = (try parseAttribute(a, tag_text, "name")) orelse "icon";
+                const name = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "name")) orelse "icon");
                 try out.appendSlice(a, "(icon: ");
                 try out.appendSlice(a, name);
                 try out.appendSlice(a, ")");
@@ -1818,9 +1853,10 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<LinkCard").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const title = (try parseAttribute(a, tag_text, "title")) orelse "Link";
-                const href = (try parseAttribute(a, tag_text, "href")) orelse "#";
-                const desc = try parseAttribute(a, tag_text, "description");
+                const title = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "title")) orelse "Link");
+                const href = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "href")) orelse "#");
+                const desc_raw = try parseAttribute(a, tag_text, "description");
+                const desc = if (desc_raw) |d| try sanitizeComponentAttr(a, d) else null;
 
                 try out.appendSlice(a, "### [Link Card] ");
                 try out.appendSlice(a, title);
@@ -1930,7 +1966,9 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
                         var k = li + 2;
                         while (k < source_line.len and source_line[k] != '>') : (k += 1) {}
                         if (k < source_line.len) k += 1;
-                        const tag_content = source_line[li + 2 .. k - 1];
+                        // `</` at end-of-line leaves `k == li + 2 == len`, which
+                        // would make `[len .. len-1]` panic; treat it as empty.
+                        const tag_content = if (k > li + 2) source_line[li + 2 .. k - 1] else "";
                         var name_end: usize = 0;
                         while (name_end < tag_content.len and !std.ascii.isWhitespace(tag_content[name_end]) and tag_content[name_end] != '/' and tag_content[name_end] != '>') : (name_end += 1) {}
                         const tag_name = tag_content[0..name_end];
@@ -2351,11 +2389,13 @@ fn migratePageImages(
                                     const source_rel = resolved.source_rel.?;
                                     // Disambiguate within-tree collisions on the same page.
                                     var within = within0;
+                                    var collision_exhausted = false;
                                     if (used_within.get(within)) |prior| {
                                         if (!std.mem.eql(u8, prior, source_rel)) {
                                             // Insert -N before extension.
                                             const ext_at = std.mem.lastIndexOfScalar(u8, within0, '.') orelse within0.len;
                                             var n: usize = 2;
+                                            var found_slot = false;
                                             while (n < 1000) : (n += 1) {
                                                 const cand = try std.fmt.allocPrint(a, "{s}-{d}{s}", .{
                                                     within0[0..ext_at],
@@ -2364,10 +2404,27 @@ fn migratePageImages(
                                                 });
                                                 if (used_within.get(cand) == null) {
                                                     within = cand;
+                                                    found_slot = true;
                                                     break;
                                                 }
                                             }
+                                            if (!found_slot) collision_exhausted = true;
                                         }
+                                    }
+                                    if (collision_exhausted) {
+                                        // Never silently overwrite a sibling asset: leave
+                                        // the source reference intact and record a review.
+                                        try events.append(a, .{
+                                            .kind = "markdown_image",
+                                            .target = try a.dupe(u8, dest_core),
+                                            .line = line_no,
+                                            .resolution = "review",
+                                            .review_reason = "asset_collision_exhausted",
+                                            .fragment = split.fragment,
+                                        });
+                                        try out.appendSlice(a, body[pos .. url_end + 1]);
+                                        pos = url_end + 1;
+                                        continue;
                                     }
                                     try used_within.put(a, within, source_rel);
 
@@ -2585,7 +2642,12 @@ fn scanAttrLinks(
         while (std.mem.indexOfPos(u8, line, search, attr.prefix)) |at| {
             const q = attr.prefix[attr.prefix.len - 1];
             const vs = at + attr.prefix.len;
-            const ve = std.mem.indexOfScalarPos(u8, line, vs, q) orelse break;
+            const ve = std.mem.indexOfScalarPos(u8, line, vs, q) orelse {
+                // Unterminated value: skip this occurrence and keep scanning for
+                // later attributes on the line instead of abandoning them all.
+                search = at + attr.prefix.len;
+                continue;
+            };
             const url = line[vs..ve];
             const ev = try classifyAndMaybeRewrite(a, route_prefix, entity_id, url, entities, attr.kind, line_no);
             // Attr links are never auto-rewritten; force explicit review when a rewrite was possible.
@@ -2779,7 +2841,10 @@ fn appendJson(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !voi
         '\n' => try buf.appendSlice(a, "\\n"),
         '\r' => try buf.appendSlice(a, "\\r"),
         '\t' => try buf.appendSlice(a, "\\t"),
-        else => try buf.append(a, c),
+        else => if (c < 0x20) {
+            var esc: [6]u8 = undefined;
+            try buf.appendSlice(a, try std.fmt.bufPrint(&esc, "\\u{x:0>4}", .{c}));
+        } else try buf.append(a, c),
     };
     try buf.append(a, '"');
 }
@@ -3015,14 +3080,47 @@ fn disambiguateEntityIds(
     }
 }
 
+/// Quote a closed-Boris frontmatter scalar when it contains YAML-significant or
+/// control characters; otherwise return it verbatim. Embedded double quotes are
+/// replaced with a single quote (Boris closed FM has no backslash escapes) and
+/// control characters are dropped, so hostile source titles cannot inject keys
+/// or emit invalid YAML downstream.
+fn escapeFmValue(a: std.mem.Allocator, value: []const u8) ![]u8 {
+    var needs_quote = false;
+    for (value) |c| {
+        if (c == ':' or c == '#' or c == '"' or c == '\'' or c == '[' or c == ']' or
+            c == ',' or c == '&' or c == '<' or c == '>' or c == '{' or c == '}' or
+            c == '\\' or c == '`' or c == '!' or c == '@' or c == '$' or c == '%' or c == '^' or
+            c == '*' or c == '(' or c == ')' or c == '=' or c == '+' or c == ';' or c == '?' or
+            c == '/' or c < 0x20 or c == 0x7f)
+        {
+            needs_quote = true;
+            break;
+        }
+    }
+    if (!needs_quote and value.len > 0 and (value[0] == ' ' or value[value.len - 1] == ' ')) needs_quote = true;
+    if (!needs_quote) return try a.dupe(u8, value);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    try out.append(a, '"');
+    for (value) |c| {
+        if (c == '"') try out.appendSlice(a, "'")
+        else if (c >= 0x20 and c != 0x7f) try out.append(a, c);
+    }
+    try out.append(a, '"');
+    return try out.toOwnedSlice(a);
+}
+
 fn emitPage(a: std.mem.Allocator, p: SourcePage) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     try buf.appendSlice(a, "---\n");
     try buf.appendSlice(a, "id: ");
     try buf.appendSlice(a, p.entity_id);
     try buf.appendSlice(a, "\n");
+    const title_e = try escapeFmValue(a, p.title);
+    defer a.free(title_e);
     try buf.appendSlice(a, "title: ");
-    try buf.appendSlice(a, p.title);
+    try buf.appendSlice(a, title_e);
     try buf.appendSlice(a, "\n");
     if (p.parent) |parent| {
         try buf.appendSlice(a, "parent: ");
@@ -3048,6 +3146,8 @@ fn emitPage(a: std.mem.Allocator, p: SourcePage) ![]u8 {
 }
 
 fn emitSyntheticTrunk(a: std.mem.Allocator, entity_id: []const u8, title: []const u8) ![]u8 {
+    const title_e = try escapeFmValue(a, title);
+    defer a.free(title_e);
     return try std.fmt.allocPrint(a,
         \\---
         \\id: {s}
@@ -3061,7 +3161,7 @@ fn emitSyntheticTrunk(a: std.mem.Allocator, entity_id: []const u8, title: []cons
         \\Synthetic Trunk created by the Starlight migration lab to satisfy Boris's
         \\one-level forest (section pages are Satellites of this Trunk).
         \\
-    , .{ entity_id, title, title });
+    , .{ entity_id, title_e, title });
 }
 
 fn refuseOutputInsideSource(source: []const u8, out: []const u8) !void {
@@ -3571,9 +3671,19 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         });
     }
 
-    // ---- Write outputs ----
-    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
-    var out = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
+    // ---- Write outputs (into a validated, owned stage, then commit) ----
+    var output_publication = try publication.Publication.begin(
+        io,
+        gpa,
+        opts.out_dir,
+        &.{opts.source_root_dir},
+        format_id,
+    );
+    defer {
+        output_publication.abandon(io, gpa);
+        output_publication.deinit(gpa);
+    }
+    var out = try Io.Dir.cwd().openDir(io, output_publication.stage_path, .{});
     defer out.close(io);
 
     for (pages.items) |p| {
@@ -3608,9 +3718,11 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     try writeBoundaryManifest(a, io, out, boundary.items);
     try writeReports(a, io, out, opts, content, pages.items, inventory.items, assets.items, nav.items, selection_rows.items, boundary.items, collisions.items);
 
-    // Compile proof
-    const compile = try tryCompileWithBoris(io, gpa, a, opts, opts.out_dir);
+    // Compile proof (runs against the staged tree before it becomes live).
+    const compile = try tryCompileWithBoris(io, gpa, a, opts, output_publication.stage_path);
     try writeCompileReport(a, io, out, compile);
+
+    try output_publication.commit(io, gpa);
 
     if (!opts.quiet) {
         std.debug.print(
@@ -5338,6 +5450,40 @@ test "starlight: refuse output inside source" {
     try std.testing.expectError(error.OutputInsideSource, refuseOutputInsideSource("/tmp/src", "/tmp/src/out"));
 }
 
+test "starlight: output is lab-owned, reruns replace it, nested out refused" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const out_rel = "fixtures/.test-starlight-owned";
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+
+    try run(io, gpa, .{
+        .source_root_dir = "fixtures/mini-starlight",
+        .out_dir = out_rel,
+        .quiet = true,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out.close(io);
+    const marker = try readFileAlloc(io, out, publication.marker_name, gpa);
+    defer gpa.free(marker);
+    try std.testing.expect(std.mem.indexOf(u8, marker, "format=boris-migration-lab-output") != null);
+
+    // A second run replaces the lab-owned output rather than refusing it.
+    try run(io, gpa, .{
+        .source_root_dir = "fixtures/mini-starlight",
+        .out_dir = out_rel,
+        .quiet = true,
+    });
+
+    // A --out nested inside --root is refused before any write.
+    try std.testing.expectError(error.OutputInsideSource, run(io, gpa, .{
+        .source_root_dir = "fixtures/mini-starlight",
+        .out_dir = "fixtures/mini-starlight/src",
+        .quiet = true,
+    }));
+}
+
 test "starlight: dogfood fixture is deterministic at scale and preserves source" {
     const io = std.testing.io;
     const a_out = "fixtures/.test-starlight-dogfood-a";
@@ -5764,6 +5910,98 @@ test "starlight: sanitizeMdxBody preserves attributed Aside and Details" {
     try std.testing.expect(std.mem.indexOf(u8, res.body, "</Details>") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "<Aside type=\"note\" title=\"Custom Aside Title\" class=\"extra-style\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "</Aside>") != null);
+}
+
+test "starlight: sanitizeMdxBody tolerates a line ending with `</`" {
+    const a = std.testing.allocator;
+    // A truncated closing tag at end-of-line must not panic the run; it should
+    // be preserved verbatim as an inert fragment rather than sliced backwards.
+    const body =
+        \\line ending in:
+        \\</
+    ;
+
+    const res = try sanitizeMdxBody(a, body);
+    defer {
+        a.free(res.body);
+        for (res.imports) |imp| a.free(imp);
+        a.free(res.imports);
+        for (res.components) |cmp| a.free(cmp);
+        a.free(res.components);
+        for (res.asset_events) |event| a.free(event.target);
+        a.free(res.asset_events);
+    }
+
+    // The truncated `</` is neutralized (dropped) rather than crashing; the
+    // preceding text survives and no backward slice is emitted.
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "line ending in:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "</") == null);
+}
+
+test "starlight: escapeFmValue quotes YAML-significant titles" {
+    const a = std.testing.allocator;
+
+    const e1 = try escapeFmValue(a, "WordPress: A Guide");
+    defer a.free(e1);
+    try std.testing.expectEqualStrings("\"WordPress: A Guide\"", e1);
+
+    const e2 = try escapeFmValue(a, "[leading bracket");
+    defer a.free(e2);
+    try std.testing.expectEqualStrings("\"[leading bracket\"", e2);
+
+    // Plain titles stay unquoted.
+    const e3 = try escapeFmValue(a, "plain title");
+    defer a.free(e3);
+    try std.testing.expectEqualStrings("plain title", e3);
+
+    // Embedded quotes are neutralized and control chars dropped.
+    const e4 = try escapeFmValue(a, "quote\" inside");
+    defer a.free(e4);
+    try std.testing.expectEqualStrings("\"quote' inside\"", e4);
+
+    const e5 = try escapeFmValue(a, "tab\there");
+    defer a.free(e5);
+    try std.testing.expectEqualStrings("\"tabhere\"", e5);
+}
+
+test "starlight: appendJson escapes control characters and quotes" {
+    const a = std.testing.allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(a);
+    try appendJson(&buf, a, "a\"b\\c\x01");
+    try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\u0001\"", buf.items);
+}
+
+test "starlight: sanitizeComponentAttr neutralizes hostile attribute values" {
+    const a = std.testing.allocator;
+    const s1 = try sanitizeComponentAttr(a, "x\"><script>alert(1)</script>");
+    defer a.free(s1);
+    try std.testing.expectEqualStrings("x'&gt;&lt;script&gt;alert(1)&lt;/script&gt;", s1);
+    try std.testing.expect(std.mem.indexOf(u8, s1, "<script>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, s1, "\"") == null);
+
+    const s2 = try sanitizeComponentAttr(a, "line\nbreak\there");
+    defer a.free(s2);
+    try std.testing.expectEqualStrings("line break here", s2);
+}
+
+test "starlight: LF frontmatter terminator wins over body CRLF ---" {
+    const a = std.testing.allocator;
+    // LF-closed frontmatter, then a body containing a CRLF `---` (e.g. a
+    // horizontal rule edited by a Windows tool). The real close must win so
+    // the body is not swallowed as frontmatter.
+    const raw = "---\ntitle: Foo\n---\nbody line one\nkey: value\n---\r\nbody tail\n";
+    const parsed = try parseFrontmatterLite(a, raw, "fallback");
+    defer {
+        a.free(parsed.title);
+        for (parsed.unmapped) |k| a.free(k);
+        a.free(parsed.unmapped);
+        for (parsed.all_keys) |k| a.free(k);
+        a.free(parsed.all_keys);
+    }
+    try std.testing.expectEqualStrings("Foo", parsed.title);
+    try std.testing.expectEqualStrings("body line one\nkey: value\n---\r\nbody tail\n", parsed.body);
+    try std.testing.expectEqual(@as(usize, 0), parsed.unmapped.len);
 }
 
 test "starlight: prefix-colliding Aside component stays reviewable" {
