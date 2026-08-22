@@ -20,7 +20,7 @@ contracts; if this page and a contract disagree, the contract wins.
 |---|---|
 | Offline plan / records / verify | Works. No network, no credentials. |
 | App-password login + publish + smoke | Works against bsky.social. This is the first-tester path. |
-| Browser OAuth login | Implemented, but **bsky.social does not grant** `site.standard.authFull`. Authorization succeeds in the browser and Boris fails closed with exit 6. Do not start here. |
+| Browser OAuth login | Implemented. Requests granular `repo:` scopes (`repo:site.standard.document`, `repo:site.standard.publication`); the live smoke verifies the provider grants them. |
 
 App passwords grant broad account write, not just Standard.site. Use a
 **dedicated, non-personal test identity**. Never put the password on argv,
@@ -103,13 +103,14 @@ for a DID replaces any OAuth session for that DID, and the reverse.
 Publish reuses a stored session (OAuth first, then app-password) and only
 opens a browser if nothing is stored. Smoke requires a stored session and
 does not launch the browser: if none is stored it tells you to
-`login --app-password` first. Against bsky.social the browser path will
-fail closed on the missing scope.
+`login --app-password` first. Against bsky.social the browser path requests the granular scopes and
+fails closed if any requested token is not granted.
 
 ## Honesty board
 
-- **OAuth on bsky.social is not a tester path.** The implementation is real;
-  the provider does not grant the Standard.site permission set.
+- **OAuth on bsky.social is the live-smoke verification target.** The
+  implementation is real and requests granular `repo:` scopes; a live smoke
+  confirms the provider grants them before OAuth is promoted to a tester path.
 - **Indexer lag is not a failure.** `smoke --indexer` reports `lagged` /
   `observed` / `failed` and never changes the verdict.
 - **`--surface-url` is optional.** Skip it unless the site is already served

@@ -361,8 +361,9 @@ Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase ban
 - Ordinary Markdown links are not a complete site-wide link checker.
 - Migration labs are bounded aids, not universal importers.
 - Cross-platform byte identity and speed claims require measured evidence.
-- Standard.site browser OAuth is implemented but unusable on bsky.social
-  (`site.standard.authFull` is not granted). Use an app password.
+- Standard.site browser OAuth is implemented; it requests granular `repo:`
+  scopes and the live smoke verifies the provider grant. The app-password path
+  is the documented first-tester path.
 - Production HTML does not yet emit Standard.site verification surfaces.
 
 ## Project map

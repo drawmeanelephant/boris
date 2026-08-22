@@ -99,7 +99,7 @@ canonical. This is an **explicit second step**.
 | :--- | :--- |
 | Offline `plan` / `records` / `verify` | Works. No network, no credentials. |
 | App-password login + publish + smoke | Works against bsky.social. First-tester path. |
-| Browser OAuth | Implemented. **bsky.social does not grant** `site.standard.authFull`. Exit 6. Do not start here. |
+| Browser OAuth | Implemented. Requests granular `repo:` scopes; the live smoke verifies the grant. |
 
 ```text
 boris standard-site plan    --profile profiles/standard-site.json

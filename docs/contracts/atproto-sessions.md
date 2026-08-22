@@ -106,8 +106,9 @@ material; tests use deterministic fixture strings that are not valid tokens.
 
 The refresh grant revalidates every binding before it can produce a session:
 the `sub` DID must equal the bound account DID, the token type must be `DPoP`,
-the granted scope must still contain both `atproto` and
-`include:site.standard.authFull`, `expires_in` must be positive, and a fresh
+the granted scope must still contain `atproto`,
+`repo:site.standard.document`, and `repo:site.standard.publication`,
+`expires_in` must be positive, and a fresh
 `DPoP-Nonce` must arrive. Partial grants and identity changes fail instead of
 producing a weakened session.
 

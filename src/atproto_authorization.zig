@@ -10,7 +10,7 @@ const identity = @import("atproto_identity.zig");
 const oauth = @import("atproto_oauth.zig");
 const transport = @import("atproto_transport.zig");
 
-pub const requested_scope = "atproto include:site.standard.authFull";
+pub const requested_scope = "atproto repo:site.standard.document repo:site.standard.publication";
 pub const callback_path = "/oauth/callback";
 pub const par_limits: transport.Limits = .{ .max_body_bytes = 16 * 1024 };
 pub const token_limits: transport.Limits = .{ .max_body_bytes = 64 * 1024 };
@@ -467,8 +467,7 @@ fn parseTokenResponse(
         value.expires_in == 0 or
         !validOpaque(value.access_token, oauth.max_access_token_length) or
         !validScope(value.scope) or
-        !scopeContains(value.scope, "atproto") or
-        !scopeContains(value.scope, "include:site.standard.authFull")) return error.InvalidTokenResponse;
+        !scopeIsSuperset(value.scope, requested_scope)) return error.InvalidTokenResponse;
     var access = try Token.from(value.access_token);
     errdefer secureZero(access.mutableSlice());
     var rotated_refresh: ?Token = null;
@@ -570,8 +569,7 @@ pub fn sessionFromWire(allocator: std.mem.Allocator, wire: SessionWire) Error!Au
     if (wire.access_token_expires_in == 0) return error.InvalidSessionWire;
     if (!validOpaque(wire.access_token, oauth.max_access_token_length)) return error.InvalidSessionWire;
     if (!validScope(wire.scope) or
-        !scopeContains(wire.scope, "atproto") or
-        !scopeContains(wire.scope, "include:site.standard.authFull")) return error.InvalidSessionWire;
+        !scopeIsSuperset(wire.scope, requested_scope)) return error.InvalidSessionWire;
     if (wire.refresh_token) |text| {
         if (!validOpaque(text, oauth.max_access_token_length)) return error.InvalidSessionWire;
     }
@@ -708,8 +706,7 @@ fn parseRefreshResponse(
         value.expires_in == 0 or
         !validOpaque(value.access_token, oauth.max_access_token_length) or
         !validScope(value.scope) or
-        !scopeContains(value.scope, "atproto") or
-        !scopeContains(value.scope, "include:site.standard.authFull"))
+        !scopeIsSuperset(value.scope, requested_scope))
     {
         return error.InvalidTokenResponse;
     }
@@ -981,7 +978,7 @@ test "form encoding and token response enforce identity and publication scope" {
     var encoded: std.ArrayList(u8) = .empty;
     defer encoded.deinit(std.testing.allocator);
     try appendFormPair(&encoded, std.testing.allocator, "scope", requested_scope);
-    try std.testing.expectEqualStrings("scope=atproto%20include%3Asite.standard.authFull", encoded.items);
+    try std.testing.expectEqualStrings("scope=atproto%20repo%3Asite.standard.document%20repo%3Asite.standard.publication", encoded.items);
 
     var pending: PendingAuthorization = .{
         .account = try testAccount(),
@@ -998,7 +995,7 @@ test "form encoding and token response enforce identity and publication scope" {
     var session = try parseTokenResponse(
         std.testing.allocator,
         &pending,
-        "{\"access_token\":\"access\",\"refresh_token\":\"refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":3600}",
+        "{\"access_token\":\"access\",\"refresh_token\":\"refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto repo:site.standard.document repo:site.standard.publication\",\"expires_in\":3600}",
         try Nonce.from("next-nonce"),
     );
     defer session.deinit();
@@ -1074,7 +1071,7 @@ const FlowMock = struct {
             .{ .status = 400, .nonce = "par-nonce-1", .body = "{\"error\":\"use_dpop_nonce\"}" },
             .{ .status = 201, .nonce = "par-nonce-2", .body = "{\"request_uri\":\"urn:ietf:params:oauth:request_uri:abc\",\"expires_in\":90}" },
             .{ .status = 400, .nonce = "token-nonce-1", .body = "{\"error\":\"use_dpop_nonce\"}" },
-            .{ .status = 200, .nonce = "token-nonce-2", .body = "{\"access_token\":\"access\",\"refresh_token\":\"refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":3600}" },
+            .{ .status = 200, .nonce = "token-nonce-2", .body = "{\"access_token\":\"access\",\"refresh_token\":\"refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto repo:site.standard.document repo:site.standard.publication\",\"expires_in\":3600}" },
         };
         const selected = responses[self.call];
         self.call += 1;
@@ -1165,7 +1162,7 @@ const ParTokenMock = struct {
         const body = if (par)
             "{\"request_uri\":\"urn:ietf:params:oauth:request_uri:abc\",\"expires_in\":90}"
         else
-            "{\"access_token\":\"old-access\",\"refresh_token\":\"old-refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":3600}";
+            "{\"access_token\":\"old-access\",\"refresh_token\":\"old-refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto repo:site.standard.document repo:site.standard.publication\",\"expires_in\":3600}";
         const headers = [_]transport.Header{
             .{ .name = "content-type", .value = "application/json" },
             .{ .name = "dpop-nonce", .value = nonce },
@@ -1224,7 +1221,7 @@ const RefreshMock = struct {
             std.mem.indexOf(u8, value.body, "grant_type=refresh_token") == null or
             std.mem.indexOf(u8, value.body, "refresh_token=old-refresh") == null or
             std.mem.indexOf(u8, value.body, "client_id=") == null or
-            std.mem.indexOf(u8, value.body, "scope=atproto%20include%3Asite.standard.authFull") == null or
+            std.mem.indexOf(u8, value.body, "scope=atproto%20repo%3Asite.standard.document%20repo%3Asite.standard.publication") == null or
             value.headers.len != 3 or
             !std.ascii.eqlIgnoreCase(value.headers[2].name, "dpop") or value.headers[2].value.len == 0)
         {
@@ -1260,7 +1257,7 @@ fn nextProof() Error!ProofMaterial {
 }
 
 test "refresh rotates DPoP-bound session with one-shot nonce retry" {
-    var mock = RefreshMock{ .response = .{ .status = 200, .body = "{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":7200}", .nonce = "refresh-nonce-2" } };
+    var mock = RefreshMock{ .response = .{ .status = 200, .body = "{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto repo:site.standard.document repo:site.standard.publication\",\"expires_in\":7200}", .nonce = "refresh-nonce-2" } };
     var session = try makeRefreshableSession(std.testing.allocator);
     defer session.deinit();
     var refreshed = try refresh(std.testing.allocator, mock.client(), &session, .{ .context = (&StaticProofSource{ .issued_at = 1_700_000_200, .jti_entropy = 40, .signing_noise = 41 }).source().context, .next_fn = (&StaticProofSource{ .issued_at = 1_700_000_200, .jti_entropy = 40, .signing_noise = 41 }).source().next_fn });
@@ -1297,7 +1294,7 @@ test "session wire seams round trip and fail closed on tampering" {
     try std.testing.expectEqualStrings(session.client_id.slice(), rebuilt.client_id.slice());
     try std.testing.expectEqualStrings(session.account.did.slice(), rebuilt.account.did.slice());
     try std.testing.expectEqual(session.access_token_expires_in, rebuilt.access_token_expires_in);
-    try std.testing.expectEqualStrings("atproto include:site.standard.authFull", rebuilt.scope.slice());
+    try std.testing.expectEqualStrings("atproto repo:site.standard.document repo:site.standard.publication", rebuilt.scope.slice());
 
     var tampered = wire;
     tampered.scope = "atproto";

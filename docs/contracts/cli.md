@@ -37,8 +37,8 @@ prints the family list, not the full compiler help. `boris standard-site
 --help` / `-h` prints the same family list and exits 0. First testers
 should start at the non-normative [operator path](../standard-site.md).
 Against bsky.social the working live path is
-`login --app-password`; browser OAuth fails closed because that provider
-does not grant `site.standard.authFull`. `smoke` accepts `--did` or
+`login --app-password`; browser OAuth requests granular `repo:` scopes and the
+live smoke verifies the grant. `smoke` accepts `--did` or
 `--handle`. See [standard-site.md](standard-site.md),
 [atproto-sessions.md](atproto-sessions.md), and
 [atproto-live-smoke.md](atproto-live-smoke.md).

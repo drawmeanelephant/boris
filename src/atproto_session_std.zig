@@ -317,8 +317,8 @@ fn makeStoredSession(allocator: std.mem.Allocator, obtained_at: u64) !authorizat
         .token_endpoint = "https://auth.example.com/token",
         .pushed_authorization_request_endpoint = "https://auth.example.com/par",
         .verified_handle = null,
-        .client_id = "http://localhost?redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Foauth%2Fcallback&scope=atproto%20include%3Asite.standard.authFull",
-        .scope = "atproto include:site.standard.authFull",
+        .client_id = "http://localhost?redirect_uri=http%3A%2F%2F127.0.0.1%3A49152%2Foauth%2Fcallback&scope=atproto%20repo%3Asite.standard.document%20repo%3Asite.standard.publication",
+        .scope = "atproto repo:site.standard.document repo:site.standard.publication",
         .access_token = "old-access",
         .refresh_token = "old-refresh",
         .key_seed = &key_seed,
@@ -328,7 +328,7 @@ fn makeStoredSession(allocator: std.mem.Allocator, obtained_at: u64) !authorizat
     });
 }
 
-const refresh_response = "{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":7200}";
+const refresh_response = "{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto repo:site.standard.document repo:site.standard.publication\",\"expires_in\":7200}";
 
 test "acquire reuses a fresh stored session without touching the network" {
     const io = std.testing.io;

@@ -102,10 +102,10 @@ The app-password live smoke is **done**. Recorded artifact:
 | Verdict | `passed` (discovery, authorization, write, readback, cleanup) |
 | Indexer | `lagged` (non-normative; AppView had not ingested before cleanup) |
 
-- **OAuth path:** still blocked. No public PDS registers
-  `site.standard.authFull`. bsky.social authorizes in the browser but
-  returns a scope without the Standard.site permission; Boris fails closed
-  with exit 6. Unchanged; recorded in
+- **OAuth path:** now requests granular `repo:` scopes
+  (`repo:site.standard.document`, `repo:site.standard.publication`) instead of
+  the `site.standard.authFull` permission set; the live smoke verifies
+  bsky.social grants them. Recorded in
   [`atproto-live-smoke.md`](atproto-live-smoke.md) and
   [`atproto-oauth.md`](atproto-oauth.md).
 
