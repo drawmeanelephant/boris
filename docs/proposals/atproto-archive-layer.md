@@ -78,7 +78,7 @@ ATProto (new):
    whether the original compiler repo still exists.
 
 3. **Immutable snapshots.** Each publish writes a new manifest record (with a
-   new rkey, e.g. `archive-2026-08-22T143000Z-a3f8`), so the archive
+   new rkey, e.g. `archive-2026-08-22T143000Z-a3f8e1c2`), so the archive
    preserves a history of every published version. Old blobs remain referenced
    by old manifest records and are not garbage-collected. The rkey includes a
    random or monotonic suffix (see **Manifest sharding and rkey design** below)
@@ -111,27 +111,48 @@ ATProto (new):
 **Problem 1 — rkey collisions.** A pure timestamp rkey like
 `archive-2026-08-22T143000Z` collides when two publishes run within the same
 second. **Solution:** Use a compound rkey
-`archive-YYYY-MM-DDTHHMMSSZ-<suffix>` where `<suffix>` is a 4-character random
-hex string generated at publish time. The timestamp gives human-readable
-ordering; the random suffix makes the key collision-resistant without requiring
-state. A UUID-based rkey is also valid but less readable. The suffix is not
-secret — it only needs to be unique per DID.
+`archive-YYYY-MM-DDTHHMMSSZ-<suffix>` where `<suffix>` is an 8-character
+CSPRNG hex string (32 bits of entropy) generated at publish time. The timestamp
+gives human-readable ordering; the random suffix makes the key
+collision-resistant without requiring state (UUID/TID rkeys are also valid but
+less readable; the suffix is not secret — it only needs to be unique per DID).
+Collision handling is mandatory: the publish path MUST treat an existing rkey as
+an error rather than an overwrite. Before or during `putRecord`, check via
+`getRecord` or rely on the PDS `409 / AlreadyExists` response; on collision,
+regenerate `<suffix>` (which also changes the derived chunk rkeys
+`archive-<ts>-<suffix>-cN`) and retry the entire root+chunks write up to 5
+times before failing. This preserves both snapshots instead of replacing the
+first.
 
 **Problem 2 — manifest exceeds the 256 KiB `putRecord` limit.** Each file
 entry in the manifest (path, CID link, mime type, size, sha256) is roughly
 300–400 bytes of JSON. A site with 800+ files can exceed the record limit.
 **Solution:** Shard the manifest across multiple records when the assembled
-payload would exceed `max_record_bytes` (256 KiB). The scheme is:
+payload would exceed `max_record_bytes` (256 KiB). The implementation MUST
+size the complete `putRecord` write, not just the `files` array: every chunk
+and the single-record path include chunk/root metadata and the XRPC envelope
+(`{ repo, collection, rkey, record, ... }`) in the limit check. Concretely:
 
 1. Compute the full manifest JSON.
-2. If `len(manifest) ≤ 256 KiB`, write it as a single record (common case for
-   small-to-medium sites).
-3. If `len(manifest) > 256 KiB`, split the `files` array into chunks of
-   ≤ 256 KiB of JSON each, and write:
+2. If `len(serialize(putRecordEnvelope(manifest))) ≤ 256 KiB`, write it as a
+   single record (common case for small-to-medium sites).
+3. If the envelope would exceed 256 KiB, split the `files` array into chunks
+   by iteratively appending entries and re-serializing the **full envelope**
+   for that chunk (`{ chunkIndex, files: [...] }` inside `putRecord`) until
+   adding the next entry would exceed the limit. Each finalized chunk is
+   therefore guaranteed to satisfy `len(serialize(envelope)) ≤ max_record_bytes`.
+   As a budget, implementations SHOULD reserve at least 2–8 KiB of headroom for
+   envelope variability across PDS implementations rather than packing to
+   exactly 256 KiB, or compute `overhead = len(envelope) - len(files_json)` and
+   enforce `len(files_json) ≤ max_record_bytes - overhead`.
+   Write:
    - A **root record** (rkey `archive-<ts>-<suffix>`) containing `site`,
      `publishedAt`, `totalFiles`, `totalChunks`, `sha256` (hash of the full
      manifest for integrity), and an ordered list of `{ rkey, chunkIndex }`
-     entries pointing to the chunk records.
+     entries pointing to the chunk records — also verified against the same
+     full-envelope limit (the root is small; the `chunks` list is ~40 bytes per
+     chunk, so it fits for any realistic site; if it would not fit, fail
+     loudly rather than truncating).
    - **Chunk records** (rkeys `archive-<ts>-<suffix>-c0`, `-c1`, …) each
      containing `{ chunkIndex, files: [...] }`.
 4. A consumer reconstructs the full manifest by reading the root, then each
