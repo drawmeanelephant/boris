@@ -2290,7 +2290,7 @@ pub fn printStandardSiteUsage() void {
         \\Auth and live:
         \\  login --app-password (--did DID | --handle HANDLE)
         \\                                         Opt-in app-password login (bsky.social path)
-        \\  login --did DID                        Browser OAuth (not granted by bsky.social)
+        \\  login --did DID                        Browser OAuth (granular repo scopes)
         \\  sessions [--session-root PATH]         List DID, flavor, PDS (no secrets)
         \\  logout (--did DID | --handle HANDLE)   Erase the local session (does not revoke)
         \\  publish --profile PATH [--plan PATH] [--out PATH] [--prune]
