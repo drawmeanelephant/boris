@@ -211,16 +211,22 @@ pub const SessionClient = struct {
             response.deinit();
         }
         if (isRedirectStatus(response.status)) return error.RedirectRejected;
-        const first_nonce = try requiredNonce(response);
-        try client.setNonce(first_nonce);
-        if (response.status == 400 and isUseDpopNonce(allocator, response.body)) {
+        // The challenge is signaled by the response body, not the status: the
+        // reference PDS uses 400, while bsky.social returns 401 for the same
+        // `use_dpop_nonce` error.
+        if (isUseDpopNonce(allocator, response.body)) {
+            // A `use_dpop_nonce` challenge must carry a fresh nonce.
+            const first_nonce = try requiredNonce(response);
+            try client.setNonce(first_nonce);
             std.crypto.secureZero(u8, response.body);
             response.deinit();
             response = try client.sendOnce(allocator, method, url, body);
             if (isRedirectStatus(response.status)) return error.RedirectRejected;
-            const retry_nonce = try requiredNonce(response);
-            try client.setNonce(retry_nonce);
-            if (response.status == 400 and isUseDpopNonce(allocator, response.body)) return error.DpopNonceRepeated;
+            try adoptNonce(client, response);
+            if (isUseDpopNonce(allocator, response.body)) return error.DpopNonceRepeated;
+        } else {
+            // A non-challenge response may omit the nonce; adopt it when present.
+            try adoptNonce(client, response);
         }
         return response;
     }
@@ -625,6 +631,15 @@ fn requiredNonce(response: transport.Response) Error![]const u8 {
     const value = response.header("dpop-nonce") orelse return error.InvalidNonce;
     if (!validOpaque(value, oauth.max_nonce_length)) return error.InvalidNonce;
     return value;
+}
+
+/// Best-effort nonce adoption from a non-challenge response. A server is not
+/// required to include `DPoP-Nonce` on every response, so absence is not an
+/// error; a present-but-invalid value is.
+fn adoptNonce(client: *SessionClient, response: transport.Response) Error!void {
+    const value = response.header("dpop-nonce") orelse return;
+    if (!validOpaque(value, oauth.max_nonce_length)) return error.InvalidNonce;
+    try client.setNonce(value);
 }
 
 fn isUseDpopNonce(allocator: std.mem.Allocator, body: []const u8) bool {
@@ -1054,6 +1069,27 @@ test "use_dpop_nonce is retried once with a fresh proof and fails closed on a se
     );
 }
 
+test "a 401 use_dpop_nonce challenge is retried like the reference 400" {
+    // bsky.social's PDS signals the challenge with HTTP 401, while the
+    // reference implementation uses 400. The client keys off the body error.
+    const retried = [_]XrpcMock.Scripted{
+        .{ .status = 401, .body = "{\"error\":\"use_dpop_nonce\",\"message\":\"Authorization server requires nonce in DPoP proof\"}" },
+        .{ .status = 200, .body = "{\"uri\":\"at://did:plc:ewvi7nxzyoun6zhxrhs64oiz/site.standard.document/guides~intro\",\"cid\":\"bafyreihwn3gfvnopsh4a6dmn2d3b7k5wqj2jqbzj6jydhpm5yfjjj7qbx4\",\"value\":{\"title\":\"Intro\"}}" },
+    };
+    var mock = XrpcMock.init(std.testing.allocator, &retried);
+    defer mock.deinit();
+    var proofs = TestProofSource{};
+    var client = SessionClient.init(try testBinding(), mock.client(), proofs.source());
+    const result = try client.getRecord(std.testing.allocator, "site.standard.document", "guides~intro");
+    var found = switch (result) {
+        .found => |response| response,
+        .not_found => return error.UnexpectedRequest,
+    };
+    defer found.deinit();
+    try std.testing.expectEqual(@as(usize, 2), mock.requests.items.len);
+    try std.testing.expectEqualStrings("pds-nonce-2", client.pds_nonce.slice());
+}
+
 test "hostile responses fail closed: redirect, bad JSON, wrong did" {
     // Redirect: transport forbidden policy rejects it before the mock.
     const redirect = [_]XrpcMock.Scripted{.{
@@ -1156,7 +1192,7 @@ test "bearer session sends the access token directly and skips the DPoP nonce" {
     try std.testing.expectEqualStrings("Intro", found.value.value.object.get("value").?.object.get("title").?.string);
 }
 
-test "a response without a pds nonce fails closed" {
+test "a non-challenge response without a pds nonce is accepted" {
     const NoNonceMock = struct {
         fn request(
             _: *anyopaque,
@@ -1171,7 +1207,7 @@ test "a response without a pds nonce fails closed" {
                 allocator,
                 200,
                 &headers,
-                "{\"uri\":\"at://did:plc:ewvi7nxzyoun6zhxrhs64oiz/site.standard.document/guides~intro\",\"cid\":\"bafyreihwn3gfvnopsh4a6dmn2d3b7k5wqj2jqbzj6jydhpm5yfjjj7qbx4\"}",
+                "{\"uri\":\"at://did:plc:ewvi7nxzyoun6zhxrhs64oiz/site.standard.document/guides~intro\",\"cid\":\"bafyreihwn3gfvnopsh4a6dmn2d3b7k5wqj2jqbzj6jydhpm5yfjjj7qbx4\",\"value\":{\"title\":\"Intro\"}}",
                 value.limits,
             );
         }
@@ -1179,6 +1215,38 @@ test "a response without a pds nonce fails closed" {
     var no_nonce = NoNonceMock{};
     var proofs = TestProofSource{};
     var client = SessionClient.init(try testBinding(), .{ .context = &no_nonce, .request_fn = NoNonceMock.request }, proofs.source());
+    const result = try client.getRecord(std.testing.allocator, "site.standard.document", "guides~intro");
+    var found = switch (result) {
+        .found => |response| response,
+        .not_found => return error.UnexpectedRequest,
+    };
+    defer found.deinit();
+    try std.testing.expectEqualStrings("Intro", found.value.value.object.get("value").?.object.get("title").?.string);
+}
+
+test "a use_dpop_nonce challenge without a nonce fails closed" {
+    const ChallengeNoNonceMock = struct {
+        fn request(
+            _: *anyopaque,
+            allocator: std.mem.Allocator,
+            value: transport.Request,
+        ) transport.Error!transport.Response {
+            const headers = [_]transport.Header{.{
+                .name = "content-type",
+                .value = "application/json",
+            }};
+            return transport.Response.initCopy(
+                allocator,
+                400,
+                &headers,
+                "{\"error\":\"use_dpop_nonce\",\"message\":\"Nonce required\"}",
+                value.limits,
+            );
+        }
+    };
+    var challenge = ChallengeNoNonceMock{};
+    var proofs = TestProofSource{};
+    var client = SessionClient.init(try testBinding(), .{ .context = &challenge, .request_fn = ChallengeNoNonceMock.request }, proofs.source());
     try std.testing.expectError(
         error.InvalidNonce,
         client.getRecord(std.testing.allocator, "site.standard.document", "guides~intro"),

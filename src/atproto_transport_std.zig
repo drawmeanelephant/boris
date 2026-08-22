@@ -105,7 +105,10 @@ pub const StdTransport = struct {
         const uri = std.Uri.parse(request_value.url) catch return error.UnsafeTarget;
         if (uri.host == null or uri.user != null or uri.password != null or uri.fragment != null) return error.UnsafeTarget;
 
-        var extra_headers: [3]std.http.Header = undefined;
+        // Up to four request headers (accept, authorization, content-type,
+        // dpop) are validated by `validateNativeRequest`; the buffer must
+        // match that bound.
+        var extra_headers: [4]std.http.Header = undefined;
         for (request_value.headers, 0..) |header, index| {
             extra_headers[index] = .{ .name = header.name, .value = header.value };
         }
