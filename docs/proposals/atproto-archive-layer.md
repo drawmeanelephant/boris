@@ -122,29 +122,46 @@ an error rather than an overwrite. Before or during `putRecord`, check via
 regenerate `<suffix>` (which also changes the derived chunk rkeys
 `archive-<ts>-<suffix>-cN`) and retry the entire root+chunks write up to 5
 times before failing. This preserves both snapshots instead of replacing the
-first.
+first. **Implementation note:** `SessionClient.putRecord` currently collapses
+all non-200 responses into generic `error.InvalidStatus`, so the publish path
+cannot identify a conflict to trigger the retry. The implementation cards below
+MUST extend the client to surface a distinct conflict signal (e.g.
+`error.RecordAlreadyExists`) by inspecting the status/body (`409` or
+`AlreadyExists`), or the publish path MUST perform a `getRecord` pre-check for
+the chosen rkey before each `putRecord` and treat a found record as a
+collision — the former is preferred so the retry stays race-free.
 
 **Problem 2 — manifest exceeds the 256 KiB `putRecord` limit.** Each file
 entry in the manifest (path, CID link, mime type, size, sha256) is roughly
 300–400 bytes of JSON. A site with 800+ files can exceed the record limit.
 **Solution:** Shard the manifest across multiple records when the assembled
-payload would exceed `max_record_bytes` (256 KiB). The implementation MUST
-size the complete `putRecord` write, not just the `files` array: every chunk
-and the single-record path include chunk/root metadata and the XRPC envelope
-(`{ repo, collection, rkey, record, ... }`) in the limit check. Concretely:
+payload would exceed the effective `putRecord` envelope limit. The effective
+limit is `min(max_record_bytes, max_request_body_bytes)` — today
+`max_record_bytes` is 256 KiB but `SessionClient`/`transport` defaults to
+`max_request_body_bytes = 16 KiB` (`atproto_xrpc.zig:response_limits`,
+`atproto_transport.zig:41`), so a 200 KiB chunk would pass a 256 KiB check yet
+fail with `InvalidRecord`/`ResponseTooLarge` on the wire. The implementation
+MUST size the complete `putRecord` write, not just the `files` array, and MUST
+budget against the transport limit. Concretely:
 
 1. Compute the full manifest JSON.
-2. If `len(serialize(putRecordEnvelope(manifest))) ≤ 256 KiB`, write it as a
-   single record (common case for small-to-medium sites).
-3. If the envelope would exceed 256 KiB, split the `files` array into chunks
-   by iteratively appending entries and re-serializing the **full envelope**
-   for that chunk (`{ chunkIndex, files: [...] }` inside `putRecord`) until
-   adding the next entry would exceed the limit. Each finalized chunk is
-   therefore guaranteed to satisfy `len(serialize(envelope)) ≤ max_record_bytes`.
-   As a budget, implementations SHOULD reserve at least 2–8 KiB of headroom for
-   envelope variability across PDS implementations rather than packing to
-   exactly 256 KiB, or compute `overhead = len(envelope) - len(files_json)` and
-   enforce `len(files_json) ≤ max_record_bytes - overhead`.
+2. If `len(serialize(putRecordEnvelope(manifest))) ≤ effectiveLimit`, write it
+   as a single record (common case for small-to-medium sites). The effective
+   limit is the configured request-body limit for archive writes; cards 1–2
+   below MUST raise `response_limits.max_request_body_bytes` (and the
+   underlying transport `Limits`) to at least `max_record_bytes` for the
+   archive collection, otherwise the single-record path is limited to ~16 KiB
+   and will shard earlier.
+3. If the envelope would exceed the effective limit, split the `files` array
+   into chunks by iteratively appending entries and re-serializing the **full
+   envelope** for that chunk (`{ chunkIndex, files: [...] }` inside `putRecord`)
+   until adding the next entry would exceed the limit. Each finalized chunk is
+   therefore guaranteed to satisfy
+   `len(serialize(envelope)) ≤ effectiveLimit`. As a budget, implementations
+   SHOULD reserve at least 2–8 KiB of headroom for envelope variability across
+   PDS implementations rather than packing to exactly the limit, or compute
+   `overhead = len(envelope) - len(files_json)` and enforce
+   `len(files_json) ≤ effectiveLimit - overhead`.
    Write:
    - A **root record** (rkey `archive-<ts>-<suffix>`) containing `site`,
      `publishedAt`, `totalFiles`, `totalChunks`, `sha256` (hash of the full
@@ -163,6 +180,20 @@ The sharding is transparent to the caller: the projection decides at write
 time whether to produce one record or N+1 records. The `--archive` CLI flag
 and the implementation card remain unchanged; only the manifest write path
 needs the split logic.
+
+**Atomicity / partial-write handling.** The PDS provides no multi-record
+transaction, so `root` is the commit point. The publisher MUST write all
+`chunk` records first, then write the `root` last. A root is only advertised
+once all its chunks exist; consumers MUST treat a root whose `chunks` list
+references a missing rkey as incomplete (fail reconstruction and ignore that
+snapshot rather than serving a partial site). On interruption (process crash,
+timeout, network failure) the write leaves orphan chunks with no reachable
+root — those blobs are still referenced by the orphan chunks but become
+unreachable and will be GC'd with their chunks when the chunks expire or are
+cleaned up; no rollback deletes the already-written chunks, and a retry
+publishes a fresh `archive-<ts>-<suffix>` with new rkeys. Implementations
+SHOULD verify after writing the root that every chunk is readable via
+`getRecord` before reporting success.
 
 ### Honest gaps
 
@@ -232,12 +263,21 @@ The archive layer would add:
    - add `uploadBlob` to `SessionClient` in `atproto_xrpc.zig`
    - binary body, correct content-type, DPoP nonce retry
    - accept and return the PDS-issued blob metadata (CID, mime, size)
+   - raise `response_limits.max_request_body_bytes` / transport `Limits` for
+     `putRecord` to at least `max_record_bytes` (256 KiB) so archive manifests
+     can use the full record budget (today the default is 16 KiB)
+   - surface `409 AlreadyExists` / `RecordAlreadyExists` distinctly from generic
+     `InvalidStatus` so the archive retry can detect rkey collisions
    - test with a mock PDS
 
 2. `fix/standard-site-archive-projection`
    - new module `standard_site_archive.zig`
    - reads `artifact_inventory` records, uploads each blob, deduplicates by
-     CID, writes manifest record
+     CID, shards manifest with full-envelope budgeting against the effective
+     `min(max_record_bytes, max_request_body_bytes)` limit
+   - writes all chunks before the root (root-last commit); verifies chunks
+     after root write; consumers reject incomplete roots
+   - handles rkey collisions with distinct error + suffix regeneration retry
    - collection: `site.standard.archive`
    - preserves existing document records unchanged
 
