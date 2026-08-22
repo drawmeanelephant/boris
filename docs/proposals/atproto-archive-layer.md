@@ -27,8 +27,10 @@ ATProto publish path.
 ## Proposed model
 
 Add a **site archive projection** that uploads the full compiled `dist/` tree
-as content-addressed blobs, then writes a single manifest record binding the
-blob CIDs to their original file paths. This runs as an **additional
+as content-addressed blobs, then writes one or more manifest records binding the
+blob CIDs to their original file paths (sharded across records when the
+manifest exceeds the 256 KiB `putRecord` limit — see **Manifest sharding and
+rkey design** below). This runs as an **additional
 publication step** (`boris standard-site publish --archive`) that operates
 alongside the existing inline document records, not replacing them.
 
@@ -76,9 +78,11 @@ ATProto (new):
    whether the original compiler repo still exists.
 
 3. **Immutable snapshots.** Each publish writes a new manifest record (with a
-   new rkey, e.g. `archive-2026-08-22T143000Z`), so the archive preserves a
-   history of every published version. Old blobs remain referenced by old
-   manifest records and are not garbage-collected.
+   new rkey, e.g. `archive-2026-08-22T143000Z-a3f8`), so the archive
+   preserves a history of every published version. Old blobs remain referenced
+   by old manifest records and are not garbage-collected. The rkey includes a
+   random or monotonic suffix (see **Manifest sharding and rkey design** below)
+   to prevent collisions when two publishes land within the same second.
 
 4. **Bypasses the 256 KiB record limit.** Document records with large
    `text_content` can approach the `putRecord` limit; blob-backed files have
@@ -96,11 +100,48 @@ ATProto (new):
 | --- | --- |
 | Primary serving | `dist/` (Pages, local server, CDN) — archive is not a web server |
 | Indexing | Document records via `getRecord` — archive is cold storage |
-| Record schema | New collection `site.standard.archive` (single-record projection) |
+| Record schema | New collection `site.standard.archive` (sharded projection; see below) |
 | Blob lifecycle | Manifest record references every blob → GC holds them |
 | Upload ordering | All blobs uploaded before manifest record to beat GC window |
 | Incremental publish | Opt-in `--archive` flag; the smoke test stays blob-free |
 | Deduplication | Same bytes → same CID → single upload; record-reuse detection by CID comparison before `uploadBlob` |
+
+### Manifest sharding and rkey design
+
+**Problem 1 — rkey collisions.** A pure timestamp rkey like
+`archive-2026-08-22T143000Z` collides when two publishes run within the same
+second. **Solution:** Use a compound rkey
+`archive-YYYY-MM-DDTHHMMSSZ-<suffix>` where `<suffix>` is a 4-character random
+hex string generated at publish time. The timestamp gives human-readable
+ordering; the random suffix makes the key collision-resistant without requiring
+state. A UUID-based rkey is also valid but less readable. The suffix is not
+secret — it only needs to be unique per DID.
+
+**Problem 2 — manifest exceeds the 256 KiB `putRecord` limit.** Each file
+entry in the manifest (path, CID link, mime type, size, sha256) is roughly
+300–400 bytes of JSON. A site with 800+ files can exceed the record limit.
+**Solution:** Shard the manifest across multiple records when the assembled
+payload would exceed `max_record_bytes` (256 KiB). The scheme is:
+
+1. Compute the full manifest JSON.
+2. If `len(manifest) ≤ 256 KiB`, write it as a single record (common case for
+   small-to-medium sites).
+3. If `len(manifest) > 256 KiB`, split the `files` array into chunks of
+   ≤ 256 KiB of JSON each, and write:
+   - A **root record** (rkey `archive-<ts>-<suffix>`) containing `site`,
+     `publishedAt`, `totalFiles`, `totalChunks`, `sha256` (hash of the full
+     manifest for integrity), and an ordered list of `{ rkey, chunkIndex }`
+     entries pointing to the chunk records.
+   - **Chunk records** (rkeys `archive-<ts>-<suffix>-c0`, `-c1`, …) each
+     containing `{ chunkIndex, files: [...] }`.
+4. A consumer reconstructs the full manifest by reading the root, then each
+   chunk in order, and verifying the concatenated `files` array matches the
+   root's `sha256`.
+
+The sharding is transparent to the caller: the projection decides at write
+time whether to produce one record or N+1 records. The `--archive` CLI flag
+and the implementation card remain unchanged; only the manifest write path
+needs the split logic.
 
 ### Honest gaps
 
@@ -128,8 +169,10 @@ ATProto (new):
 
 5. **Blob GC window.** The protocol requires a record to reference a blob
    within a short, undefined window after upload. The tool must upload all
-   blobs first, then immediately write the manifest record — pause or network
-   delay between the last blob upload and the manifest write risks GC.
+   blobs first, then immediately write the manifest record(s) — pause or
+   network delay between the last blob upload and the manifest write risks GC.
+   For sharded manifests, all chunks must be written in rapid succession
+   after the final blob upload.
 
 ## Relationship to existing infrastructure
 
