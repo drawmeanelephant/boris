@@ -2649,6 +2649,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .content_root = opts.input_dir,
             .layout_path = layout_path,
             .incremental = opts.incremental,
+            .refresh_evidence = opts.refresh_evidence,
             .quiet = opts.quiet,
             .jobs = opts.jobs,
             .input_format = opts.input_format,
@@ -2678,6 +2679,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .dist_dir = html_dir,
             .layout_path = layout_path,
             .incremental = opts.incremental,
+            .refresh_evidence = opts.refresh_evidence,
             .quiet = opts.quiet,
             .jobs = opts.jobs,
             .input_format = opts.input_format,
@@ -2984,6 +2986,70 @@ test "mapHtmlError: unsafe SVG content failure exits 1 without a generic wrapper
     // content-asset path; mapHtmlError must classify it as a content error
     // (exit 1) and must not print either generic wrapper line.
     try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, &.{}, default_layout));
+}
+
+fn writeTreeFileMain(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8) !void {
+    const cwd = Io.Dir.cwd();
+    const full = try std.fmt.allocPrint(std.heap.page_allocator, "{s}/{s}", .{ root_rel, rel });
+    defer std.heap.page_allocator.free(full);
+    if (std.fs.path.dirname(full)) |parent| try cwd.createDirPath(io, parent);
+    try cwd.writeFile(io, .{ .sub_path = full, .data = data });
+}
+
+fn fileInode(io: Io, path: []const u8) !u64 {
+    var file = try Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+    const st = try file.stat(io);
+    return st.inode;
+}
+
+test "runHtml threads --refresh-evidence into the compile options (#728)" {
+    // Guards the CLI → CompileOptions seam: with reuse active an unchanged
+    // rebuild keeps the evidence file (same inode); `--refresh-evidence` must
+    // re-derive it through the atomic transaction (new inode).
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/refresh-evidence-seam", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFileMain(io, work, "themes/docs/layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFileMain(io, work, "content/index.md", "# Home\n\nStable body.\n");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/themes/docs/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const checks_path = try std.fmt.allocPrint(gpa, "{s}/_boris/proof/checks.json", .{dist});
+    defer gpa.free(checks_path);
+
+    const base: Options = .{
+        .input_dir = content,
+        .html_dir = dist,
+        .html_layout = layout,
+        .incremental = true,
+        .quiet = true,
+    };
+
+    var opts = base;
+    try std.testing.expectEqual(ExitCode.success, runHtml(io, gpa, opts, null));
+    const first_inode = try fileInode(io, checks_path);
+
+    // Unchanged rebuild: reuse must keep the committed evidence untouched.
+    try std.testing.expectEqual(ExitCode.success, runHtml(io, gpa, opts, null));
+    try std.testing.expectEqual(first_inode, try fileInode(io, checks_path));
+
+    // --refresh-evidence must force a full re-derivation even though the
+    // digest gate would have allowed reuse.
+    opts.refresh_evidence = true;
+    try std.testing.expectEqual(ExitCode.success, runHtml(io, gpa, opts, null));
+    try std.testing.expect(first_inode != try fileInode(io, checks_path));
 }
 
 test "mapHtmlError: link-audit content failure exits 1" {
