@@ -91,11 +91,14 @@ pub const FrozenSite = struct {
     nodes: []graph_mod.Node,
     edges: []graph_mod.Edge,
     nav: []graph_mod.NavEntry,
-    /// Site-nav fingerprint material (GPA-owned); empty when layout has no `{{nav}}`.
-    site_nav_material: []const u8 = "",
+    /// Site-nav fingerprint digest (GPA-owned): the fixed-size SHA-256 of the
+    /// raw `(id, title, parent, role)` material, computed once per build
+    /// (#727) so graph-chrome pages hash 32 bytes instead of O(pages) bytes.
+    /// Empty when layout has no graph chrome.
+    site_nav_digest: []const u8 = "",
 
     pub fn deinit(self: *FrozenSite) void {
-        if (self.site_nav_material.len > 0) self.gpa.free(self.site_nav_material);
+        if (self.site_nav_digest.len > 0) self.gpa.free(self.site_nav_digest);
         graph_mod.freeNav(self.gpa, self.nav);
         self.gpa.free(self.edges);
         self.gpa.free(self.nodes);
@@ -240,9 +243,13 @@ pub fn freezeSiteFromPageDb(
         }
     }
 
-    var material: []const u8 = "";
+    var site_nav_digest: []const u8 = "";
     if (include_nav_material) {
-        material = try html_nav.siteNavMaterial(gpa, g.nodes);
+        const material = try html_nav.siteNavMaterial(gpa, g.nodes);
+        defer gpa.free(material);
+        const digest = try gpa.alloc(u8, cache.hashBytes(material).len);
+        @memcpy(digest, &cache.hashBytes(material));
+        site_nav_digest = digest;
     }
     if (recorder) |t| t.stop(.graph_validate);
 
@@ -251,7 +258,7 @@ pub fn freezeSiteFromPageDb(
         .nodes = g.nodes,
         .edges = g.edges,
         .nav = nav,
-        .site_nav_material = material,
+        .site_nav_digest = site_nav_digest,
     };
 }
 
@@ -2450,6 +2457,7 @@ fn fingerprintPage(
     site: *const FrozenSite,
     heading_index: *wikilink.HeadingIndex,
     content_assets: *const content_asset.SiteAssetInventory,
+    ref_node_map: *const wikilink.NodeMap,
 ) !PageFingerprint {
     // Convert owned []u8 include lists to []const u8 views for the hasher.
     const inc_owned = shared.include_bytes[page_idx];
@@ -2462,7 +2470,7 @@ fn fingerprintPage(
     // `children` uses the same complete graph digest conservatively: it keeps
     // add/remove/rename/title changes correct across incremental runs.
     const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
-    const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
+    const nav_material: []const u8 = if (needs_site_material) site.site_nav_digest else "";
     var relation_material: []u8 = &.{};
     if (page_layout.has_relations or page_layout.has_backlinks) {
         const relation_index = site.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
@@ -2493,11 +2501,11 @@ fn fingerprintPage(
         wiki_paths[1 + j] = inc_paths[j];
     }
     var wiki_fail: wikilink.FailInfo = .{ .line_base = fail_line_base };
-    const ref_material = wikilink.referenceMaterialMulti(
+    const ref_material = wikilink.referenceMaterialMultiWithMap(
         gpa,
         wiki_bodies,
         wiki_paths,
-        site.nodes,
+        ref_node_map,
         &wiki_fail,
         .{ .heading_index = heading_index, .validate_fragments = true },
     ) catch |err| {
@@ -2644,6 +2652,11 @@ fn computeFingerprintsAndDirty(
 
     if (options.timings) |t| t.start(.fingerprint);
 
+    // One shared wiki id→node map for every page fingerprint (#727); the
+    // per-page reference-material pass reuses it instead of rebuilding.
+    var ref_node_map = try wikilink.buildNodeMap(gpa, site.nodes);
+    defer ref_node_map.deinit(gpa);
+
     for (db.items(), 0..) |page, page_idx| {
         const fp = try fingerprintPage(
             gpa,
@@ -2658,6 +2671,7 @@ fn computeFingerprintsAndDirty(
             site,
             heading_index,
             content_assets,
+            &ref_node_map,
         );
         fingerprints[page_idx] = fp.hex;
         if (options.timings) |t| {
