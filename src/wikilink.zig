@@ -282,8 +282,8 @@ pub fn scanWikiLinks(
     }
 }
 
-fn buildNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !std.StringHashMapUnmanaged(graph_mod.Node) {
-    var map: std.StringHashMapUnmanaged(graph_mod.Node) = .{};
+pub fn buildNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !NodeMap {
+    var map: NodeMap = .{};
     errdefer map.deinit(allocator);
     try map.ensureTotalCapacity(allocator, @intCast(nodes.len));
     for (nodes) |n| {
@@ -293,7 +293,7 @@ fn buildNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !st
     return map;
 }
 
-fn findNodeMap(map: *const std.StringHashMapUnmanaged(graph_mod.Node), id: []const u8) ?graph_mod.Node {
+fn findNodeMap(map: *const NodeMap, id: []const u8) ?graph_mod.Node {
     return map.get(id);
 }
 
@@ -417,12 +417,51 @@ pub fn rewriteWikiLinksOpts(
     var node_map = try buildNodeMap(allocator, nodes);
     defer node_map.deinit(allocator);
 
+    return rewriteWithNodeMap(allocator, body, hits.items, &node_map, current_output_path, fail_out, opts);
+}
+
+/// Id → node lookup over the frozen graph, reusable across pages of one build
+/// (#726). Build once with `buildNodeMap` and pass to
+/// `rewriteWikiLinksWithMapOpts`; contents must cover the same node list every
+/// rendered page would otherwise receive.
+pub const NodeMap = std.StringHashMapUnmanaged(graph_mod.Node);
+
+/// Rewrite wiki links using a caller-shared map instead of rebuilding one per
+/// page. Behaviorally identical to `rewriteWikiLinksOpts` over the same nodes.
+pub fn rewriteWikiLinksWithMapOpts(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    node_map: *const NodeMap,
+    current_output_path: []const u8,
+    fail_out: ?*FailInfo,
+    opts: ResolveOptions,
+) WikiError![]u8 {
+    var hits: std.ArrayList(WikiHit) = .empty;
+    defer hits.deinit(allocator);
+    try scanWikiLinks(body, allocator, &hits, fail_out, "");
+
+    if (hits.items.len == 0) {
+        return try allocator.dupe(u8, body);
+    }
+
+    return rewriteWithNodeMap(allocator, body, hits.items, node_map, current_output_path, fail_out, opts);
+}
+
+fn rewriteWithNodeMap(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    hits: []const WikiHit,
+    node_map: *const NodeMap,
+    current_output_path: []const u8,
+    fail_out: ?*FailInfo,
+    opts: ResolveOptions,
+) WikiError![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     var copy_from: usize = 0;
 
-    for (hits.items) |hit| {
-        const node = findNodeMap(&node_map, hit.entity_id) orelse {
+    for (hits) |hit| {
+        const node = findNodeMap(node_map, hit.entity_id) orelse {
             if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
             return error.ReferenceMissing;
         };
@@ -800,6 +839,55 @@ test "rewriteWikiLinks relative href" {
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "[Content Model](guides/overview.html)") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "[[") == null);
+}
+
+test "shared node map rewrite matches per-page rewrite" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{
+            .id = "guides/overview",
+            .source_path = "guides/overview.md",
+            .title = "Content Model",
+            .role = .trunk,
+            .index = 0,
+        },
+        .{
+            .id = "getting-started",
+            .source_path = "getting-started.md",
+            .title = "Getting Started",
+            .role = .trunk,
+            .index = 1,
+        },
+    };
+    var map = try buildNodeMap(gpa, &nodes);
+    defer map.deinit(gpa);
+
+    const bodies = [_][]const u8{
+        "Go to [[guides/overview]] please.",
+        "See [[getting-started]] and [[guides/overview|the guide]].",
+        "No links here at all.",
+    };
+    for (bodies) |body| {
+        const classic = try rewriteWikiLinksOpts(gpa, body, &nodes, "getting-started.html", null, .{});
+        defer gpa.free(classic);
+        const shared = try rewriteWikiLinksWithMapOpts(gpa, body, &map, "getting-started.html", null, .{});
+        defer gpa.free(shared);
+        try std.testing.expectEqualStrings(classic, shared);
+    }
+
+    // Missing targets fail identically through both entry points.
+    const bad = "Go to [[no/such/page]] now.";
+    var classic_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksOpts(gpa, bad, &nodes, "index.html", &classic_fail, .{}),
+    );
+    var shared_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksWithMapOpts(gpa, bad, &map, "index.html", &shared_fail, .{}),
+    );
+    try std.testing.expectEqualStrings(classic_fail.detail(), shared_fail.detail());
 }
 
 test "wiki inline code spans stay out of rewrite and fingerprint material" {
