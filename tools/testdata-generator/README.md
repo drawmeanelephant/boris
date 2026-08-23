@@ -93,6 +93,7 @@ Built-in profiles are:
 | Profile | Purpose |
 |---|---|
 | `readme-realistic-v1` | README-shaped valid pages with Trunk/Satellite graph edges, links, includes, headings, tables, code fences, and an asset. |
+| `bounded-nav-v1` | The same valid grammar with the generated theme's navigation bounded to breadcrumb plus direct children (`"nav": "children"`), so per-page anchors stay flat and scale runs measure compiler throughput rather than whole-graph nav rendering. |
 | `nightmare-v1` | The same valid grammar with named failure barbs applied at deterministic loci. |
 | `preserved-edge-v1` | Traversal-like Markdown links that Boris should preserve literally. |
 | `mild-poison-v1` | Mostly valid output with one precise post-publish barb per selected case. |
@@ -107,9 +108,17 @@ path. The closed profile shape is:
   "description": "...",
   "style": "readme | reference | compact",
   "includeAssets": true,
-  "barbs": ["duplicate_id"]
+  "barbs": ["duplicate_id"],
+  "nav": "full | children"
 }
 ```
+
+`nav` (optional, default `full`) selects which navigation slots the generated
+built-in theme requests: `full` asks Boris for the recursive whole-graph
+`{{nav}}` on every page (per-page anchors grow with the corpus), while
+`children` requests `{{breadcrumb}} {{children}}`, bounding per-page navigation
+regardless of corpus size (#729). Existing profiles default to `full` and keep
+byte-identical output.
 
 `--theme PATH` recursively copies a regular-file theme into
 `optional-theme/`, sorting paths bytewise and rejecting symlinks. This is the
