@@ -755,6 +755,7 @@ pub const WatchCoordinator = struct {
                 .content_root = self.options.input_dir,
                 .layout_path = layout_default,
                 .incremental = self.options.incremental,
+                .refresh_evidence = self.options.refresh_evidence,
                 // `--watch-json` implies quiet: the stderr stream is the
                 // machine-readable event channel, not prose progress.
                 .quiet = self.options.quiet or self.options.watch_json,
@@ -776,6 +777,7 @@ pub const WatchCoordinator = struct {
                 .dist_dir = self.options.html_dir orelse "dist",
                 .layout_path = layout_default,
                 .incremental = self.options.incremental,
+                .refresh_evidence = self.options.refresh_evidence,
                 // `--watch-json` implies quiet: the stderr stream is the
                 // machine-readable event channel, not prose progress.
                 .quiet = self.options.quiet or self.options.watch_json,
