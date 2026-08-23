@@ -61,6 +61,12 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    # Keep the Zig *global* cache outside the checkout: when both cache dirs
+    # share the workspace path, a cancelled run can persist a partial cache
+    # entry (manifest without payload) that deterministically fails later
+    # installs on the same reused runner (#735 CI incident).
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
