@@ -48,6 +48,27 @@ roll back the target; it returns exit code `3` and explicitly reports that the
 publication committed but its evidence was not refreshed. Atomic report-write
 failure preserves the previous report.
 
+## Incremental evidence reuse
+
+The full derivation chain is deterministic: identical committed bytes produce
+identical reports. A build may therefore **reuse** the on-disk evidence
+reports unchanged when all of the following hold:
+
+1. `dist/.boris-cache/evidence-state/<target>.json` parses with format
+   `boris-evidence-state-v1`, matching `target` and `compiler_id`;
+2. the recorded `compiler_id` matches the current compiler identity
+   (an upgraded binary must not reuse evidence from a different version);
+3. the SHA-256 of the current `_boris/proof/artifacts.json` equals the
+   recorded `artifacts_sha256` (the exact committed set the reports describe);
+4. every derived report (`checks.json`, `claims.json`, `touches.json`,
+   `proof-pack.json`, `proof/index.html`) still hashes to its recorded digest.
+
+Any mismatch, missing file, corrupt state, or unusable target name falls back
+to full derivation; reuse is an optimization and never an authority.
+`--refresh-evidence` skips reuse unconditionally. Reused builds keep the prior
+reports byte-for-byte and refresh nothing. State files are written only by
+incremental builds, best-effort, after a fully successful chain.
+
 ## Fixed report shape
 
 The root object has exactly these keys, in this order:

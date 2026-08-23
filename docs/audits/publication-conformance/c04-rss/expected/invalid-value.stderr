@@ -95,6 +95,8 @@ Options:
   --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
                       Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
   --incremental       Content-addressed incremental HTML rendering (HTML mode)
+  --refresh-evidence  Force full evidence re-derivation, skipping reuse of
+                      unchanged committed evidence (HTML mode, #728)
   --watch             Compatibility flag; same as the watch command; with `validate`
                       starts the zero-write validation daemon (validate --watch)
   --watch-json        Emit one NDJSON event per build phase on stderr (watch only,

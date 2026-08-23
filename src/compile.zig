@@ -75,6 +75,7 @@ const artifact_inventory = @import("artifact_inventory.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
 const publication_touches = @import("publication_touches.zig");
+const publication_evidence_state = @import("publication_evidence_state.zig");
 const publication_proof_pack = @import("publication_proof_pack.zig");
 const timings = @import("timings.zig");
 const compile_stage = @import("compile_stage.zig");
@@ -301,6 +302,9 @@ pub const CompileOptions = struct {
     test_fail_publish_at: ?usize = null,
     /// Opt-in to fast incremental rendering.
     incremental: bool = false,
+    /// Force full publication-evidence re-derivation even when the committed
+    /// artifact set is byte-identical to what on-disk evidence describes (#728).
+    refresh_evidence: bool = false,
     /// When set, inject failure before publishing cache manifest to test rollback.
     test_fail_cache_publish: bool = false,
     /// Bounded parallel rendering worker count.
@@ -2341,6 +2345,28 @@ fn publishEvidenceReports(
     dist_dir: Io.Dir,
     options: CompileOptions,
 ) !void {
+    // Evidence reuse (Option A, #728): when the committed artifact set is
+    // byte-identical to the set the on-disk evidence was derived from — and
+    // every derived report still hashes to its recorded digest — the fully
+    // deterministic chain below would rewrite identical bytes. Skip it.
+    // `--refresh-evidence` always derives; any mismatch falls back to the
+    // full chain, so reuse is an optimization and never an authority.
+    if (!options.refresh_evidence and
+        publication_evidence_state.reuseValid(io, dist_dir, gpa, options.target_name, pipeline.compiler_id))
+    {
+        if (options.timings) |t| {
+            t.start(.checks);
+            t.stop(.checks);
+            t.start(.claims);
+            t.stop(.claims);
+            t.start(.touches);
+            t.stop(.touches);
+            t.start(.proof_pack);
+            t.stop(.proof_pack);
+        }
+        return;
+    }
+
     // The payload transaction, including artifacts.json as its deferred last
     // file, is complete before checks read the target. Checks are a separate
     // atomic report publication and never participate in that transaction.
@@ -2424,6 +2450,13 @@ fn publishEvidenceReports(
         return error.PublicationProofPackFailed;
     };
     if (options.timings) |t| t.stop(.proof_pack);
+
+    // Persist reuse state so a later unchanged incremental build can skip the
+    // chain above. Incremental-only, mirroring the .boris-cache write rule;
+    // best-effort — no state simply means the next build re-derives.
+    if (options.incremental) {
+        publication_evidence_state.record(io, dist_dir, gpa, options.target_name, pipeline.compiler_id);
+    }
 }
 
 const FingerprintPlan = struct {
@@ -6533,6 +6566,119 @@ test "deferred publication paths compare across host separators" {
     ));
 }
 
+test "incremental evidence reuse skips derivation and --refresh-evidence forces it" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/evidence-reuse", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "themes/docs/layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nStable body.\n");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/themes/docs/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const state_path = publication_evidence_state.state_dir_sub_path ++ "/default.json";
+    const canonical_checks = blk: {
+        const base: CompileOptions = .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout,
+            .incremental = true,
+            .quiet = true,
+        };
+        _ = try compileHtmlSite(io, gpa, base);
+        break :blk try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    };
+    defer gpa.free(canonical_checks);
+
+    // State was recorded by the first incremental build.
+    const state_bytes = try readTargetPayload(io, gpa, dist, state_path);
+    gpa.free(state_bytes);
+
+    const expectChecksEqual = struct {
+        fn go(g: std.mem.Allocator, io_l: std.Io, d: []const u8, want: []const u8) !void {
+            const got = try readTargetPayload(io_l, g, d, publication_checks.output_path);
+            defer g.free(got);
+            try std.testing.expectEqualStrings(want, got);
+        }
+    }.go;
+
+    // Unchanged tree + injected checks failure still succeeds: reuse skipped
+    // the derivation entirely.
+    var reuse_options: CompileOptions = .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+        .test_fail_publication_checks = true,
+    };
+    _ = try compileHtmlSite(io, gpa, reuse_options);
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // The same injection with --refresh-evidence must fail loud.
+    reuse_options.refresh_evidence = true;
+    try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, reuse_options));
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // A corrupt state file falls back to full derivation (injection fires).
+    reuse_options.refresh_evidence = false;
+    try writeTreeFile(io, work, "dist/.boris-cache/evidence-state/default.json", "{ broken");
+    try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, reuse_options));
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // A state file with a different compiler_id forces re-derivation: an
+    // upgraded binary must not silently reuse stale evidence.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    const fake_json =
+        \\{"format":"boris-evidence-state-v1","compiler_id":"boris/0.9.9","target":"default","artifacts_sha256":"0000000000000000000000000000000000000000000000000000000000000000","reports":[]}
+    ;
+    try writeTreeFile(io, work, "dist/.boris-cache/evidence-state/default.json", fake_json);
+    try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+        .test_fail_publication_checks = true,
+    }));
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // A tampered report digest also forces re-derivation, which restores the
+    // canonical bytes.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    try writeTreeFile(io, work, "dist/_boris/proof/checks.json", "{\"tampered\":true}\n");
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+}
+
 test "HTML publication artifact inventory is complete, deterministic, isolated, and transactional" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -6613,6 +6759,7 @@ test "HTML publication artifact inventory is complete, deterministic, isolated, 
 
     var checks_failure_options = base_options;
     checks_failure_options.test_fail_publication_checks = true;
+    checks_failure_options.refresh_evidence = true;
     try std.testing.expectError(
         error.PublicationChecksFailed,
         compileHtmlSite(io, gpa, checks_failure_options),
@@ -9635,6 +9782,7 @@ test "post-commit checker failure preserves stale checks while exposing changed 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
     var failure_options = options;
     failure_options.test_fail_publication_checks = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, failure_options));
 
     const new_inventory = try readArtifactInventory(io, gpa, dist);
@@ -9768,6 +9916,7 @@ test "claims failure preserves committed payloads, inventory, checks, and prior 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
     var failure_options = options;
     failure_options.test_fail_publication_claims = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
 
     const new_inventory = try readArtifactInventory(io, gpa, dist);
@@ -9814,6 +9963,7 @@ test "claims write failure preserves the prior claims report" {
     defer gpa.free(old_claims);
     var failure_options = options;
     failure_options.test_fail_publication_claims_write = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
     const after = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
     defer gpa.free(after);
@@ -9857,6 +10007,7 @@ test "quiet claims failure emits the captured diagnostic and preserves prior cla
     defer output.deinit();
     var failure_options = options;
     failure_options.test_fail_publication_claims = true;
+    failure_options.refresh_evidence = true;
     failure_options.publication_claims_failure_writer = &output.writer;
     try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
     try std.testing.expectEqualStrings(
@@ -10014,6 +10165,7 @@ test "touches failure preserves committed payloads, inventory, checks, claims, a
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
     var failure_options = options;
     failure_options.test_fail_publication_touches = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
 
     const new_inventory = try readArtifactInventory(io, gpa, dist);
@@ -10060,6 +10212,7 @@ test "touches write failure preserves the prior touches report" {
     defer gpa.free(old_touches);
     var failure_options = options;
     failure_options.test_fail_publication_touches_write = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
     const after = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
     defer gpa.free(after);
@@ -10099,6 +10252,7 @@ test "quiet touches failure emits the captured diagnostic and preserves prior to
     defer output.deinit();
     var failure_options = options;
     failure_options.test_fail_publication_touches = true;
+    failure_options.refresh_evidence = true;
     failure_options.publication_touches_failure_writer = &output.writer;
     try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
     try std.testing.expectEqualStrings(
@@ -10152,6 +10306,7 @@ test "quiet proof-pack failure emits the captured not-refreshed diagnostic and p
     defer output.deinit();
     var failure_options = options;
     failure_options.test_fail_publication_proof_pack = true;
+    failure_options.refresh_evidence = true;
     failure_options.publication_proof_pack_failure_writer = &output.writer;
     try std.testing.expectError(error.PublicationProofPackFailed, compileHtmlSite(io, gpa, failure_options));
     try std.testing.expectEqualStrings(

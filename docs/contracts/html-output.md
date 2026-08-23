@@ -277,7 +277,11 @@ On `--incremental`, a page is **reused** only when all of the following hold:
 3. The on-disk HTML file exists and is non-empty.
 4. The file’s **SHA-256** (lowercase hex) equals the entry’s `output_digest`.
 
-`output_size` is recorded as a **cheap prefilter** only. Same-length
+`output_size` is recorded as a **cheap prefilter** only.
+On unchanged builds the publication-evidence chain may additionally be reused
+without re-derivation under its own digest gate; see
+[publication-checks](publication-checks.md#incremental-evidence-reuse).
+`--refresh-evidence` forces full re-derivation. Same-length
 corruption of published HTML must still fail the digest check and force a
 re-render. Older manifests with a different `format_version` (including
 `boris-cache-v1-multitarget`) force a cold rebuild.
