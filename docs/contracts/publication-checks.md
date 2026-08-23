@@ -55,10 +55,12 @@ identical reports. A build may therefore **reuse** the on-disk evidence
 reports unchanged when all of the following hold:
 
 1. `dist/.boris-cache/evidence-state/<target>.json` parses with format
-   `boris-evidence-state-v1`, matching `target`;
-2. the SHA-256 of the current `_boris/proof/artifacts.json` equals the
+   `boris-evidence-state-v1`, matching `target` and `compiler_id`;
+2. the recorded `compiler_id` matches the current compiler identity
+   (an upgraded binary must not reuse evidence from a different version);
+3. the SHA-256 of the current `_boris/proof/artifacts.json` equals the
    recorded `artifacts_sha256` (the exact committed set the reports describe);
-3. every derived report (`checks.json`, `claims.json`, `touches.json`,
+4. every derived report (`checks.json`, `claims.json`, `touches.json`,
    `proof-pack.json`, `proof/index.html`) still hashes to its recorded digest.
 
 Any mismatch, missing file, corrupt state, or unusable target name falls back

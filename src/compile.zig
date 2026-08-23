@@ -2352,7 +2352,7 @@ fn publishEvidenceReports(
     // `--refresh-evidence` always derives; any mismatch falls back to the
     // full chain, so reuse is an optimization and never an authority.
     if (!options.refresh_evidence and
-        publication_evidence_state.reuseValid(io, dist_dir, gpa, options.target_name))
+        publication_evidence_state.reuseValid(io, dist_dir, gpa, options.target_name, pipeline.compiler_id))
     {
         if (options.timings) |t| {
             t.start(.checks);
@@ -2455,7 +2455,7 @@ fn publishEvidenceReports(
     // chain above. Incremental-only, mirroring the .boris-cache write rule;
     // best-effort — no state simply means the next build re-derives.
     if (options.incremental) {
-        publication_evidence_state.record(io, dist_dir, gpa, options.target_name);
+        publication_evidence_state.record(io, dist_dir, gpa, options.target_name, pipeline.compiler_id);
     }
 }
 
@@ -6634,6 +6634,29 @@ test "incremental evidence reuse skips derivation and --refresh-evidence forces 
     reuse_options.refresh_evidence = false;
     try writeTreeFile(io, work, "dist/.boris-cache/evidence-state/default.json", "{ broken");
     try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, reuse_options));
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // A state file with a different compiler_id forces re-derivation: an
+    // upgraded binary must not silently reuse stale evidence.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    const fake_json =
+        \\{"format":"boris-evidence-state-v1","compiler_id":"boris/0.9.9","target":"default","artifacts_sha256":"0000000000000000000000000000000000000000000000000000000000000000","reports":[]}
+    ;
+    try writeTreeFile(io, work, "dist/.boris-cache/evidence-state/default.json", fake_json);
+    try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+        .test_fail_publication_checks = true,
+    }));
     try expectChecksEqual(gpa, io, dist, canonical_checks);
 
     // A tampered report digest also forces re-derivation, which restores the

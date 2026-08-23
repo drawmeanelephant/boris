@@ -5,6 +5,8 @@
 //! deterministic evidence reports already on disk are exactly what a fresh
 //! derivation would produce. This module records and re-verifies that fact:
 //!
+//! - `compiler_id` pins the derivation identity so an upgraded binary rejects
+//!   stale evidence produced by a different compiler version;
 //! - `artifacts_sha256` pins the exact committed inventory the reports describe;
 //! - each report's recorded digest must still match the file on disk.
 //!
@@ -70,8 +72,9 @@ fn jsonStr(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 }
 
 /// Parse the recorded state for `target_name`; null when anything is off
-/// (missing, corrupt, wrong format/target/report list).
-fn loadState(io: Io, dist_dir: Io.Dir, gpa: std.mem.Allocator, target_name: []const u8) ?ParsedState {
+/// (missing, corrupt, wrong format/target/report list, missing compiler_id,
+/// or compiler_id mismatch).
+fn loadState(io: Io, dist_dir: Io.Dir, gpa: std.mem.Allocator, target_name: []const u8, expected_compiler_id: []const u8) ?ParsedState {
     const sub = stateSubPath(gpa, target_name) orelse return null;
     defer gpa.free(sub);
     const bytes = readFileBounded(io, dist_dir, sub, gpa) orelse return null;
@@ -91,6 +94,11 @@ fn loadState(io: Io, dist_dir: Io.Dir, gpa: std.mem.Allocator, target_name: []co
     if (!std.mem.eql(u8, format, state_format)) return null;
     const target = jsonStr(obj, "target") orelse return null;
     if (!std.mem.eql(u8, target, target_name)) return null;
+
+    // compiler_id is required: absent state (e.g. pre-#735) falls back to
+    // full derivation, which is the correct fail-closed behavior.
+    const recorded_id = jsonStr(obj, "compiler_id") orelse return null;
+    if (!std.mem.eql(u8, expected_compiler_id, recorded_id)) return null;
 
     var out: ParsedState = undefined;
     const artifacts = jsonStr(obj, "artifacts_sha256") orelse return null;
@@ -117,16 +125,20 @@ fn loadState(io: Io, dist_dir: Io.Dir, gpa: std.mem.Allocator, target_name: []co
 }
 
 /// Decide whether the committed evidence on disk may be reused unchanged:
-/// recorded state parses, the current artifacts.json digest matches the one
-/// the reports were derived from, and every report file still hashes to its
-/// recorded digest. Transient allocations come from `gpa`.
+/// recorded state parses, the compiler identity matches (an upgraded binary
+/// must not reuse stale evidence), the current artifacts.json digest matches
+/// the one the reports were derived from, and every report file still hashes
+/// to its recorded digest. Transient allocations come from `gpa`.
 pub fn reuseValid(
     io: Io,
     dist_dir: Io.Dir,
     gpa: std.mem.Allocator,
     target_name: []const u8,
+    current_compiler_id: []const u8,
 ) bool {
-    const state = loadState(io, dist_dir, gpa, target_name) orelse return false;
+    // loadState validates compiler_id match; absent or stale identity falls
+    // back to full derivation (fail-closed).
+    const state = loadState(io, dist_dir, gpa, target_name, current_compiler_id) orelse return false;
 
     const current_artifacts = sha256HexOfFile(io, dist_dir, gpa, artifacts_path) orelse return false;
     if (!std.mem.eql(u8, &current_artifacts, &state.artifacts_hex)) return false;
@@ -146,6 +158,7 @@ pub fn record(
     dist_dir: Io.Dir,
     gpa: std.mem.Allocator,
     target_name: []const u8,
+    current_compiler_id: []const u8,
 ) void {
     const sub = stateSubPath(gpa, target_name) orelse return;
     defer gpa.free(sub);
@@ -160,6 +173,8 @@ pub fn record(
     defer buf.deinit(gpa);
     buf.appendSlice(gpa, "{\"format\":") catch return;
     appendJsonString(gpa, &buf, state_format) catch return;
+    buf.appendSlice(gpa, ",\"compiler_id\":") catch return;
+    appendJsonString(gpa, &buf, current_compiler_id) catch return;
     buf.appendSlice(gpa, ",\"target\":") catch return;
     appendJsonString(gpa, &buf, target_name) catch return;
     buf.appendSlice(gpa, ",\"artifacts_sha256\":") catch return;
