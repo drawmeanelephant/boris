@@ -252,7 +252,9 @@ When `{{children}}` is present, Boris emits only the current frozen node's
 When the layout contains `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, or
 `{{children}}`, each such page fingerprint includes a **site nav material**
 digest derived from the frozen ordered list of `(id, title, parent, role)` for
-every page. This conservative shared material keeps title, output-path, parent,
+every page: the raw material is hashed once per build, and each page
+fingerprint folds in that fixed-size SHA-256 digest rather than rehashing the
+per-page-count material. This conservative shared material keeps title, output-path, parent,
 and direct-child changes correct across incremental builds; a title or parent
 change on any page dirties every page using graph chrome. Layouts without graph
 chrome keep the prior page-local fingerprint inputs
@@ -268,7 +270,7 @@ published as IR or RAG semantic edges.
 On `--incremental`, a page is **reused** only when all of the following hold:
 
 1. Prior `dist/.boris-cache/manifest.json` parses and its `format_version`
-   equals the fingerprint discriminator (`boris-cache-v2-layout-rules`).
+   equals the fingerprint discriminator (`boris-cache-v3-nav-digest`).
 2. A manifest entry matches the page’s `entity_id`, `output_path`, effective
    `selected_layout`, and current **input** fingerprint (source / includes /
    selected layout path+bytes / target / nav material / theme material).

@@ -574,6 +574,17 @@ fn materialFromIdLocs(
     nodes: []const graph_mod.Node,
     fail_out: ?*FailInfo,
 ) WikiError![]u8 {
+    var node_map = try buildNodeMap(allocator, nodes);
+    defer node_map.deinit(allocator);
+    return materialFromIdLocsWithMap(allocator, locs, &node_map, fail_out);
+}
+
+fn materialFromIdLocsWithMap(
+    allocator: std.mem.Allocator,
+    locs: []const IdLoc,
+    node_map: *const NodeMap,
+    fail_out: ?*FailInfo,
+) WikiError![]u8 {
     if (locs.len == 0) return try allocator.dupe(u8, "");
 
     const sorted = try allocator.alloc(IdLoc, locs.len);
@@ -585,13 +596,10 @@ fn materialFromIdLocs(
         }
     }.less);
 
-    var node_map = try buildNodeMap(allocator, nodes);
-    defer node_map.deinit(allocator);
-
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     for (sorted) |loc| {
-        const node = findNodeMap(&node_map, loc.id) orelse {
+        const node = findNodeMap(node_map, loc.id) orelse {
             if (fail_out) |f| f.set(loc.line, loc.column, loc.id, loc.locus);
             return error.ReferenceMissing;
         };
@@ -633,6 +641,22 @@ pub fn referenceMaterialMulti(
     fail_out: ?*FailInfo,
     opts: ResolveOptions,
 ) WikiError![]u8 {
+    var node_map = try buildNodeMap(allocator, nodes);
+    defer node_map.deinit(allocator);
+    return referenceMaterialMultiWithMap(allocator, bodies, body_paths, &node_map, fail_out, opts);
+}
+
+/// Union wiki targets from multiple bodies using a caller-shared node map
+/// (#727), so per-page fingerprint passes stop rebuilding it. Behaviorally
+/// identical to `referenceMaterialMulti` over the same nodes.
+pub fn referenceMaterialMultiWithMap(
+    allocator: std.mem.Allocator,
+    bodies: []const []const u8,
+    body_paths: ?[]const []const u8,
+    node_map: *const NodeMap,
+    fail_out: ?*FailInfo,
+    opts: ResolveOptions,
+) WikiError![]u8 {
     if (body_paths) |paths| {
         if (paths.len != bodies.len) return error.PathError;
     }
@@ -644,7 +668,7 @@ pub fn referenceMaterialMulti(
         const path = if (body_paths) |paths| paths[i] else "";
         try collectIdsFromBody(body, path, allocator, &locs, &seen, fail_out, opts);
     }
-    return materialFromIdLocs(allocator, locs.items, nodes, fail_out);
+    return materialFromIdLocsWithMap(allocator, locs.items, node_map, fail_out);
 }
 
 pub fn errorCode(err: WikiError) diag.Code {
@@ -886,6 +910,44 @@ test "shared node map rewrite matches per-page rewrite" {
     try std.testing.expectError(
         error.ReferenceMissing,
         rewriteWikiLinksWithMapOpts(gpa, bad, &map, "index.html", &shared_fail, .{}),
+    );
+    try std.testing.expectEqualStrings(classic_fail.detail(), shared_fail.detail());
+}
+
+test "shared node map reference material matches per-page material" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{
+            .id = "guides/overview",
+            .source_path = "guides/overview.md",
+            .title = "Content Model",
+            .role = .trunk,
+            .index = 0,
+        },
+    };
+    var map = try buildNodeMap(gpa, &nodes);
+    defer map.deinit(gpa);
+
+    const bodies = [_][]const u8{ "Link [[guides/overview]] here.", "Include [[guides/overview|guide]] too." };
+    const paths = [_][]const u8{ "page.md", "include.md" };
+
+    const classic = try referenceMaterialMulti(gpa, &bodies, &paths, &nodes, null, .{});
+    defer gpa.free(classic);
+    const shared = try referenceMaterialMultiWithMap(gpa, &bodies, &paths, &map, null, .{});
+    defer gpa.free(shared);
+    try std.testing.expectEqualStrings(classic, shared);
+
+    // Missing targets fail identically through both entry points.
+    const bad_bodies = [_][]const u8{"Link [[no/such/page]] here."};
+    var classic_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        referenceMaterialMulti(gpa, &bad_bodies, null, &nodes, &classic_fail, .{}),
+    );
+    var shared_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        referenceMaterialMultiWithMap(gpa, &bad_bodies, null, &map, &shared_fail, .{}),
     );
     try std.testing.expectEqualStrings(classic_fail.detail(), shared_fail.detail());
 }

@@ -7,8 +7,8 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 ///
 /// Bumped only when fingerprint inputs or manifest discriminator semantics
 /// change. Layout-rule selection records the effective selected layout per
-/// page (`boris-cache-v2-layout-rules`); older manifests force a cold rebuild.
-pub const CACHE_FORMAT_VERSION = "boris-cache-v2-layout-rules";
+/// page (`boris-cache-v3-nav-digest`); older manifests force a cold rebuild.
+pub const CACHE_FORMAT_VERSION = "boris-cache-v3-nav-digest";
 
 /// Hash a u64 length prefix in fixed little-endian (host-independent).
 fn updateLen(hasher: *Sha256, len: u64) void {
@@ -57,7 +57,7 @@ pub fn computePageFingerprint(
     source_bytes: []const u8,
     include_deps: []const []const u8,
     layout_bytes: []const u8,
-    site_nav_material: []const u8,
+    site_nav_digest: []const u8,
 ) [32]u8 {
     return computePageFingerprintTheme(
         target_name,
@@ -66,7 +66,7 @@ pub fn computePageFingerprint(
         source_bytes,
         include_deps,
         layout_bytes,
-        site_nav_material,
+        site_nav_digest,
         "",
     );
 }
@@ -81,7 +81,7 @@ pub fn computePageFingerprintTheme(
     source_bytes: []const u8,
     include_deps: []const []const u8,
     layout_bytes: []const u8,
-    site_nav_material: []const u8,
+    site_nav_digest: []const u8,
     theme_material: []const u8,
 ) [32]u8 {
     return computePageFingerprintThemeInput(
@@ -91,7 +91,7 @@ pub fn computePageFingerprintTheme(
         source_bytes,
         include_deps,
         layout_bytes,
-        site_nav_material,
+        site_nav_digest,
         theme_material,
         "",
     );
@@ -106,7 +106,7 @@ pub fn computePageFingerprintThemeInput(
     source_bytes: []const u8,
     include_deps: []const []const u8,
     layout_bytes: []const u8,
-    site_nav_material: []const u8,
+    site_nav_digest: []const u8,
     theme_material: []const u8,
     input_material: []const u8,
 ) [32]u8 {
@@ -117,7 +117,7 @@ pub fn computePageFingerprintThemeInput(
         source_bytes,
         include_deps,
         layout_bytes,
-        site_nav_material,
+        site_nav_digest,
         theme_material,
         input_material,
         null,
@@ -136,7 +136,7 @@ pub fn computePageFingerprintThemeInputCounted(
     source_bytes: []const u8,
     include_deps: []const []const u8,
     layout_bytes: []const u8,
-    site_nav_material: []const u8,
+    site_nav_digest: []const u8,
     theme_material: []const u8,
     input_material: []const u8,
     hashed_bytes: ?*u64,
@@ -179,12 +179,13 @@ pub fn computePageFingerprintThemeInputCounted(
     hasher.update(layout_bytes);
     total += layout_bytes.len + 8;
 
-    // 6. Site nav material (Feature 6) — only when non-empty so content-only
-    // layouts keep prior fingerprint inputs.
-    if (site_nav_material.len > 0) {
-        updateLen(&hasher, site_nav_material.len);
-        hasher.update(site_nav_material);
-        total += site_nav_material.len + 8;
+    // 6. Site nav digest — the fixed-size SHA-256 of the raw site nav
+    // material, computed once per build (#727). Only when non-empty so
+    // content-only layouts keep prior fingerprint inputs.
+    if (site_nav_digest.len > 0) {
+        updateLen(&hasher, site_nav_digest.len);
+        hasher.update(site_nav_digest);
+        total += site_nav_digest.len + 8;
     }
 
     // 7. Theme material (F9.1) — footer + referenced assets; empty keeps legacy digests.
