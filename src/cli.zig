@@ -206,6 +206,9 @@ pub const Options = struct {
     owned_html_layout: bool = false,
     /// Explicit incremental HTML build mode (HTML mode only).
     incremental: bool = false,
+    /// Force full publication-evidence re-derivation even when reuse applies
+    /// (HTML mode only, #728).
+    refresh_evidence: bool = false,
     /// Bounded parallel rendering worker count (HTML mode only).
     jobs: usize = 1,
     /// Opt-in local-development watch mode for HTML builds and, with the
@@ -525,6 +528,7 @@ const ParseState = struct {
     saw_html_layout: bool = false,
     saw_theme: bool = false,
     saw_incremental: bool = false,
+    saw_refresh_evidence: bool = false,
     saw_jobs: bool = false,
     saw_watch: bool = false,
     saw_watch_json: bool = false,
@@ -698,6 +702,7 @@ const ModeBoolFlag = enum {
     sitemap,
     html,
     incremental,
+    refresh_evidence,
     watch,
     serve,
     watch_json,
@@ -718,6 +723,7 @@ const mode_bool_flags = [_]struct { name: []const u8, flag: ModeBoolFlag }{
     .{ .name = "--sitemap", .flag = .sitemap },
     .{ .name = "--html", .flag = .html },
     .{ .name = "--incremental", .flag = .incremental },
+    .{ .name = "--refresh-evidence", .flag = .refresh_evidence },
     .{ .name = "--watch", .flag = .watch },
     .{ .name = "--serve", .flag = .serve },
     .{ .name = "--watch-json", .flag = .watch_json },
@@ -744,6 +750,7 @@ fn applyModeBoolFlag(st: *ParseState, entry: ModeBoolFlag) ParseError!void {
         .sitemap => &st.saw_sitemap,
         .html => &st.saw_html,
         .incremental => &st.saw_incremental,
+        .refresh_evidence => &st.saw_refresh_evidence,
         .watch => &st.saw_watch,
         .serve => &st.saw_serve,
         .watch_json => &st.saw_watch_json,
@@ -1451,7 +1458,7 @@ fn buildNostrPlanOptions(st: *ParseState) ParseError!Options {
     // stdout belongs to the single plan document — hence no `--timings`.
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or st.wantsSitemap() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental)
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence)
     {
         return error.ConflictingFlags;
     }
@@ -1481,7 +1488,7 @@ fn buildNostrSignOptions(st: *ParseState) ParseError!Options {
     if (!st.nostr_key_stdin) return error.MissingValue;
     if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs)
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
         return error.ConflictingFlags;
     }
@@ -1515,7 +1522,7 @@ fn buildNostrPublishOptions(st: *ParseState) ParseError!Options {
     if (st.nostr_bundle_path == null) return error.MissingValue;
     if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs)
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
         return error.ConflictingFlags;
     }
@@ -1545,7 +1552,7 @@ fn buildInitOptions(st: *ParseState) ParseError!Options {
     if (st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
         st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
-        st.saw_profile or st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_out or st.saw_rag_dir or st.saw_incremental or st.saw_jobs)
+        st.saw_profile or st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_out or st.saw_rag_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
         return error.ConflictingFlags;
     }
@@ -1577,7 +1584,7 @@ fn buildRecipeScaleOptions(st: *ParseState) ParseError!Options {
     // JSON stream.
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs or st.saw_profile)
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile)
     {
         return error.ConflictingFlags;
     }
@@ -1610,7 +1617,7 @@ fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
         st.wantsSitemap() or st.wantsRag() or st.saw_no_rag or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
         st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
         st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_rag_dir or st.saw_scope or st.saw_split_size or st.saw_bundles_only or st.saw_complete or
-        st.saw_incremental or st.saw_jobs or st.saw_llms_path or st.saw_rss_path or st.saw_sitemap_path or st.saw_context_dir)
+        st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_llms_path or st.saw_rss_path or st.saw_sitemap_path or st.saw_context_dir)
     {
         return error.ConflictingStandardSiteFlags;
     }
@@ -1718,7 +1725,7 @@ fn validateBuildConflicts(st: *const ParseState) ParseError!void {
         // select another projection or imply filesystem state.
         if (st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or
             st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_scope or
-            st.saw_split_size or st.saw_bundles_only or st.saw_incremental or st.saw_jobs or
+            st.saw_split_size or st.saw_bundles_only or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or
             st.saw_format)
         {
             return error.ConflictingFlags;
@@ -1736,7 +1743,7 @@ fn validateBuildConflicts(st: *const ParseState) ParseError!void {
     }
 
     if (st.command == .check or st.command == .impact) {
-        if (st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.wantsSitemap() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.explicitHtml() or st.saw_jobs or st.saw_watch or st.saw_incremental or st.saw_theme or st.saw_html_layout or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules()) {
+        if (st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.wantsSitemap() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.explicitHtml() or st.saw_jobs or st.saw_watch or st.saw_incremental or st.saw_refresh_evidence or st.saw_theme or st.saw_html_layout or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules()) {
             return error.ConflictingFlags;
         }
     } else if (st.command == .build and st.saw_format) {
@@ -1794,7 +1801,7 @@ fn validateProjectionConflicts(st: *const ParseState) ParseError!void {
         return error.ConflictingFlags;
     }
     // HTML-only options conflict with IR or RAG selection (default HTML is fine).
-    if ((st.saw_jobs or st.saw_watch or st.saw_incremental) and (wants_ir or wants_rag or wants_context or wants_rss)) {
+    if ((st.saw_jobs or st.saw_watch or st.saw_incremental or st.saw_refresh_evidence) and (wants_ir or wants_rag or wants_context or wants_rss)) {
         return error.ConflictingFlags;
     }
     // Target conflict rules
@@ -2032,6 +2039,7 @@ fn buildOptionsForMode(
             o.html_layout = st.html_layout;
             o.owned_html_layout = st.owned_html_layout;
             o.incremental = st.saw_incremental or st.saw_watch;
+            o.refresh_evidence = st.saw_refresh_evidence;
             o.jobs = st.jobs;
             o.watch = st.saw_watch;
             o.watch_json = st.saw_watch_json;
@@ -2179,6 +2187,8 @@ pub fn printUsage() void {
         \\  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
         \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
+        \\  --refresh-evidence  Force full evidence re-derivation, skipping reuse of
+        \\                      unchanged committed evidence (HTML mode, #728)
         \\  --watch             Compatibility flag; same as the watch command; with `validate`
         \\                      starts the zero-write validation daemon (validate --watch)
         \\  --watch-json        Emit one NDJSON event per build phase on stderr (watch only,
