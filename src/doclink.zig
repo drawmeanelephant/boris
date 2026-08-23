@@ -305,14 +305,37 @@ fn rewriteDestination(allocator: std.mem.Allocator, destination: []const u8, opt
     return try std.fmt.allocPrint(allocator, "{s}{s}", .{ href, split.suffix });
 }
 
-pub fn rewrite(allocator: std.mem.Allocator, body: []const u8, options: Options) ![]u8 {
-    var nodes: std.StringHashMapUnmanaged(graph_mod.Node) = .{};
-    defer nodes.deinit(allocator);
-    try nodes.ensureTotalCapacity(allocator, @intCast(options.nodes.len));
-    for (options.nodes) |node| {
-        const gop = try nodes.getOrPut(allocator, node.source_path);
+/// source_path → node lookup over the frozen graph, reusable across pages of
+/// one build (#726). Build once with `buildSourceNodeMap` and pass to
+/// `rewriteWithSourceMap`; contents must cover the same node list every
+/// rendered page would otherwise receive.
+pub const SourceNodeMap = std.StringHashMapUnmanaged(graph_mod.Node);
+
+pub fn buildSourceNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !SourceNodeMap {
+    var map: SourceNodeMap = .{};
+    errdefer map.deinit(allocator);
+    try map.ensureTotalCapacity(allocator, @intCast(nodes.len));
+    for (nodes) |node| {
+        const gop = try map.getOrPut(allocator, node.source_path);
         if (!gop.found_existing) gop.value_ptr.* = node;
     }
+    return map;
+}
+
+pub fn rewrite(allocator: std.mem.Allocator, body: []const u8, options: Options) ![]u8 {
+    var nodes = try buildSourceNodeMap(allocator, options.nodes);
+    defer nodes.deinit(allocator);
+    return rewriteWithSourceMap(allocator, body, options, &nodes);
+}
+
+/// Rewrite documentation links using a caller-shared map instead of rebuilding
+/// one per page. Behaviorally identical to `rewrite` over the same nodes.
+pub fn rewriteWithSourceMap(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    options: Options,
+    source_map: *const SourceNodeMap,
+) ![]u8 {
     if (options.nodes.len == 0) return try allocator.dupe(u8, body);
 
     var out: std.ArrayList(u8) = .empty;
@@ -392,11 +415,11 @@ pub fn rewrite(allocator: std.mem.Allocator, body: []const u8, options: Options)
                 if (label_end + 1 < body.len and body[label_end + 1] == '(') {
                     if (parseDestination(body, label_end + 1)) |dest| {
                         if (options.reference_ids) |references| {
-                            if (try destinationNode(allocator, body[dest.start..dest.end], options, &nodes)) |node| {
+                            if (try destinationNode(allocator, body[dest.start..dest.end], options, source_map)) |node| {
                                 try references.append(allocator, node.id);
                             }
                         }
-                        const maybe = try rewriteDestination(allocator, body[dest.start..dest.end], options, &nodes);
+                        const maybe = try rewriteDestination(allocator, body[dest.start..dest.end], options, source_map);
                         if (maybe) |href| {
                             defer allocator.free(href);
                             try out.appendSlice(allocator, body[copy_from..dest.start]);

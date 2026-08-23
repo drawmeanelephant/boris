@@ -51,6 +51,7 @@ const html_toc = @import("html_toc.zig");
 const html_body = @import("html_body.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
+const doclink = @import("doclink.zig");
 const json_out = @import("json_out.zig");
 const pipeline = @import("pipeline.zig");
 const theme_mod = @import("theme.zig");
@@ -712,6 +713,12 @@ fn promoteScannedPages(
 pub const RenderOptions = struct {
     site: ?*const FrozenSite = null,
     heading_index: ?*const wikilink.HeadingIndex = null,
+    /// Prebuilt wiki id→node map covering `site.?.nodes`, shared across the
+    /// page loop (#726). When null, each wiki-linked page builds its own.
+    shared_node_map: ?*const wikilink.NodeMap = null,
+    /// Prebuilt source_path→node map covering `site.?.nodes` for the
+    /// documentation-link rewrite (#726). Same sharing contract.
+    shared_doclink_map: ?*const doclink.SourceNodeMap = null,
     theme: ?*const theme_mod.ThemeBundle = null,
     page_assets: ?*const content_asset.PageAssetBundle = null,
     /// Standard.site verification surfaces for the compiler-owned `{{head}}`
@@ -721,6 +728,21 @@ pub const RenderOptions = struct {
     /// Nostr head config for the same slot. Composed after Standard.site.
     nostr_head: ?*const nostr_emit.HeadConfig = null,
 };
+
+/// Build the per-pass shared node maps (#726): wiki rewrite keys by entity id,
+/// documentation-link rewrite by source_path. Null members let every page fall
+/// back to its own per-page map exactly as before.
+fn buildSharedWikiNodeMap(gpa: std.mem.Allocator, site: ?*const FrozenSite) !?wikilink.NodeMap {
+    const s = site orelse return null;
+    if (s.nodes.len == 0) return null;
+    return try wikilink.buildNodeMap(gpa, s.nodes);
+}
+
+fn buildSharedDoclinkNodeMap(gpa: std.mem.Allocator, site: ?*const FrozenSite) !?doclink.SourceNodeMap {
+    const s = site orelse return null;
+    if (s.nodes.len == 0) return null;
+    return try doclink.buildSourceNodeMap(gpa, s.nodes);
+}
 
 /// Render one page through the canonical prepublication body and layout-slot
 /// preparation path. Returned slices live on `doc_arena`; callers must keep
@@ -758,6 +780,8 @@ fn renderPageSlots(
     const html = try html_body.renderSource(io, gpa, content_dir, doc_arena, source, page.source_path, page.output_path, .{
         .input_format = options.input_format,
         .nodes = if (render_opts.site) |s| s.nodes else &.{},
+        .shared_node_map = render_opts.shared_node_map,
+        .shared_doclink_map = render_opts.shared_doclink_map,
         .heading_index = render_opts.heading_index,
         .page_assets = render_opts.page_assets,
         .diagnostics = options.diagnostics,
@@ -1447,6 +1471,9 @@ const ParallelContext = struct {
     options: CompileOptions,
     is_dirty: []const bool,
     site: ?*const FrozenSite,
+    /// Immutable after workers start; concurrent read-only map access is safe.
+    shared_node_map: ?*const wikilink.NodeMap = null,
+    shared_doclink_map: ?*const doclink.SourceNodeMap = null,
     heading_index: ?*const wikilink.HeadingIndex,
     theme: ?*const theme_mod.ThemeBundle,
     content_assets: ?*const content_asset.SiteAssetInventory = null,
@@ -1499,6 +1526,8 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 page_index,
                 .{
                     .site = ctx.site,
+                    .shared_node_map = ctx.shared_node_map,
+                    .shared_doclink_map = ctx.shared_doclink_map,
                     .heading_index = ctx.heading_index,
                     .theme = ctx.theme,
                     .page_assets = page_assets,
@@ -2682,6 +2711,12 @@ fn renderPages(
     var stats: CompileStats = .{};
 
     if (options.timings) |t| t.start(.render);
+    // Per-pass shared node maps (#726): workers/serial pages reuse them
+    // read-only instead of rebuilding maps on every page.
+    var shared_wiki_map = try buildSharedWikiNodeMap(gpa, site);
+    defer if (shared_wiki_map) |*m| m.deinit(gpa);
+    var shared_doclink_map = try buildSharedDoclinkNodeMap(gpa, site);
+    defer if (shared_doclink_map) |*m| m.deinit(gpa);
     if (options.jobs > 1) {
         var ctx = ParallelContext{
             .gpa = gpa,
@@ -2693,6 +2728,8 @@ fn renderPages(
             .options = options,
             .is_dirty = is_dirty,
             .site = site,
+            .shared_node_map = if (shared_wiki_map) |*m| m else null,
+            .shared_doclink_map = if (shared_doclink_map) |*m| m else null,
             .heading_index = heading_index,
             .theme = theme_bundle,
             .content_assets = content_assets,
@@ -2769,6 +2806,8 @@ fn renderPages(
                     page_index,
                     .{
                         .site = site,
+                        .shared_node_map = if (shared_wiki_map) |*m| m else null,
+                        .shared_doclink_map = if (shared_doclink_map) |*m| m else null,
                         .heading_index = heading_index,
                         .theme = theme_bundle,
                         .page_assets = &content_assets.pages[page_index],
