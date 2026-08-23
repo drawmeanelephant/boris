@@ -61,21 +61,20 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    # Both Zig caches live outside the checkout: gitignored paths survive
-    # actions/checkout on reused runners, so a cancelled run can persist a
-    # partial cache entry (manifest without payload) that deterministically
-    # fails later installs on that runner (#735 CI incident).
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}-zig-global-cache
-      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}-zig-local-cache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # setup-zig redirects all Zig caches into one cross-run-cached
+      # directory; a run cancelled mid-build once persisted a partial cache
+      # entry (manifest without payload) that then failed every later macOS
+      # install deterministically (#735 CI incident). Fresh builds are the
+      # honest baseline for the release gate.
       - name: Install Zig
         uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+          use-cache: false
 
       - name: Format check
         run: zig fmt --check build.zig build.zig.zon src tools test fixtures
