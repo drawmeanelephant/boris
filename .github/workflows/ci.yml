@@ -61,12 +61,13 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    # Keep the Zig *global* cache outside the checkout: when both cache dirs
-    # share the workspace path, a cancelled run can persist a partial cache
-    # entry (manifest without payload) that deterministically fails later
-    # installs on the same reused runner (#735 CI incident).
+    # Both Zig caches live outside the checkout: gitignored paths survive
+    # actions/checkout on reused runners, so a cancelled run can persist a
+    # partial cache entry (manifest without payload) that deterministically
+    # fails later installs on that runner (#735 CI incident).
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}-zig-global-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}-zig-local-cache
     steps:
       - name: Checkout
         uses: actions/checkout@v4
