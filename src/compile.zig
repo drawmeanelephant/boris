@@ -7114,6 +7114,112 @@ test "search publication excludes draft pages while the link audit still resolve
     try std.testing.expect(std.mem.indexOf(u8, search_json, "\"path\": \"index.html\"") != null);
 }
 
+test "default target emits draft pages but prunes them from nav and children (#738)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/nav-draft", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body><nav>NAV<{{nav}}>ENDNAV</nav>BREAD<{{breadcrumb}}>ENDBREAD{{content}}KIDS<{{children}}>ENDKIDS</body></html>");
+    // The published home page links to the draft; the link audit must keep
+    // resolving it because a draft still renders to HTML.
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: Home\n---\n# Home\n\n[draft](secret.html)\n");
+    try writeTreeFile(io, work, "content/guides/a.md", "---\ntitle: Guide A\nparent: index\n---\n# A\n");
+    try writeTreeFile(io, work, "content/secret.md", "---\ntitle: Secret\nstatus: draft\n---\n# SECRETBODYTOKEN\n");
+    // A published satellite under the drafted trunk: emitted, but its nav
+    // subtree is pruned until the trunk publishes.
+    try writeTreeFile(io, work, "content/secret/kid.md", "---\ntitle: Kid\nparent: secret\n---\n# Kid\n");
+    // Archived stays advertised (consistent with Standard.site / Nostr).
+    try writeTreeFile(io, work, "content/archived.md", "---\ntitle: Archived\nstatus: archived\n---\n# Archived\n");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+
+    // Emitted but unadvertised.
+    const secret_html = try std.fmt.allocPrint(gpa, "{s}/secret.html", .{dist});
+    defer gpa.free(secret_html);
+    const secret_bytes = try readFileAlloc(io, cwd, secret_html, gpa);
+    defer gpa.free(secret_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, secret_bytes, "SECRETBODYTOKEN") != null);
+    // The draft trunk's own nav prunes itself and its subtree; its own
+    // {{children}} still lists the published kid (per-page context).
+    const secret_nav = navSegment(secret_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, secret_nav, "secret.html") == null);
+    try std.testing.expect(std.mem.indexOf(u8, secret_nav, ">Kid</a>") == null);
+
+    const kid_html = try std.fmt.allocPrint(gpa, "{s}/secret/kid.html", .{dist});
+    defer gpa.free(kid_html);
+    const kid_bytes = try readFileAlloc(io, cwd, kid_html, gpa);
+    defer gpa.free(kid_bytes);
+    // Breadcrumb context is not advertising: the drafted parent stays a crumb.
+    const kid_crumb = crumbSegment(kid_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, kid_crumb, ">Secret</a>") != null);
+
+    const index_html = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_html);
+    var home_bytes = try readFileAlloc(io, cwd, index_html, gpa);
+    defer gpa.free(home_bytes);
+    var home_nav = navSegment(home_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Secret</a>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Guide A</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Archived</a>") != null);
+
+    // The draft remains a graph/cache member: the manifest still lists it.
+    const manifest_path = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/manifest.json", .{dist});
+    defer gpa.free(manifest_path);
+    const manifest_bytes = try readFileAlloc(io, cwd, manifest_path, gpa);
+    defer gpa.free(manifest_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, manifest_bytes, "\"entity_id\": \"secret\"") != null);
+
+    // Publishing the draft dirties chrome through the status-aware nav
+    // material: an incremental rebuild must start advertising it.
+    try writeTreeFile(io, work, "content/secret.md", "---\ntitle: Secret\nstatus: published\n---\n# SECRETBODYTOKEN\n");
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+    gpa.free(home_bytes);
+    home_bytes = try readFileAlloc(io, cwd, index_html, gpa);
+    home_nav = navSegment(home_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Secret</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Kid</a>") != null);
+}
+
+/// Slice the `NAV<…>ENDNAV` segment of the test layout's output.
+fn navSegment(bytes: []const u8) []const u8 {
+    const start = std.mem.indexOf(u8, bytes, "NAV<") orelse return "";
+    const end = std.mem.indexOf(u8, bytes, ">ENDNAV") orelse return "";
+    if (end < start) return "";
+    return bytes[start + 4 .. end];
+}
+
+/// Slice the `BREAD<…>ENDBREAD` segment of the test layout's output.
+fn crumbSegment(bytes: []const u8) []const u8 {
+    const start = std.mem.indexOf(u8, bytes, "BREAD<") orelse return "";
+    const end = std.mem.indexOf(u8, bytes, ">ENDBREAD") orelse return "";
+    if (end < start) return "";
+    return bytes[start + 6 .. end];
+}
+
 test "HTML sitemap uses the staged live overlay and is deterministic across clean incremental and parallel builds" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
