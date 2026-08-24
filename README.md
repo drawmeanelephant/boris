@@ -2,6 +2,8 @@
 
 **The Content Exit Hatch**
 
+[![Greptile: The War on Bugs](https://www.greptile.com/badge.svg)](https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source)
+
 Boris is a graph-native publication compiler. It turns Markdown into a
 validated content graph, then publishes that graph to one or more contracted
 targets. HTML `dist/` is the default target, not the whole product.
