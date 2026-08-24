@@ -355,7 +355,7 @@ test "draft-rooted subtrees are pruned from nav and omitted from children" {
         if (std.mem.eql(u8, n.id, "index")) index_i = @intCast(i);
     }
 
-    const site = try renderNav(gpa, g.nodes, nav, index_i, "index.html");
+    const site = try renderNav(gpa, g.nodes, nav, index_i, "index.html", null);
     defer gpa.free(site);
     try std.testing.expect(std.mem.indexOf(u8, site, ">Alpha</a>") != null);
     try std.testing.expect(std.mem.indexOf(u8, site, ">Gamma</a>") != null);
