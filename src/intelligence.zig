@@ -28,6 +28,10 @@ pub const Endpoint = struct {
 pub const Page = struct {
     id: []const u8,
     parent: ?[]const u8 = null,
+    /// Content-root source path (e.g. `"guides/a.md"`). Incoming `include`
+    /// edges name this path, so pages without it can never be
+    /// include-consumed (#739). Optional for graph-only callers.
+    source_path: ?[]const u8 = null,
 };
 
 pub const Edge = struct {
@@ -115,14 +119,23 @@ pub fn analyze(
     }
     report.summary.source_endpoints = known_sources.count();
 
-    // A page is unreferenced only when no incoming reference edge points to it.
-    // Parent edges are navigation structure and do not count as references.
+    // A page is unreferenced only when no inbound use points to it. Parent
+    // edges are navigation structure and do not count. Include composition
+    // does count (#739): a fragment consumed by other pages through
+    // `{{include}}` is in active use even though no `reference` edge exists,
+    // and flagging it as unreferenced was a false positive.
     for (pages) |page| {
         const endpoint = Endpoint{ .type = .page, .value = page.id };
         var has_reference = false;
         for (edges) |edge| {
-            if (edge.kind.len == 9 and std.mem.eql(u8, edge.kind, "reference") and
-                Endpoint.eql(edge.to, endpoint))
+            const kind_is_reference = edge.kind.len == 9 and std.mem.eql(u8, edge.kind, "reference");
+            if (kind_is_reference and edge.to.type == .page and Endpoint.eql(edge.to, endpoint)) {
+                has_reference = true;
+                break;
+            }
+            const kind_is_include = edge.kind.len == 7 and std.mem.eql(u8, edge.kind, "include");
+            if (kind_is_include and edge.to.type == .source and page.source_path != null and
+                std.mem.eql(u8, edge.to.value, page.source_path.?))
             {
                 has_reference = true;
                 break;
@@ -218,6 +231,29 @@ test "analysis distinguishes parent edges from reference edges" {
     var report = try analyze(std.testing.allocator, &pages, &edges, .{});
     defer report.deinit();
     try std.testing.expectEqual(@as(usize, 2), report.summary.unreferenced_pages);
+}
+
+test "include composition counts as inbound use, not as unreferenced (#739)" {
+    const pages = [_]Page{
+        .{ .id = "index" },
+        .{ .id = "_includes/exit-codes", .source_path = "_includes/exit-codes.md" },
+        .{ .id = "orphan", .source_path = null },
+    };
+    const edges = [_]Edge{
+        // index composes the fragment; nothing references either by wiki-link.
+        .{ .from = .{ .type = .page, .value = "index" }, .to = .{ .type = .source, .value = "_includes/exit-codes.md" }, .kind = "include" },
+        // A same-valued parent edge must not suppress the finding.
+        .{ .from = .{ .type = .page, .value = "x" }, .to = .{ .type = .page, .value = "orphan" }, .kind = "parent" },
+    };
+    var report = try analyze(std.testing.allocator, &pages, &edges, .{});
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 2), report.summary.unreferenced_pages);
+    // The include-consumed fragment is absent; `index` and `orphan` remain.
+    var saw_fragment_finding = false;
+    for (report.findings.items) |f| {
+        if (std.mem.eql(u8, f.endpoint.value, "_includes/exit-codes")) saw_fragment_finding = true;
+    }
+    try std.testing.expect(!saw_fragment_finding);
 }
 
 test "analysis sorts findings and computes multi-hop impact" {

@@ -42,7 +42,11 @@ uses these precise categories:
 - **root** — a valid Trunk with no `parent`.
 - **satellite** — a valid page with a direct parent; that parent may itself be
   a Satellite.
-- **unreferenced** — no incoming `reference` edge from another page.
+- **unreferenced** — no incoming `reference` edge from another page and no
+  incoming `include` edge naming it. Include composition is inbound use: a
+  page consumed through `{{include}}` is never reported as unreferenced,
+  because composition by other pages is real dependency even without a
+  wiki-link.
 - **include-source** — a source dependency endpoint referenced by one or more
   pages or included sources.
 - **unreachable** — reserved for a future explicit entry-point policy; the
@@ -121,7 +125,9 @@ schema and bytes do not depend on this policy.
 ## Acceptance fixtures
 
 The first fixture set must cover one root Trunk and two Satellites; an
-unreferenced valid page; a shared include with fan-in; a multi-hop
+unreferenced valid page; a shared include with fan-in; an include-consumed
+page outside the reserved `includes/` library that must not be flagged
+unreferenced; a multi-hop
 include/reference impact chain; shuffled source creation order; invalid graph
 cases proving analysis does not run on an unfrozen graph; requested page/source,
 missing ID, invalid ID grammar; and empty/single-page sites.
