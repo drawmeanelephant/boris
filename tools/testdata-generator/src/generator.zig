@@ -1439,6 +1439,18 @@ fn readArtifactRecord(allocator: std.mem.Allocator, reader: *std.json.Reader) !A
                 },
                 else => return error.InvalidArtifactInventory,
             }
+        } else if (std.mem.eql(u8, key, "advertised")) {
+            // Extended page record (#752): null, true, or false; not needed by
+            // the generator, but the vocabulary is strict so an unknown shape
+            // still fails closed.
+            const token = try reader.nextAllocMax(allocator, .alloc_if_needed, 4096);
+            defer freeJsonToken(allocator, token);
+            switch (token) {
+                .null => {},
+                .true => {},
+                .false => {},
+                else => return error.InvalidArtifactInventory,
+            }
         } else {
             return error.InvalidArtifactInventory;
         }

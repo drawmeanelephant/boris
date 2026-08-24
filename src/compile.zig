@@ -3126,6 +3126,10 @@ fn writeInventoryOverlay(
             .producer = "html-render",
             .required = true,
             .allow_live = true,
+            // #752: a draft page is emitted but deliberately unadvertised.
+            // The rendered-search check consumes this so its eligible subject
+            // set mirrors the search producer's own filtered slice.
+            .advertised = page.status != .draft,
         });
     }
     for (theme_bundle.assets) |asset| {
@@ -7117,6 +7121,36 @@ test "search publication excludes draft pages while the link audit still resolve
     // assertions above without publishing anything searchable.
     try std.testing.expect(std.mem.indexOf(u8, search_json, "PUBLISHEDBODYTOKEN") != null);
     try std.testing.expect(std.mem.indexOf(u8, search_json, "\"path\": \"index.html\"") != null);
+
+    // #752: the inventory records advertisement per page, and the rendered-
+    // search check treats the unadvertised draft as ineligible instead of
+    // reporting a missing search document for intended state.
+    const artifacts_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist, artifact_inventory.output_path });
+    defer gpa.free(artifacts_path);
+    const artifacts_json = try readFileAlloc(io, cwd, artifacts_path, gpa);
+    defer gpa.free(artifacts_json);
+    const secret_record = try std.fmt.allocPrint(
+        gpa,
+        "{{\n      \"path\": \"secret.html\",\n      \"kind\": \"html-page\",\n      \"producer\": \"html-render\",\n      \"required\": true,\n      \"status\": \"committed\",\n      \"bytes\": {d},",
+        .{draft_bytes.len},
+    );
+    defer gpa.free(secret_record);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts_json, secret_record) != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts_json, "\"advertised\": false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts_json, "\"advertised\": true") != null);
+
+    const checks_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist, publication_checks.output_path });
+    defer gpa.free(checks_path);
+    const checks_json = try readFileAlloc(io, cwd, checks_path, gpa);
+    defer gpa.free(checks_json);
+    try std.testing.expect(std.mem.indexOf(u8, checks_json, "SEARCH_DOCUMENT_MISSING") == null);
+    const rendered_search_row = try std.fmt.allocPrint(
+        gpa,
+        "{{\n      \"id\": \"rendered-search\",\n      \"eligible\": true,\n      \"ran\": true,\n      \"status\": \"{s}\",",
+        .{publication_checks.Status.passed.name()},
+    );
+    defer gpa.free(rendered_search_row);
+    try std.testing.expect(std.mem.indexOf(u8, checks_json, rendered_search_row) != null);
 }
 
 test "default target emits draft pages but prunes them from nav and children (#738)" {

@@ -193,7 +193,7 @@ default HTML target a `status: draft` page is **emitted but not advertised**:
 | `{{nav}}` | **Pruned**, including the whole subtree below a drafted page (no re-rooting; publish the trunk to re-advertise its section). An all-draft forest still emits the empty `<nav>` wrapper shape. |
 | `{{children}}` | Direct draft children are **omitted**; an all-draft child list emits the empty fragment. |
 | `{{breadcrumb}}` | Unchanged — per-page context, not advertising; a drafted ancestor stays a crumb. |
-| Search index / sitemap / RSS | Excluded (same rule as before this section existed). |
+| Search index / sitemap / RSS | Excluded (same rule as before this section existed). The publication-checks report applies the same eligibility rule: an emitted draft is not a `rendered-search` check subject, so its absence from the index cannot fail that check (#752; inventory records the fact as `"advertised": false`). |
 | `{{metadata}}` on the drafted page itself | Unchanged (own-page context). |
 | `archived` | Treated exactly like published on the HTML target, consistent with Standard.site and Nostr eligibility. |
 | IR (`graph.json`) / RAG | Keep every validated page regardless of status; they are source-derived corpora, not publication advertisements. |

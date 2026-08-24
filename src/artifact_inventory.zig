@@ -127,6 +127,11 @@ pub const Spec = struct {
     required: bool = true,
     format_version: ?[]const u8 = null,
     allow_live: bool = false,
+    /// Publication-surface eligibility (#752): `false` marks an emitted page
+    /// that is deliberately unadvertised (`status: draft`) — committed HTML
+    /// excluded from public projections such as search and sitemap. Only
+    /// `html_page` specs carry a non-null value.
+    advertised: ?bool = null,
 };
 
 /// Explicit author-facing semantics for asset kinds (#396). Theme-owned
@@ -168,6 +173,11 @@ pub const Record = struct {
     /// Explicit static/content-reference semantics for asset kinds; null for
     /// non-asset records.
     semantics: ?AssetSemantics = null,
+    /// Publication-surface eligibility (#752): `false` marks an emitted page
+    /// that is deliberately unadvertised (`status: draft`) — committed HTML
+    /// excluded from public projections such as search and sitemap. Null on
+    /// non-page records and on inventories written before this field existed.
+    advertised: ?bool = null,
 };
 
 pub const Inventory = struct {
@@ -375,6 +385,7 @@ fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader)
     // before them round-trip with null; `undefined` would leave them garbage.
     record.dimensions = null;
     record.semantics = null;
+    record.advertised = null;
     errdefer freeRecord(gpa, record);
 
     var have_path = false;
@@ -387,6 +398,7 @@ fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader)
     var have_format_version = false;
     var have_dimensions = false;
     var have_semantics = false;
+    var have_advertised = false;
 
     while (true) {
         const key_token = try nextJsonAllocToken(gpa, reader, 4096);
@@ -504,6 +516,16 @@ fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader)
                 else => return error.InvalidInventory,
             }
             have_semantics = true;
+        } else if (std.mem.eql(u8, key, "advertised")) {
+            if (have_advertised) return error.InvalidInventory;
+            // Null stays eligible-by-default for non-page records.
+            record.advertised = switch (try nextJsonToken(reader)) {
+                .true => true,
+                .false => false,
+                .null => null,
+                else => return error.InvalidInventory,
+            };
+            have_advertised = true;
         } else {
             return error.InvalidInventory;
         }
@@ -674,6 +696,7 @@ pub fn collect(
                 .content_asset => .content_reference,
                 else => null,
             },
+            .advertised = spec.advertised,
         };
         filled += 1;
     }
@@ -730,6 +753,7 @@ pub fn collectFromPayloads(
                 .content_asset => .content_reference,
                 else => null,
             },
+            .advertised = spec.advertised,
         };
         filled += 1;
     }
@@ -798,6 +822,12 @@ pub fn render(gpa: std.mem.Allocator, inventory: *const Inventory) ![]u8 {
         try out.appendSlice(gpa, ",\n      \"semantics\": ");
         if (record.semantics) |semantics| {
             try json_out.writeString(&out, gpa, semantics.name());
+        } else {
+            try json_out.writeNull(&out, gpa);
+        }
+        try out.appendSlice(gpa, ",\n      \"advertised\": ");
+        if (record.advertised) |advertised| {
+            try json_out.writeBool(&out, gpa, advertised);
         } else {
             try json_out.writeNull(&out, gpa);
         }
@@ -992,6 +1022,8 @@ test "asset records carry dimensions and explicit semantics (#396)" {
     const page = inventory.records[3];
     try std.testing.expect(page.dimensions == null);
     try std.testing.expect(page.semantics == null);
+    // Specs without an explicit advertisement default to null (eligible).
+    try std.testing.expect(page.advertised == null);
 
     // Render/parse round-trip preserves the extended fields.
     const rendered = try render(gpa, &inventory);
@@ -1005,7 +1037,8 @@ test "asset records carry dimensions and explicit semantics (#396)" {
     try std.testing.expect(parsed.records[3].dimensions == null);
 
     // Absent extended fields parse as null (v1 fixture compatibility):
-    // inventories written before #396 have no dimensions/semantics keys.
+    // inventories written before #396 have no dimensions/semantics keys, and
+    // inventories written before #752 have no advertised key.
     // (Built with appends rather than allocPrint — this module is on the
     // json_out emitter tier, which bans raw formatting calls everywhere.)
     const digest = cache.hexDigest(cache.hashBytes("page"));
@@ -1021,6 +1054,7 @@ test "asset records carry dimensions and explicit semantics (#396)" {
     try std.testing.expectEqual(@as(usize, 1), legacy_inventory.records.len);
     try std.testing.expect(legacy_inventory.records[0].dimensions == null);
     try std.testing.expect(legacy_inventory.records[0].semantics == null);
+    try std.testing.expect(legacy_inventory.records[0].advertised == null);
 }
 
 test "inventory JSON has the fixed schema field set" {
@@ -1059,8 +1093,10 @@ test "inventory JSON has the fixed schema field set" {
     try std.testing.expect(item.get("format_version") != null);
     try std.testing.expect(item.get("dimensions") != null);
     try std.testing.expect(item.get("semantics") != null);
+    try std.testing.expect(item.get("advertised") != null);
     try std.testing.expect(item.get("dimensions").? == .null);
     try std.testing.expect(item.get("semantics").? == .null);
+    try std.testing.expect(item.get("advertised").? == .null);
 }
 
 test "published artifact schema matches the fixed runtime vocabulary" {
@@ -1099,7 +1135,7 @@ test "published artifact schema matches the fixed runtime vocabulary" {
         "format_version",
     });
     const properties = artifact.get("properties").?.object;
-    try std.testing.expectEqual(@as(usize, 10), properties.count());
+    try std.testing.expectEqual(@as(usize, 11), properties.count());
     for ([_][]const u8{
         "path",
         "kind",
@@ -1111,6 +1147,7 @@ test "published artifact schema matches the fixed runtime vocabulary" {
         "format_version",
         "dimensions",
         "semantics",
+        "advertised",
     }) |field| try std.testing.expect(properties.get(field) != null);
     try expectStringArray(properties.get("kind").?.object.get("enum").?, &[_][]const u8{
         "html-page",
