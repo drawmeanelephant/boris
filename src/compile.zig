@@ -7236,10 +7236,8 @@ test "{{nav depth=N}} caps the rendered forest while every page still builds (#7
     try cwd.createDirPath(io, work);
 
     // Deep chain: index → a → b → c → d (five rendered levels unbounded).
-    try writeTreeFile(io, work, "layouts/bounded.html",
-        "<html><body>NAV<{{nav depth=2}}>ENDNAV{{content}}</body></html>");
-    try writeTreeFile(io, work, "layouts/full.html",
-        "<html><body>NAV<{{nav}}>ENDNAV{{content}}</body></html>");
+    try writeTreeFile(io, work, "layouts/bounded.html", "<html><body>NAV<{{nav depth=2}}>ENDNAV{{content}}</body></html>");
+    try writeTreeFile(io, work, "layouts/full.html", "<html><body>NAV<{{nav}}>ENDNAV{{content}}</body></html>");
     try writeTreeFile(io, work, "content/index.md", "---\ntitle: L1\n---\n# L1\n");
     try writeTreeFile(io, work, "content/a.md", "---\ntitle: L2\nparent: index\n---\n# L2\n");
     try writeTreeFile(io, work, "content/b.md", "---\ntitle: L3\nparent: a\n---\n# L3\n");
