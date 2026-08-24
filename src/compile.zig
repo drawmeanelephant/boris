@@ -443,6 +443,7 @@ pub fn loadLayoutOnce(
         error.DuplicateContentMarker => return error.LayoutDuplicateMarker,
         error.DuplicateLayoutMarker => return error.LayoutDuplicateMarker,
         error.UnknownLayoutMarker => return error.LayoutUnknownMarker,
+        error.InvalidNavMarker => return error.LayoutInvalidNavMarker,
         error.TooManyLayoutSegments => return error.LayoutTooManySegments,
         error.InvalidAssetUrl => return error.LayoutInvalidAssetUrl,
         error.TooManyAssetUrls => return error.LayoutTooManyAssetUrls,
@@ -464,6 +465,7 @@ fn loadLayoutForOptions(
             error.DuplicateContentMarker => return error.LayoutDuplicateMarker,
             error.DuplicateLayoutMarker => return error.LayoutDuplicateMarker,
             error.UnknownLayoutMarker => return error.LayoutUnknownMarker,
+            error.InvalidNavMarker => return error.LayoutInvalidNavMarker,
             error.TooManyLayoutSegments => return error.LayoutTooManySegments,
             error.InvalidAssetUrl => return error.LayoutInvalidAssetUrl,
             error.TooManyAssetUrls => return error.LayoutTooManyAssetUrls,
@@ -831,7 +833,7 @@ fn renderPageSlots(
         const gi = s.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
         const node = s.nodes[gi];
         if (layout.has_nav) {
-            slots.nav = try html_nav.renderNav(arena, s.nodes, s.nav, gi, page.output_path);
+            slots.nav = try html_nav.renderNav(arena, s.nodes, s.nav, gi, page.output_path, layout.nav_depth);
         }
         if (layout.has_breadcrumb) {
             slots.breadcrumb = try html_nav.renderBreadcrumb(arena, s.nodes, s.nav, gi, page.output_path);
@@ -1174,6 +1176,7 @@ pub fn isContentCompileFailure(err: anyerror) bool {
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
+        error.LayoutInvalidNavMarker,
         error.LayoutTooManySegments,
         error.LayoutInvalidAssetUrl,
         error.LayoutTooManyAssetUrls,
@@ -1472,6 +1475,7 @@ pub fn validateHtmlSiteMulti(
 test "multi-target failure classification keeps I/O distinct from content" {
     try std.testing.expect(isContentCompileFailure(error.ParseFailed));
     try std.testing.expect(isContentCompileFailure(error.LayoutMissingMarker));
+    try std.testing.expect(isContentCompileFailure(error.LayoutInvalidNavMarker));
     try std.testing.expect(isContentCompileFailure(error.AssetUnsafeSvg));
     try std.testing.expect(isContentCompileFailure(error.LinkAuditFailed));
     try std.testing.expect(!isContentCompileFailure(error.AccessDenied));
@@ -1782,6 +1786,7 @@ fn layoutCodeFor(err: anyerror) diag.Code {
     return switch (err) {
         error.LayoutMissingMarker => .ELAYOUTMISSINGMARKER,
         error.LayoutUnknownMarker => .ELAYOUTUNKNOWNMARKER,
+        error.LayoutInvalidNavMarker, error.InvalidNavMarker => .ELAYOUTNAVDEPTH,
         error.LayoutDuplicateMarker => .ELAYOUTDUPLICATEMARKER,
         error.LayoutInvalidAssetUrl => .ELAYOUTASSET,
         error.LayoutTooManyAssetUrls => .ELAYOUTASSET,
@@ -7220,6 +7225,102 @@ fn crumbSegment(bytes: []const u8) []const u8 {
     return bytes[start + 6 .. end];
 }
 
+test "{{nav depth=N}} caps the rendered forest while every page still builds (#744)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/nav-depth", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    // Deep chain: index → a → b → c → d (five rendered levels unbounded).
+    try writeTreeFile(io, work, "layouts/bounded.html",
+        "<html><body>NAV<{{nav depth=2}}>ENDNAV{{content}}</body></html>");
+    try writeTreeFile(io, work, "layouts/full.html",
+        "<html><body>NAV<{{nav}}>ENDNAV{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: L1\n---\n# L1\n");
+    try writeTreeFile(io, work, "content/a.md", "---\ntitle: L2\nparent: index\n---\n# L2\n");
+    try writeTreeFile(io, work, "content/b.md", "---\ntitle: L3\nparent: a\n---\n# L3\n");
+    try writeTreeFile(io, work, "content/c.md", "---\ntitle: L4\nparent: b\n---\n# L4\n");
+    try writeTreeFile(io, work, "content/d.md", "---\ntitle: L5\nparent: c\n---\n# L5\n");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const bounded_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/bounded.html", .{work});
+    defer gpa.free(bounded_layout);
+    const full_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/full.html", .{work});
+    defer gpa.free(full_layout);
+    const bounded_dist = try std.fmt.allocPrint(gpa, "{s}/bounded", .{work});
+    defer gpa.free(bounded_dist);
+    const full_dist = try std.fmt.allocPrint(gpa, "{s}/full", .{work});
+    defer gpa.free(full_dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = bounded_dist,
+        .layout_path = bounded_layout,
+        .quiet = true,
+    });
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = full_dist,
+        .layout_path = full_layout,
+        .quiet = true,
+    });
+
+    // Every page builds under both layouts.
+    for ([_][]const u8{ "index.html", "a.html", "b.html", "c.html", "d.html" }) |page| {
+        const p = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ bounded_dist, page });
+        defer gpa.free(p);
+        const bp = try readFileAlloc(io, cwd, p, gpa);
+        defer gpa.free(bp);
+        const q = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ full_dist, page });
+        defer gpa.free(q);
+        const bq = try readFileAlloc(io, cwd, q, gpa);
+        defer gpa.free(bq);
+    }
+
+    // Bounded: level cap 2 renders trunks + direct children only; deeper
+    // titles never appear in any nav, including from the deep pages
+    // themselves.
+    const bounded_index = try std.fmt.allocPrint(gpa, "{s}/index.html", .{bounded_dist});
+    defer gpa.free(bounded_index);
+    const bi_bytes = try readFileAlloc(io, cwd, bounded_index, gpa);
+    defer gpa.free(bi_bytes);
+    const bi_nav = navSegmentForDepthTest(bi_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bi_nav, ">L1</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bi_nav, ">L2</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bi_nav, ">L3</a>") == null);
+
+    const bounded_deep = try std.fmt.allocPrint(gpa, "{s}/d.html", .{bounded_dist});
+    defer gpa.free(bounded_deep);
+    const bd_bytes = try readFileAlloc(io, cwd, bounded_deep, gpa);
+    defer gpa.free(bd_bytes);
+    const bd_nav = navSegmentForDepthTest(bd_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bd_nav, ">L2</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bd_nav, ">L5</a>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, bd_nav, ">L4</a>") == null);
+
+    // Unbounded control on the same tree: the deepest title is present and
+    // the bounded nav is strictly smaller.
+    const full_deep = try std.fmt.allocPrint(gpa, "{s}/d.html", .{full_dist});
+    defer gpa.free(full_deep);
+    const fd_bytes = try readFileAlloc(io, cwd, full_deep, gpa);
+    defer gpa.free(fd_bytes);
+    const fd_nav = navSegmentForDepthTest(fd_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, fd_nav, ">L5</a>") != null);
+    try std.testing.expect(bd_nav.len < fd_nav.len);
+}
+
+/// Slice the `NAV<…>ENDNAV` segment of this test's layout output.
+fn navSegmentForDepthTest(bytes: []const u8) []const u8 {
+    const start = std.mem.indexOf(u8, bytes, "NAV<") orelse return "";
+    const end = std.mem.indexOf(u8, bytes, ">ENDNAV") orelse return "";
+    if (end < start) return "";
+    return bytes[start + 4 .. end];
+}
 test "HTML sitemap uses the staged live overlay and is deterministic across clean incremental and parallel builds" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

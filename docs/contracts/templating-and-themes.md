@@ -98,7 +98,7 @@ The vocabulary has two construct kinds with different multiplicity rules:
 |---|---:|---|
 | `{{content}}` | yes | Rendered Markdown (Oliver) and ordered Aside HTML. Raw HTML behavior remains the current trusted-author behavior. |
 | `{{title}}` | no | Page `title`, or entity id when the title is absent; HTML-escaped text. |
-| `{{nav}}` | no | Deterministic graph forest from the frozen Trunk/Satellite graph; generated HTML as in `html-output.md`. |
+| `{{nav}}` | no | Deterministic graph forest from the frozen Trunk/Satellite graph; generated HTML as in `html-output.md`. May also be written `{{nav depth=N}}` (N ≥ 1, ASCII digits) to cap the rendered levels (level 1 = root Trunks); plain `{{nav}}` stays unbounded. Both spellings are the same once-per-layout slot. |
 | `{{breadcrumb}}` | no | Root-to-current graph chain; generated HTML as in `html-output.md`. |
 | `{{toc}}` | no | Page-local h1–h3 outline from Oliver-emitted heading ids; generated HTML as in `html-output.md`. |
 | `{{children}}` | no | Deterministic direct-child list from the frozen graph; title-or-id labels and links are escaped, and childless pages emit empty. No recursive graph semantics or query language is introduced. |
@@ -501,6 +501,7 @@ Node, a bundler, or network access.
 | 8 | Layout UTF-8 boundary | **F9.2** — `Layout.split` / `loadLayout` (`LayoutInvalidUtf8`) |
 | 9 | Orphan theme-asset scrub | **F9.2** — post-publish under managed theme roots only |
 | 10 | Footer UTF-8 boundary | **Accepted** — `footer.html` validated at theme load (`FooterInvalidUtf8`); same encoding contract as layout, even though footer is not marker-scanned |
+| 11 | Bounded site navigation | **Accepted** — `{{nav depth=N}}` (N ≥ 1) caps rendered levels; grammar extension over layout-rule or CSS-only alternatives (#744(3)) |
 
 ### Known limitations (not silent failures)
 

@@ -74,6 +74,9 @@ fn appendNavNode(
     current_index: u32,
     current_output_path: []const u8,
     is_root: bool,
+    /// 1-based level of `index` in the rendered forest (trunks = 1).
+    level: u32,
+    max_depth: ?u32,
 ) !void {
     const node = nodes[index];
     const out_path = try outputPathFor(allocator, node);
@@ -96,23 +99,27 @@ fn appendNavNode(
     try buf.appendSlice(allocator, "</a>");
 
     const children = nav[index].children;
-    // Open a nested list only when at least one child survives pruning, so an
-    // all-draft child set never leaves an empty (invalid) <ul> behind (#738).
+    // Open a nested list only while the next level stays within the requested
+    // depth cap AND at least one child survives draft pruning — an all-draft
+    // child set never leaves an empty (invalid) <ul> behind (#738, #744).
+    const within_depth = max_depth == null or level < max_depth.?;
     var any_advertised = false;
-    for (children) |ci| {
-        if (!isDraft(nodes[ci])) {
-            any_advertised = true;
-            break;
+    if (within_depth) {
+        for (children) |ci| {
+            if (!isDraft(nodes[ci])) {
+                any_advertised = true;
+                break;
+            }
         }
     }
-    if (any_advertised) {
+    if (within_depth and any_advertised) {
         try buf.appendSlice(allocator, "\n<ul>\n");
         for (children) |child_index| {
             // Prune draft-rooted subtrees: skipping the child skips everything
             // below it, so a published satellite under a draft section stays
             // emitted but unadvertised until its parent publishes (#738).
             if (isDraft(nodes[child_index])) continue;
-            try appendNavNode(allocator, buf, nodes, nav, child_index, current_index, current_output_path, false);
+            try appendNavNode(allocator, buf, nodes, nav, child_index, current_index, current_output_path, false, level + 1, max_depth);
         }
         try buf.appendSlice(allocator, "</ul>\n");
     }
@@ -120,14 +127,20 @@ fn appendNavNode(
 }
 
 /// Full site forest for `{{nav}}`, recursively rendering the frozen hierarchy.
+///
 /// Draft-rooted subtrees are pruned; the empty wrapper still emits when every
 /// trunk is drafted.
+///
+/// `max_depth` bounds the rendered levels (level 1 = root Trunks): `null`
+/// renders the unbounded whole forest (plain `{{nav}}`); `N ≥ 1` stops once
+/// `N` levels are emitted. Ordering is unchanged either way.
 pub fn renderNav(
     allocator: std.mem.Allocator,
     nodes: []const graph_mod.Node,
     nav: []const graph_mod.NavEntry,
     current_index: u32,
     current_output_path: []const u8,
+    max_depth: ?u32,
 ) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
@@ -137,7 +150,7 @@ pub fn renderNav(
     for (nodes, 0..) |node, i| {
         if (node.parent != null) continue; // trunks only (id order among frozen nodes)
         if (isDraft(node)) continue; // draft trunks are not advertised (#738)
-        try appendNavNode(allocator, &buf, nodes, nav, @intCast(i), current_index, current_output_path, true);
+        try appendNavNode(allocator, &buf, nodes, nav, @intCast(i), current_index, current_output_path, true, 1, max_depth);
     }
 
     try buf.appendSlice(allocator, "</ul>\n</nav>");
@@ -263,7 +276,7 @@ test "renderNav forest and breadcrumb" {
     for (g.nodes, 0..) |n, i| {
         if (std.mem.eql(u8, n.id, "guides/tips/deep/deepest")) deepest_i = @intCast(i);
     }
-    const html = try renderNav(gpa, g.nodes, nav, deepest_i, "guides/tips/deep/deepest.html");
+    const html = try renderNav(gpa, g.nodes, nav, deepest_i, "guides/tips/deep/deepest.html", null);
     defer gpa.free(html);
     try std.testing.expect(std.mem.indexOf(u8, html, "site-nav") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "is-current") != null);
@@ -380,6 +393,52 @@ test "draft-rooted subtrees are pruned from nav and omitted from children" {
     try std.testing.expect(!std.mem.eql(u8, material_a, material_b));
 }
 
+test "renderNav depth cap bounds rendered levels deterministically" {
+    const gpa = std.testing.allocator;
+    var nodes = [_]graph_mod.Node{
+        .{ .id = "l1", .source_path = "l1.md", .title = "Level One", .parent = null },
+        .{ .id = "l1/l2", .source_path = "l1/l2.md", .title = "Level Two", .parent = "l1" },
+        .{ .id = "l1/l2/l3", .source_path = "l1/l2/l3.md", .title = "Level Three", .parent = "l1/l2" },
+        .{ .id = "l1/l2/l3/l4", .source_path = "l1/l2/l3/l4.md", .title = "Level Four", .parent = "l1/l2/l3" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try graph_mod.validate(gpa, gpa, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
+    const g = try graph_mod.freeze(gpa, &nodes, null);
+    defer gpa.free(g.edges);
+    const nav = try graph_mod.buildNav(gpa, g.nodes);
+    defer graph_mod.freeNav(gpa, nav);
+
+    // depth=1: trunks only — no nested child list is emitted at all.
+    const one = try renderNav(gpa, g.nodes, nav, 0, "l1.html", 1);
+    defer gpa.free(one);
+    try std.testing.expect(std.mem.indexOf(u8, one, ">Level One</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, one, "Level Two") == null);
+
+    // depth=2: trunk + direct children; grandchildren pruned.
+    const two = try renderNav(gpa, g.nodes, nav, 0, "l1.html", 2);
+    defer gpa.free(two);
+    try std.testing.expect(std.mem.indexOf(u8, two, ">Level Two</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, two, "Level Three") == null);
+    try std.testing.expect(std.mem.indexOf(u8, two, "Level Four") == null);
+
+    // null equals unbounded: every level present.
+    const full = try renderNav(gpa, g.nodes, nav, 0, "l1.html", null);
+    defer gpa.free(full);
+    try std.testing.expect(std.mem.indexOf(u8, full, ">Level Four</a>") != null);
+
+    // A depth beyond the tree height renders exactly the whole forest.
+    const deep = try renderNav(gpa, g.nodes, nav, 0, "l1.html", 99);
+    defer gpa.free(deep);
+    try std.testing.expectEqualStrings(full, deep);
+
+    // Deterministic bytes across calls with identical inputs.
+    const again = try renderNav(gpa, g.nodes, nav, 0, "l1.html", 2);
+    defer gpa.free(again);
+    try std.testing.expectEqualStrings(two, again);
+}
+
 test "navigation chrome has deterministic landmarks, lists, current state, and escaped sinks" {
     const gpa = std.testing.allocator;
     var nodes = [_]graph_mod.Node{
@@ -399,7 +458,7 @@ test "navigation chrome has deterministic landmarks, lists, current state, and e
     for (g.nodes, 0..) |node, i| {
         if (std.mem.eql(u8, node.id, "index")) current = @intCast(i);
     }
-    const site = try renderNav(gpa, g.nodes, nav, current, "index.html");
+    const site = try renderNav(gpa, g.nodes, nav, current, "index.html", null);
     defer gpa.free(site);
     try std.testing.expectEqualStrings(
         "<nav class=\"site-nav\" aria-label=\"Site\">\n" ++

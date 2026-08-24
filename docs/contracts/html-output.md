@@ -144,7 +144,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 
    | Marker | Value |
    |--------|--------|
-   | `{{nav}}` | Full site forest (root Trunks id-ascending, recursively nested children id-ascending; draft-rooted subtrees pruned) |
+   | `{{nav}}` | Full site forest (root Trunks id-ascending, recursively nested children id-ascending; draft-rooted subtrees pruned). May be written `{{nav depth=N}}` with N ≥ 1 to cap the rendered levels (level 1 = root Trunks); plain `{{nav}}` stays unbounded. Both spellings are one slot under the at-most-once rule. |
    | `{{breadcrumb}}` | Parent chain root → current page (inclusive) |
    | `{{title}}` | Page title, or entity id when title is absent (HTML-escaped text) |
    | `{{toc}}` | In-page outline from **this page’s** body headings (h1–h3 with `id`) |
@@ -205,6 +205,18 @@ The frozen graph is unchanged by status gating: drafts remain graph nodes,
 
 When `{{nav}}` is present, emit a deterministic rooted forest (no hash-map order):
 draft-rooted subtrees are pruned per [status gating](#status-gating-on-the-default-html-target-738).
+
+- With the plain `{{nav}}` spelling the forest is unbounded: every level of
+  every Trunk subtree renders.
+- With `{{nav depth=N}}` (N ≥ 1, ASCII digits), exactly the first `N` levels
+  render (level 1 = root Trunks); deeper nodes and their nested lists are
+  omitted from every page's nav, while every page still builds at its route.
+- Ordering, classes, escaping, and relative-href rules are identical under
+  both spellings; depth only bounds how many levels render. A depth beyond
+  the tree height renders byte-identical output to plain `{{nav}}`.
+- Malformed arguments (`depth=0`, non-numeric, extra tokens) fail layout load
+  with `ELAYOUTNAVDEPTH`; any two nav-form tokens are the duplicate-slot
+  error.
 
 ```html
 <nav class="site-nav" aria-label="Site">

@@ -2843,6 +2843,7 @@ fn mapHtmlError(
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
+        error.LayoutInvalidNavMarker,
         error.LayoutTooManySegments,
         error.LayoutInvalidAssetUrl,
         error.LayoutTooManyAssetUrls,

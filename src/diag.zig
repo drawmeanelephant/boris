@@ -105,6 +105,9 @@ pub const Code = enum {
     ELAYOUTUNKNOWNMARKER,
     /// Layout template repeats a slot marker.
     ELAYOUTDUPLICATEMARKER,
+    /// A `{{nav …}}` token whose argument is not exactly `depth=N` with N ≥ 1
+    /// (the only argument-bearing nav form).
+    ELAYOUTNAVDEPTH,
     /// Layout path is illegal (absolute, `..`, or otherwise non-relative).
     ELAYOUTPATH,
     /// Layout template references an invalid or excessive asset url.
@@ -136,6 +139,7 @@ pub const Code = enum {
             .ELAYOUTMISSINGMARKER => "Add the required {{content}} (and any other referenced slot) marker to the layout template",
             .ELAYOUTUNKNOWNMARKER => "Use only these markers, each at most once per layout: {{content}} (required), {{nav}}, {{breadcrumb}}, {{title}}, {{toc}}, {{children}}, {{metadata}}, {{relations}}, {{backlinks}}, {{footer}}, {{head}}; plus the {{asset-url PATH}} helper",
             .ELAYOUTDUPLICATEMARKER => "Keep exactly one marker per slot in the layout template",
+            .ELAYOUTNAVDEPTH => "Write {{nav}} for the full forest, or {{nav depth=N}} with an integer N ≥ 1 to cap the rendered levels",
             .ELAYOUTPATH => "Use a workspace-relative layout path with no .., absolute, or backslash segments",
             .ELAYOUTASSET => "Reference layout assets as assets/… urls relative to the theme root, one per slot",
             .ELAYOUTRULE => "Give each layout rule a unique, valid selector and stay under the per-target rule limit",
