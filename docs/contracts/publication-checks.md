@@ -215,7 +215,10 @@ coverage: not-applicable
 ```
 
 Search selection is not inferred from filesystem existence or the publication
-plan. Its supporting page set is every committed `html-page` record. The exact
+plan. Its supporting page set is every committed, advertised `html-page`
+record: a committed page recorded with `"advertised": false` (a `status:
+draft` page — emitted HTML that is deliberately unadvertised) is an ineligible
+subject, mirroring the search producer's own filtered slice (#752). The exact
 selected search bytes are read during integrity inspection and passed to the
 incremental Doctor analysis. It reuses:
 

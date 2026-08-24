@@ -63,6 +63,13 @@
             { "type": "null" },
             { "enum": ["static", "content-reference"] }
           ]
+        },
+        "advertised": {
+          "description": "Publication-surface eligibility (#752): false marks an emitted html-page that is deliberately unadvertised (status: draft) and excluded from public projections such as search and sitemap. Null for non-page records and inventories written before this field existed.",
+          "anyOf": [
+            { "type": "null" },
+            { "type": "boolean" }
+          ]
         }
       }
     }
