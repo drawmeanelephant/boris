@@ -27,7 +27,7 @@
     },
     "proofPack": {
       "type": "object",
-      "description": "Publication-check verdicts mirrored from <outDir>/_boris/proof/checks.json. Present only when the run committed target evidence and the checks report was readable; absent for validate, pre-publication failures, and unreadable trees. A failing check never fails the committed target (docs/contracts/publication-checks.md); allPassed=false tells CI to inspect the findings[] array in that file.",
+      "description": "Publication-check verdicts mirrored from <outDir>/_boris/proof/checks.json. Present only when a single-output build committed target evidence and the checks report was readable; absent for multi-target builds (evidence lives under each target directory), validate, pre-publication failures, and unreadable trees. A failing check never fails the committed target (docs/contracts/publication-checks.md); allPassed=false tells CI to inspect the findings[] array in that file.",
       "additionalProperties": false,
       "required": ["path", "allPassed", "checks"],
       "properties": {

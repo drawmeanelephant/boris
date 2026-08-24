@@ -2744,7 +2744,17 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             std.debug.print("ok: wrote HTML under {s} ({d} page(s))\n", .{ html_dir, stats.pages_written });
         }
     }
-    writeHtmlReport(io, gpa, opts, collector_ptr, true, html_dir, true);
+    // Only a single-output build may read committed evidence at this exact
+    // path: either zero targets (internal single-`--html-dir` invocation) or
+    // exactly one target whose output directory IS the report directory from
+    // this successful run. Multi-target runs publish _boris/proof/ under
+    // each target directory, so an aggregate out_dir would hold foreign or
+    // stale state (#741).
+    const include_proof =
+        opts.targets.items.len == 0 or
+        (opts.targets.items.len == 1 and
+            std.mem.eql(u8, opts.targets.items[0].output_dir, html_dir));
+    writeHtmlReport(io, gpa, opts, collector_ptr, true, html_dir, include_proof);
     return .success;
 }
 
@@ -3271,6 +3281,76 @@ test "runPipeline: HTML fixture exits 0" {
     defer gpa.free(index_path);
     var file = try cwd.openFile(io, index_path, .{});
     defer file.close(io);
+}
+
+test "runPipeline: single-output build mirrors proofPack into --report (#741)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-proof", .{tmp.sub_path});
+    defer gpa.free(out);
+    const rep = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/proof-report.json", .{tmp.sub_path});
+    defer gpa.free(rep);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .html,
+        .input_dir = "test/fixtures/html/content",
+        .out_dir = null,
+        .rag_dir = null,
+        .html_dir = out,
+        .report_path = rep,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.success, code);
+
+    const cwd = Io.Dir.cwd();
+    const bytes = try cwd.readFileAlloc(io, rep, gpa, .unlimited);
+    defer gpa.free(bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    // The report directory IS this run's evidence root → section present.
+    const proof = parsed.value.object.get("proofPack") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(true, proof.object.get("allPassed").?.bool);
+    try std.testing.expect(proof.object.get("checks").?.array.items.len > 0);
+}
+
+test "runPipeline: multi-target reports omit proofPack (#741)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const one = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/t-one", .{tmp.sub_path});
+    defer gpa.free(one);
+    const two = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/t-two", .{tmp.sub_path});
+    defer gpa.free(two);
+    const rep = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/multi-report.json", .{tmp.sub_path});
+    defer gpa.free(rep);
+
+    var targets: std.ArrayListUnmanaged(target.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
+    defer targets.deinit(gpa);
+    try targets.append(gpa, .{ .name = "one", .output_dir = one });
+    try targets.append(gpa, .{ .name = "two", .output_dir = two });
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .html,
+        .input_dir = "test/fixtures/html/content",
+        .out_dir = null,
+        .rag_dir = null,
+        .targets = targets,
+        .report_path = rep,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.success, code);
+
+    const cwd = Io.Dir.cwd();
+    const bytes = try cwd.readFileAlloc(io, rep, gpa, .unlimited);
+    defer gpa.free(bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    // Evidence lives under each target directory; the aggregate report must
+    // not claim verdicts it did not derive.
+    try std.testing.expect(parsed.value.object.get("proofPack") == null);
 }
 
 test "runPipeline: --timings leaves exit codes and artifacts unchanged" {

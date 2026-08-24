@@ -192,13 +192,15 @@ path keeps its own auto-written `build-report.json`.
   `contentRoot`, `outDir`, `errorCount`, `diagnostics`. There is no
   `pageCount` (the HTML path does not expose a single page count across
   targets).
-- Optional `proofPack` section (#741): when the run committed target evidence
-  and `<outDir>/_boris/proof/checks.json` was readable, the report mirrors the
+- Optional `proofPack` section (#741): when a single-output build committed
+  its target evidence and `<outDir>/_boris/proof/checks.json` was readable,
+  the report mirrors the
   per-check verdicts — `path`, `allPassed` (false when any check reported
   `failed`/`incomplete`), and `checks[]`. A failing check never fails the
   committed target ([publication-checks.md](publication-checks.md));
   `allPassed: false` tells machine consumers to read that file's `findings[]`.
-  The section is absent for validate and pre-publication failures.
+  Multi-target reports omit the section because evidence lives under each
+  target directory; validate and pre-publication failures never carry it.
 - Each diagnostic object uses the **exact key order** of the IR diagnostic
   object: `severity, code, message, remediation, sourcePath, line, column, id`.
 - Diagnostics are sorted with the same deterministic comparator as the IR
