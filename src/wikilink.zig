@@ -297,6 +297,94 @@ fn findNodeMap(map: *const NodeMap, id: []const u8) ?graph_mod.Node {
     return map.get(id);
 }
 
+/// Bounded Levenshtein distance between `a` and `b`, or null when the distance
+/// provably exceeds `allowed`. `scratch` needs `2 * (max(b.len, a.len) + 1)`
+/// bytes of usize cells.
+fn boundedEditDistance(scratch: []usize, a: []const u8, b: []const u8, allowed: usize) ?usize {
+    if (a.len > b.len + allowed or b.len > a.len + allowed) return null;
+    const width = b.len + 1;
+    if (scratch.len < 2 * width) return null;
+    var prev = scratch[0..width];
+    var cur = scratch[width .. 2 * width];
+    for (0..width) |j| prev[j] = j;
+    for (a, 0..) |ca, i| {
+        cur[0] = i + 1;
+        var row_min = cur[0];
+        for (b, 0..) |cb, j| {
+            const sub = prev[j] + @as(usize, if (ca == cb) 0 else 1);
+            const del = prev[j + 1] + 1;
+            const ins = cur[j] + 1;
+            const v = @min(sub, @min(del, ins));
+            cur[j + 1] = v;
+            if (v < row_min) row_min = v;
+        }
+        // Whole row already over budget → final distance cannot come back down.
+        if (row_min > allowed) return null;
+        const tmp = prev;
+        prev = cur;
+        cur = tmp;
+    }
+    const dist = prev[b.len];
+    return if (dist <= allowed) dist else null;
+}
+
+/// Nearest existing entity id for did-you-mean diagnostics (#742).
+///
+/// Deterministic by construction: the lowest bounded edit distance wins and
+/// ties break toward the lexicographically smaller id, so hash-map iteration
+/// order cannot leak into output. The per-candidate allowance is relative to
+/// the longer id (capped) so unrelated targets never produce noise hints.
+/// Returns an id borrowed from `ids`; callers must copy before freeing them.
+pub fn nearestId(allocator: std.mem.Allocator, ids: []const []const u8, target: []const u8) ?[]const u8 {
+    if (ids.len == 0 or target.len == 0) return null;
+
+    var max_len: usize = target.len;
+    for (ids) |id| {
+        if (id.len > max_len) max_len = id.len;
+    }
+    const scratch = allocator.alloc(usize, 2 * (max_len + 1)) catch return null;
+    defer allocator.free(scratch);
+
+    var best: ?[]const u8 = null;
+    var best_dist: usize = 0;
+    for (ids) |id| {
+        const allowed = @max(@as(usize, 1), @min(@as(usize, 8), @max(target.len, id.len) / 3));
+        const dist = boundedEditDistance(scratch, target, id, allowed) orelse continue;
+        const better = best == null or dist < best_dist or
+            (dist == best_dist and std.mem.order(u8, id, best.?) == .lt);
+        if (better) {
+            best = id;
+            best_dist = dist;
+        }
+    }
+    return best;
+}
+
+fn nearestNodeId(allocator: std.mem.Allocator, node_map: *const NodeMap, target: []const u8) ?[]const u8 {
+    if (node_map.count() == 0) return null;
+    var keys = std.ArrayList([]const u8).empty;
+    defer keys.deinit(allocator);
+    keys.ensureTotalCapacity(allocator, node_map.count()) catch return null;
+    var it = node_map.keyIterator();
+    while (it.next()) |key| keys.appendAssumeCapacity(key.*);
+    return nearestId(allocator, keys.items, target);
+}
+
+/// Nearest existing entity id among frozen graph nodes, for producers that
+/// hold the node list directly (pipeline dependency scans).
+pub fn nearestNodeIdInNodes(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    target: []const u8,
+) ?[]const u8 {
+    if (nodes.len == 0) return null;
+    var ids = std.ArrayList([]const u8).empty;
+    defer ids.deinit(allocator);
+    ids.ensureTotalCapacity(allocator, nodes.len) catch return null;
+    for (nodes) |n| ids.appendAssumeCapacity(n.id);
+    return nearestId(allocator, ids.items, target);
+}
+
 fn appendUniqueIdLocHashed(
     locs: *std.ArrayList(IdLoc),
     seen: *std.StringHashMapUnmanaged(void),
@@ -462,7 +550,10 @@ fn rewriteWithNodeMap(
 
     for (hits) |hit| {
         const node = findNodeMap(node_map, hit.entity_id) orelse {
-            if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
+            if (fail_out) |f| {
+                f.set(hit.line, hit.column, hit.entity_id, "");
+                if (nearestNodeId(allocator, node_map, hit.entity_id)) |s| f.setHint(s);
+            }
             return error.ReferenceMissing;
         };
 
@@ -600,7 +691,10 @@ fn materialFromIdLocsWithMap(
     errdefer out.deinit(allocator);
     for (sorted) |loc| {
         const node = findNodeMap(node_map, loc.id) orelse {
-            if (fail_out) |f| f.set(loc.line, loc.column, loc.id, loc.locus);
+            if (fail_out) |f| {
+                f.set(loc.line, loc.column, loc.id, loc.locus);
+                if (nearestNodeId(allocator, node_map, loc.id)) |s| f.setHint(s);
+            }
             return error.ReferenceMissing;
         };
         const out_path = identity.htmlOutputPath(allocator, node.id) catch {
@@ -698,13 +792,15 @@ fn messageFor(retain: std.mem.Allocator, err: WikiError, fail: *const FailInfo) 
         else
             try retain.dupe(u8, "malformed [[…]] wiki-link"),
         error.ReferenceMissing => blk: {
-            if (det.len > 0) {
+            const base = if (det.len > 0) base_msg: {
                 if (std.mem.indexOfScalar(u8, det, '#')) |_| {
-                    break :blk try std.fmt.allocPrint(retain, "wiki-link heading target \"{s}\" not found on the page", .{det});
+                    break :base_msg try std.fmt.allocPrint(retain, "wiki-link heading target \"{s}\" not found on the page", .{det});
                 }
-                break :blk try std.fmt.allocPrint(retain, "wiki-link target \"{s}\" not found in the page graph", .{det});
-            }
-            break :blk try retain.dupe(u8, "wiki-link target not found in the page graph");
+                break :base_msg try std.fmt.allocPrint(retain, "wiki-link target \"{s}\" not found in the page graph", .{det});
+            } else try retain.dupe(u8, "wiki-link target not found in the page graph");
+            const hint_s = fail.hint();
+            if (hint_s.len == 0) break :blk base;
+            break :blk try std.fmt.allocPrint(retain, "{s} (did you mean \"{s}\"?)", .{ base, hint_s });
         },
         error.OutOfMemory => try retain.dupe(u8, "out of memory while resolving wiki-links"),
         error.PathError => if (det.len > 0)
@@ -912,6 +1008,112 @@ test "shared node map rewrite matches per-page rewrite" {
         rewriteWikiLinksWithMapOpts(gpa, bad, &map, "index.html", &shared_fail, .{}),
     );
     try std.testing.expectEqualStrings(classic_fail.detail(), shared_fail.detail());
+}
+
+test "boundedEditDistance returns exact distances or null past allowance" {
+    var scratch: [2 * (32 + 1)]usize = undefined;
+    try std.testing.expectEqual(@as(usize, 0), boundedEditDistance(&scratch, "", "", 1).?);
+    try std.testing.expectEqual(@as(usize, 3), boundedEditDistance(&scratch, "kitten", "sitting", 3).?);
+    try std.testing.expectEqual(@as(usize, 5), boundedEditDistance(scratch[0..], "nested/child", "deep/nested/child", 6).?);
+    try std.testing.expectEqual(@as(?usize, null), boundedEditDistance(&scratch, "kitten", "sitting", 2));
+    // Length delta alone over budget.
+    try std.testing.expectEqual(@as(?usize, null), boundedEditDistance(&scratch, "a", "abcdefghij", 3));
+}
+
+test "missing wiki target suggests nearest existing entity id" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "index", .source_path = "index.md", .role = .trunk, .index = 0 },
+        .{ .id = "deep/nested/child", .source_path = "deep/nested/child.md", .role = .satellite, .parent = "index", .index = 1 },
+        .{ .id = "guides/overview", .source_path = "guides/overview.md", .role = .trunk, .index = 2 },
+    };
+    const bad = "Go to [[nested/child]] now.";
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksOpts(gpa, bad, &nodes, "index.html", &fail, .{}),
+    );
+    try std.testing.expectEqualStrings("nested/child", fail.detail());
+    try std.testing.expectEqualStrings("deep/nested/child", fail.hint());
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = try makeDiagnostic(arena.allocator(), error.ReferenceMissing, "guides/probe.md", fail);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "(did you mean \"deep/nested/child\"?)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "wiki-link target \"nested/child\" not found") != null);
+    try std.testing.expectEqualStrings("nested/child", d.id);
+}
+
+test "missing wiki target without a near match carries no hint" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "guides/overview", .source_path = "guides/overview.md", .role = .trunk, .index = 0 },
+    };
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksOpts(gpa, "See [[zzz/nothing/here/at/all]] now.", &nodes, "index.html", &fail, .{}),
+    );
+    try std.testing.expectEqual(@as(usize, 0), fail.hint().len);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = try makeDiagnostic(arena.allocator(), error.ReferenceMissing, "p.md", fail);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "did you mean") == null);
+}
+
+test "did-you-mean ties break toward the lexicographically smaller id" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "aa/bd", .source_path = "aa/bd.md", .role = .trunk, .index = 0 },
+        .{ .id = "aa/bb", .source_path = "aa/bb.md", .role = .trunk, .index = 1 },
+    };
+    var map = try buildNodeMap(gpa, &nodes);
+    defer map.deinit(gpa);
+    const s = nearestId(gpa, &[_][]const u8{ "aa/bd", "aa/bb" }, "aa/bx").?;
+    try std.testing.expectEqualStrings("aa/bb", s);
+    const via_map = nearestNodeId(gpa, &map, "aa/bx").?;
+    try std.testing.expectEqualStrings("aa/bb", via_map);
+    const via_nodes = nearestNodeIdInNodes(gpa, &nodes, "aa/bx").?;
+    try std.testing.expectEqualStrings("aa/bb", via_nodes);
+}
+
+test "fingerprint material failure also reports did-you-mean" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "deep/nested/child", .source_path = "deep/nested/child.md", .role = .satellite, .index = 0 },
+    };
+    const bodies = [_][]const u8{"See [[nested/child]]."};
+    const paths = [_][]const u8{"guides/page.md"};
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        referenceMaterialMulti(gpa, &bodies, &paths, &nodes, &fail, .{}),
+    );
+    try std.testing.expectEqualStrings("deep/nested/child", fail.hint());
+}
+
+test "heading-fragment mismatch keeps its message and gains no page hint" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "guides/a", .source_path = "guides/a.md", .role = .satellite, .index = 0 },
+    };
+    // Fragment validation without a heading index fails with the '#' detail.
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksOpts(gpa, "See [[guides/a#wrong-slug]].", &nodes, "index.html", &fail, .{
+            .validate_fragments = true,
+            .heading_index = null,
+        }),
+    );
+    try std.testing.expectEqualStrings("guides/a#wrong-slug", fail.detail());
+    try std.testing.expectEqual(@as(usize, 0), fail.hint().len);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = try makeDiagnostic(arena.allocator(), error.ReferenceMissing, "p.md", fail);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "heading target") != null);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "did you mean") == null);
 }
 
 test "shared node map reference material matches per-page material" {

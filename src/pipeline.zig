@@ -224,6 +224,7 @@ const DependencyResolver = struct {
         for (hits.items) |hit| {
             if (!findPage(self.nodes, hit.entity_id)) {
                 fail.set(hit.line, hit.column, hit.entity_id, locus);
+                if (wikilink.nearestNodeIdInNodes(self.gpa, self.nodes, hit.entity_id)) |s| fail.setHint(s);
                 try self.diagnostics.append(self.gpa, try wikilink.makeDiagnostic(
                     self.retain,
                     error.ReferenceMissing,

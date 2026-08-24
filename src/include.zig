@@ -53,6 +53,10 @@ pub const FailInfo = struct {
     /// File where line/col apply (e.g. nested include path). Empty → caller page path.
     locus_len: usize = 0,
     locus_buf: [max_fail_str]u8 = undefined,
+    /// Optional nearest-valid-target hint (wiki did-you-mean, #742). Copied
+    /// like detail/locus so the graph that produced it can be freed first.
+    hint_len: usize = 0,
+    hint_buf: [max_fail_str]u8 = undefined,
 
     pub fn detail(self: *const FailInfo) []const u8 {
         return self.detail_buf[0..self.detail_len];
@@ -62,11 +66,19 @@ pub const FailInfo = struct {
         return self.locus_buf[0..self.locus_len];
     }
 
+    pub fn hint(self: *const FailInfo) []const u8 {
+        return self.hint_buf[0..self.hint_len];
+    }
+
     pub fn set(self: *FailInfo, line: u32, column: u32, detail_s: []const u8, locus_s: []const u8) void {
         self.line = line + self.line_base;
         self.column = column;
         self.detail_len = copyCap(&self.detail_buf, detail_s);
         self.locus_len = copyCap(&self.locus_buf, locus_s);
+    }
+
+    pub fn setHint(self: *FailInfo, hint_s: []const u8) void {
+        self.hint_len = copyCap(&self.hint_buf, hint_s);
     }
 
     pub fn setAt(self: *FailInfo, body: []const u8, offset: usize, detail_s: []const u8, locus_s: []const u8) void {
