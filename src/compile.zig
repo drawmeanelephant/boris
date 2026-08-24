@@ -623,11 +623,18 @@ pub fn loadAndPromoteFormat(
         error.ContentDirMissing => return error.ContentDirMissing,
         error.InputFormatMismatch => {
             if (!diag.text_suppressed.load(.unordered)) {
-                if (input_format == .cook) {
-                    std.debug.print("error: ECOOKLANG: content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode [Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input]\n", .{});
-                } else {
-                    std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
-                }
+                // Name the offending family so the fix (--cooklang /
+                // --textile) is visible without trial and error (#744); the
+                // code follows the offending family per
+                // docs/contracts/scanner.md. Falls back to the requested-mode
+                // wording when the tree cannot be re-probed.
+                const offender: ?identity.ContentKind = blk: {
+                    const root_dir = Io.Dir.cwd().openDir(io, content_root, .{ .iterate = true }) catch break :blk null;
+                    defer root_dir.close(io);
+                    break :blk scanner.probeForeignFamily(io, root_dir, input_format);
+                };
+                const guidance = scanner.modeMismatchGuidance(input_format, offender);
+                std.debug.print("error: {s}: {s} [{s}]\n", .{ guidance.code.name(), guidance.message, guidance.remediation });
             }
             return error.InputFormatMismatch;
         },

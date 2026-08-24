@@ -805,21 +805,21 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             return result;
         },
         error.InputFormatMismatch => {
-            // Naming the wrong adapter is worse than naming none: a `.cook`
-            // tree told to fix its Textile extensions sends the author looking
-            // for a file that does not exist.
-            const is_cook = options.input_format == .cook;
+            // Name the offending family so the fix (--cooklang / --textile)
+            // is visible without trial and error (#744). The probe runs only
+            // against a real content directory; injected memory sources keep
+            // the requested-mode wording. The code follows the offending
+            // family per docs/contracts/scanner.md.
+            const offender: ?identity.ContentKind = if (dir_adapter) |*d|
+                scanner.probeForeignFamily(io, d.dir, options.input_format)
+            else
+                null;
+            const guidance = scanner.modeMismatchGuidance(options.input_format, offender);
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
-                .code = if (is_cook) .ECOOKLANG else .ETEXTILE,
-                .message = try retain.dupe(u8, if (is_cook)
-                    "content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode"
-                else
-                    "content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode"),
-                .remediation = try retain.dupe(u8, if (is_cook)
-                    "Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input"
-                else
-                    "Use Markdown-only input by default, or pass --textile for a .textile-only tree"),
+                .code = guidance.code,
+                .message = try retain.dupe(u8, guidance.message),
+                .remediation = try retain.dupe(u8, guidance.remediation),
             });
             result.failure = .content;
             diag.sortDiagnostics(result.diagnostics.items);
@@ -1458,6 +1458,21 @@ test "Cooklang mode extracts recipes, links them, and fails closed" {
     defer mixed.deinit();
     try std.testing.expect(!mixed.ok);
     try std.testing.expectEqual(diag.Code.ECOOKLANG, mixed.diagnostics.items[0].code);
+
+    // Default (Markdown) mode over a .cook-only tree must blame Cooklang and
+    // name --cooklang — not send the author hunting for Textile files (#744).
+    var unflagged_cook = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/content",
+        .quiet = true,
+    });
+    defer unflagged_cook.deinit();
+    try std.testing.expect(!unflagged_cook.ok);
+    try std.testing.expectEqual(diag.Code.ECOOKLANG, unflagged_cook.diagnostics.items[0].code);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        unflagged_cook.diagnostics.items[0].remediation,
+        "--cooklang",
+    ) != null);
 }
 
 test "a corpus without recipes keeps its existing IR version" {
