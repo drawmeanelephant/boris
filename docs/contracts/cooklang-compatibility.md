@@ -370,9 +370,15 @@ Schema for one scaled amount:
 { "class": "scalable", "original": "1/2", "scaled": "1" }
 ```
 
-The page envelope is `docs/contracts/schemas/recipe-scale-view-0.1.0.schema.json`
+The page envelope is `docs/contracts/schemas/recipe-scale-view-0.2.0.schema.json`
 (`format: boris-recipe-scale`). Timer `scaled` equals `original` even when
-the amount classifies as scalable.
+the amount classifies as scalable, and every timer entry carries
+`"scaling": "locked"` so the unchanged amount is self-describing rather than
+looking like a scaling bug (#743):
+
+```json
+{ "name": "pasta", "quantity": { "amount": { "class": "scalable", "original": "9", "scaled": "9" }, "unit": "minutes" }, "scaling": "locked" }
+```
 
 ## IR version selection
 

@@ -1,1 +1,1 @@
-error: target 'default' failed to load layout docs/audits/publication-conformance/c06-cache-watch/dup.html: LayoutDuplicateMarker
+error: target 'default' failed to load layout docs/audits/publication-conformance/c06-cache-watch/dup.html: LayoutDuplicateMarker [Keep exactly one marker per slot in the layout template]

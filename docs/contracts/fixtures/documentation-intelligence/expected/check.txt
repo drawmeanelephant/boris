@@ -1,6 +1,6 @@
 Documentation Intelligence (check)
-pages: 4 (roots 2, satellites 2)
-source endpoints: 1
+pages: 5 (roots 2, satellites 3)
+source endpoints: 2
 unreferenced pages: 1
 hotspots: 0
 findings:

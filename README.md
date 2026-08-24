@@ -54,6 +54,10 @@ surface, not a second product.
   strikethrough.
 - Deterministic HTML output with trusted static layouts and copied assets.
 - Validated Trunk/Satellite navigation and graph-aware breadcrumbs/children.
+- `{{include path}}` composition with a reserved fragment library: files under
+  `content/includes/` are never discovered as pages (no stray HTML, no nav
+  entries, no `unreferenced_page` findings); fragments anywhere else compile as
+  normal pages too.
 - Closed, explicit frontmatter rather than unrestricted YAML or executable MDX.
 - Authoritative `boris validate` preflight with no generated output or evidence.
 - Incremental builds, watch mode, isolated targets, and bounded page workers.

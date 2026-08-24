@@ -273,7 +273,7 @@ test "the published recipe-scale view schema matches a freshly rendered view" {
     const bytes = try recipe_scale_view.renderFromCompile(gpa, &compiled, "carbonara", factor, null);
     defer gpa.free(bytes);
 
-    const schema_bytes = try readAlloc(io, Io.Dir.cwd(), "docs/contracts/schemas/recipe-scale-view-0.1.0.schema.json", gpa);
+    const schema_bytes = try readAlloc(io, Io.Dir.cwd(), "docs/contracts/schemas/recipe-scale-view-0.2.0.schema.json", gpa);
     defer gpa.free(schema_bytes);
     var schema_parsed = try std.json.parseFromSlice(std.json.Value, gpa, schema_bytes, .{});
     defer schema_parsed.deinit();

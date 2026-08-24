@@ -2100,7 +2100,7 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
     defer pages.deinit(gpa);
     pages.ensureTotalCapacity(gpa, result.pages.items.len) catch return .io_error;
     for (result.pages.items) |page| {
-        pages.appendAssumeCapacity(.{ .id = page.id, .parent = page.parent });
+        pages.appendAssumeCapacity(.{ .id = page.id, .parent = page.parent, .source_path = page.source_path });
     }
 
     var edges: std.ArrayListUnmanaged(intelligence.Edge) = .empty;

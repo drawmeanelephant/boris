@@ -623,11 +623,18 @@ pub fn loadAndPromoteFormat(
         error.ContentDirMissing => return error.ContentDirMissing,
         error.InputFormatMismatch => {
             if (!diag.text_suppressed.load(.unordered)) {
-                if (input_format == .cook) {
-                    std.debug.print("error: ECOOKLANG: content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode [Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input]\n", .{});
-                } else {
-                    std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
-                }
+                // Name the offending family so the fix (--cooklang /
+                // --textile) is visible without trial and error (#744); the
+                // code follows the offending family per
+                // docs/contracts/scanner.md. Falls back to the requested-mode
+                // wording when the tree cannot be re-probed.
+                const offender: ?identity.ContentKind = blk: {
+                    const root_dir = Io.Dir.cwd().openDir(io, content_root, .{ .iterate = true }) catch break :blk null;
+                    defer root_dir.close(io);
+                    break :blk scanner.probeForeignFamily(io, root_dir, input_format);
+                };
+                const guidance = scanner.modeMismatchGuidance(input_format, offender);
+                std.debug.print("error: {s}: {s} [{s}]\n", .{ guidance.code.name(), guidance.message, guidance.remediation });
             }
             return error.InputFormatMismatch;
         },
@@ -1389,7 +1396,7 @@ fn loadLayoutsForPlan(
         const gop = try layout_cache.getOrPut(gpa, lp);
         if (gop.found_existing) continue;
         const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena) catch |err| {
-            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s} [{s}]\n", .{ plan.name, lp, @errorName(err), diag.Code.remediationForLayout(layoutCodeFor(err)) });
             const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
             defer gpa.free(msg);
             appendHtmlDiagnostic(base_options, .{
@@ -1774,7 +1781,7 @@ fn appendHtmlDiagnostic(options: *const CompileOptions, d: diag.Diagnostic) void
 fn layoutCodeFor(err: anyerror) diag.Code {
     return switch (err) {
         error.LayoutMissingMarker => .ELAYOUTMISSINGMARKER,
-        error.LayoutUnknownMarker => .ELAYOUTMISSINGMARKER,
+        error.LayoutUnknownMarker => .ELAYOUTUNKNOWNMARKER,
         error.LayoutDuplicateMarker => .ELAYOUTDUPLICATEMARKER,
         error.LayoutInvalidAssetUrl => .ELAYOUTASSET,
         error.LayoutTooManyAssetUrls => .ELAYOUTASSET,
@@ -2371,9 +2378,12 @@ fn publishEvidenceReports(
     // file, is complete before checks read the target. Checks are a separate
     // atomic report publication and never participate in that transaction.
     if (options.timings) |t| t.start(.checks);
+    var check_outcomes: std.ArrayList(publication_checks.Outcome) = .empty;
+    defer check_outcomes.deinit(gpa);
     publication_checks.writeAfterCommit(io, gpa, dist_dir, options.target_name, .{
         .test_fail_execution = options.test_fail_publication_checks,
         .test_fail_write = options.test_fail_publication_checks_write,
+        .outcomes_out = &check_outcomes,
     }) catch |err| {
         const stderr = std.debug.lockStderr(&.{});
         defer std.debug.unlockStderr();
@@ -2381,6 +2391,20 @@ fn publishEvidenceReports(
         return error.PublicationChecksFailed;
     };
     if (options.timings) |t| t.stop(.checks);
+
+    // A failed check never fails the committed target by design
+    // (docs/contracts/publication-checks.md), but it must not be invisible:
+    // surface every non-passing verdict even under --quiet, with the pointer
+    // to its per-finding evidence (#740, #741).
+    for (check_outcomes.items) |outcome| {
+        if (outcome.status == .passed or outcome.status == .not_applicable) continue;
+        const stderr = std.debug.lockStderr(&.{});
+        defer std.debug.unlockStderr();
+        stderr.file_writer.interface.print(
+            "warning: publication check '{s}' for target '{s}' reported status '{s}'; per-finding detail lives in _boris/proof/checks.json findings[] and the claim mirrors it in _boris/proof/claims.json\n",
+            .{ outcome.id, options.target_name, outcome.status.name() },
+        ) catch {};
+    }
 
     // Claims are derived from the exact committed artifacts and checks bytes.
     // A derivation, stale-binding, parser, I/O, or atomic-write failure keeps
@@ -3849,6 +3873,45 @@ test "#421: broken layout surfaces a structured ELAYOUTDUPLICATEMARKER diagnosti
     try std.testing.expectEqual(diag.Severity.error_, d.severity);
     try std.testing.expectEqualStrings(layout_path, d.source_path);
     try std.testing.expect(d.line == null);
+}
+
+test "#737: unknown layout marker enumerates the closed slot set" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-737-layout", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<a>{{nosuchslot}}</a>{{content}}");
+    try writeTreeFile(io, work, "content/index.md", "# Hi\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.LayoutUnknownMarker, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .diagnostics = &collector,
+    }));
+
+    try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.ELAYOUTUNKNOWNMARKER, d.code);
+    // Every accepted marker is named so the valid set is discoverable (#737).
+    inline for (.{ "{{content}}", "{{nav}}", "{{breadcrumb}}", "{{title}}", "{{toc}}", "{{children}}", "{{metadata}}", "{{relations}}", "{{backlinks}}", "{{footer}}", "{{head}}", "{{asset-url" }) |marker| {
+        try std.testing.expect(std.mem.indexOf(u8, d.remediation, marker) != null);
+    }
 }
 
 test "#421: content failures are collected with source path and position" {

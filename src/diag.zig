@@ -98,9 +98,11 @@ pub const Code = enum {
     /// secp256k1 context cannot be initialized, or the signature fails to
     /// self-verify. Never emitted with a bundle.
     ENOSTRSIGN,
-    /// Layout template lacks a required or declared slot marker (or names an
-    /// unknown marker).
+    /// Layout template lacks the required `{{content}}` slot marker.
     ELAYOUTMISSINGMARKER,
+    /// Layout template names a marker outside the closed slot set. The
+    /// remediation enumerates every accepted marker (#737).
+    ELAYOUTUNKNOWNMARKER,
     /// Layout template repeats a slot marker.
     ELAYOUTDUPLICATEMARKER,
     /// Layout path is illegal (absolute, `..`, or otherwise non-relative).
@@ -132,6 +134,7 @@ pub const Code = enum {
     pub fn remediationForLayout(code: Code) []const u8 {
         return switch (code) {
             .ELAYOUTMISSINGMARKER => "Add the required {{content}} (and any other referenced slot) marker to the layout template",
+            .ELAYOUTUNKNOWNMARKER => "Use only these markers, each at most once per layout: {{content}} (required), {{nav}}, {{breadcrumb}}, {{title}}, {{toc}}, {{children}}, {{metadata}}, {{relations}}, {{backlinks}}, {{footer}}, {{head}}; plus the {{asset-url PATH}} helper",
             .ELAYOUTDUPLICATEMARKER => "Keep exactly one marker per slot in the layout template",
             .ELAYOUTPATH => "Use a workspace-relative layout path with no .., absolute, or backslash segments",
             .ELAYOUTASSET => "Reference layout assets as assets/… urls relative to the theme root, one per slot",

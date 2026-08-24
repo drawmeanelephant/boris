@@ -280,6 +280,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) 
             \\  boris standard-site plan --profile standard-site.json          inspect Atmosphere records
             \\  boris watch --input content --html-dir dist --theme themes/boris   rebuild on change
             \\
+            \\conventions:
+            \\  shared fragments live under content/includes/ and never compile as pages
+            \\  page images live in <stem>.assets/ beside the page that owns them
+            \\
         , .{target_dir});
     }
     return @intFromEnum(ExitCode.success);

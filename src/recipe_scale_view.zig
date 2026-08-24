@@ -11,7 +11,7 @@ const pipeline = @import("pipeline.zig");
 const recipe_scale = @import("recipe_scale.zig");
 
 pub const format_name = "boris-recipe-scale";
-pub const schema_version = "0.1.0";
+pub const schema_version = "0.2.0";
 
 pub const ServingsScale = struct {
     current: u32,
@@ -153,6 +153,12 @@ fn writeNamedList(
         try json_out.writeString(buf, gpa, item.name);
         try buf.appendSlice(gpa, ", \"quantity\": ");
         try writeQuantity(buf, gpa, amount, item.quantity.unit);
+        if (is_timer) {
+            // The timer lock is part of the output (#743): an unchanged
+            // scalable amount must never read as a scaling bug. Pinned by
+            // recipe-scale-view-0.2.0.schema.json.
+            try buf.appendSlice(gpa, ", \"scaling\": \"locked\"");
+        }
         try buf.appendSlice(gpa, " }");
         if (i + 1 < items.len) try buf.append(gpa, ',');
         try buf.append(gpa, '\n');
@@ -296,4 +302,6 @@ test "fixed amounts and timers stay put in the view" {
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"original\": \"1\", \"scaled\": \"2\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"original\": \"10\", \"scaled\": \"10\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"class\": \"fixed\"") != null);
+    // The timer lock is explicit in the view (#743).
+    try std.testing.expect(std.mem.indexOf(u8, bytes, ", \"scaling\": \"locked\" }") != null);
 }
