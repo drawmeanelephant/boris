@@ -1396,7 +1396,7 @@ fn loadLayoutsForPlan(
         const gop = try layout_cache.getOrPut(gpa, lp);
         if (gop.found_existing) continue;
         const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena) catch |err| {
-            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s} [{s}]\n", .{ plan.name, lp, @errorName(err), diag.Code.remediationForLayout(layoutCodeFor(err)) });
             const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
             defer gpa.free(msg);
             appendHtmlDiagnostic(base_options, .{
@@ -1781,7 +1781,7 @@ fn appendHtmlDiagnostic(options: *const CompileOptions, d: diag.Diagnostic) void
 fn layoutCodeFor(err: anyerror) diag.Code {
     return switch (err) {
         error.LayoutMissingMarker => .ELAYOUTMISSINGMARKER,
-        error.LayoutUnknownMarker => .ELAYOUTMISSINGMARKER,
+        error.LayoutUnknownMarker => .ELAYOUTUNKNOWNMARKER,
         error.LayoutDuplicateMarker => .ELAYOUTDUPLICATEMARKER,
         error.LayoutInvalidAssetUrl => .ELAYOUTASSET,
         error.LayoutTooManyAssetUrls => .ELAYOUTASSET,
@@ -3856,6 +3856,45 @@ test "#421: broken layout surfaces a structured ELAYOUTDUPLICATEMARKER diagnosti
     try std.testing.expectEqual(diag.Severity.error_, d.severity);
     try std.testing.expectEqualStrings(layout_path, d.source_path);
     try std.testing.expect(d.line == null);
+}
+
+test "#737: unknown layout marker enumerates the closed slot set" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-737-layout", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<a>{{nosuchslot}}</a>{{content}}");
+    try writeTreeFile(io, work, "content/index.md", "# Hi\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.LayoutUnknownMarker, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .diagnostics = &collector,
+    }));
+
+    try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.ELAYOUTUNKNOWNMARKER, d.code);
+    // Every accepted marker is named so the valid set is discoverable (#737).
+    inline for (.{ "{{content}}", "{{nav}}", "{{breadcrumb}}", "{{title}}", "{{toc}}", "{{children}}", "{{metadata}}", "{{relations}}", "{{backlinks}}", "{{footer}}", "{{head}}", "{{asset-url" }) |marker| {
+        try std.testing.expect(std.mem.indexOf(u8, d.remediation, marker) != null);
+    }
 }
 
 test "#421: content failures are collected with source path and position" {
