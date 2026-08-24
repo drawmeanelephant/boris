@@ -96,7 +96,16 @@ fn appendNavNode(
     try buf.appendSlice(allocator, "</a>");
 
     const children = nav[index].children;
-    if (children.len > 0) {
+    // Open a nested list only when at least one child survives pruning, so an
+    // all-draft child set never leaves an empty (invalid) <ul> behind (#738).
+    var any_advertised = false;
+    for (children) |ci| {
+        if (!isDraft(nodes[ci])) {
+            any_advertised = true;
+            break;
+        }
+    }
+    if (any_advertised) {
         try buf.appendSlice(allocator, "\n<ul>\n");
         for (children) |child_index| {
             // Prune draft-rooted subtrees: skipping the child skips everything
@@ -337,6 +346,9 @@ test "draft-rooted subtrees are pruned from nav and omitted from children" {
     defer gpa.free(site);
     try std.testing.expect(std.mem.indexOf(u8, site, ">Alpha</a>") != null);
     try std.testing.expect(std.mem.indexOf(u8, site, ">Gamma</a>") != null);
+    // An advertised page whose children are all drafts emits no empty <ul>.
+    try std.testing.expect(std.mem.indexOf(u8, site, ">Gamma</a>\n<ul>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, site, "<ul>\n</ul>") == null);
     try std.testing.expect(std.mem.indexOf(u8, site, "beta.html") == null);
     try std.testing.expect(std.mem.indexOf(u8, site, "Beta Child") == null);
     try std.testing.expect(std.mem.indexOf(u8, site, ">Shown</a>") != null);
