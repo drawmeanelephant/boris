@@ -7124,23 +7124,17 @@ test "default target emits draft pages but prunes them from nav and children (#7
     defer gpa.free(work);
     try cwd.createDirPath(io, work);
 
-    try writeTreeFile(io, work, "layouts/main.html",
-        "<html><body><nav>NAV<{{nav}}>ENDNAV</nav>BREAD<{{breadcrumb}}>ENDBREAD{{content}}KIDS<{{children}}>ENDKIDS</body></html>");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body><nav>NAV<{{nav}}>ENDNAV</nav>BREAD<{{breadcrumb}}>ENDBREAD{{content}}KIDS<{{children}}>ENDKIDS</body></html>");
     // The published home page links to the draft; the link audit must keep
     // resolving it because a draft still renders to HTML.
-    try writeTreeFile(io, work, "content/index.md",
-        "---\ntitle: Home\n---\n# Home\n\n[draft](secret.html)\n");
-    try writeTreeFile(io, work, "content/guides/a.md",
-        "---\ntitle: Guide A\nparent: index\n---\n# A\n");
-    try writeTreeFile(io, work, "content/secret.md",
-        "---\ntitle: Secret\nstatus: draft\n---\n# SECRETBODYTOKEN\n");
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: Home\n---\n# Home\n\n[draft](secret.html)\n");
+    try writeTreeFile(io, work, "content/guides/a.md", "---\ntitle: Guide A\nparent: index\n---\n# A\n");
+    try writeTreeFile(io, work, "content/secret.md", "---\ntitle: Secret\nstatus: draft\n---\n# SECRETBODYTOKEN\n");
     // A published satellite under the drafted trunk: emitted, but its nav
     // subtree is pruned until the trunk publishes.
-    try writeTreeFile(io, work, "content/secret/kid.md",
-        "---\ntitle: Kid\nparent: secret\n---\n# Kid\n");
+    try writeTreeFile(io, work, "content/secret/kid.md", "---\ntitle: Kid\nparent: secret\n---\n# Kid\n");
     // Archived stays advertised (consistent with Standard.site / Nostr).
-    try writeTreeFile(io, work, "content/archived.md",
-        "---\ntitle: Archived\nstatus: archived\n---\n# Archived\n");
+    try writeTreeFile(io, work, "content/archived.md", "---\ntitle: Archived\nstatus: archived\n---\n# Archived\n");
 
     const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
     defer gpa.free(content);
@@ -7195,8 +7189,7 @@ test "default target emits draft pages but prunes them from nav and children (#7
 
     // Publishing the draft dirties chrome through the status-aware nav
     // material: an incremental rebuild must start advertising it.
-    try writeTreeFile(io, work, "content/secret.md",
-        "---\ntitle: Secret\nstatus: published\n---\n# SECRETBODYTOKEN\n");
+    try writeTreeFile(io, work, "content/secret.md", "---\ntitle: Secret\nstatus: published\n---\n# SECRETBODYTOKEN\n");
     _ = try compileHtmlSite(io, gpa, .{
         .content_root = content,
         .dist_dir = dist,
