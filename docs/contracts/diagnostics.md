@@ -159,6 +159,7 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `ELAYOUTMISSINGMARKER` | error | Layout template lacks the required `{{content}}` slot marker | `assemble.loadLayout` → HTML load/validate |
 | `ELAYOUTUNKNOWNMARKER` | error | Layout template names a marker outside the closed slot set; remediation enumerates every accepted marker | `assemble.loadLayout` → HTML load/validate |
 | `ELAYOUTDUPLICATEMARKER` | error | Layout template repeats a slot marker | `assemble.loadLayout` → HTML load/validate |
+| `ELAYOUTNAVDEPTH` | error | A `{{nav …}}` token whose argument is not exactly `depth=N` with N ≥ 1 | `assemble.loadLayout` → HTML load/validate |
 | `ELAYOUTPATH` | error | Layout path is illegal (absolute, `..`, backslash, or otherwise non-relative) | `layout_select.validateLayoutPath` → HTML load/validate |
 | `ELAYOUTASSET` | error | Layout template references an invalid or excessive asset url | `assemble.loadLayout` / `theme.requireReferencedAssets` → HTML load/validate |
 | `ELAYOUTRULE` | error | Layout-rule selection failure (ambiguous glob, duplicate/invalid selector, mixed theme roots, or rule bounds) | `layout_select` → HTML load/validate |
