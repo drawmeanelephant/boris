@@ -195,9 +195,22 @@ const DependencyResolver = struct {
     edges: *std.ArrayList(DependencyEdge),
     diagnostics: *std.ArrayList(diag.Diagnostic),
     scanned_sources: std.StringHashMapUnmanaged(void) = .empty,
+    /// Lazily built once per resolver (#731). Rebuilding the same source→node
+    /// map for every page made dependency resolution O(pages × nodes); with
+    /// the map shared, the whole pass stays linear like every other consumer
+    /// of the #726 seam.
+    doclink_source_map: ?doclink.SourceNodeMap = null,
 
     fn deinit(self: *DependencyResolver) void {
         self.scanned_sources.deinit(self.gpa);
+        if (self.doclink_source_map) |*m| m.deinit(self.gpa);
+    }
+
+    fn doclinkMap(self: *DependencyResolver) !*const doclink.SourceNodeMap {
+        if (self.doclink_source_map == null) {
+            self.doclink_source_map = try doclink.buildSourceNodeMap(self.gpa, self.nodes);
+        }
+        return &self.doclink_source_map.?;
     }
 
     fn appendEdge(self: *DependencyResolver, from: Endpoint, to: Endpoint, kind: []const u8) !void {
@@ -322,12 +335,12 @@ const DependencyResolver = struct {
         if (include_html_links) {
             var references: std.ArrayList([]const u8) = .empty;
             defer references.deinit(self.gpa);
-            const rewritten = try doclink.rewrite(self.gpa, body, .{
+            const rewritten = try doclink.rewriteWithSourceMap(self.gpa, body, .{
                 .nodes = self.nodes,
                 .source_path = page.source_path,
                 .output_path = page.id,
                 .reference_ids = &references,
-            });
+            }, try self.doclinkMap());
             self.gpa.free(rewritten);
             for (references.items) |id| {
                 try self.appendEdge(from, .{ .type = .page, .value = id }, "html-link");
