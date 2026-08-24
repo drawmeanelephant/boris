@@ -2378,9 +2378,12 @@ fn publishEvidenceReports(
     // file, is complete before checks read the target. Checks are a separate
     // atomic report publication and never participate in that transaction.
     if (options.timings) |t| t.start(.checks);
+    var check_outcomes: std.ArrayList(publication_checks.Outcome) = .empty;
+    defer check_outcomes.deinit(gpa);
     publication_checks.writeAfterCommit(io, gpa, dist_dir, options.target_name, .{
         .test_fail_execution = options.test_fail_publication_checks,
         .test_fail_write = options.test_fail_publication_checks_write,
+        .outcomes_out = &check_outcomes,
     }) catch |err| {
         const stderr = std.debug.lockStderr(&.{});
         defer std.debug.unlockStderr();
@@ -2388,6 +2391,20 @@ fn publishEvidenceReports(
         return error.PublicationChecksFailed;
     };
     if (options.timings) |t| t.stop(.checks);
+
+    // A failed check never fails the committed target by design
+    // (docs/contracts/publication-checks.md), but it must not be invisible:
+    // surface every non-passing verdict even under --quiet, with the pointer
+    // to its per-finding evidence (#740, #741).
+    for (check_outcomes.items) |outcome| {
+        if (outcome.status == .passed or outcome.status == .not_applicable) continue;
+        const stderr = std.debug.lockStderr(&.{});
+        defer std.debug.unlockStderr();
+        stderr.file_writer.interface.print(
+            "warning: publication check '{s}' for target '{s}' reported status '{s}'; per-finding detail lives in _boris/proof/checks.json findings[] and the claim mirrors it in _boris/proof/claims.json\n",
+            .{ outcome.id, options.target_name, outcome.status.name() },
+        ) catch {};
+    }
 
     // Claims are derived from the exact committed artifacts and checks bytes.
     // A derivation, stale-binding, parser, I/O, or atomic-write failure keeps

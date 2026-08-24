@@ -77,6 +77,10 @@ pub const Options = struct {
     /// Test-only fault injection. Production callers leave both false.
     test_fail_execution: bool = false,
     test_fail_write: bool = false,
+    /// When set, receives one `Outcome` per executed check after the report
+    /// bytes are built, so the CLI can surface failed checks without parsing
+    /// the committed JSON (#741). The list is caller-owned and not cleared.
+    outcomes_out: ?*std.ArrayList(Outcome) = null,
 };
 
 pub const Error = std.mem.Allocator.Error || error{
@@ -351,6 +355,20 @@ fn writeScope(out: *std.ArrayList(u8), gpa: std.mem.Allocator, scope: Scope) !vo
     try out.appendSlice(gpa, "\n      }");
 }
 
+/// One executed check's verdict, for callers that must surface results
+/// without re-parsing the committed report (#741).
+pub const Outcome = struct {
+    id: []const u8,
+    status: Status,
+};
+
+fn appendOutcomes(out: ?*std.ArrayList(Outcome), gpa: std.mem.Allocator, checks: []const Check) !void {
+    const sink = out orelse return;
+    for (checks) |check| {
+        try sink.append(gpa, .{ .id = check.id, .status = check.status });
+    }
+}
+
 fn writeCheck(out: *std.ArrayList(u8), gpa: std.mem.Allocator, check: Check) !void {
     try out.appendSlice(gpa, "    {\n      \"id\": ");
     try json_out.writeString(out, gpa, check.id);
@@ -434,6 +452,7 @@ fn buildReport(
     root: Io.Dir,
     target: []const u8,
     inventory_binding: InventoryBinding,
+    outcomes_out: ?*std.ArrayList(Outcome),
 ) Error![]u8 {
     var inventory = try parseInventoryFile(io, root, report_gpa, target);
     defer inventory.deinit();
@@ -652,6 +671,7 @@ fn buildReport(
     }
 
     const checks = [_]Check{ integrity_check, html_check, search_check };
+    try appendOutcomes(outcomes_out, payload_gpa, &checks);
     return writeReport(report_gpa, target, inventory_binding, &inventory, &checks, findings.items) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.NoSpaceLeft => unreachable,
@@ -680,7 +700,7 @@ pub fn writeAfterCommit(
     const report = try buildReport(io, report_gpa, gpa, root, target, .{
         .bytes = inventory_binding.bytes,
         .sha256 = inventory_binding.sha256,
-    });
+    }, options.outcomes_out);
 
     var atomic = root.createFileAtomic(io, output_path, .{ .replace = true, .make_path = true }) catch {
         return error.ChecksWriteFailed;
@@ -1290,6 +1310,31 @@ test "clean checks publish all three executions deterministically" {
     try std.testing.expectEqual(@as(i64, 0), objectAt(checks[0], "finding_offset").integer);
     try std.testing.expectEqual(@as(i64, 0), objectAt(checks[1], "finding_offset").integer);
     try std.testing.expectEqual(@as(i64, 0), objectAt(checks[2], "finding_offset").integer);
+
+    // The outcomes sink mirrors the committed checks without re-parsing (#741).
+    var outcomes: std.ArrayList(Outcome) = .empty;
+    defer outcomes.deinit(gpa);
+    try writeAfterCommit(io, gpa, tmp.dir, "public", .{ .outcomes_out = &outcomes });
+    try std.testing.expectEqual(@as(usize, 3), outcomes.items.len);
+    try std.testing.expectEqualStrings("artifact-integrity", outcomes.items[0].id);
+    try std.testing.expectEqual(Status.passed, outcomes.items[0].status);
+    try std.testing.expectEqualStrings("rendered-html", outcomes.items[1].id);
+    try std.testing.expectEqual(Status.passed, outcomes.items[1].status);
+    try std.testing.expectEqualStrings("rendered-search", outcomes.items[2].id);
+    try std.testing.expectEqual(Status.passed, outcomes.items[2].status);
+
+    // A stale search artifact surfaces as a non-passing verdict.
+    const stale_search = "{\"format\":\"wrong\"}";
+    try writePayload(io, tmp.dir, search_index.output_path, stale_search);
+    var degraded: std.ArrayList(Outcome) = .empty;
+    defer degraded.deinit(gpa);
+    try writeAfterCommit(io, gpa, tmp.dir, "public", .{ .outcomes_out = &degraded });
+    try std.testing.expectEqual(@as(usize, 3), degraded.items.len);
+    var saw_non_passing = false;
+    for (degraded.items) |outcome| {
+        if (outcome.status == .failed or outcome.status == .incomplete) saw_non_passing = true;
+    }
+    try std.testing.expect(saw_non_passing);
 }
 
 test "publication checks retain bounded metadata instead of the aggregate payload set" {
