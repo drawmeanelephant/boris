@@ -2205,14 +2205,14 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*ti
     }) catch |err| {
         const code = mapHtmlError(err, opts.targets.items, layout_path);
         appendEscapedDiagnostic(collector_ptr, err, code);
-        writeHtmlReport(io, gpa, opts, collector_ptr, false, out_dir);
+        writeHtmlReport(io, gpa, opts, collector_ptr, false, out_dir, false);
         return code;
     };
 
     if (!opts.quiet) {
         std.debug.print("ok: validation passed for {d} target(s)\n", .{opts.targets.items.len});
     }
-    writeHtmlReport(io, gpa, opts, collector_ptr, true, out_dir);
+    writeHtmlReport(io, gpa, opts, collector_ptr, true, out_dir, false);
     return .success;
 }
 
@@ -2231,6 +2231,11 @@ fn appendEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror, code: Exi
 
 /// Write the HTML-path diagnostics report (`--report PATH`) deterministically
 /// on success and failure. Never changes the exit code or stderr text.
+///
+/// `include_proof` gates the proofPack mirror (#741): only a run that just
+/// committed target evidence may attribute verdicts to itself. Validate never
+/// publishes, and failed builds must not inherit `_boris/proof/` left in the
+/// output directory by an earlier successful run.
 fn writeHtmlReport(
     io: Io,
     gpa: std.mem.Allocator,
@@ -2238,16 +2243,17 @@ fn writeHtmlReport(
     collector: ?*diag.Collector,
     ok: bool,
     out_dir: []const u8,
+    include_proof: bool,
 ) void {
     const path = opts.report_path orelse return;
     const c = collector orelse return;
     diag.sortDiagnostics(c.list.items);
-    // Mirror publication-check verdicts into the report when the run
+    // Mirror publication-check verdicts into the report when this run
     // committed target evidence (#741). Any read/parse failure simply omits
     // the section; the arena frees everything after rendering.
     var proof_arena = std.heap.ArenaAllocator.init(gpa);
     defer proof_arena.deinit();
-    const proof = readProofSection(io, proof_arena.allocator(), out_dir);
+    const proof = if (include_proof) readProofSection(io, proof_arena.allocator(), out_dir) else null;
     const rendered = html_report.renderHtmlReport(gpa, pipeline.compiler_id, .{
         .ok = ok,
         .content_root = opts.input_dir,
@@ -2700,7 +2706,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         }) catch |err| {
             const code = mapHtmlError(err, opts.targets.items, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);
-            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir);
+            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir, false);
             return code;
         };
 
@@ -2730,7 +2736,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         }) catch |err| {
             const code = mapHtmlError(err, &.{}, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);
-            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir);
+            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir, false);
             return code;
         };
 
@@ -2738,7 +2744,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             std.debug.print("ok: wrote HTML under {s} ({d} page(s))\n", .{ html_dir, stats.pages_written });
         }
     }
-    writeHtmlReport(io, gpa, opts, collector_ptr, true, html_dir);
+    writeHtmlReport(io, gpa, opts, collector_ptr, true, html_dir, true);
     return .success;
 }
 
