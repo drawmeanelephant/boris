@@ -692,16 +692,16 @@ test "report results map ok to the one-shot outcome convention" {
     };
 
     const ok_result = try resultFromReport(arena.allocator(), config, "boris/test",
-        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/test","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/test","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
     );
     try std.testing.expectEqual(FailureClass.success, ok_result.failure_class);
     try std.testing.expectEqual(@as(?u8, 0), ok_result.exit_code);
     try std.testing.expectEqual(@as(usize, 0), ok_result.problems.len);
     try std.testing.expect(!ok_result.used_stderr_fallback);
-    try std.testing.expectEqualStrings("html-build-report-0.1.0", ok_result.report_version.?);
+    try std.testing.expectEqualStrings("html-build-report-0.2.0", ok_result.report_version.?);
 
     const failed_result = try resultFromReport(arena.allocator(), config, "boris/test",
-        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/test","ok":false,"contentRoot":"content","outDir":"dist","errorCount":1,"diagnostics":[{"severity":"error","code":"EFRONTMATTER","message":"bad.md:2:1: unknown key","remediation":"remove the unknown key","sourcePath":"bad.md","line":2,"column":1,"id":null}]}
+        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/test","ok":false,"contentRoot":"content","outDir":"dist","errorCount":1,"diagnostics":[{"severity":"error","code":"EFRONTMATTER","message":"bad.md:2:1: unknown key","remediation":"remove the unknown key","sourcePath":"bad.md","line":2,"column":1,"id":null}]}
     );
     try std.testing.expectEqual(FailureClass.content, failed_result.failure_class);
     try std.testing.expectEqual(@as(?u8, 1), failed_result.exit_code);

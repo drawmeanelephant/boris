@@ -23,6 +23,7 @@ const target = @import("target.zig");
 const theme_mod = @import("theme.zig");
 const watch = @import("watch.zig");
 const intelligence = @import("intelligence.zig");
+const publication_checks = @import("publication_checks.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 const publication_plan = @import("publication_plan.zig");
@@ -2204,14 +2205,14 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*ti
     }) catch |err| {
         const code = mapHtmlError(err, opts.targets.items, layout_path);
         appendEscapedDiagnostic(collector_ptr, err, code);
-        writeHtmlReport(io, gpa, opts, collector_ptr, false, out_dir);
+        writeHtmlReport(io, gpa, opts, collector_ptr, false, out_dir, false);
         return code;
     };
 
     if (!opts.quiet) {
         std.debug.print("ok: validation passed for {d} target(s)\n", .{opts.targets.items.len});
     }
-    writeHtmlReport(io, gpa, opts, collector_ptr, true, out_dir);
+    writeHtmlReport(io, gpa, opts, collector_ptr, true, out_dir, false);
     return .success;
 }
 
@@ -2230,6 +2231,11 @@ fn appendEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror, code: Exi
 
 /// Write the HTML-path diagnostics report (`--report PATH`) deterministically
 /// on success and failure. Never changes the exit code or stderr text.
+///
+/// `include_proof` gates the proofPack mirror (#741): only a run that just
+/// committed target evidence may attribute verdicts to itself. Validate never
+/// publishes, and failed builds must not inherit `_boris/proof/` left in the
+/// output directory by an earlier successful run.
 fn writeHtmlReport(
     io: Io,
     gpa: std.mem.Allocator,
@@ -2237,19 +2243,55 @@ fn writeHtmlReport(
     collector: ?*diag.Collector,
     ok: bool,
     out_dir: []const u8,
+    include_proof: bool,
 ) void {
     const path = opts.report_path orelse return;
     const c = collector orelse return;
     diag.sortDiagnostics(c.list.items);
+    // Mirror publication-check verdicts into the report when this run
+    // committed target evidence (#741). Any read/parse failure simply omits
+    // the section; the arena frees everything after rendering.
+    var proof_arena = std.heap.ArenaAllocator.init(gpa);
+    defer proof_arena.deinit();
+    const proof = if (include_proof) readProofSection(io, proof_arena.allocator(), out_dir) else null;
     const rendered = html_report.renderHtmlReport(gpa, pipeline.compiler_id, .{
         .ok = ok,
         .content_root = opts.input_dir,
         .out_dir = out_dir,
         .diagnostics = c.list.items,
+        .proof = proof,
     }) catch return;
     defer gpa.free(rendered);
     Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = rendered }) catch |err| {
         std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+    };
+}
+
+/// Read `<out_dir>/_boris/proof/checks.json` and mirror its per-check
+/// verdicts for the `--report` proofPack section (#741). All allocations go
+/// to the caller-owned arena; any structural surprise yields null so the
+/// report stays valid without the section.
+fn readProofSection(io: Io, arena: std.mem.Allocator, out_dir: []const u8) ?html_report.ProofSection {
+    const path = std.fmt.allocPrint(arena, "{s}/{s}", .{ out_dir, publication_checks.output_path }) catch return null;
+    const bytes = Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(4 * 1024 * 1024)) catch return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, arena, bytes, .{}) catch return null;
+    if (parsed.value != .object) return null;
+    const checks_val = parsed.value.object.get("checks") orelse return null;
+    if (checks_val != .array) return null;
+    const items = checks_val.array.items;
+    const checks = arena.alloc(html_report.ProofCheck, items.len) catch return null;
+    var count: usize = 0;
+    for (items) |item| {
+        if (item != .object) return null;
+        const id = item.object.get("id") orelse return null;
+        const status = item.object.get("status") orelse return null;
+        if (id != .string or status != .string) return null;
+        checks[count] = .{ .id = id.string, .status = status.string };
+        count += 1;
+    }
+    return .{
+        .path = publication_checks.output_path,
+        .checks = checks[0..count],
     };
 }
 
@@ -2664,7 +2706,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         }) catch |err| {
             const code = mapHtmlError(err, opts.targets.items, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);
-            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir);
+            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir, false);
             return code;
         };
 
@@ -2694,7 +2736,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         }) catch |err| {
             const code = mapHtmlError(err, &.{}, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);
-            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir);
+            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir, false);
             return code;
         };
 
@@ -2702,7 +2744,17 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             std.debug.print("ok: wrote HTML under {s} ({d} page(s))\n", .{ html_dir, stats.pages_written });
         }
     }
-    writeHtmlReport(io, gpa, opts, collector_ptr, true, html_dir);
+    // Only a single-output build may read committed evidence at this exact
+    // path: either zero targets (internal single-`--html-dir` invocation) or
+    // exactly one target whose output directory IS the report directory from
+    // this successful run. Multi-target runs publish _boris/proof/ under
+    // each target directory, so an aggregate out_dir would hold foreign or
+    // stale state (#741).
+    const include_proof =
+        opts.targets.items.len == 0 or
+        (opts.targets.items.len == 1 and
+            std.mem.eql(u8, opts.targets.items[0].output_dir, html_dir));
+    writeHtmlReport(io, gpa, opts, collector_ptr, true, html_dir, include_proof);
     return .success;
 }
 
@@ -3229,6 +3281,76 @@ test "runPipeline: HTML fixture exits 0" {
     defer gpa.free(index_path);
     var file = try cwd.openFile(io, index_path, .{});
     defer file.close(io);
+}
+
+test "runPipeline: single-output build mirrors proofPack into --report (#741)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-proof", .{tmp.sub_path});
+    defer gpa.free(out);
+    const rep = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/proof-report.json", .{tmp.sub_path});
+    defer gpa.free(rep);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .html,
+        .input_dir = "test/fixtures/html/content",
+        .out_dir = null,
+        .rag_dir = null,
+        .html_dir = out,
+        .report_path = rep,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.success, code);
+
+    const cwd = Io.Dir.cwd();
+    const bytes = try cwd.readFileAlloc(io, rep, gpa, .unlimited);
+    defer gpa.free(bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    // The report directory IS this run's evidence root → section present.
+    const proof = parsed.value.object.get("proofPack") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(true, proof.object.get("allPassed").?.bool);
+    try std.testing.expect(proof.object.get("checks").?.array.items.len > 0);
+}
+
+test "runPipeline: multi-target reports omit proofPack (#741)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const one = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/t-one", .{tmp.sub_path});
+    defer gpa.free(one);
+    const two = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/t-two", .{tmp.sub_path});
+    defer gpa.free(two);
+    const rep = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/multi-report.json", .{tmp.sub_path});
+    defer gpa.free(rep);
+
+    var targets: std.ArrayListUnmanaged(target.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
+    defer targets.deinit(gpa);
+    try targets.append(gpa, .{ .name = "one", .output_dir = one });
+    try targets.append(gpa, .{ .name = "two", .output_dir = two });
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .html,
+        .input_dir = "test/fixtures/html/content",
+        .out_dir = null,
+        .rag_dir = null,
+        .targets = targets,
+        .report_path = rep,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.success, code);
+
+    const cwd = Io.Dir.cwd();
+    const bytes = try cwd.readFileAlloc(io, rep, gpa, .unlimited);
+    defer gpa.free(bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    // Evidence lives under each target directory; the aggregate report must
+    // not claim verdicts it did not derive.
+    try std.testing.expect(parsed.value.object.get("proofPack") == null);
 }
 
 test "runPipeline: --timings leaves exit codes and artifacts unchanged" {

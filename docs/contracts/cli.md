@@ -89,7 +89,7 @@ preflight. See the normative [validation contract](validation.md).
 publication-evidence artifacts. It accepts applicable existing HTML options,
 including target/layout/theme and sitemap configuration, and rejects export
 selectors, `--incremental`, `--refresh-evidence`, `--jobs`, and `--format`; `--report PATH` writes
-the shared `html-build-report-0.1.0` JSON (additive; see
+the shared `html-build-report-0.2.0` JSON (additive; see
 [Machine-readable reports](#machine-readable-reports)). With `--watch` it
 becomes the zero-write validation daemon described above. `check` and `impact`
 likewise create no product artifacts; only their explicit `--report` path may
@@ -225,7 +225,7 @@ reimplementing frontmatter or graph resolution.
 
 The HTML path has its own machine-readable diagnostics report: `boris build
 --report PATH` and `boris validate --report PATH` write a deterministic JSON
-report on both success and failure (`html-build-report-0.1.0` schema, same
+report on both success and failure (`html-build-report-0.2.0` schema, same
 diagnostic-object shape as the IR report). It covers every HTML-path
 diagnostic class — parse/graph, component, include, wiki-link, asset,
 link-audit, and layout/theme — and is the surface the preview server and
@@ -240,7 +240,7 @@ editor consume. `--report` is rejected on `watch` and on non-HTML build modes;
 | Command | What `--report PATH` writes | Without `--report` |
 |---|---|---|
 | `check` / `impact` | The Documentation Intelligence analysis report (human or JSON per `--format`) | The same report prints to **stderr** |
-| `build` / `validate` | The HTML-path diagnostics report (`html-build-report-0.1.0` JSON) | No report file; diagnostics stay on stderr as text |
+| `build` / `validate` | The HTML-path diagnostics report (`html-build-report-0.2.0` JSON) | No report file; diagnostics stay on stderr as text |
 
 On `build`/`validate` the file is additive: stderr text and exit codes are
 unchanged with or without it. On `check`/`impact` the file replaces the
