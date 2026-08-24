@@ -87,10 +87,14 @@ the publication checks bind search documents to the selected HTML page set;
 neither result is a claim that an external deployed search request succeeded.
 
 Without `--pages-file`, the CLI recursively discovers regular files whose path
-ends in lowercase `.html`, rejects symlinks, and excludes the configured output
-directory when nested below the root. With `--pages-file`, every non-empty line
-is an exact output-relative `.html` path subject to the same separator,
-component, regular-file, and no-symlink rules. Duplicate entries fail closed.
+ends in lowercase `.html`, rejects symlinks, excludes the configured output
+directory when nested below the root, and prunes the Boris-owned `_boris/`
+evidence namespace: proof chrome and the search artifact itself are never
+searchable content (#750), matching the compiler-owned page list. With
+`--pages-file`, every non-empty line is an exact output-relative `.html` path
+subject to the same separator, component, regular-file, and no-symlink rules;
+an entry under `_boris/` fails closed with a reserved-path error rather than
+diverging from the discovery rule. Duplicate entries fail closed.
 
 ## Extraction and normalization
 
