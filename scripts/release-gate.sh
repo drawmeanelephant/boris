@@ -464,7 +464,7 @@ if "${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
   --layout-rule default role:trunk "${LR_THEME}/layouts/section.html" \
   --html-dir="${LR_OUT_INC}" --incremental --quiet; then
   if [[ -f "${LR_OUT_INC}/.boris-cache/manifest.json" ]] \
-    && grep -q 'boris-cache-v2-layout-rules' "${LR_OUT_INC}/.boris-cache/manifest.json" \
+    && grep -q 'boris-cache-v3-nav-digest' "${LR_OUT_INC}/.boris-cache/manifest.json" \
     && grep -q 'selected_layout' "${LR_OUT_INC}/.boris-cache/manifest.json"; then
     pass "layout-rules: incremental cache v2 + selected_layout"
   else
