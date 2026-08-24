@@ -144,7 +144,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 
    | Marker | Value |
    |--------|--------|
-   | `{{nav}}` | Full site forest (root Trunks id-ascending, recursively nested children id-ascending) |
+   | `{{nav}}` | Full site forest (root Trunks id-ascending, recursively nested children id-ascending; draft-rooted subtrees pruned) |
    | `{{breadcrumb}}` | Parent chain root → current page (inclusive) |
    | `{{title}}` | Page title, or entity id when title is absent (HTML-escaped text) |
    | `{{toc}}` | In-page outline from **this page’s** body headings (h1–h3 with `id`) |
@@ -182,9 +182,29 @@ Before any page render, the HTML path:
    `{{nav}}` / `{{breadcrumb}}` / `{{children}}` (and fingerprint material when
    graph chrome is present).
 
+### Status gating on the default HTML target (#738)
+
+`status` is a document fact; each projection owns its eligibility rule. On the
+default HTML target a `status: draft` page is **emitted but not advertised**:
+
+| Surface | Draft behavior |
+|---------|----------------|
+| Page HTML at its normal route | **Emitted.** A draft is unlisted, not absent: wiki-links and Markdown links to it keep resolving, and the output link audit keeps auditing the complete output set. |
+| `{{nav}}` | **Pruned**, including the whole subtree below a drafted page (no re-rooting; publish the trunk to re-advertise its section). An all-draft forest still emits the empty `<nav>` wrapper shape. |
+| `{{children}}` | Direct draft children are **omitted**; an all-draft child list emits the empty fragment. |
+| `{{breadcrumb}}` | Unchanged — per-page context, not advertising; a drafted ancestor stays a crumb. |
+| Search index / sitemap / RSS | Excluded (same rule as before this section existed). |
+| `{{metadata}}` on the drafted page itself | Unchanged (own-page context). |
+| `archived` | Treated exactly like published on the HTML target, consistent with Standard.site and Nostr eligibility. |
+| IR (`graph.json`) / RAG | Keep every validated page regardless of status; they are source-derived corpora, not publication advertisements. |
+
+The frozen graph is unchanged by status gating: drafts remain graph nodes,
+`graph.json` keeps its shape, and no `schemaVersion` bump occurs.
+
 ### Site nav HTML (normative shape)
 
 When `{{nav}}` is present, emit a deterministic rooted forest (no hash-map order):
+draft-rooted subtrees are pruned per [status gating](#status-gating-on-the-default-html-target-738).
 
 ```html
 <nav class="site-nav" aria-label="Site">
@@ -226,7 +246,8 @@ Last crumb is the current page (unlinked text). Earlier crumbs are links.
 ### Direct-children HTML (normative shape)
 
 When `{{children}}` is present, Boris emits only the current frozen node's
-**direct** children, in canonical entity-id ascending order:
+**direct** children, in canonical entity-id ascending order (draft direct
+children omitted; see [status gating](#status-gating-on-the-default-html-target-738)):
 
 ```html
 <nav class="page-children" aria-label="Children">
@@ -251,12 +272,16 @@ When `{{children}}` is present, Boris emits only the current frozen node's
 
 When the layout contains `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, or
 `{{children}}`, each such page fingerprint includes a **site nav material**
-digest derived from the frozen ordered list of `(id, title, parent, role)` for
+digest derived from the frozen ordered list of `(id, title, parent, role,
+status)` for
 every page: the raw material is hashed once per build, and each page
 fingerprint folds in that fixed-size SHA-256 digest rather than rehashing the
 per-page-count material. This conservative shared material keeps title, output-path, parent,
 and direct-child changes correct across incremental builds; a title or parent
-change on any page dirties every page using graph chrome. Layouts without graph
+change on any page dirties every page using graph chrome. The status field is
+load-bearing: flipping a page between `draft` and published-equivalent states
+changes what `{{nav}}`/`{{children}}` render and must dirty chrome pages.
+Layouts without graph
 chrome keep the prior page-local fingerprint inputs
 (source, includes, layout bytes, entity id, target identity).
 
