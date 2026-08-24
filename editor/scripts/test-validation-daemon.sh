@@ -99,7 +99,7 @@ node -e 'const v = require(process.argv[1]); if (!v.supported || v.supported.val
 run_command "$work/validate-1.json" '{"mode":"validate"}'
 node -e '
   const r = require(process.argv[1]);
-  if (r.exit_code !== 0 || r.failure_class !== "success" || r.report_version !== "html-build-report-0.1.0") throw Error("clean project did not validate through the daemon");
+  if (r.exit_code !== 0 || r.failure_class !== "success" || r.report_version !== "html-build-report-0.2.0") throw Error("clean project did not validate through the daemon");
   if (r.used_stderr_fallback) throw Error("daemon result used stderr fallback");
 ' "$work/validate-1.json"
 [[ "$(daemon_count)" == "1" ]] || { echo "expected exactly one validate --watch daemon, found $(daemon_count)" >&2; exit 1; }
@@ -122,7 +122,7 @@ done
 run_command "$work/validate-failed.json" '{"mode":"validate"}'
 node -e '
   const r = require(process.argv[1]);
-  if (r.exit_code !== 1 || r.failure_class !== "content" || r.report_version !== "html-build-report-0.1.0") throw Error("daemon failure classification mismatch");
+  if (r.exit_code !== 1 || r.failure_class !== "content" || r.report_version !== "html-build-report-0.2.0") throw Error("daemon failure classification mismatch");
   if (!r.problems.some(p => p.code === "EDUPLICATEID")) throw Error("daemon report missing EDUPLICATEID");
   if (r.used_stderr_fallback) throw Error("daemon result used stderr fallback");
 ' "$work/validate-failed.json"

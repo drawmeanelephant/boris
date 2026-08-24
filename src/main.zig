@@ -23,6 +23,7 @@ const target = @import("target.zig");
 const theme_mod = @import("theme.zig");
 const watch = @import("watch.zig");
 const intelligence = @import("intelligence.zig");
+const publication_checks = @import("publication_checks.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 const publication_plan = @import("publication_plan.zig");
@@ -2241,15 +2242,50 @@ fn writeHtmlReport(
     const path = opts.report_path orelse return;
     const c = collector orelse return;
     diag.sortDiagnostics(c.list.items);
+    // Mirror publication-check verdicts into the report when the run
+    // committed target evidence (#741). Any read/parse failure simply omits
+    // the section; the arena frees everything after rendering.
+    var proof_arena = std.heap.ArenaAllocator.init(gpa);
+    defer proof_arena.deinit();
+    const proof = readProofSection(io, proof_arena.allocator(), out_dir);
     const rendered = html_report.renderHtmlReport(gpa, pipeline.compiler_id, .{
         .ok = ok,
         .content_root = opts.input_dir,
         .out_dir = out_dir,
         .diagnostics = c.list.items,
+        .proof = proof,
     }) catch return;
     defer gpa.free(rendered);
     Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = rendered }) catch |err| {
         std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+    };
+}
+
+/// Read `<out_dir>/_boris/proof/checks.json` and mirror its per-check
+/// verdicts for the `--report` proofPack section (#741). All allocations go
+/// to the caller-owned arena; any structural surprise yields null so the
+/// report stays valid without the section.
+fn readProofSection(io: Io, arena: std.mem.Allocator, out_dir: []const u8) ?html_report.ProofSection {
+    const path = std.fmt.allocPrint(arena, "{s}/{s}", .{ out_dir, publication_checks.output_path }) catch return null;
+    const bytes = Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(4 * 1024 * 1024)) catch return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, arena, bytes, .{}) catch return null;
+    if (parsed.value != .object) return null;
+    const checks_val = parsed.value.object.get("checks") orelse return null;
+    if (checks_val != .array) return null;
+    const items = checks_val.array.items;
+    const checks = arena.alloc(html_report.ProofCheck, items.len) catch return null;
+    var count: usize = 0;
+    for (items) |item| {
+        if (item != .object) return null;
+        const id = item.object.get("id") orelse return null;
+        const status = item.object.get("status") orelse return null;
+        if (id != .string or status != .string) return null;
+        checks[count] = .{ .id = id.string, .status = status.string };
+        count += 1;
+    }
+    return .{
+        .path = publication_checks.output_path,
+        .checks = checks[0..count],
     };
 }
 

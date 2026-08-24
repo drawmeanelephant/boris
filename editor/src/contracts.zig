@@ -112,7 +112,7 @@ pub fn readBuildReport(allocator: std.mem.Allocator, bytes: []const u8) Error!Do
 pub fn readHtmlBuildReport(allocator: std.mem.Allocator, bytes: []const u8) Error!Document {
     var document = try parseObject(allocator, bytes, .html_build_report);
     errdefer document.deinit();
-    try expectString(&document, "schemaVersion", "html-build-report-0.1.0");
+    try expectString(&document, "schemaVersion", "html-build-report-0.2.0");
     try requireString(&document, "compilerId");
     try requireBool(&document, "ok");
     try requireString(&document, "contentRoot");
@@ -121,7 +121,7 @@ pub fn readHtmlBuildReport(allocator: std.mem.Allocator, bytes: []const u8) Erro
     try requireArray(&document, "diagnostics");
     const diagnostic_views = try extractDiagnostics(allocator, &document);
     allocator.free(diagnostic_views);
-    return withVersion(document, "html-build-report-0.1.0");
+    return withVersion(document, "html-build-report-0.2.0");
 }
 
 pub fn readManifest(allocator: std.mem.Allocator, bytes: []const u8) Error!Document {
@@ -509,16 +509,24 @@ test "IR adapters negotiate base and conditional facet versions" {
     try std.testing.expectEqualStrings("0.4.0", graph.version);
 }
 
-test "HTML-path report adapter accepts html-build-report-0.1.0" {
+test "HTML-path report adapter accepts html-build-report-0.2.0" {
     const allocator = std.testing.allocator;
     var report = try readHtmlBuildReport(allocator,
-        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
     );
     defer report.deinit();
     try std.testing.expectEqual(.html_build_report, report.kind);
-    try std.testing.expectEqualStrings("html-build-report-0.1.0", report.version);
+    try std.testing.expectEqualStrings("html-build-report-0.2.0", report.version);
+    // The optional proofPack section (#741) passes through untouched.
+    var with_proof = try readHtmlBuildReport(allocator,
+        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[],"proofPack":{"path":"_boris/proof/checks.json","allPassed":false,"checks":[{"id":"rendered-search","status":"failed"}]}}
+    );
+    defer with_proof.deinit();
+    const proof = with_proof.parsed.value.object.get("proofPack").?.object;
+    try std.testing.expectEqual(false, proof.get("allPassed").?.bool);
+    // The retired 0.1.0 version is no longer accepted.
     try std.testing.expectError(error.UnknownFormat, readHtmlBuildReport(allocator,
-        \\{"schemaVersion":"0.2.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
     ));
 
     try std.testing.expectError(error.UnsupportedSchemaVersion, readGraph(allocator,

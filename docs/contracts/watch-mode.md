@@ -194,7 +194,7 @@ Validate mode uses the same event names with `mode` `"validate"`:
 
 - `errors` is the count of `error`-severity diagnostics.
 - Each `diagnostics` object is byte-identical in shape and field order to the
-  `build-report.json` / `html-build-report-0.1.0` diagnostic object
+  `build-report.json` / `html-build-report-0.2.0` diagnostic object
   (`severity`, `code`, `message`, `remediation`, `sourcePath`, `line`,
   `column`, `id`). `sourcePath` and `id` are `null` when absent; `line` and
   `column` are `null` when not known.

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris HTML-path build-report.json (v0.2)",
+  "description": "Machine-readable twin of the HTML-path stderr text, written by `boris build --report PATH` and `boris validate --report PATH` on both success and failure. The prose contract in docs/contracts/diagnostics.md remains normative. Unlike the IR build-report it is flag-opt-in (no artifact is auto-written into the output tree); diagnostics cover all HTML-path classes including layout/theme. 0.2.0 adds the optional proofPack section (#741): when the run published target evidence and _boris/proof/checks.json could be read back, machine consumers see per-check verdicts in the same file instead of having to discover the separate evidence channel.",
+  "type": "object",
+  "required": ["schemaVersion", "compilerId", "ok", "contentRoot", "outDir", "errorCount", "diagnostics"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "html-build-report-0.2.0" },
+    "compilerId": {
+      "type": "string",
+      "description": "Compiler id from the version constants (see docs/contracts/version.md); lets tooling pin the producing compiler."
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "true iff the HTML build/validate succeeded with zero error diagnostics."
+    },
+    "contentRoot": { "type": "string" },
+    "outDir": {
+      "type": "string",
+      "description": "Configured HTML output directory (dist/ or --html-dir). validate writes the same value even though it publishes nothing."
+    },
+    "errorCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of severity=error diagnostics."
+    },
+    "proofPack": {
+      "type": "object",
+      "description": "Publication-check verdicts mirrored from <outDir>/_boris/proof/checks.json. Present only when the run committed target evidence and the checks report was readable; absent for validate, pre-publication failures, and unreadable trees. A failing check never fails the committed target (docs/contracts/publication-checks.md); allPassed=false tells CI to inspect the findings[] array in that file.",
+      "additionalProperties": false,
+      "required": ["path", "allPassed", "checks"],
+      "properties": {
+        "path": { "type": "string", "const": "_boris/proof/checks.json" },
+        "allPassed": {
+          "type": "boolean",
+          "description": "true iff no executed check reported status failed or incomplete."
+        },
+        "checks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/proofCheck" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "description": "Sorted diagnostics; see docs/contracts/diagnostics.md for the closed code set (including the ELAYOUT* family).",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "description": "Key order: severity, code, message, remediation, sourcePath, line, column, id — identical to the IR diagnostic object.",
+      "required": ["severity", "code", "message", "remediation", "sourcePath", "line", "column", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "remediation": { "type": "string" },
+        "sourcePath": { "type": ["string", "null"] },
+        "line": { "type": ["integer", "null"] },
+        "column": { "type": ["integer", "null"] },
+        "id": { "type": ["string", "null"] }
+      }
+    },
+    "proofCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "type": "string", "enum": ["passed", "failed", "incomplete", "not-applicable"] }
+      }
+    }
+  }
+}

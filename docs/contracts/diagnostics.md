@@ -186,12 +186,19 @@ component, include, wiki-link, asset, link-audit (`EROUTEMISSING`,
 the preview server ([#392]'s `serve` loop) and the Boris editor expose; the IR
 path keeps its own auto-written `build-report.json`.
 
-- Schema: `html-build-report-0.1.0` — see
-  [schemas/html-build-report-0.1.0.schema.json](schemas/html-build-report-0.1.0.schema.json).
+- Schema: `html-build-report-0.2.0` — see
+  [schemas/html-build-report-0.2.0.schema.json](schemas/html-build-report-0.2.0.schema.json).
 - Top-level shape matches the IR report: `schemaVersion`, `compilerId`, `ok`,
   `contentRoot`, `outDir`, `errorCount`, `diagnostics`. There is no
   `pageCount` (the HTML path does not expose a single page count across
   targets).
+- Optional `proofPack` section (#741): when the run committed target evidence
+  and `<outDir>/_boris/proof/checks.json` was readable, the report mirrors the
+  per-check verdicts — `path`, `allPassed` (false when any check reported
+  `failed`/`incomplete`), and `checks[]`. A failing check never fails the
+  committed target ([publication-checks.md](publication-checks.md));
+  `allPassed: false` tells machine consumers to read that file's `findings[]`.
+  The section is absent for validate and pre-publication failures.
 - Each diagnostic object uses the **exact key order** of the IR diagnostic
   object: `severity, code, message, remediation, sourcePath, line, column, id`.
 - Diagnostics are sorted with the same deterministic comparator as the IR
