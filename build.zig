@@ -11,6 +11,23 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Build provenance (#776): the VCS revision this binary was compiled
+    // from, baked in at compile time. Auto-detected from git when available;
+    // packagers (scripts/agent-pack.sh) can pin it explicitly with
+    // `-Dvcs-revision=<token>`. Empty when the tree is not a git checkout
+    // (e.g. a source tarball). A dirty worktree appends ".dirty" so a local
+    // uncommitted build is never mistaken for a clean commit artifact. The
+    // token is opaque provenance text: it never alters the compiler id,
+    // exit codes, or artifact schemas — it surfaces only through the additive
+    // `--build-info` query and the reports' additive `vcs_revision` field.
+    const vcs_revision = b.option(
+        []const u8,
+        "vcs-revision",
+        "VCS revision token baked into the binary (default: auto-detect from git)",
+    ) orelse detectVcsRevision(b);
+    const build_info = b.addOptions();
+    build_info.addOption([]const u8, "vcs_revision", vcs_revision);
+
     // Portable AT Protocol OAuth primitives. This module has no host I/O,
     // clock, filesystem, or ambient-randomness dependency; consumers provide
     // those capabilities at their platform boundary.
@@ -463,6 +480,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    root_mod.addOptions("build_info", build_info);
     root_mod.addImport("secp256k1", secp.c_module);
     root_mod.linkLibrary(secp.library);
     linkOliver(root_mod, oliver_mod);
@@ -2045,4 +2063,23 @@ fn buildSecp256k1(
     c_module.linkLibrary(lib);
 
     return .{ .library = lib, .c_module = c_module };
+}
+
+/// Best-effort VCS revision detection for build provenance (#776). Runs git
+/// against the build root; any failure (no git, not a repository, detached
+/// plumbing) yields an empty token so tarball builds simply carry no revision.
+/// A dirty worktree appends ".dirty" so an uncommitted local build is never
+/// mistaken for a clean commit artifact.
+fn detectVcsRevision(b: *std.Build) []const u8 {
+    const argv = [_][]const u8{ "git", "rev-parse", "--short", "HEAD" };
+    var code: u8 = 0;
+    const raw = b.runAllowFail(&argv, &code, .ignore) catch return "";
+    const trimmed = std.mem.trim(u8, raw, " \n\r\t");
+    if (trimmed.len == 0) return "";
+    const dirty_argv = [_][]const u8{ "git", "status", "--porcelain" };
+    const dirty = b.runAllowFail(&dirty_argv, &code, .ignore) catch "";
+    if (std.mem.trim(u8, dirty, " \n\r\t").len > 0) {
+        return std.fmt.allocPrint(b.allocator, "{s}.dirty", .{trimmed}) catch trimmed;
+    }
+    return trimmed;
 }

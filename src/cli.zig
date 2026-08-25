@@ -107,6 +107,9 @@ pub const Options = struct {
     help: bool = false,
     /// When true, print the compiler version and exit successfully (no pipeline).
     version: bool = false,
+    /// When true, print the build-info provenance document (#776) and exit
+    /// successfully (no pipeline). Additive stdout machine surface.
+    build_info: bool = false,
     /// Suppress progress and success chatter on stderr (`--quiet`).
     ///
     /// This never suppresses errors or fatal diagnostics. A nonzero exit must
@@ -377,19 +380,24 @@ fn parseOptionsAccumulate(gpa: std.mem.Allocator, args: []const []const u8, st: 
         if (captureCommandPositional(st, a)) continue;
 
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h") or
-            std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V"))
+            std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V") or
+            std.mem.eql(u8, a, "--build-info"))
         {
-            // Help/version short-circuits: do not validate remaining args.
-            // The first of the two flags wins (they share one exit path).
-            // Release any targets accumulated before the flag: the returned
-            // Options carries an empty list (no allocation), and the caller's
-            // deinit would never see the accumulated one (errdefer only fires
-            // on error), so `--target X --help`/`--version` must not leak it.
+            // Help/version/build-info short-circuits: do not validate
+            // remaining args. The first of the three flags wins (they share
+            // one exit path). Release any targets accumulated before the
+            // flag: the returned Options carries an empty list (no
+            // allocation), and the caller's deinit would never see the
+            // accumulated one (errdefer only fires on error), so
+            // `--target X --help`/`--version`/`--build-info` must not leak it.
             freeTargetList(gpa, &st.targets);
             const wants_help = std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h");
+            const wants_version = !wants_help and
+                (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V"));
             return .{
                 .help = wants_help,
-                .version = !wants_help,
+                .version = wants_version,
+                .build_info = !wants_help and !wants_version,
                 .quiet = st.quiet,
                 .timings = st.saw_timings,
                 .command = st.command,
@@ -2585,6 +2593,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         const a = args[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
         if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) continue;
+        if (std.mem.eql(u8, a, "--build-info")) continue;
         for (never_blamed_flags) |f| {
             if (std.mem.eql(u8, a, f)) break;
         } else return a;
@@ -2594,6 +2603,8 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
 /// Dispatch parsed options through a small injectable runner.
 ///
 /// - Version: calls `runner.printVersion()` and returns success; never calls `run`.
+/// - Build info: calls `runner.printBuildInfo()` when the runner provides it
+///   and returns success; never calls `run` (#776).
 /// - Help: calls `runner.printHelp()` and returns success; never calls `run`.
 /// - Build modes: calls `runner.run(opts)` and returns its exit code.
 ///
@@ -2601,6 +2612,11 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
 pub fn execute(opts: Options, runner: anytype) ExitCode {
     if (opts.version) {
         runner.printVersion();
+        return .success;
+    }
+    if (opts.build_info) {
+        const Runner = @TypeOf(runner.*);
+        if (@hasDecl(Runner, "printBuildInfo")) runner.printBuildInfo();
         return .success;
     }
     if (opts.help) {
@@ -3719,6 +3735,31 @@ test "parse: help/version short-circuit and do not validate trailing junk" {
     defer o7.deinit(std.testing.allocator);
     try expect(o7.version);
     try expectEqual(@as(usize, 0), o7.targets.items.len);
+}
+
+test "parse: --build-info joins the short-circuit family" {
+    // #776: --build-info is a stdout query surface like --version.
+    var o1 = try parseOptions(std.testing.allocator, &.{"boris", "--build-info"});
+    defer o1.deinit(std.testing.allocator);
+    try expect(o1.build_info);
+    try expect(!o1.help);
+    try expect(!o1.version);
+
+    // First flag wins across the whole query family.
+    var o2 = try parseOptions(std.testing.allocator, &.{ "boris", "--help", "--build-info" });
+    defer o2.deinit(std.testing.allocator);
+    try expect(o2.help);
+    try expect(!o2.build_info);
+
+    var o3 = try parseOptions(std.testing.allocator, &.{ "boris", "--build-info", "--not-a-real-flag" });
+    defer o3.deinit(std.testing.allocator);
+    try expect(o3.build_info);
+
+    // Targets accumulated before the short-circuit are released.
+    var o4 = try parseOptions(std.testing.allocator, &.{ "boris", "--target", "a=dist", "--build-info" });
+    defer o4.deinit(std.testing.allocator);
+    try expect(o4.build_info);
+    try expectEqual(@as(usize, 0), o4.targets.items.len);
 }
 
 test "execute: help does not invoke pipeline (dependency injection)" {

@@ -192,7 +192,10 @@ path keeps its own auto-written `build-report.json`.
 - Top-level shape matches the IR report: `schemaVersion`, `compilerId`, `ok`,
   `contentRoot`, `outDir`, `errorCount`, `diagnostics`. There is no
   `pageCount` (the HTML path does not expose a single page count across
-  targets).
+  targets). An additive `vcsRevision` string (#776) follows `compilerId`:
+  the opaque VCS revision token the producing binary was compiled from,
+  `""` when the build could not detect one — build provenance without
+  touching the compiler id.
 - Optional `proofPack` section (#741): when a single-output build committed
   its target evidence and `<outDir>/_boris/proof/checks.json` was readable,
   the report mirrors the
@@ -305,7 +308,11 @@ Rules:
 3. Do not exit `0` if any `error` was emitted, even if some files parsed.
 4. `--help` / `-h` exit `0` without scanning content or writing artifacts.
 5. Prefer `3` over `1` for pure I/O failures (missing content root, read errors
-   classified as `EIO` with `failure: io`).
+   classified as `EIO` with `failure: io`). The HTML path's missing-content-root
+   diagnostic names the probed content root —
+   `content root "…" not found or not a directory` plus the create-or-`--input`
+   remediation (#779) — matching the IR pipeline's wording, so a wrong-cwd
+   invocation reads as an invocation problem rather than an opaque error class.
 6. On content failure the pipeline writes `build-report.json` with diagnostics
    and does **not** publish graph-dependent IR; that does **not** make the exit
    code `0`.

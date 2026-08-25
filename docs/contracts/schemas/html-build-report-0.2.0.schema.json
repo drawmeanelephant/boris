@@ -11,6 +11,10 @@
       "type": "string",
       "description": "Compiler id from the version constants (see docs/contracts/version.md); lets tooling pin the producing compiler."
     },
+    "vcsRevision": {
+      "type": "string",
+      "description": "Additive build provenance (#776): opaque VCS revision token the producing binary was compiled from (e.g. \"a8ef247\", or with a \".dirty\" suffix for an uncommitted build); \"\" when the build could not detect one. Never part of the compiler id; key order is stable (emitted directly after `compilerId`)."
+    },
     "ok": {
       "type": "boolean",
       "description": "true iff the HTML build/validate succeeded with zero error diagnostics."

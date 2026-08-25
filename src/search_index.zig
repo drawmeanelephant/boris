@@ -275,7 +275,15 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
                     heading_marked = attrValue(txt, "data-boris-search-title") != null;
                     level = n[1] - '0';
                     if (attrValue(txt, "id")) |id| try appendDecoded(&sections.items[sections.items.len - 1].fragment, a, id);
-                } else if (std.ascii.eqlIgnoreCase(n, "code") or std.ascii.eqlIgnoreCase(n, "pre")) code_depth += 1;
+                } else if (std.ascii.eqlIgnoreCase(n, "code") or std.ascii.eqlIgnoreCase(n, "pre")) {
+                    code_depth += 1;
+                    // Word boundaries (#778): successive code fragments in a
+                    // section must not concatenate ("fileotool -Lstrings"),
+                    // and prose must not concatenate across an inline span's
+                    // edges. normalize() collapses the padding whitespace.
+                    try sections.items[sections.items.len - 1].code.append(a, ' ');
+                    try sections.items[sections.items.len - 1].prose.append(a, ' ');
+                }
                 if (isBlock(n) or isBreak(n)) try sections.items[sections.items.len - 1].prose.append(a, ' ');
             }
         } else if (excluded > 0) excluded -= 1 else if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6' and heading) {
@@ -286,7 +294,11 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
                 title = heading_title;
             } else a.free(heading_title);
             heading_marked = false;
-        } else if ((std.ascii.eqlIgnoreCase(n, "code") or std.ascii.eqlIgnoreCase(n, "pre")) and code_depth > 0) code_depth -= 1;
+        } else if ((std.ascii.eqlIgnoreCase(n, "code") or std.ascii.eqlIgnoreCase(n, "pre")) and code_depth > 0) {
+            code_depth -= 1;
+            // Close the prose word boundary opened by the span (#778).
+            try sections.items[sections.items.len - 1].prose.append(a, ' ');
+        }
         if (isBlock(n) and excluded == 0) try sections.items[sections.items.len - 1].prose.append(a, ' ');
         i = tag.end + 1;
     }
@@ -468,6 +480,20 @@ test "rendered extractor excludes chrome and preserves sections" {
     try std.testing.expect(std.mem.indexOf(u8, d.sections[0].code, "zig build") != null);
     try std.testing.expectEqualStrings("linux", d.sections[1].fragment);
     try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "Noise") == null);
+}
+
+test "code fragments join with spaces and prose keeps word boundaries at span edges" {
+    // #778: adjacent code spans must not concatenate in `code`, and the prose
+    // around an inline span must not fuse into one token. Code stays out of
+    // `text` (contract: rendered-search.md).
+    const html = "<main data-boris-search-root><h1>Triage</h1>" ++
+        "<p>Zero-build triage of the pack: <code>file</code>, <code>otool -L</code>, then <code>strings</code> mining.</p>" ++
+        "</main>";
+    const d = try indexHtml(std.testing.allocator, "triage.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    const s = d.sections[0];
+    try std.testing.expectEqualStrings("file otool -L strings", s.code);
+    try std.testing.expectEqualStrings("Zero-build triage of the pack: , , then mining.", s.text);
 }
 
 test "explicit root failures stay fail-loud" {
