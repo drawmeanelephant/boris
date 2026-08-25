@@ -4,6 +4,10 @@ const model = @import("model.zig");
 const scanner = @import("scanner.zig");
 const report = @import("report.zig");
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this tool does not import `src/`.
+pub const tool_id = "boris-docs-maintenance/0.8.1";
+
 pub fn main(init: std.process.Init) u8 {
     const arena = init.arena.allocator();
     const gpa = init.gpa;
@@ -22,6 +26,13 @@ pub fn main(init: std.process.Init) u8 {
     const subcommand = raw_args[1];
     if (std.mem.eql(u8, subcommand, "-h") or std.mem.eql(u8, subcommand, "--help") or std.mem.eql(u8, subcommand, "help")) {
         printUsage();
+        return 0;
+    }
+    if (std.mem.eql(u8, subcommand, "-V") or std.mem.eql(u8, subcommand, "--version")) {
+        var stdout_buffer: [128]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+        stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+        stdout_writer.interface.flush() catch {};
         return 0;
     }
 
@@ -173,6 +184,7 @@ fn printUsage() void {
         \\  --json <path>          Output JSON inventory path (default: zig-out/docs-maintenance/inventory.json)
         \\  --markdown <path>      Output Markdown summary path (default: zig-out/docs-maintenance/summary.md)
         \\  -h, --help             Display this help message
+        \\  -V, --version          Print the tool id and exit
         \\
         \\EXIT STATUS:
         \\  0  Successful scan; trustworthy reports published.
