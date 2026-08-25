@@ -41,6 +41,11 @@ Rules:
 4. Directories are not publishable assets; only regular files are inventoried.
 5. SVG is inspected before publication. Files containing active constructs are
    rejected with `EASSET`; Boris never rewrites or sanitizes an author's SVG.
+   The inspection sweeps **every regular file under the sibling root at
+   discovery time**, including files no page references; when an offending
+   SVG's path appears nowhere in the owning page's source, the diagnostic
+   detail appends `(file not referenced by any page)` so remediation can
+   distinguish dead files from live ones.
 6. Missing sibling root is allowed (empty inventory).
 7. Inventory order is bytewise sorted by within-tree path (deterministic copy).
 8. Extension policy for pages is unchanged: non-page files under content are
