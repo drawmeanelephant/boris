@@ -10,7 +10,7 @@
 # All generated trees live under the ignored .zig-cache tree.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 BORIS="./zig-out/bin/boris"
@@ -20,7 +20,7 @@ OUT=".zig-cache/boris-init"
 [[ "$OUT" == ".zig-cache/boris-init" ]] || { echo "unsafe test output path" >&2; exit 1; }
 rm -rf "$OUT"
 mkdir -p "$OUT"
-OUT="$(cd "$OUT" && pwd)"
+OUT="$(cd "$OUT" && pwd -P)"
 
 note() { printf '==> %s\n' "$*"; }
 pass() { printf '    OK  %s\n' "$*"; }

@@ -19,7 +19,7 @@
 #   ./scripts/test-release-gate-git-detection.sh
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 GATE_SCRIPT="${ROOT}/scripts/release-gate.sh"
