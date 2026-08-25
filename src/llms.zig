@@ -22,8 +22,8 @@ pub const Options = struct {
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
     /// Optional normalized Pages identity. When present, links are absolute
-    /// public URLs rooted at that identity; otherwise the legacy root-relative
-    /// first-slice form is retained.
+    /// public URLs rooted at that identity; otherwise links are root-relative
+    /// `.html` paths naming the default HTML output layout.
     publication_location: ?*const github_pages.Location = null,
     /// Opt-in phase timing/counter recorder (`--timings`); null by default.
     timings: ?*timings.Recorder = null,
@@ -130,20 +130,16 @@ fn appendUrl(
     id: []const u8,
     location: ?*const github_pages.Location,
 ) !void {
+    const output_path = try identity.safeOutputRelativePath(gpa, id);
+    defer gpa.free(output_path);
+    var url = structured_out.Sink.init(gpa);
+    defer url.deinit();
     if (location) |public_location| {
-        const output_path = try identity.safeOutputRelativePath(gpa, id);
-        defer gpa.free(output_path);
-        var url = structured_out.Sink.init(gpa);
-        defer url.deinit();
         try url.rawTrusted("github_pages.parse validates the normalized publication base URL", public_location.base_url);
-        try url.lit("/");
-        try url.uriPath(output_path);
-        try buf.appendSlice(gpa, url.items());
-        return;
     }
-    try buf.append(gpa, '/');
-    try appendInline(buf, gpa, id);
-    try buf.appendSlice(gpa, "/");
+    try url.lit("/");
+    try url.uriPath(output_path);
+    try buf.appendSlice(gpa, url.items());
 }
 
 const ChildrenIndex = struct {
@@ -394,15 +390,25 @@ test "llms export renders arbitrary-depth hierarchy recursively" {
     const output = try readFileAlloc(io, Io.Dir.cwd(), out, gpa);
     defer gpa.free(output);
     const chain = [_][]const u8{
-        "[Hierarchy Trunk](/hierarchy-trunk/)",
-        "[Hierarchy Mid](/hierarchy-mid/)",
-        "[Hierarchy Leaf](/hierarchy-leaf/)",
-        "[Hierarchy Great-Grandchild](/hierarchy-great-grandchild/)",
+        "[Hierarchy Trunk](/hierarchy-trunk.html)",
+        "[Hierarchy Mid](/hierarchy-mid.html)",
+        "[Hierarchy Leaf](/hierarchy-leaf.html)",
+        "[Hierarchy Great-Grandchild](/hierarchy-great-grandchild.html)",
     };
     var prior: usize = 0;
     for (chain) |entry| {
         const found = std.mem.indexOfPos(u8, output, prior, entry) orelse return error.TestExpectedEqual;
         prior = found + entry.len;
+    }
+    // Default-export links must name the flat .html layout (#762): they have
+    // to resolve against a plain static serve of the built dist/ tree.
+    var it = std.mem.splitScalar(u8, output, '\n');
+    while (it.next()) |line| {
+        const open = std.mem.indexOf(u8, line, "](") orelse continue;
+        const close = std.mem.indexOfScalarPos(u8, line, open + 2, ')') orelse return error.TestExpectedEqual;
+        const url = line[open + 2 .. close];
+        try std.testing.expect(std.mem.endsWith(u8, url, ".html"));
+        try std.testing.expect(!std.mem.endsWith(u8, url, "/"));
     }
 }
 
