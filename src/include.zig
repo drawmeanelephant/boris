@@ -278,9 +278,10 @@ pub const IncludeReader = struct {
 /// fully expanded body, so each unique fragment is read and expanded once per
 /// build instead of once per consuming page. Entries are copied into a cache-
 /// owned arena; page arenas keep their own assembled copies, so cached slices
-/// never alias page-lifetime memory. Locking covers only map access — nested
-/// expansions run outside the lock, so recursive use cannot self-deadlock and
-/// racing workers may transiently duplicate work but never share partial state.
+/// never alias page-lifetime memory. Locking covers map access and the
+/// cache-owned arena (both are shared mutable state); nested expansions run
+/// outside the lock, so recursive use cannot self-deadlock and racing workers
+/// may transiently duplicate work but never share partial state.
 pub const IncludeCache = struct {
     gpa: std.mem.Allocator,
     arena_state: std.heap.ArenaAllocator,
@@ -303,14 +304,17 @@ pub const IncludeCache = struct {
         return self.map.get(path);
     }
 
-    /// Store `value` under `path`, copying both into cache-owned storage. When
-    /// a racing worker inserted the same path first, the existing entry wins.
+    /// Store `value` under `path`, copying both into cache-owned storage. The
+    /// arena mutation shares the map's critical section: parallel workers can
+    /// reach `put` for the same uncached fragment, and `ArenaAllocator` is not
+    /// thread-safe. When a racing worker inserted the same path first, the
+    /// existing entry wins.
     fn put(self: *IncludeCache, io: Io, path: []const u8, value: []const u8) IncludeError!void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
         const arena = self.arena_state.allocator();
         const key = arena.dupe(u8, path) catch return error.OutOfMemory;
         const stored = arena.dupe(u8, value) catch return error.OutOfMemory;
-        self.mutex.lockUncancelable(io);
-        defer self.mutex.unlock(io);
         const gop = self.map.getOrPut(self.gpa, key) catch return error.OutOfMemory;
         if (gop.found_existing) return;
         gop.key_ptr.* = key;
@@ -1232,4 +1236,62 @@ test "per-call cache re-reads fragments for every expansion" {
     }
     // Without a shared cache each expansion pays both reads again (#760).
     try std.testing.expectEqual(@as(usize, 4), counter.reads);
+}
+
+test "shared IncludeCache tolerates concurrent workers racing on cold entries" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var cache = IncludeCache.init(gpa);
+    defer cache.deinit();
+
+    const RaceCtx = struct {
+        gpa: std.mem.Allocator,
+        io: Io,
+        cache: *IncludeCache,
+        reader: *CountingReader,
+        failed: bool = false,
+
+        fn run(self: *@This()) void {
+            // One page arena per worker, reset between rounds like renderPageSlots.
+            var arena = std.heap.ArenaAllocator.init(self.gpa);
+            defer arena.deinit();
+            var i: usize = 0;
+            while (i < 16) : (i += 1) {
+                _ = arena.reset(.free_all);
+                const out = expandIncludesWithCache(
+                    self.io,
+                    undefined,
+                    self.reader.reader(),
+                    self.gpa,
+                    arena.allocator(),
+                    "{{include includes/a.md}}",
+                    "page.md",
+                    null,
+                    self.cache,
+                ) catch {
+                    self.failed = true;
+                    return;
+                };
+                if (std.mem.indexOf(u8, out, "FROM_B") == null) {
+                    self.failed = true;
+                    return;
+                }
+            }
+        }
+    };
+
+    // One reader per worker: the cache is the only shared mutable object.
+    var readers: [4]CountingReader = undefined;
+    var ctxs: [4]RaceCtx = undefined;
+    for (&readers, &ctxs) |*r, *c| {
+        r.* = .{ .gpa = gpa, .files = &shared_cache_fixture };
+        c.* = .{ .gpa = gpa, .io = io, .cache = &cache, .reader = r };
+    }
+
+    var threads: [ctxs.len]std.Thread = undefined;
+    for (&threads, &ctxs) |*t, *c| t.* = try std.Thread.spawn(.{}, RaceCtx.run, .{c});
+    for (threads) |t| t.join();
+
+    for (&ctxs) |*c| try std.testing.expect(!c.failed);
 }
