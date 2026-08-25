@@ -10,8 +10,9 @@
 //! ## Recognition rules
 //!
 //! - Components are recognized **only outside** fenced code blocks
-//!   (``` / ~~~ CommonMark-style fences).
-//! - Literal `<Aside>` / `</Aside>` text inside fences stays literal.
+//!   (``` / ~~~ CommonMark-style fences) and inline code spans.
+//! - Literal `<Aside>` / `</Aside>` text inside fences or backticks stays
+//!   literal.
 //! - Close tag `</Aside>` is recognized only at **logical line start**
 //!   (optional ASCII spaces/tabs). Mid-line `</Aside>` does not close.
 //! - Nested Aside is rejected with a stable diagnostic.
@@ -23,7 +24,8 @@
 //! retrieval. That form is **export-only** and **not** round-trippable source.
 
 const std = @import("std");
-const apex = @import("apex.zig");
+const render = @import("render.zig");
+const include_mod = @import("include.zig");
 
 // ---------------------------------------------------------------------------
 // Bounds / allowlists
@@ -195,6 +197,18 @@ fn fenceAtLineStart(source: []const u8, index: usize) ?struct { u8, usize } {
     if (run < 3) return null;
     // Info string may follow; we only need the marker.
     return .{ ch, run };
+}
+
+/// True when a line-start fence opener appears in body[from..to]. A
+/// would-be inline-code span must not cross one: the closer search would
+/// otherwise swallow the fence opener and let fenced content be scanned as
+/// real components.
+fn fenceOpenerInRange(body: []const u8, from: usize, to: usize) bool {
+    var j = from;
+    while (j < to) : (j += 1) {
+        if (atLineStart(body, j) and fenceAtLineStart(body, j) != null) return true;
+    }
+    return false;
 }
 
 fn lineEndIndex(source: []const u8, start: usize) usize {
@@ -448,7 +462,7 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
     }.go;
 
     while (i < body.len) {
-        // Fence open/close only at line starts, and only when not mid-tag open wait.
+        // Fence open/close only at line starts, and only when not mid-tag.
         if (atLineStart(body, i)) {
             if (fenceAtLineStart(body, i)) |f| {
                 const ch = f[0];
@@ -474,6 +488,26 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
         // Inside fenced code: never recognize components.
         if (fence_ch != 0) {
             i += 1;
+            continue;
+        }
+
+        // Inline code spans stay literal: component-looking text inside
+        // backticks is documentation, not a component (mirrors the wikilink,
+        // include, and content-asset scanners; see #255). Only skip a span
+        // when a matching equal-length closer exists ahead — and not across
+        // a line-start fence, which the closer search would otherwise
+        // swallow. An unmatched backtick is literal and cannot suppress
+        // scanning for the rest of the document.
+        if (body[i] == '`') {
+            if (include_mod.inlineCodeSpanEnd(body, i)) |end| {
+                if (fenceOpenerInRange(body, i, end)) {
+                    i += include_mod.backtickRunLength(body, i);
+                } else {
+                    i = end;
+                }
+            } else {
+                i += include_mod.backtickRunLength(body, i);
+            }
             continue;
         }
 
@@ -709,7 +743,7 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
     const label = kindLabel(kind, &label_buf);
 
     const inner = if (a.body.len > 0)
-        (try apex.render(a.body, doc_arena)).bytes
+        (try render.render(a.body, doc_arena)).bytes
     else
         "";
 
@@ -739,7 +773,7 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
 /// The summary is intentionally emitted as escaped text, never Markdown.
 pub fn renderDetailsHtml(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
     const arena = doc_arena.allocator();
-    const inner = if (d.body.len > 0) (try apex.render(d.body, doc_arena)).bytes else "";
+    const inner = if (d.body.len > 0) (try render.render(d.body, doc_arena)).bytes else "";
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(arena, "<details class=\"details\"");
     if (d.id.len > 0) {
@@ -756,91 +790,26 @@ pub fn renderDetailsHtml(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]con
     return try out.toOwnedSlice(arena);
 }
 
-// ---------------------------------------------------------------------------
-// RAG export representation (non-round-trippable)
-// ---------------------------------------------------------------------------
-
-/// Format one Aside as an export-only `:::kind` block.
-///
-/// Kind and id are already allowlist/grammar-validated at tokenize time.
-/// Body is written verbatim (export representation for retrieval, not HTML).
-pub fn formatRagDirective(a: Aside, allocator: std.mem.Allocator) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.appendSlice(allocator, ":::");
-    try out.appendSlice(allocator, a.kind);
-    if (a.id.len > 0) {
-        try out.appendSlice(allocator, "{id=\"");
-        try out.appendSlice(allocator, a.id);
-        try out.appendSlice(allocator, "\"}");
-    }
-    try out.append(allocator, '\n');
-    // Trim a single leading newline from inner body for cleaner export.
-    var body = a.body;
-    if (body.len > 0 and body[0] == '\n') body = body[1..];
-    if (body.len > 0 and body[body.len - 1] == '\r') body = body[0 .. body.len - 1];
-    try out.appendSlice(allocator, body);
-    if (body.len == 0 or body[body.len - 1] != '\n') try out.append(allocator, '\n');
-    try out.appendSlice(allocator, ":::\n");
-    return try out.toOwnedSlice(allocator);
+/// Render one Aside to deterministic plain text: the inner body's semantic
+/// text, with the admonition chrome dropped (no kind label, no markup).
+pub fn renderPlainText(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
+    if (a.body.len == 0) return "";
+    return (try render.renderPlainText(a.body, doc_arena)).bytes;
 }
 
-/// Format Details as an inline, export-only RAG directive. The body remains
-/// source Markdown; the summary is escaped for the directive attribute sink.
-pub fn formatDetailsRagDirective(d: Details, allocator: std.mem.Allocator) ![]u8 {
+/// Render one Details component to deterministic plain text: the summary on
+/// its own line, then the body's semantic text. The summary is text (never
+/// Markdown), matching `renderDetailsHtml`.
+pub fn renderDetailsPlainText(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
+    const arena = doc_arena.allocator();
+    const body = if (d.body.len > 0) (try render.renderPlainText(d.body, doc_arena)).bytes else "";
+    if (d.summary.len == 0) return body;
+    if (body.len == 0) return arena.dupe(u8, d.summary) catch return error.OutOfMemory;
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.appendSlice(allocator, ":::details{summary=\"");
-    try appendEscapedAttr(&out, allocator, d.summary);
-    try out.appendSlice(allocator, "\"");
-    if (d.id.len > 0) {
-        try out.appendSlice(allocator, " id=\"");
-        try appendEscapedAttr(&out, allocator, d.id);
-        try out.appendSlice(allocator, "\"");
-    }
-    if (d.open) try out.appendSlice(allocator, " open=\"true\"");
-    try out.appendSlice(allocator, "}\n");
-    var body = d.body;
-    if (body.len > 0 and body[0] == '\n') body = body[1..];
-    if (body.len > 0 and body[body.len - 1] == '\r') body = body[0 .. body.len - 1];
-    try out.appendSlice(allocator, body);
-    if (body.len == 0 or body[body.len - 1] != '\n') try out.append(allocator, '\n');
-    try out.appendSlice(allocator, ":::\n");
-    return try out.toOwnedSlice(allocator);
-}
-
-/// Rebuild a body for RAG: markdown segments H1-normalized by caller pieces,
-/// asides as `:::kind` blocks, document order preserved.
-pub fn exportBodyWithDirectives(
-    segments: []const Segment,
-    prepare_md: *const fn ([]const u8, std.mem.Allocator) anyerror![]const u8,
-    allocator: std.mem.Allocator,
-) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    for (segments) |seg| {
-        switch (seg) {
-            .markdown => |md| {
-                if (std.mem.trim(u8, md, " \t\r\n").len == 0) {
-                    try out.appendSlice(allocator, md);
-                    continue;
-                }
-                const prepared = try prepare_md(md, allocator);
-                try out.appendSlice(allocator, prepared);
-            },
-            .aside => |a| {
-                const block = try formatRagDirective(a, allocator);
-                defer allocator.free(block);
-                try out.appendSlice(allocator, block);
-            },
-            .details => |d| {
-                const block = try formatDetailsRagDirective(d, allocator);
-                defer allocator.free(block);
-                try out.appendSlice(allocator, block);
-            },
-        }
-    }
-    return try out.toOwnedSlice(allocator);
+    try out.appendSlice(arena, d.summary);
+    try out.appendSlice(arena, "\n");
+    try out.appendSlice(arena, body);
+    return out.toOwnedSlice(arena);
 }
 
 // ---------------------------------------------------------------------------
@@ -916,7 +885,36 @@ test "renderDetailsHtml uses native semantics and escapes text sinks" {
     try std.testing.expect(std.mem.indexOf(u8, html, "<strong>body</strong>") != null);
 }
 
-test "tokenize: valid Details attributes and RAG projection" {
+test "renderPlainText drops admonition chrome and keeps body words" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const text = try renderPlainText(.{
+        .kind = "tip",
+        .id = "006-1",
+        .body = "Stay **hydrated**.\n",
+        .raw_span = "",
+    }, &arena);
+    try std.testing.expectEqualStrings("Stay hydrated.\n", text);
+    // The kind label and id are presentation chrome; neither survives.
+    try std.testing.expect(std.mem.indexOf(u8, text, "tip") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "006-1") == null);
+}
+
+test "renderDetailsPlainText keeps summary line then body" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const text = try renderDetailsPlainText(.{
+        .summary = "See more",
+        .id = "detail-1",
+        .open = true,
+        .body = "Inside **body**.\n",
+    }, &arena);
+    try std.testing.expectEqualStrings("See more\nInside body.\n", text);
+}
+
+test "tokenize: valid Details attributes" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -928,9 +926,7 @@ test "tokenize: valid Details attributes and RAG projection" {
     try std.testing.expect(!r.hasErrors());
     try std.testing.expectEqual(@as(usize, 1), r.details.len);
     try std.testing.expect(r.details[0].open);
-    const rag = try formatDetailsRagDirective(r.details[0], gpa);
-    defer gpa.free(rag);
-    try std.testing.expect(std.mem.indexOf(u8, rag, ":::details{summary=\"Read &lt;this&gt; &amp; that\" id=\"more-1\" open=\"true\"}") != null);
+    try std.testing.expectEqualStrings("Read <this> & that", r.details[0].summary);
 }
 
 test "tokenize: Details rejects closed grammar and cross nesting" {
@@ -1121,6 +1117,59 @@ test "tokenize: fenced code keeps Aside literal" {
     try std.testing.expect(std.mem.indexOf(u8, joined.items, "<Aside kind=\"tip\">") != null);
 }
 
+test "tokenize: inline code keeps component-looking text literal" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // Tag-looking literals inside backtick spans are documentation, not
+    // components; a real Aside after the spans still tokenizes.
+    const body = "`<DIV>` and `<Figure kind=\"x\">` stay literal; then a real Aside:\n<Aside kind=\"note\">\nreal\n</Aside>\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+    try std.testing.expectEqualStrings("note", r.asides[0].kind);
+}
+
+test "tokenize: adjacent inline-code spans do not pair closers with openers" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // The closer of the first span must not pair with the opener of the
+    // second: per-backtick pairing would consume the second span's opener
+    // and resume scanning inside the code span at `<DIV>`.
+    const body = "to the `alt` string — `<DIV>` stays literal; then a real Aside:\n<Aside kind=\"note\">\nreal\n</Aside>\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+    try std.testing.expectEqualStrings("note", r.asides[0].kind);
+}
+
+test "tokenize: unmatched backtick does not suppress later component" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // A stray tick without a matching closer is literal text: the real Aside
+    // after it must still be recognized (no persistent span state).
+    const body = "a ` stray tick\n<Aside kind=\"note\">\nreal\n</Aside>\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+    try std.testing.expectEqualStrings("note", r.asides[0].kind);
+}
+
+test "tokenize: stray backtick does not swallow a later fence opener" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // The stray tick must not pair with the equal-length tick inside the
+    // fenced block: that would swallow the fence opener and recognize the
+    // Aside inside the fence as a real component.
+    const body = "a ` stray tick\n```\ncode with ` and <Aside kind=\"note\">\nx\n</Aside>\n```\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 0), r.asides.len);
+}
+
 test "tokenize: real Aside after fence still works" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
@@ -1168,17 +1217,6 @@ test "tokenize: invalid id grammar" {
     try std.testing.expect(r.diagnostics[0].kind == .invalid_id);
 }
 
-test "formatRagDirective export representation" {
-    const gpa = std.testing.allocator;
-    const block = try formatRagDirective(.{
-        .kind = "tip",
-        .id = "z1",
-        .body = "Tip body.\n",
-    }, gpa);
-    defer gpa.free(block);
-    try std.testing.expectEqualStrings(":::tip{id=\"z1\"}\nTip body.\n:::\n", block);
-}
-
 test "isValidAsideId grammar" {
     try std.testing.expect(isValidAsideId("a"));
     try std.testing.expect(isValidAsideId("006-1"));
@@ -1195,9 +1233,9 @@ test "tokenize rejects invalid UTF-8" {
     try std.testing.expectError(error.InvalidUtf8, tokenizeBody(&bad, gpa));
 }
 
-// U15: Zig Aside stream stays in document order under real Apex Unified.
-// Mirrors compile's segment walk: markdown → apex.render, aside → renderHtml.
-test "U15 Aside document order with real Apex stream" {
+// U15: Zig Aside stream stays in document order under Oliver.
+// Mirrors compile's segment walk: markdown → render.render, aside → renderHtml.
+test "U15 Aside document order with real Oliver stream" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -1225,7 +1263,7 @@ test "U15 Aside document order with real Apex stream" {
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try apex.render(md, &arena);
+                const h = try render.render(md, &arena);
                 try out.appendSlice(gpa, h.bytes);
             },
             .aside => |a| {
@@ -1250,9 +1288,11 @@ test "U15 Aside document order with real Apex stream" {
     try std.testing.expect(std.mem.indexOf(u8, html, "<Aside") == null);
 }
 
-// Aside body is re-rendered via apex.render — Unified callouts must survive
-// (not double-escaped or dropped). Complements U15 table-in-Aside coverage.
-test "U15b Apex callout inside Aside body renders through" {
+// Aside body is re-rendered via render.render (the Oliver seam). Blockquote
+// bodies (including `> [!NOTE]`-style lines, which Oliver renders as ordinary
+// blockquotes, not callouts) must survive the round trip un-dropped and
+// un-double-escaped. Complements U15 table-in-Aside coverage.
+test "U15b Aside body with a blockquote renders through" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -1276,7 +1316,7 @@ test "U15b Apex callout inside Aside body renders through" {
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try apex.render(md, &arena);
+                const h = try render.render(md, &arena);
                 try out.appendSlice(gpa, h.bytes);
             },
             .aside => |a| {
@@ -1292,12 +1332,13 @@ test "U15b Apex callout inside Aside body renders through" {
     const html = out.items;
     const i_before = std.mem.indexOf(u8, html, "BEFORE") orelse return error.TestUnexpectedResult;
     const i_tip = std.mem.indexOf(u8, html, "admonition--tip") orelse return error.TestUnexpectedResult;
-    const i_call = std.mem.indexOf(u8, html, "callout") orelse return error.TestUnexpectedResult;
     const i_body = std.mem.indexOf(u8, html, "CALL-IN-ASIDE") orelse return error.TestUnexpectedResult;
     const i_after = std.mem.indexOf(u8, html, "AFTER") orelse return error.TestUnexpectedResult;
     try std.testing.expect(i_before < i_tip);
-    try std.testing.expect(i_tip < i_call);
-    try std.testing.expect(i_call < i_body or i_tip < i_body);
+    // The `[!NOTE]` marker is ordinary blockquote text under Oliver (no
+    // callout transformation), but the marker and body must survive.
+    try std.testing.expect(std.mem.indexOf(u8, html, "[!NOTE]") != null);
+    try std.testing.expect(i_tip < i_body);
     try std.testing.expect(i_body < i_after);
     try std.testing.expect(std.mem.indexOf(u8, html, "id=\"t-call\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "<Aside") == null);

@@ -81,7 +81,11 @@ fn collectHrefFindings(
     var cursor: usize = 0;
     while (std.mem.indexOfPos(u8, html, cursor, "href=\"")) |start| {
         const value_start = start + "href=\"".len;
-        const end = std.mem.indexOfScalarPos(u8, html, value_start, '"') orelse break;
+        const end = std.mem.indexOfScalarPos(u8, html, value_start, '"') orelse {
+            // Unterminated value: skip it and keep scanning for later hrefs.
+            cursor = value_start;
+            continue;
+        };
         const href = html[value_start..end];
         cursor = end + 1;
         if (isIgnoredHref(href)) continue;
@@ -114,6 +118,24 @@ fn appendFmt(list: *std.ArrayList(u8), gpa: std.mem.Allocator, comptime fmt: []c
     try list.appendSlice(gpa, rendered);
 }
 
+/// JSON string escaping: quotes, backslashes, and control characters are all
+/// neutralized so an attacker-controlled href/path cannot corrupt the manifest.
+fn appendJson(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !void {
+    try buf.append(a, '"');
+    for (s) |c| switch (c) {
+        '"' => try buf.appendSlice(a, "\\\""),
+        '\\' => try buf.appendSlice(a, "\\\\"),
+        '\n' => try buf.appendSlice(a, "\\n"),
+        '\r' => try buf.appendSlice(a, "\\r"),
+        '\t' => try buf.appendSlice(a, "\\t"),
+        else => if (c < 0x20) {
+            var esc: [6]u8 = undefined;
+            try buf.appendSlice(a, try std.fmt.bufPrint(&esc, "\\u{x:0>4}", .{c}));
+        } else try buf.append(a, c),
+    };
+    try buf.append(a, '"');
+}
+
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     var retain = std.heap.ArenaAllocator.init(gpa);
     defer retain.deinit();
@@ -137,7 +159,17 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     try appendFmt(&json, gpa, "{d},\n  \"findings\": [\n", .{html_count});
     for (findings.items, 0..) |f, i| {
         if (i > 0) try json.appendSlice(gpa, ",\n");
-        try appendFmt(&json, gpa, "    {{\"source\":\"{s}\",\"target\":\"{s}\",\"line\":{d},\"kind\":\"{s}\",\"reason\":\"{s}\"}}", .{ f.source, f.target, f.line, f.kind, f.reason });
+        try json.appendSlice(gpa, "    {\"source\":");
+        try appendJson(&json, gpa, f.source);
+        try json.appendSlice(gpa, ",\"target\":");
+        try appendJson(&json, gpa, f.target);
+        try json.appendSlice(gpa, ",\"line\":");
+        try appendFmt(&json, gpa, "{d}", .{f.line});
+        try json.appendSlice(gpa, ",\"kind\":");
+        try appendJson(&json, gpa, f.kind);
+        try json.appendSlice(gpa, ",\"reason\":");
+        try appendJson(&json, gpa, f.reason);
+        try json.appendSlice(gpa, "}");
     }
     try json.appendSlice(gpa, "\n  ]\n}\n");
 
@@ -150,6 +182,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         try md.appendSlice(gpa, "| Source | Line | Target | Kind | Reason |\n|---|---:|---|---|---|\n");
         for (findings.items) |f| try appendFmt(&md, gpa, "| `{s}` | {d} | `{s}` | `{s}` | {s} |\n", .{ f.source, f.line, f.target, f.kind, f.reason });
     }
+    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
     var out = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
     defer out.close(io);
     try writeFile(io, out, "link_audit.json", json.items);
@@ -161,4 +194,12 @@ test "link audit ignores external and hash links" {
     try std.testing.expect(isIgnoredHref("#top"));
     try std.testing.expect(isIgnoredHref("https://example.com"));
     try std.testing.expect(!isIgnoredHref("../missing.html"));
+}
+
+test "link audit appendJson escapes href control characters and quotes" {
+    const a = std.testing.allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(a);
+    try appendJson(&buf, a, "a\"b\\c\x01");
+    try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\u0001\"", buf.items);
 }

@@ -6,9 +6,9 @@
 //!    or records diagnostics without crashing.
 //! 2. **Component tokenizer** never panics on valid UTF-8 bodies; invalid UTF-8
 //!    yields a clean error.
-//! 3. **Apex** never accepts invalid pointer/length contracts (via
-//!    `prepareMdForC` / `mapRenderResult`) and never crashes on bounded
-//!    random payloads.
+//! 3. **Renderer seam** (`render.render`) never crashes on bounded random
+//!    payloads, including arbitrary bytes; OOM / InputTooLarge / writer
+//!    failures are accepted outcomes.
 //! 4. **Graph topology**: random topologies — `graph.validate` agrees with an
 //!    independent simple reference checker on error *categories*.
 //!
@@ -19,7 +19,7 @@
 //! | `default_seed` | `0xB0B15_F027` | Deterministic PRNG seed |
 //! | `frontmatter_iters` | 256 | Frontmatter fuzz iterations |
 //! | `component_iters` | 256 | Component fuzz iterations |
-//! | `apex_iters` | 128 | Apex fuzz iterations |
+//! | `render_iters` | 128 | Renderer fuzz iterations |
 //! | `graph_iters` | 200 | Random graph topologies |
 //! | `max_input_bytes` | 512 | Max random payload size |
 //! | `max_graph_nodes` | 12 | Max nodes per random graph |
@@ -31,19 +31,18 @@
 //! No concurrency. Resource use is O(iters × max_input_bytes).
 
 const std = @import("std");
-const frontmatter = @import("frontmatter.zig");
+const parser = @import("parser.zig");
 const aside = @import("aside.zig");
-const apex = @import("apex.zig");
+const render = @import("render.zig");
 const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
 
-/// Deterministic default seed (document in test/README.md).
-/// Deterministic default seed (`BORIS` + `FUZZ` as hex-ish mnemonic: B0B15 / FUZZ).
+/// Deterministic default seed (`BORIS` + `FUZZ` as hex-ish mnemonic: B0B15 / FUZZ; documented in test/README.md).
 pub const default_seed: u64 = 0xB0B15_F027;
 
 pub const frontmatter_iters: usize = 256;
 pub const component_iters: usize = 256;
-pub const apex_iters: usize = 128;
+pub const render_iters: usize = 128;
 pub const graph_iters: usize = 200;
 pub const max_input_bytes: usize = 512;
 pub const max_graph_nodes: usize = 12;
@@ -52,25 +51,15 @@ pub const max_graph_nodes: usize = 12;
 // Frontmatter fuzz
 // ---------------------------------------------------------------------------
 
-/// Bounded frontmatter fuzz: never panics; allocator errors may surface as OOM.
+/// Bounded frontmatter fuzz: never panics on arbitrary bounded bytes.
 pub fn runFrontmatterFuzz(seed: u64, iterations: usize) !void {
-    const gpa = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
-
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    var diags: std.ArrayList(diag.Diagnostic) = .empty;
-    defer diags.deinit(gpa);
 
     var buf: [max_input_bytes]u8 = undefined;
 
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
-        _ = arena.reset(.free_all);
-        diags.clearRetainingCapacity();
-        const retain = arena.allocator();
-
         const n = random.intRangeAtMost(usize, 0, max_input_bytes);
         random.bytes(buf[0..n]);
         // Mix structured inputs every few iterations for higher signal.
@@ -79,12 +68,14 @@ pub fn runFrontmatterFuzz(seed: u64, iterations: usize) !void {
         else
             buf[0..n];
 
-        // Content errors become diagnostics; only OOM should error out.
-        _ = frontmatter.parse(payload, "fuzz.md", retain, gpa, &diags) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-        };
-        // Diagnostics must be finite (bounded by grammar).
-        try std.testing.expect(diags.items.len < 10_000);
+        // Exercise the product parser directly. It is allocation-free, so the
+        // fuzz property is the same one the compiler depends on: arbitrary
+        // bounded bytes must produce a result or diagnostic without panicking.
+        const result = parser.parse(payload);
+        if (result.diagnostic == null) {
+            try std.testing.expect(result.doc.body_offset <= payload.len);
+            try std.testing.expectEqualStrings(payload[result.doc.body_offset..], result.doc.body);
+        }
     }
 }
 
@@ -248,10 +239,10 @@ test "fuzz: component tokenizer bounded (deterministic seed)" {
 }
 
 // ---------------------------------------------------------------------------
-// Apex fuzz — pointer/length contracts + no crash on bounded input
+// Renderer fuzz — no crash on bounded input (Oliver-backed seam)
 // ---------------------------------------------------------------------------
 
-pub fn runApexFuzz(seed: u64, iterations: usize) !void {
+pub fn runRenderFuzz(seed: u64, iterations: usize) !void {
     const gpa = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(seed ^ 0xA9E5);
     const random = prng.random();
@@ -260,26 +251,11 @@ pub fn runApexFuzz(seed: u64, iterations: usize) !void {
     defer arena.deinit();
     var buf: [max_input_bytes]u8 = undefined;
 
-    // Contract: empty uses non-null sentinel.
-    {
-        const prep = try apex.prepareMdForC(&.{});
-        try std.testing.expect(@intFromPtr(prep.ptr) != 0);
-        try std.testing.expectEqual(@as(usize, 0), prep.len);
-    }
-
-    // Contract: mapRenderResult never slices dirty error outputs.
-    {
-        var poison = [_]u8{ 0xDE, 0xAD };
-        try std.testing.expectError(error.OutOfMemory, apex.mapRenderResult(2, &poison, 99));
-        try std.testing.expectError(error.RenderFailed, apex.mapRenderResult(1, &poison, 99));
-        try std.testing.expectError(error.RenderFailed, apex.mapRenderResult(0, null, 5));
-    }
-
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
         _ = arena.reset(.free_all);
         const n = random.intRangeAtMost(usize, 0, max_input_bytes);
-        // Apex is byte-oriented; random bytes are allowed.
+        // The renderer is byte-oriented; random bytes are allowed.
         random.bytes(buf[0..n]);
         // Occasional structured markdown.
         const md: []const u8 = if (i % 3 == 0) blk: {
@@ -288,19 +264,19 @@ pub fn runApexFuzz(seed: u64, iterations: usize) !void {
             break :blk buf[0..s.len];
         } else buf[0..n];
 
-        const prep = try apex.prepareMdForC(md);
-        try std.testing.expect(@intFromPtr(prep.ptr) != 0);
-        try std.testing.expectEqual(md.len, prep.len);
-
-        // Render must not crash; OOM / RenderFailed are acceptable.
-        _ = apex.render(md, &arena) catch |err| switch (err) {
-            error.OutOfMemory, error.RenderFailed => {},
+        // Render must not crash; OOM / InputTooLarge / writer failures are
+        // acceptable.
+        _ = render.render(md, &arena) catch |err| switch (err) {
+            // RawHtmlNotXmlWellFormed is unreachable through the seam (Boris
+            // always uses the HTML profile; see src/render.zig) but must be
+            // listed for exhaustive error-set coverage.
+            error.OutOfMemory, error.InputTooLarge, error.WriteFailed, error.NoSpaceLeft, error.RawHtmlNotXmlWellFormed => {},
         };
     }
 }
 
-test "fuzz: apex bounded no-crash + pointer contracts (deterministic seed)" {
-    try runApexFuzz(default_seed, apex_iters);
+test "fuzz: renderer bounded no-crash (deterministic seed)" {
+    try runRenderFuzz(default_seed, render_iters);
 }
 
 // ---------------------------------------------------------------------------
@@ -312,11 +288,10 @@ pub const RefProblems = struct {
     dup_id: bool = false,
     self_parent: bool = false,
     missing_parent: bool = false,
-    not_trunk: bool = false,
     cycle: bool = false,
 
     pub fn any(self: RefProblems) bool {
-        return self.dup_id or self.self_parent or self.missing_parent or self.not_trunk or self.cycle;
+        return self.dup_id or self.self_parent or self.missing_parent or self.cycle;
     }
 };
 
@@ -343,19 +318,14 @@ pub fn referenceCheck(nodes: []const graph_mod.Node) RefProblems {
                 continue;
             }
             var found = false;
-            var parent_has_parent = false;
             for (nodes) |cand| {
                 if (std.mem.eql(u8, cand.id, par)) {
                     found = true;
-                    parent_has_parent = cand.parent != null;
                     break;
                 }
             }
             if (!found) {
                 p.missing_parent = true;
-            } else if (parent_has_parent) {
-                // Satellite-of-satellite: parent itself has a parent.
-                p.not_trunk = true;
             }
         }
     }
@@ -399,7 +369,6 @@ fn productionProblems(diags: []const diag.Diagnostic) RefProblems {
             .EDUPLICATEID => p.dup_id = true,
             .EPARENTSELF => p.self_parent = true,
             .EPARENTMISSING => p.missing_parent = true,
-            .EPARENTNOTTRUNK => p.not_trunk = true,
             .EPARENTCYCLE => p.cycle = true,
             else => {},
         }
@@ -451,7 +420,7 @@ fn generateRandomGraph(
             }
         },
         2 => {
-            // Chain 0←1←2←… (satellite-of-satellite for depth>1).
+            // Chain 0←1←2←… (a valid nested parent hierarchy).
             if (n >= 2 and !force_dup) {
                 var i: usize = 1;
                 while (i < n) : (i += 1) nodes[i].parent = nodes[i - 1].id;
@@ -520,33 +489,20 @@ pub fn runGraphTopologyFuzz(seed: u64, iterations: usize) !void {
         try graph_mod.validate(gpa, retain, work[0..n], &diags);
         const prod = productionProblems(diags.items);
 
-        // Agreement on categories. Note: production may report multiple codes;
-        // reference is independent. Each flag that is true on one side must be
-        // true on the other when the scenario is "pure" — but mixed scenarios
-        // (cycle + not_trunk) can both fire. We require bidirectional inclusion
-        // of the *primary* structural faults we model.
+        // Agreement on categories. Production and reference both allow
+        // multi-level parent chains; cycles remain the only chain topology
+        // failure.
         try std.testing.expectEqual(ref.dup_id, prod.dup_id);
         try std.testing.expectEqual(ref.self_parent, prod.self_parent);
         try std.testing.expectEqual(ref.missing_parent, prod.missing_parent);
 
-        // not_trunk: production reports EPARENTNOTTRUNK when parent has a parent.
-        // Cycles that are also chains may interact; require: if ref.not_trunk and
-        // not a pure cycle-only two-node swap, prod should see not_trunk OR cycle.
-        if (ref.not_trunk and !ref.cycle) {
-            try std.testing.expect(prod.not_trunk);
-        }
-        if (prod.not_trunk) {
-            try std.testing.expect(ref.not_trunk or ref.cycle);
-        }
-
         // Cycles: when ref detects a cycle (and no dups that obscure indexing),
-        // production should report EPARENTCYCLE unless satellite-of-satellite
-        // short-circuits parent_index for multi-hop (still should see not_trunk).
+        // production should report EPARENTCYCLE.
         if (ref.cycle and !ref.dup_id) {
-            try std.testing.expect(prod.cycle or prod.not_trunk or prod.self_parent);
+            try std.testing.expect(prod.cycle or prod.self_parent);
         }
         if (prod.cycle) {
-            try std.testing.expect(ref.cycle or ref.not_trunk);
+            try std.testing.expect(ref.cycle);
         }
 
         // Healthy star/all-trunk graphs: both sides clean.
@@ -593,14 +549,14 @@ test "fuzz: reference checker known cases" {
         };
         try std.testing.expect(referenceCheck(&nodes).cycle);
     }
-    // Satellite of satellite.
+    // Multi-level hierarchy is valid.
     {
         var nodes = [_]graph_mod.Node{
             .{ .id = "t", .source_path = "t.md" },
             .{ .id = "m", .source_path = "m.md", .parent = "t" },
             .{ .id = "l", .source_path = "l.md", .parent = "m" },
         };
-        try std.testing.expect(referenceCheck(&nodes).not_trunk);
+        try std.testing.expect(!referenceCheck(&nodes).any());
     }
     // Dup.
     {

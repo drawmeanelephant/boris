@@ -6,19 +6,23 @@ implementations must match.
 
 ## Status note
 
-Normative contracts are in force. Implementation status and the post-P2/P3
-roadmap are tracked in [`docs/STATUS.md`](../STATUS.md). Presence of a contract
-is **not** proof that every surface is the default CLI product.
+Normative contracts are in force. Current phase and pointers live in
+[`docs/STATUS.md`](../STATUS.md) (phase banner + pointer table, <80 lines);
+capability details live in this directory and the archived snapshot
+[`capability-matrix-v0.8.md`](../archived/capability-matrix-v0.8.md).
+Presence of a contract is **not** proof that every surface is the default CLI
+product.
 
 | Layer | Status (post-P2 / post-P3) |
 |-------|-------------|
 | Normative docs under `docs/contracts/` | **In force** |
 | Fixture corpus under `fixtures/` | **Inventory + IR/RAG goldens + tests** |
 | Compiler IR on CLI (`--out` / `--no-rag`) | **Implemented** (opt-in; not bare default) |
-| Optional product RAG (`--rag`) | **Implemented** (includes `:::kind` export) |
+| Optional product RAG (`--rag`) | **Implemented** (working-context packs; verbatim authoring docs) |
 | Aside component tokenizer | **Implemented** (`components.md`) |
-| Apex C ABI + Zig wrapper | **Implemented** (ApexMarkdown Unified host adapter; U1–U17 tested) |
+| Markdown rendering (Oliver) | **Implemented** — Oliver pinned in build.zig.zon; `src/render.zig` seam; see [oliver-renderer.md](oliver-renderer.md) |
 | HTML path (default CLI) | **Implemented** — bare `boris` → `dist/`; also `--html` / `--html-dir` / `--target` |
+| Authoritative no-publication validation | **Implemented** — `boris validate` reuses HTML prepublication compiler semantics and writes no product artifacts; see `validation.md` |
 | P2 dependency indexes / incremental HTML | **Implemented** (`--incremental`; fingerprints + affected set) |
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
@@ -27,10 +31,21 @@ is **not** proof that every surface is the default CLI product.
 | Content-local page assets | **Implemented** (v0.5.1) — sibling `{stem}.assets/` publish + Markdown image rewrite; see `content-local-assets.md` |
 | Semantic relations (IR 0.3) | **Implemented** — bounded author relations with deliberate schema change; see `semantic-relations.md` |
 | AI Context Bundle (`--context`) | **Implemented** — deterministic provenance-rich export; see `context-bundle.md` |
-| Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
+| Includes + wiki-links (HTML) | **Implemented** — pre-render; see `includes-and-wiki-links.md` |
+| Graph-backed Markdown documentation links | **Implemented first slice** — pre-render; see `documentation-links.md` |
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
+| Cooklang compatibility | **Implemented, explicit opt-in** — bounded `.cook` body adapter via `--cooklang`, also emitting a structured `recipe` IR facet; see [cooklang-compatibility.md](cooklang-compatibility.md) |
+| Publication plan declaration | **Implemented** — `plan --profile PATH` emits normalized declaration JSON without publication; see [publication-plan.md](publication-plan.md) |
+| GitHub Pages publication declaration | **Implemented first slice** — normalized `base_url` / `origin` / `base_path` identity and fail-closed public-target validation; see [publication-profile.md](publication-profile.md) and [publication-plan.md](publication-plan.md) |
+| HTML publication artifact inventory | **Implemented first slice** — deterministic target-owned `artifacts.json` inventory for committed HTML payloads; see [publication-artifacts.md](publication-artifacts.md) |
+| HTML publication checks evidence | **Implemented first slice** — deterministic target-local `checks.json` bound to the committed inventory and exact payload bytes; see [publication-checks.md](publication-checks.md) |
+| HTML publication claims evidence | **Implemented first slice** — deterministic target-local `claims.json` derived from committed inventory and checks bytes, with fixed claims and limitations; see [publication-claims.md](publication-claims.md) |
+| Publication Touch Atlas | **Implemented first slice** — deterministic `touches.json` relationship index derived exclusively from the three existing evidence reports; see [publication-touches.md](publication-touches.md) |
+| Publication Proof Pack | **Implemented first slice** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed evidence; see [publication-proof-pack.md](publication-proof-pack.md) |
+| Publication platform model | **Documented** — normative verified-target model, adapter seam, and platform deployment matrix; the target registry is `github-pages` and `standard-site`. GitHub Pages is the depth model; Standard.site is the second verified target. See [publication-platforms.md](publication-platforms.md). The profile and plan contracts use the same closed registry. |
+| AT Protocol / Standard.site publication | **Implemented** — offline projection, persistent OAuth and app-password sessions, one-shot publish, and opt-in live smoke. bsky.social testers use `login --app-password`; browser OAuth requests granular `repo:` scopes and the live smoke verifies the grant. Operator path: [standard-site.md](../standard-site.md). Contracts: [standard-site.md](standard-site.md), [atproto-app-password.md](atproto-app-password.md), [atproto-sessions.md](atproto-sessions.md), [atproto-live-smoke.md](atproto-live-smoke.md), [atproto-oauth.md](atproto-oauth.md). |
 
 ## Canonical ownership (one document per topic)
 
@@ -39,20 +54,29 @@ per topic:
 
 | Topic | Canonical normative document |
 |-------|------------------------------|
+| Publication model: document facts, publication facts, migration provenance, projections, and verification claims | [publication-model.md](publication-model.md) |
 | Frontmatter grammar | [frontmatter.md](frontmatter.md) |
+| RSS 2.0 export | [rss-2.0.md](rss-2.0.md) |
+| XML sitemap for HTML | [xml-sitemap.md](xml-sitemap.md) |
 | Source paths and entity IDs | [identity-and-paths.md](identity-and-paths.md) |
 | Discovery / scanning | [scanner.md](scanner.md) |
+| In-memory / filesystem source provider | [source-provider.md](source-provider.md) |
+| In-memory / filesystem artifact sink | [artifact-sink.md](artifact-sink.md) |
 | Parent / graph validation (Trunk / Satellite) | [ir-schema.md](ir-schema.md) (graph section); `parent` field shape in [frontmatter.md](frontmatter.md) |
 | JSON IR (manifest, graph, build-report) | [ir-schema.md](ir-schema.md) |
 | Diagnostics | [diagnostics.md](diagnostics.md) |
+| Authoritative no-publication validation | [validation.md](validation.md) |
 | RAG export | [rag-export.md](rag-export.md) |
+| `llms.txt` export | [llms-txt.md](llms-txt.md) |
 | Aside / components | [components.md](components.md) |
-| Apex C ABI | [apex-abi.md](apex-abi.md) |
+| Markdown rendering (Oliver) | [oliver-renderer.md](oliver-renderer.md) |
+| Freestanding embedding (`compileBundle`, Wasm ABI, Worker host) | [embedding.md](embedding.md) |
 | HTML output (default CLI) | [html-output.md](html-output.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
+| Graph-backed Markdown documentation links | [documentation-links.md](documentation-links.md) |
 | Heading IDs + wiki fragments | [heading-ids.md](heading-ids.md) |
 | Templating + themes (F9.1 / F9.2) | [templating-and-themes.md](templating-and-themes.md) |
 | Content-local page assets | [content-local-assets.md](content-local-assets.md) |
@@ -60,31 +84,69 @@ per topic:
 | AI Context Bundle | [context-bundle.md](context-bundle.md) |
 | Documentation Intelligence | [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility adapter | [textile-compatibility.md](textile-compatibility.md) |
+| Cooklang recipe input adapter | [cooklang-compatibility.md](cooklang-compatibility.md) |
+| Rendered-site search artifacts | [rendered-search.md](rendered-search.md) |
+| HTML publication artifact inventory | [publication-artifacts.md](publication-artifacts.md) |
+| HTML publication checks evidence | [publication-checks.md](publication-checks.md) |
+| HTML publication claims evidence | [publication-claims.md](publication-claims.md) |
+| Publication Touch Atlas | [publication-touches.md](publication-touches.md) |
+| Publication Proof Pack | [publication-proof-pack.md](publication-proof-pack.md) |
+| Publication platform model / deployment matrix | [publication-platforms.md](publication-platforms.md) |
+| Hosted job runner (Cloudflare Containers) | [cloudflare-container-runner.md](cloudflare-container-runner.md) |
+| AT Protocol OAuth core and host-capability boundary | [atproto-oauth.md](atproto-oauth.md) |
+| Standard.site target (records, rkeys, plan, publish) | [standard-site.md](standard-site.md) |
+| Standard.site app-password login | [atproto-app-password.md](atproto-app-password.md) |
+| Standard.site persistent sessions | [atproto-sessions.md](atproto-sessions.md) |
+| Standard.site live smoke | [atproto-live-smoke.md](atproto-live-smoke.md) |
+| Standard.site operator path (non-normative) | [../standard-site.md](../standard-site.md) |
+| Astro plan-only migration intake | [astro-import-plan.md](astro-import-plan.md) |
+| Astro initial-create migration apply | [astro-import-apply.md](astro-import-apply.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 
 | Document | Topic |
 |----------|-------|
-| [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; keys `id`, `title`, `parent`, `status`, `tags`, and bounded `relations` only |
+| [publication-model.md](publication-model.md) | Canonical ownership model for document facts, publication facts, migration provenance, projections, and verification claims |
+| [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary` only |
+| [rss-2.0.md](rss-2.0.md) | Deterministic RSS 2.0 projection and publication contract |
+| [xml-sitemap.md](xml-sitemap.md) | Deterministic staged XML Sitemap Protocol projection for one HTML target |
 | [identity-and-paths.md](identity-and-paths.md) | Source paths, entity ids, `/` separators, `.md`/`.mdx` case rules |
 | [scanner.md](scanner.md) | Deterministic discovery walk, sort key, symlink policy (m4) |
-| [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
+| [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …, `ELAYOUT*`), severity, exit codes, HTML-path `--report` surface (schema twin `html-build-report-0.2.0`) |
+| [validation.md](validation.md) | Canonical HTML prepublication validity boundary, no-write guarantee, and adjacent-command distinctions |
 | [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, typed dependency edges, reverse index, deterministic JSON under `.boris/` |
-| [rag-export.md](rag-export.md) | Optional RAG export; schema versioning; `:::kind` export-only |
+| [rag-export.md](rag-export.md) | Optional RAG export; working-context packs + complete corpus; authoring fidelity |
+| [llms-txt.md](llms-txt.md) | Deterministic crawler/LLM discovery projection; URL and deployment limits |
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
-| [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
+| [oliver-renderer.md](oliver-renderer.md) | Oliver pin + upgrade procedure, render seam, compatibility wall |
 | [html-output.md](html-output.md) | HTML Whiteboard, Aside stream, layout splice, Atomic publish (default CLI) |
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
-| [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; fragment tree; IR 0.2 edge projection |
-| [heading-ids.md](heading-ids.md) | Apex heading `id` harvest; `[[entity#heading]]` match + URL rules |
+| [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-render; cycles; fragment tree; IR 0.2 edge projection |
+| [documentation-links.md](documentation-links.md) | Existing-page inline Markdown-link rewrite to canonical HTML hrefs |
+| [heading-ids.md](heading-ids.md) | Oliver heading `id` harvest; `[[entity#heading]]` match + URL rules |
 | [templating-and-themes.md](templating-and-themes.md) | Closed layout plan, theme assets, UTF-8/orphan hardening (F9.1 / F9.2) |
 | [content-local-assets.md](content-local-assets.md) | Page sibling `{stem}.assets/` discovery, Markdown image rewrite, target copy/scrub |
 | [semantic-relations.md](semantic-relations.md) | Bounded author relations and deliberate IR 0.3 schema plan |
 | [context-bundle.md](context-bundle.md) | Deterministic provenance-rich AI context export (`--context`) |
-| [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`) |
+| [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`); schema twin under `schemas/` |
+| [publication-profile.md](publication-profile.md) | Strict schema-v1 publication-profile parser, normalization, and static validation boundary |
+| [publication-plan.md](publication-plan.md) | Deterministic schema-v1 normalized publication declaration (`plan --profile PATH`) |
+| [../github-pages.md](../github-pages.md) | GitHub Pages workflow, public/evidence artifact separation, and operational setup |
+| [publication-artifacts.md](publication-artifacts.md) | Deterministic schema-v1 inventory of committed Boris-owned HTML-target payload bytes |
+| [publication-checks.md](publication-checks.md) | Deterministic schema-v1 publication-checks evidence over committed inventory and exact payload bytes |
+| [publication-claims.md](publication-claims.md) | Deterministic schema-v1 claims-and-limitations derivation over committed inventory and checks evidence |
+| [publication-touches.md](publication-touches.md) | Deterministic schema-v1 relationship index over committed artifact, checks, and claims evidence; implemented first slice |
+| [publication-proof-pack.md](publication-proof-pack.md) | Deterministic schema-v1 two-file presentation model and static HTML over committed artifact, checks, claims, and Touch Atlas evidence; implemented first slice |
+| [publication-platforms.md](publication-platforms.md) | Verified-target model, three-adapter seam (location provider, deployer, packaging rules), and platform deployment matrix; no proactive Vercel/Netlify work |
+| [atproto-oauth.md](atproto-oauth.md) | Host-independent crypto, handle/DID authority discovery, one-shot authorization, and native/freestanding capability boundaries |
+| [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
+| [cooklang-compatibility.md](cooklang-compatibility.md) | Explicit bounded `.cook`-to-Markdown input mode with structured `recipe` IR facet |
+| [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |
+| [astro-import-plan.md](astro-import-plan.md) | Plan-only plain-Markdown Astro intake; snapshot, identity, and digest rules |
+| [astro-import-apply.md](astro-import-apply.md) | Initial-create application of a verified Astro import plan |
 
 ## Redirect / compatibility paths (non-normative)
 
@@ -105,8 +167,9 @@ Supporting / historical drafts may also remain in this tree. Prefer linking the
 |----------------------------|------|
 | [acceptance.md](acceptance.md) | v0.1 acceptance checklist |
 | [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
-| [../STATUS.md](../STATUS.md) | Living status + next work |
-| [`../../CHANGELOG.md`](../../CHANGELOG.md) | Shipped history; removed campaign reviews are not normative |
+| [../authoring-spine.md](../authoring-spine.md) | Non-normative teaching path (init → publish → verify) that links into contracts |
+| [../STATUS.md](../STATUS.md) | Phase banner + pointer table (capability snapshot in [`../archived/capability-matrix-v0.8.md`](../archived/capability-matrix-v0.8.md)) |
+| [`../../CHANGELOG.md`](../../CHANGELOG.md) | Shipped history (`[Unreleased]` + `[0.8.0]`; pre-0.8 at [`../archived/CHANGELOG-pre-0.8.md`](../archived/CHANGELOG-pre-0.8.md)); removed campaign reviews are not normative |
 
 ## Fixture corpus
 
@@ -143,6 +206,6 @@ runs against contract fixtures / hardening suites separately (`pipeline`,
 - Markdown-native `:::` **authoring** (export representation only)
 - Generic multi-component systems / MDX / unrestricted executable content
 - Full YAML frontmatter
-- Child-process markdown rendering (forbidden; see apex-abi.md)
+- Child-process markdown rendering (forbidden; Oliver is consumed as a native Zig module — see oliver-renderer.md)
 - Unbounded shared-mutable concurrency outside the documented HTML `--jobs`
   contract (IR/RAG and pre-render coordinator phases stay sequential)

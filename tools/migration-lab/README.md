@@ -5,6 +5,8 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | Mode | Input | Output |
 |------|--------|--------|
 | **astro** | Astro project/export tree | Deterministic archaeology `report.json` + `REPORT.md` |
+| **astro-import-plan** | Explicit Astro plain-Markdown content root | Read-only source snapshot + deterministic proposed-action plan |
+| **astro-import-apply** | Reviewed Slice A plan + adjacent snapshot | Atomic first publication to a new Boris source tree |
 | **wordpress** | WordPress WXR/XML + optional local media | Boris-ready Markdown under `content/` + review reports |
 | **instagram** | Unpacked Instagram data-download (Takeout) | Boris Markdown + generated theme assets + reports |
 | **obsidian** | Local Obsidian vault directory | Boris Markdown + attachments inventory + review reports |
@@ -18,8 +20,11 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **link-audit** | Generated static HTML tree | Missing local routes/fragments report; external links are left out of scope |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
-**no network access**, no zip extraction, no scraping, and **no product compiler
-coupling**. All code and fixtures live under `tools/migration-lab/`.
+**no network access**, no zip extraction, and no scraping. Analysis modes do not
+depend on the product compiler; reviewed `astro-import-apply` intentionally
+imports the Boris parser only as a final gate for generated candidate Markdown
+before it is written. Migration logic and fixtures live under
+`tools/migration-lab/`.
 
 | | |
 |--|--|
@@ -36,9 +41,29 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Starlight format id | `boris-starlight-migration-lab` |
 | Asset-filename format id | `boris-asset-filename-lab` |
 | Theme-archaeology format id | `boris-theme-archaeology-lab` |
-| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight/Asset-filename/Theme-archaeology/Theme-materialize `1`; WordPress **`3`** |
+| Schema | Instagram **`2`**; Astro/Obsidian/Notion/Filed/Starlight/Asset-filename/Theme-archaeology/Theme-materialize `1`; WordPress **`3`** |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
+
+### Ownership boundary
+
+The lab emits migration provenance and proposed Boris source. Its source paths,
+source-system fields and values, normalization decisions, confidence,
+unsupported constructs, dropped/preserved metadata, and reviewer decisions
+belong in lab reports, ledgers, manifests, review records, or importer-owned
+sidecars. They must not silently become Boris frontmatter, publication settings,
+or graph semantics. Generated candidate Markdown remains subject to the
+closed [`frontmatter.md`](../../docs/contracts/frontmatter.md) and graph
+contracts. A provenance comment in a candidate body is a lab annotation, not a
+product metadata field.
+
+The complete fact/projection/verification boundary is the canonical
+[publication model contract](../../docs/contracts/publication-model.md).
+
+Future Facebook, Instagram, and Google Takeout dogfooding starts with the
+provider-neutral [takeout intake contract](../../docs/contracts/takeout-lab-intake.md)
+and its synthetic fixture lane under `fixtures/takeout-intake/`. This is an
+intake convention, not another migration mode or a claim of provider support.
 
 ---
 
@@ -50,8 +75,21 @@ From **`tools/migration-lab/`** (Zig **0.16+**):
 zig build
 zig build test
 
+# Real Draft 2020-12 contract matrix (test-only Ajv; no Boris runtime dependency)
+npm --prefix schema-validation ci --ignore-scripts
+zig build schema-test
+
 # Astro archaeology
 zig build run -- --mode=astro --root=./fixtures/mini-astro --out=./.migration-report
+
+# Astro import planning — no source or destination content is written
+zig build run -- --mode=astro-import-plan --root=./fixtures/astro-import-plan \
+  --content-root=src/content/docs --project-id=fixture-docs --out=/tmp/astro-import-plan
+
+# Astro initial-create apply — destination must not exist
+zig build run -- --mode=astro-import-apply --root=./fixtures/astro-import-plan \
+  --content-root=src/content/docs --project-id=fixture-docs \
+  --plan=.tmp/astro-import-plan/import_plan.json --destination=.tmp/astro-boris-source
 
 # WordPress WXR → Boris Markdown + reports
 zig build run -- --mode=wordpress \
@@ -161,9 +199,14 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`), or `theme-materialize` (`materialize` / `theme-materialise`) |
-| `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
-| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, theme scan root, or generated HTML tree for `link-audit` |
+| `--mode=MODE` | `astro` | `astro`, `astro-import-plan`, `astro-import-apply`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`), or `theme-materialize` (`materialize` / `theme-materialise`) |
+| `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**); must be explicit for `astro-import-plan` |
+| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, theme scan root, or generated HTML tree for `link-audit`; must be explicit for `astro-import-plan` |
+| `--content-root=RELATIVE_DIR` | | Required by `astro-import-plan` and `astro-import-apply`; approved plain-Markdown root relative to `--root` |
+| `--project-id=ID` | | Required by `astro-import-plan` and `astro-import-apply`; stable importer identity namespace |
+| `--plan=FILE` | | Required by `astro-import-apply`; reviewed `import_plan.json` with adjacent `source_snapshot.json` |
+| `--destination=DIR` | | Required by `astro-import-apply`; a previously nonexistent Boris source root |
+| `--previous-manifest=FILE` | | Optional valid completed-apply evidence; preserves same-path import-record IDs only |
 | `--ledger=FILE` | | Required by `theme-materialize`; adaptation ledger emitted by `theme-archaeology` |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional offline local media/uploads tree (WordPress); never modified; no network |
@@ -181,7 +224,9 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 
 ## Safety rules
 
-1. **Preserve originals** — only writes under `--out`.
+1. **Preserve originals** — only writes under `--out`; WordPress and theme
+   modes refuse any source/output overlap (including an output ancestor) before
+   creating a stage.
 2. **No network** — no fetches, no package installs, no oEmbed expansion.
 3. **No destructive source ops** — no delete/rename of WXR, media, vault, or scan-root files.
 4. **No product coupling** — does not import `src/` compiler modules; not in root `zig build test`.
@@ -205,6 +250,21 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
     Never executes PHP/JS, loads WordPress, resolves plugin/database state,
     fetches remote assets, or claims universal WordPress compatibility. Every
     dynamic finding is retained in `manual_review.json`.
+13. **WordPress and theme publication** — `wordpress`, `wordpress-theme`,
+    `theme-archaeology`, and `theme-materialize` write a complete sibling stage
+    and replace only an output carrying their exact
+    `.boris-migration-lab-output` ownership marker. A non-empty unmarked
+    `--out`, source/output symlink, or stale unowned stage is refused without
+    mutation. Successful reruns replace the complete owned tree, so stale
+    generated files cannot survive.
+14. **Astro import plan** — never applies a plan, writes content, copies an
+   asset, executes project code, or treats an inferred route as observed. Its
+   exact supported profile and digest algorithm are in
+   [`astro-import-plan.md`](../../docs/contracts/astro-import-plan.md). Every
+   selected content-root component is opened without following symlinks.
+15. **Astro import schemas** — Ajv is a test-only locked dependency under
+   `schema-validation/`; it is not linked into Boris, shipped in product
+   artifacts, or required by ordinary compiler execution.
 
 ---
 
@@ -304,14 +364,18 @@ source. It is intentionally separate from WXR content import: WXR describes
 posts and pages, while this mode inventories PHP templates, static assets,
 template relationships, hook calls, menu locations, and widget regions.
 
+For block themes/FSE, it additionally inventories root `theme.json` and direct
+`templates/*.html` as bytes-and-hashes evidence only. It does not parse block
+JSON, render block markup, execute PHP or JavaScript, or claim WordPress parity.
+
 The lab emits:
 
 | Output | Role |
 |---|---|
 | `inventory.json` | Sorted file inventory plus line-level PHP/menu/widget/hook evidence |
-| `slot_mapping.json` | Closed mapping proposal for `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, `{{content}}`, `{{children}}`, Aside, `{{toc}}`, and `{{footer}}` |
+| `slot_mapping.json` | Line-evidenced Boris slot candidates, all requiring human review; absent evidence produces no candidate |
 | `manual_review.json` | Every detected unsupported or dynamic behavior with source path, line, evidence, and decision |
-| `prototype/main.html` | No-runtime static layout using Boris’s closed layout markers |
+| `prototype/main.html` | Minimal no-runtime Boris layout contract smoke input (one `{{title}}`, one `{{content}}`, no asset claim) |
 | `report.json` / `REPORT.md` | Counts, preserve/adapt/review/drop decisions, and evidence boundary |
 
 The checked-in fixture at
@@ -319,6 +383,11 @@ The checked-in fixture at
 synthetic because no Kubrick source was supplied locally and this lab does not
 retrieve external themes. It models classic file names and behaviors; it must
 not be read as authentic Kubrick code or universal WordPress coverage.
+
+The prototype is deliberately not a theme converter: source assets remain
+inventory evidence and are not copied or referenced. Candidate slots require
+an exact scanned source line and remain review items; missing evidence is not
+filled from WordPress conventions or template filenames.
 
 ---
 
@@ -429,8 +498,18 @@ Rules:
    `parent_entry`.
 
 `report.json` (schema **2**) includes `parent_normalization` counts and a
-`parent_review` array for conflict/invalid rows. See
-[`docs/dogfood/filed-parent-key-normalize.md`](../../docs/dogfood/filed-parent-key-normalize.md).
+`parent_review` array for conflict/invalid rows.
+
+The adapter rejects invalid UTF-8 (including a leading BOM), malformed
+top-level field lines, duplicate keys, and unterminated frontmatter before
+writing any converted record. Existing indented Astro/YAML-shaped material is
+still inventoried as an unmapped source field rather than interpreted. CRLF
+frontmatter is accepted and body bytes are preserved after the closing fence.
+Comment lines are ignored as fields, while indentationless sequence
+continuations remain review-only under their owning unmapped field. The only
+mapped source scalar, `title`, must fit Boris's one-line 512-byte scalar
+grammar; block scalars, YAML escapes, structured values, and oversized titles
+fail before conversion.
 
 ### Provenance / outputs
 
@@ -454,10 +533,9 @@ neutral category, and `stripped: true`.
 | [`fixtures/filed-parent-normalize/`](fixtures/filed-parent-normalize/) | Safe parent rewrite matrix (camel / snake / canonical / both-same) |
 | [`fixtures/filed-parent-conflict/`](fixtures/filed-parent-conflict/) | Conflict + invalid parent values (no silent pick) |
 
-A bounded real-site adoption pass (Filed.fyi changelog/releases slice against
-current `main`, including product HTML/IR/RAG evidence and remediation cards)
-is recorded in
-[`docs/dogfood/filed-fyi-adoption-pass.md`](../../docs/dogfood/filed-fyi-adoption-pass.md).
+A bounded Filed.fyi adoption pass was recorded historically; current lab
+state is the v0.8 snapshot in
+[`docs/archived/capability-matrix-v0.8.md`](../../docs/archived/capability-matrix-v0.8.md).
 
 ## Starlight read-only dogfood (locale-dir + root-locale)
 
@@ -507,6 +585,8 @@ and `/…` for root-locale.
    | `selection_manifest.json` | Selected source files + exclusion reasons |
    | `route_map.json` | Route / entity / output mapping |
    | `link_review.json` | Internal links, unresolved, external, assets |
+| `relationship_target_inventory.json` / `RELATIONSHIP_TARGET_INVENTORY.md` | Site-wide deterministic exact-key target discovery, including selection/exclusion and duplicate-key evidence |
+| `relationship_candidate_classification.json` / `RELATIONSHIP_CANDIDATE_CLASSIFICATION.md` | Exact eligible-key review join: `selected`, `inventoried`, `ambiguous`, `absent`, or `invalid`; no relation emission |
    | `relation_candidates.json` | Review-first Filed-shaped relationship values + converted-entity resolution |
    | `heading_fragments.json` | Fragment inventory (headings **not** verified) |
    | `assets_manifest.json` | Inventory + migrated page assets (exists + SHA-256 when proven) |
@@ -526,6 +606,40 @@ and `/…` for root-locale.
 
 ### Relationship candidate sidecar
 
+### Relationship target inventory
+
+Every Starlight run also writes `relationship_target_inventory.json` and a
+short Markdown summary. The inventory follows the migration mode's normal
+Markdown discovery and selection rules, preserving one path-derived exact key
+per discovered source page. Version 2 records `source_slug_state`: a safe
+explicit `frontmatter.slug` becomes the exact key; missing, empty, and invalid
+slug values retain a deterministic path-derived fallback and their state. Files
+under the discovered content root that are not Markdown/MDX are explicit
+`unsupported_source_file_type` rows rather than pages. It records source
+provenance, the original and normalized key, converted-page evidence when the
+page was selected, and an explicit eligibility or exclusion reason. Duplicate
+exact keys are retained as separate rows with `duplicate_exact_key`; no first
+match is selected. Draft frontmatter remains conversion evidence under the
+existing migration rules, but is explicitly excluded from relationship-target
+eligibility with `draft_frontmatter`.
+
+This is a versioned discovery artifact for the exact-key review join below. It
+performs no fuzzy matching, semantic-relation emission, or source/converted-page
+mutation. The lab's source format remains
+Markdown/MDX only; files outside its established discovery rules are not
+silently treated as relationship targets.
+
+### Relationship candidate classification
+
+Every relationship candidate receives one deterministic classification in
+`relationship_candidate_classification.json`: `selected` requires an existing
+explicit mapping rule (none is inferred), `inventoried` means one eligible
+exact-key target exists, `ambiguous` means multiple eligible exact-key targets
+exist, `absent` means none exists, and `invalid` means the source value is not a
+supported target scalar. Matching is case-sensitive and exact; the report never
+guesses from titles, paths, or fuzzy text, emits no Boris relations, and mutates
+neither source nor converted pages.
+
 `relation_candidates.json` inventories only these known Filed-shaped source
 fields: `relatedEntries`, `relatedHaiku`, `relatedLimerick`, `relatedLorelog`,
 `mascotRef`, `concepts`, and `escalationPath`. Each deterministic row retains
@@ -534,7 +648,12 @@ raw value, safe normalized target when available, converted-entity resolution,
 optional proposed kind, the product relation ordinal/bound evidence, and an
 explicit review reason.
 
-The lab proposes `relates_to` only for target-like values from the five
+The lab recognizes the proven `{slug: ...}` object shape for `relatedHaiku`
+and `relatedLimerick`; other object shapes and fields remain review-only. It
+accepts only a single string `slug` member: empty values, unquoted numeric,
+boolean, or null values, extra members, nested values, and arrays stay as
+source-located review rows with their original value intact.
+It proposes `relates_to` only for target-like values from the five
 `related*` / `mascotRef` fields that resolve against the converted entity map.
 `concepts` and `escalationPath` are always review-only. Malformed values,
 non-scalar mappings, ambiguous or unresolved targets, self-targets, and
@@ -549,9 +668,8 @@ Every later duplicate remains visible with `proposed_kind: "relates_to"`,
 it does not consume another product-limit slot. Here `proposed_kind` records a
 defensible semantic mapping, not eligibility for automatic emission.
 
-The bounded real-site results and the converted-map evidence boundary are
-recorded in the
-[Filed.fyi v0.7 relationship-candidate dogfood report](/docs/dogfood/filed-relation-candidates-v07.md).
+Bounded real-site relationship-candidate results are summarized in the v0.8
+snapshot [`docs/archived/capability-matrix-v0.8.md`](../../docs/archived/capability-matrix-v0.8.md).
 
 ### Boundary classes
 
@@ -648,9 +766,10 @@ media_manifest.json        # deterministic source→output inventory
 ```
 
 Each page uses **closed Boris frontmatter** where possible (`title`, optional
-`parent` / `status` / `tags`), preserves compatible authored frontmatter, drops
-unknown keys into the review queue, and appends a
-`boris-migration-provenance` comment (export path, entity id, Notion page id).
+`parent` / `status` / `tags`), drops unknown source keys into the review queue,
+and may append a `boris-migration-provenance` comment (export path, entity id,
+Notion page id). That comment is a lab-owned annotation and does not widen
+product frontmatter or become publication metadata.
 
 | Class | Typical cause |
 |-------|----------------|
@@ -774,27 +893,58 @@ Satellite rules). See [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 ```text
 content/
   instagram.md                 # Trunk
-  instagram/<kind>-<id>.md     # one page per post/reel/story/other record
+  instagram/posts/YYYY/MM/YYYY-MM-DD-caption-slug.md
+  instagram/reels/YYYY/MM/YYYY-MM-DD-caption-slug.md
+  instagram/stories/YYYY/MM/YYYY-MM-DD-caption-slug.md
+  instagram/other/YYYY/MM/YYYY-MM-DD-caption-slug.md
+  instagram/tags/<tag-slug>.md # generated hashtag indexes
 theme/
   layouts/main.html
   footer.html
   assets/css/site.css
-  assets/media/...             # copied source media (bytes unchanged)
+  assets/media/instagram/...   # copied source media with human public names (bytes unchanged)
 report.json
 REPORT.md
 media_manifest.json            # clean provenance for a later enrichment pass (no OCR)
 ```
 
 Each page uses **closed Boris frontmatter only**: `id`, `title`, `parent`,
-`status`, `tags`. Caption bytes, timestamp, source JSON/HTML path, media URIs,
-theme asset paths, and conversion notes live in the body + provenance comment.
+`status`, `tags`. Public routes use UTC dates plus a caption-derived slug;
+durable export ids and fallback hashes remain in reports and final hidden
+provenance. Captions render as safe natural paragraphs: raw HTML and Markdown
+control syntax are escaped, while validated `@mentions` and generated hashtag
+links are the only links injected by the transformer. Dates, media, and archive
+feed cards are human-readable; source paths and conversion evidence stay out of
+the visible page body.
+Present media is copied unchanged into `theme/assets/media/instagram/<kind>/…`
+with a deterministic human destination derived from the final record identity:
+`YYYY-MM-DD-caption-slug-01.jpg`, `-02`, and so on in source carousel order.
+Only lowercase `jpg`, `jpeg`, `png`, `gif`, `webp`, `mp4`, and `mov` extensions
+are accepted for public destinations. The original Instagram URI is retained in
+the manifest and hidden page provenance as audit evidence; it is never used as
+a public filename or rendered media reference.
+JSON captions using Meta's escaped Latin-1/UTF-8 form are repaired only when
+the resulting bytes validate as UTF-8; repaired pages are marked
+`meta-latin1-repaired` in provenance and classified as `transformed`. Ordinary
+UTF-8 captions remain unchanged. A caption that still carries a mojibake
+signature after the attempt — mixed escaped and genuine Unicode, or text encoded
+more than once — is marked `suspected-mojibake-unrepaired` and classed
+`human_review`; the lab never reports such a caption as clean `utf-8`.
+
+The dump is untrusted input. Media URIs that would escape the dump on read or
+the output root on write — a `..` component, an absolute path, a Windows
+separator, or a drive prefix — are rejected before any filesystem access, class
+the record `human_review`, and appear in the report as
+`unsafe media uri rejected`. Symlink/reparse-point media path components are
+also refused before copying. Caption text is escaped into ordinary paragraphs,
+so it cannot become live Markdown or HTML. See `fixtures/hostile-instagram/`.
 
 | Class | Typical cause |
 |-------|----------------|
 | `exact` | Simple photo record with durable id |
 | `transformed` | Carousel, video, reel/story, HTML-source parse |
 | `unsupported` | other/unknown archive kinds, malformed JSON placeholder |
-| `human_review` | Missing media, empty caption, id collisions |
+| `human_review` | Missing media, unsafe/symlink media path, encoding concern |
 
 Synthetic fixture: [`fixtures/mini-instagram/`](fixtures/mini-instagram/).
 

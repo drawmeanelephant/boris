@@ -1,0 +1,5 @@
+bin/
+themes/
+node_modules/
+.wrangler/
+dev.vars

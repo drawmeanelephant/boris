@@ -7,7 +7,8 @@
 //! ## Policies (see docs/contracts/scanner.md)
 //!
 //! - **Extensions:** default Markdown accepts lowercase `.md` / `.mdx`;
-//!   explicit Textile accepts lowercase `.textile` only.
+//!   explicit Textile accepts lowercase `.textile` only; explicit Cooklang
+//!   accepts lowercase `.cook` only.
 //! - **Isolation:** a recognized page from the other input family fails the
 //!   scan; Boris never guesses a dialect per page.
 //! - **Paths:** logical metadata uses `/` only; no host absolute paths.
@@ -18,13 +19,14 @@
 //! - **Duplicates:** both pages kept when entity ids collide so later graph
 //!   validation can emit a precise `EDUPLICATEID` diagnostic.
 //!
-//! No frontmatter parse, graph resolve, RAG, Apex, HTML render, or concurrency.
+//! No frontmatter parse, graph resolve, RAG, Markdown render, or concurrency.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const Io = std.Io;
 const identity = @import("identity.zig");
 const page_mod = @import("page.zig");
+const diag = @import("diag.zig");
 
 pub const Page = page_mod.Page;
 pub const PageList = page_mod.PageList;
@@ -56,20 +58,14 @@ const FsIdentity = struct {
     ino: u64,
 
     fn fromStat(st: Io.File.Stat) FsIdentity {
+        if (@TypeOf(st.inode) == void) return .{ .ino = 0 };
         return .{ .ino = @intCast(st.inode) };
-    }
-
-    fn eql(a: FsIdentity, b: FsIdentity) bool {
-        return a.ino == b.ino;
     }
 };
 
-fn identitySeen(list: []const FsIdentity, id: FsIdentity) bool {
-    for (list) |v| {
-        if (FsIdentity.eql(v, id)) return true;
-    }
-    return false;
-}
+/// Keep the existing `FsIdentity` key semantics while making re-entry checks
+/// expected O(1) instead of scanning every previously entered directory.
+const FsIdentitySet = std.AutoHashMapUnmanaged(FsIdentity, void);
 
 /// Walk `options.content_root` and append discovered pages to `out`.
 ///
@@ -100,11 +96,11 @@ pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out
     const list_gpa = out.list_gpa;
     const retain = out.retain;
 
-    var visited_dirs: std.ArrayList(FsIdentity) = .empty;
+    var visited_dirs: FsIdentitySet = .empty;
     defer visited_dirs.deinit(list_gpa);
 
     const root_st = try content_dir.stat(io);
-    try visited_dirs.append(list_gpa, FsIdentity.fromStat(root_st));
+    try visited_dirs.put(list_gpa, FsIdentity.fromStat(root_st), {});
 
     var walker = try content_dir.walkSelectively(list_gpa);
     defer walker.deinit();
@@ -141,10 +137,10 @@ pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out
             if (st.kind != .directory) continue;
 
             const fs_id = FsIdentity.fromStat(st);
-            if (identitySeen(visited_dirs.items, fs_id)) {
+            if (visited_dirs.contains(fs_id)) {
                 return error.SymlinkCycle;
             }
-            try visited_dirs.append(list_gpa, fs_id);
+            try visited_dirs.put(list_gpa, fs_id, {});
             walker.enter(io, entry) catch |err| switch (err) {
                 error.SymLinkLoop => return error.SymlinkCycle,
                 else => return err,
@@ -172,14 +168,97 @@ pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out
         if (st.kind != .file) continue;
 
         // entry.path is relative to content_dir; invalidated on next next().
-        try registerPage(retain, out, entry.path);
+        try registerDiscoveredPage(retain, out, entry.path);
     }
 
     // Deterministic order independent of filesystem enumeration.
     page_mod.sortPages(out.pages.items);
 }
 
-fn registerPage(retain: std.mem.Allocator, out: *PageList, walk_path: []const u8) ScanError!void {
+/// Failure-path probe (#744): which non-selected input family has page files
+/// under this content root? Walks the same tree the scanner walks (skipping
+/// the reserved `includes/` fragment library and `{stem}.assets/` trees) and
+/// answers with a fixed priority (`.cook`, `.textile`, `.mdx`, `.md`) so the
+/// result never depends on filesystem enumeration order. `null` means the
+/// mismatch could not be attributed to a family (caller keeps its generic
+/// guidance).
+pub fn probeForeignFamily(io: Io, dir: Io.Dir, selected: identity.InputFormat) ?identity.ContentKind {
+    var seen = [4]bool{ false, false, false, false };
+    const priority = [4]identity.ContentKind{ .cook, .textile, .mdx, .md };
+
+    var walker = dir.walkSelectively(std.heap.page_allocator) catch return null;
+    defer walker.deinit();
+    while (true) {
+        const walked = walker.next(io) catch return null;
+        const entry = walked orelse break;
+        switch (entry.kind) {
+            .directory => {
+                // Same reservation rules as discovery: the content-root
+                // `includes/` library and sibling asset trees hold no pages.
+                if (std.mem.eql(u8, entry.path, "includes")) continue;
+                if (std.mem.endsWith(u8, entry.basename, ".assets")) continue;
+                walker.enter(io, entry) catch continue;
+            },
+            .file => {
+                const kind = identity.contentKind(entry.basename) catch continue;
+                switch (kind) {
+                    .cook => seen[0] = true,
+                    .textile => seen[1] = true,
+                    .mdx => seen[2] = true,
+                    .md => seen[3] = true,
+                }
+            },
+            else => {},
+        }
+    }
+    for (priority, 0..) |kind, i| {
+        if (seen[i] and !selected.accepts(kind)) return kind;
+    }
+    return null;
+}
+
+/// Static code/message/remediation for an input-family mismatch (#744).
+///
+/// The diagnostic code follows the offending family per
+/// docs/contracts/scanner.md (`ECOOKLANG` for Cooklang pages, `ETEXTILE` for
+/// Textile pages), and the remediation names the flag that selects that
+/// family — so a `.cook`-only tree built without `--cooklang` can no longer
+/// send authors looking for `.textile` files. When no offender is known
+/// (non-filesystem sources), falls back to the requested-mode wording.
+pub fn modeMismatchGuidance(
+    selected: identity.InputFormat,
+    offender: ?identity.ContentKind,
+) struct { code: diag.Code, message: []const u8, remediation: []const u8 } {
+    if (offender) |kind| {
+        if (!selected.accepts(kind)) {
+            switch (kind) {
+                .cook => return .{
+                    .code = .ECOOKLANG,
+                    .message = "content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode",
+                    .remediation = "Pass --cooklang for a .cook-only tree, or drop --cooklang for Markdown input",
+                },
+                .textile => return .{
+                    .code = .ETEXTILE,
+                    .message = "content root mixes Textile and non-Textile page extensions, or uses the wrong explicit input mode",
+                    .remediation = "Pass --textile for a .textile-only tree",
+                },
+                else => {},
+            }
+        }
+    }
+    if (selected == .cook) return .{
+        .code = .ECOOKLANG,
+        .message = "content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode",
+        .remediation = "Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input",
+    };
+    return .{
+        .code = .ETEXTILE,
+        .message = "content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode",
+        .remediation = "Use Markdown-only input by default, or pass --textile for a .textile-only tree",
+    };
+}
+
+pub fn registerDiscoveredPage(retain: std.mem.Allocator, out: *PageList, walk_path: []const u8) ScanError!void {
     // Canonicalize first so identity derivation sees a stable form.
     const source_path = identity.canonicalize(retain, walk_path) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -238,14 +317,19 @@ test "scan: recursive fixtures/content/valid" {
 
     try scan(io, .{ .content_root = "fixtures/content/valid" }, &list);
 
-    // empty-no-fm.md, nested/deep/page.md, satellite-child.md, trunk-root.md
-    try testing.expectEqual(@as(usize, 4), list.len());
+    // empty-no-fm.md, multi-level-hierarchy/* (four pages), nested/deep/page.md,
+    // satellite-child.md, trunk-root.md
+    try testing.expectEqual(@as(usize, 8), list.len());
 
     // Sorted by entity_id.
     try testing.expectEqualStrings("empty-no-fm", list.items()[0].entity_id);
-    try testing.expectEqualStrings("nested/deep/page", list.items()[1].entity_id);
-    try testing.expectEqualStrings("satellite-child", list.items()[2].entity_id);
-    try testing.expectEqualStrings("trunk-root", list.items()[3].entity_id);
+    try testing.expectEqualStrings("multi-level-hierarchy/great-grandchild", list.items()[1].entity_id);
+    try testing.expectEqualStrings("multi-level-hierarchy/leaf", list.items()[2].entity_id);
+    try testing.expectEqualStrings("multi-level-hierarchy/mid", list.items()[3].entity_id);
+    try testing.expectEqualStrings("multi-level-hierarchy/trunk", list.items()[4].entity_id);
+    try testing.expectEqualStrings("nested/deep/page", list.items()[5].entity_id);
+    try testing.expectEqualStrings("satellite-child", list.items()[6].entity_id);
+    try testing.expectEqualStrings("trunk-root", list.items()[7].entity_id);
 
     // Logical paths only — no host absolute prefixes.
     for (list.items()) |p| {
@@ -258,8 +342,8 @@ test "scan: recursive fixtures/content/valid" {
         try testing.expect(std.mem.indexOf(u8, p.output_path, "..") == null);
     }
 
-    try testing.expectEqualStrings("nested/deep/page.md", list.items()[1].source_path);
-    try testing.expectEqualStrings("nested/deep/page.html", list.items()[1].output_path);
+    try testing.expectEqualStrings("multi-level-hierarchy/great-grandchild.md", list.items()[1].source_path);
+    try testing.expectEqualStrings("multi-level-hierarchy/great-grandchild.html", list.items()[1].output_path);
     try testing.expect(list.items()[1].kind == .md);
 }
 
@@ -517,6 +601,40 @@ test "scan: rejects directory symlink without following" {
     );
 }
 
+test "scan: rejects a directory symlink cycle before cycle detection" {
+    if (builtin.os.tag == .windows) return;
+
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        var content = try Io.Dir.cwd().openDir(io, content_rel, .{});
+        defer content.close(io);
+        content.symLink(io, ".", "loop", .{ .is_directory = true }) catch |err| switch (err) {
+            error.AccessDenied, error.PermissionDenied => return,
+            else => return err,
+        };
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    // A symlink that points back to the root is still rejected as a symlink;
+    // it must not be reported as an inode cycle or followed.
+    try testing.expectError(
+        error.SymlinkRejected,
+        scan(io, .{ .content_root = content_rel }, &list),
+    );
+}
+
 test "scan: rejects page-file symlink" {
     if (builtin.os.tag == .windows) return;
 
@@ -583,4 +701,79 @@ test "scan: duplicate entity ids preserved for later diagnostics" {
     // Tie-break: source_path order.
     try testing.expectEqualStrings("same.md", list.items()[0].source_path);
     try testing.expectEqualStrings("same.mdx", list.items()[1].source_path);
+}
+
+test "probeForeignFamily attributes mismatch to offending family deterministically" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{ .iterate = true });
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "recipe.cook", .data = "Boil @water{1%l}.\n" });
+        try content.createDirPath(io, "guides");
+        try content.writeFile(io, .{ .sub_path = "guides/old.textile", .data = "h1. Old\n" });
+        // Reserved fragment library and asset trees never attribute blame.
+        try content.createDirPath(io, "includes");
+        try content.writeFile(io, .{ .sub_path = "includes/frag.textile", .data = "fragment\n" });
+        try content.createDirPath(io, "page.assets");
+        try content.writeFile(io, .{ .sub_path = "page.assets/pic.textile", .data = "junk\n" });
+    }
+
+    const cwd = Io.Dir.cwd();
+    var dir = try cwd.openDir(io, content_rel, .{ .iterate = true });
+    defer dir.close(io);
+
+    try testing.expectEqual(identity.ContentKind.cook, probeForeignFamily(io, dir, .markdown).?);
+    try testing.expectEqual(identity.ContentKind.cook, probeForeignFamily(io, dir, .textile).?);
+    try testing.expect(probeForeignFamily(io, dir, .cook) != null);
+
+    // Priority is fixed (.cook first) regardless of enumeration order.
+    try testing.expectEqual(identity.ContentKind.cook, probeForeignFamily(io, dir, .markdown).?);
+}
+
+test "probeForeignFamily returns null when nothing foreign remains" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "page.md", .data = "# page\n" });
+    }
+
+    const cwd = Io.Dir.cwd();
+    var dir = try cwd.openDir(io, content_rel, .{ .iterate = true });
+    defer dir.close(io);
+    try testing.expect(probeForeignFamily(io, dir, .markdown) == null);
+}
+
+test "modeMismatchGuidance names the flag for the offending family" {
+    const t = comptime struct {
+        fn expectCase(selected: InputFormat, offender: ?identity.ContentKind, want_code: diag.Code, want_flag: []const u8) !void {
+            const g = modeMismatchGuidance(selected, offender);
+            try std.testing.expectEqual(want_code, g.code);
+            try std.testing.expect(std.mem.indexOf(u8, g.remediation, want_flag) != null);
+        }
+    };
+    // A .cook-only tree built without --cooklang blames Cooklang, not Textile (#744).
+    try t.expectCase(.markdown, .cook, .ECOOKLANG, "--cooklang");
+    try t.expectCase(.textile, .cook, .ECOOKLANG, "--cooklang");
+    // Symmetric: a .textile tree without --textile keeps ETEXTILE and names it.
+    try t.expectCase(.markdown, .textile, .ETEXTILE, "--textile");
+    // Unknown offender falls back to the requested-mode wording.
+    try t.expectCase(.cook, null, .ECOOKLANG, "--cooklang");
+    try t.expectCase(.markdown, null, .ETEXTILE, "--textile");
 }

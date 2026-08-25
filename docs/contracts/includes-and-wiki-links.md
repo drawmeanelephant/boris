@@ -5,14 +5,15 @@ publication implemented in Feature 8.1–F8.2
 **Modules:** [`src/include.zig`](../../src/include.zig), [`src/wikilink.zig`](../../src/wikilink.zig),
 wired from [`src/compile.zig`](../../src/compile.zig)  
 **Related:** [html-output.md](html-output.md), [diagnostics.md](diagnostics.md),
-[apex-abi.md](apex-abi.md), [scanner.md](scanner.md)
+[oliver-renderer.md](oliver-renderer.md), [scanner.md](scanner.md)
 
 ---
 
 ## Goals
 
-- Expand Markdown includes and resolve wiki-links **in Zig before Apex**.
-- Keep Apex sandboxed: `enable_file_includes = false` always (never engine FS reads).
+- Expand Markdown includes and resolve wiki-links **in Zig before Oliver**.
+- The renderer never reads files: includes are Boris-mediated (`{{include}}`),
+  and Oliver has no filesystem access.
 - Fail loud on missing targets, illegal paths, and include cycles.
 - Include file bytes contribute to the parent page’s HTML cache fingerprint.
 - Under historical IR schema `0.1.0`, include/reference edges were not published.
@@ -38,7 +39,7 @@ wired from [`src/compile.zig`](../../src/compile.zig)
 | Nesting | Includes may include further includes |
 | Cycles | Hard error `EINCLUDECYCLE` |
 | Missing | Hard error `EINCLUDEMISSING` |
-| Fences | No expansion inside fenced code blocks |
+| Code | No expansion inside fenced code blocks or matching backtick-run inline code spans |
 | Discovery | Content-root directory **`includes/`** is **not** discovered as pages |
 
 Recommended layout: fragment files under `content/includes/**`. Nested
@@ -61,19 +62,19 @@ pages if they contain `.md` / `.mdx`.
 | Output | Rewritten to `[label](relative-href)` using HTML output paths; with fragment → `relative-href#fragment` |
 | Missing entity | Hard error `EREFERENCEMISSING` |
 | Missing heading | Hard error `EREFERENCEMISSING` (no silent fall-back to page-only URL) |
-| Fences | No rewrite inside fenced code |
+| Code | No rewrite inside fenced code or matching backtick-run inline code spans |
 | Sections | `[[id#heading-id]]` — fragment is the **exact rendered heading `id`** on the target page; see [heading-ids.md](heading-ids.md) |
 
 ---
 
 ## Resolve order (HTML)
 
-1. Fence-aware **include expansion** (depth limit 32 + cycle stack).
-2. Build per-page **heading id index** from Apex-rendered body HTML (see
+1. Fence- and inline-code-aware **include expansion** (depth limit 32 + cycle stack).
+2. Build per-page **heading id index** from Oliver-rendered body HTML (see
    [heading-ids.md](heading-ids.md)); used only to validate wiki fragments.
-3. Fence-aware **wiki rewrite** against frozen graph nodes (+ optional fragment).
+3. Fence- and inline-code-aware **wiki rewrite** against frozen graph nodes (+ optional fragment).
 4. **Aside** tokenize.
-5. **Apex** render markdown segments.
+5. **Oliver** render markdown segments.
 
 Coordinator phases (discover, parent graph freeze, include plan, heading index,
 fingerprint) stay sequential. Workers only render with precomputed deps.
@@ -82,7 +83,7 @@ fingerprint) stay sequential. Workers only render with precomputed deps.
 
 ## IR 0.2 dependency projection
 
-IR dependency discovery is fence-aware and uses the same syntax, target
+IR dependency discovery is fence- and inline-code-aware and uses the same syntax, target
 resolution, depth bound, and diagnostic categories as HTML planning. It runs
 sequentially before graph freeze and does not render Markdown.
 
@@ -100,6 +101,9 @@ the IR contract.
 - Edges represent direct active syntax only; nested/transitive dependency
   closure is recovered by reverse traversal.
 - Repeated directives to the same target in one locus do not duplicate an edge.
+- Syntax inside fenced code or matching backtick-run inline code spans produces
+  no expansion, dependency edge, diagnostic, heading-target request, or
+  fingerprint / incremental dirty-set input.
 - Wiki labels and heading fragments do not affect edge identity (still page→page).
 - Include targets remain source endpoints and are not discovered as page nodes
   merely because they occur in the IR graph.
@@ -159,8 +163,8 @@ error: EINCLUDEMISSING: path/to/page.md:line:col: message [remediation]
 
 ## Non-goals (this contract)
 
-- Apex-native includes or wiki plugins.
+- Renderer-native includes or wiki plugins (Oliver has no such features).
 - Soft warnings for broken links.
-- Re-implementing Apex heading slug rules in Zig (see [heading-ids.md](heading-ids.md)).
+- Re-implementing Oliver heading slug rules in Zig (see [heading-ids.md](heading-ids.md)).
 - Emitting internal `layout` or `asset` dependency kinds in IR 0.2.
 - Fragment-aware IR edge kinds or schema changes.

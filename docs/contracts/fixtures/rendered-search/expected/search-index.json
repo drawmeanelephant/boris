@@ -1,0 +1,29 @@
+{
+  "format": "boris-rendered-search-index",
+  "schema_version": 1,
+  "documents": [
+    {
+      "path": "guides/install.html",
+      "title": "Install Boris",
+      "sections": [
+        {"level": 1, "heading": "Install Boris", "fragment": "install-boris", "text": "Install on macOS.", "code": ""},
+        {"level": 2, "heading": "Linux & CI", "fragment": "linux", "text": "", "code": "zig build test"}
+      ]
+    },
+    {
+      "path": "guides/reference/paths.html",
+      "title": "Paths",
+      "sections": [
+        {"level": 1, "heading": "Paths", "fragment": "paths", "text": "Output-relative paths stay stable.", "code": ""}
+      ]
+    },
+    {
+      "path": "index.html",
+      "title": "Home & Start",
+      "sections": [
+        {"level": 1, "heading": "Home & Start", "fragment": "home", "text": "Root prose.", "code": ""},
+        {"level": 2, "heading": "Quick start", "fragment": "quick-start", "text": "Run .", "code": "boris"}
+      ]
+    }
+  ]
+}

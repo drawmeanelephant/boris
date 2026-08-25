@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="80" viewBox="0 0 240 80" role="img" aria-label="Archive audit graph">
+  <rect width="240" height="80" fill="#f4f0e8"/>
+  <path d="M36 40h168" stroke="#252525" stroke-width="3"/>
+  <circle cx="36" cy="40" r="12" fill="#cf4b28"/>
+  <circle cx="204" cy="40" r="12" fill="#1c5d99"/>
+</svg>

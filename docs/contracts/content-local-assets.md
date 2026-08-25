@@ -3,7 +3,7 @@
 **Status:** normative for the HTML path · test-driven  
 **Modules:** `src/content_asset.zig`, `src/html_body.zig`, `src/compile.zig`  
 **Does not change:** IR `schemaVersion`, frontmatter grammar, theme ownership,
-or Apex trust model.
+or the raw-HTML trust model.
 
 A Markdown page may reference **opaque local files** stored in an exact sibling
 directory named after the page stem:
@@ -39,9 +39,16 @@ Rules:
 2. Discovery walks regular files under the sibling root recursively.
 3. **Symlinks are rejected** (asset root, intermediate segments, and leaf files).
 4. Directories are not publishable assets; only regular files are inventoried.
-5. Missing sibling root is allowed (empty inventory).
-6. Inventory order is bytewise sorted by within-tree path (deterministic copy).
-7. Extension policy for pages is unchanged: non-page files under content are
+5. SVG is inspected before publication. Files containing active constructs are
+   rejected with `EASSET`; Boris never rewrites or sanitizes an author's SVG.
+   The inspection sweeps **every regular file under the sibling root at
+   discovery time**, including files no page references; when an offending
+   SVG's path appears nowhere in the owning page's source, the diagnostic
+   detail appends `(file not referenced by any page)` so remediation can
+   distinguish dead files from live ones.
+6. Missing sibling root is allowed (empty inventory).
+7. Inventory order is bytewise sorted by within-tree path (deterministic copy).
+8. Extension policy for pages is unchanged: non-page files under content are
    ignored by page discovery and only enter the build via this asset path.
 
 Path grammar for within-tree segments (ASCII-only, fail closed):
@@ -120,6 +127,10 @@ Copy rules:
 - Theme `assets/` remains separate under the target root `assets/` prefix.
 - Preflight **collision** when a content-local published path equals a page
   HTML output path or a theme asset path (`EASSET` / `AssetCollision`).
+- SVG with `<script>`, `<foreignObject>`, `iframe`, `object`, `embed`, `on*`
+  handlers, `javascript:` URLs, or document/entity declarations is rejected.
+  The error names the asset path and first rejected construct. This is a
+  publication policy, not a sanitizer: safe SVG bytes are copied exactly.
 
 ---
 
@@ -150,7 +161,7 @@ Stale cleanup:
 
 | Code | When |
 |------|------|
-| `EASSET` | Invalid/out-of-tree path, missing file, symlink, non-file, or published-path collision |
+| `EASSET` | Invalid/out-of-tree path, missing file, symlink, non-file, active SVG, or published-path collision |
 
 Exit **1** (content) on `EASSET` during HTML compile. IR/RAG paths do not
 publish content-local assets and do not rewrite Markdown images.
@@ -181,8 +192,8 @@ slice is stricter and more explicit:
    `{{asset-url …}}`.
 
 Migration labs may inventory “content-local” files for authors; the product
-compiler only publishes the sibling-tree contract above. See
-[`docs/designs/content-local-assets-astro-starlight.md`](../designs/content-local-assets-astro-starlight.md).
+compiler only publishes the sibling-tree contract above. Author workflow:
+[`docs/MIGRATION.md`](../MIGRATION.md).
 
 ---
 
@@ -191,6 +202,6 @@ compiler only publishes the sibling-tree contract above. See
 | Concern | Module |
 |---------|--------|
 | Discover / validate / rewrite / copy / scrub | `src/content_asset.zig` |
-| Pre-Apex image rewrite in body pipeline | `src/html_body.zig` |
+| Pre-render image rewrite in body pipeline | `src/html_body.zig` |
 | Site loop: inventory, collisions, stage copy, scrub | `src/compile.zig` |
 | Theme assets (separate) | `src/theme.zig` |

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "boris-testdata-profile/1",
+  "name": "mild-poison-v1",
+  "description": "Mostly valid output with one precise late-pipeline wound per selected barb",
+  "style": "readme",
+  "includeAssets": true,
+  "barbs": [
+    "html_missing_local_route",
+    "html_missing_fragment",
+    "html_duplicate_id",
+    "html_unclosed_structure",
+    "artifact_missing",
+    "artifact_digest_mismatch",
+    "search_stale_title",
+    "deployment_owned_extra"
+  ]
+}

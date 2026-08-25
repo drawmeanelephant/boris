@@ -15,7 +15,7 @@ experimental-theme/assets/css/docs.css static stylesheet
 ```
 
 The content uses only the current closed frontmatter grammar and the existing
-one-level Trunk/Satellite graph. The experimental theme is intentionally plain
+recursive Trunk/Satellite graph. The experimental theme is intentionally plain
 CSS; it is a shape fixture for asset ownership and page-relative URLs, not a
 DaisyUI implementation. F9.1 accepts `metadata`, `footer`, and `asset-url`
 when the layout path is under a theme root (`…/layouts/main.html`).

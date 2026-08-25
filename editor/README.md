@@ -1,0 +1,416 @@
+# Boris Editor
+
+The Boris Editor is a local browser-served authoring environment and a clean
+consumer of Boris. The Zig host owns loopback transport, safe local file
+operations, session state, and fixed Boris CLI invocations. Boris remains the
+only parser, graph, validation, completion, rendering, and publication
+authority; Oliver remains the markup authority.
+
+## M0 scaffold
+
+Build the static Svelte UI and the independent Zig host:
+
+```bash
+cd editor/ui
+npm ci
+npm run check
+npm run build
+cd ../..
+zig build
+zig build --build-file editor/build.zig test
+zig build --build-file editor/build.zig
+./editor/zig-out/bin/boris-editor . \
+  --boris ./zig-out/bin/boris \
+  --ui-dir editor/ui/dist
+```
+
+The host binds an ephemeral port on `127.0.0.1`, prints a launch URL containing
+a random session token in its URL fragment, and serves:
+
+- `GET /` and `/assets/*`: compiled editor shell;
+- `GET /api/health`: host/project-discovery health;
+- `GET /api/version`: the result of the fixed `boris --version` invocation and
+  the editor's supported artifact-version matrix.
+
+Every API request requires the random token and a loopback `Host`; any supplied
+`Origin` must match the session origin. The state-root path is computed from the
+canonical project path under the OS user cache directory. M0 does not create
+that directory and has no project-content write endpoint. A path-like `--boris`
+value is canonicalized against the editor's current directory at startup (so
+`./zig-out/bin/boris` keeps working from inside the project); a bare command
+name is resolved through `PATH` instead.
+
+The adapter accepts only the published Boris versions for `completion.json`,
+`build-report.json`, `manifest.json`, `graph.json`, Documentation Intelligence,
+publication plans, and the frontmatter JSON Schema. Compiler identifiers are
+opaque and may carry Boris-owned variant suffixes.
+
+## Launch line contract
+
+Embedders (a native `WKWebView`, a test harness, another desktop shell) spawn
+`boris-editor` as a subprocess and discover the session URL from the process
+contract below. Both pieces are pinned by `editor/scripts/test-host.sh`.
+
+**Launch line.** After the loopback listener is bound, the host prints exactly
+one line to **stderr**:
+
+```text
+BORIS_EDITOR_URL=http://127.0.0.1:<port>/#token=<32 hex chars>
+```
+
+The `BORIS_EDITOR_URL=` prefix, the loopback URL shape, and the `#token=`
+fragment are fixed (an optional `open=` fragment parameter may follow — see
+below). `--port 0` (the default) selects an ephemeral port and the
+printed port is the bound one. The token is 32 lowercase hex characters and is
+random per process. The token lives in the URL **fragment**, not a query
+string — fragments are never sent to the server on navigation, and the host
+accepts the same token via the `x-boris-editor-token` header for API calls.
+
+**Optional `open=` fragment parameter (UI contract).** An embedder may append
+`&open=<project-relative path>` to the printed URL, for example
+`BORIS_EDITOR_URL=http://127.0.0.1:<port>/#token=<32 hex>&open=content/foo.md`.
+The shell opens that file on launch through its ordinary open path, so dirty
+tracking, undo, `activePath`, and save behavior are exactly as if the author
+opened it by hand. The value must obey the same author-owned rule as the file
+API ([`file_api.validatePath`](src/file_api.zig)): exactly `boris.json` or a
+regular file below `content/` or `themes/`, with no leading `/`, no `..`
+segments, and no backslashes. An invalid path is ignored with a status message;
+a well-formed but missing path surfaces the host's `file_not_found`; either way
+the editor still boots to the project file list. The fragment is consumed only
+by the shell — the host keeps printing the token-only launch line and never
+reads a file from the URL, so the token/CSP/loopback posture is unchanged.
+
+**Flags.** `boris-editor [DIR] [--boris PATH] [--ui-dir DIR] [--port PORT]`.
+`DIR` is the project root (default `.`); `--boris` is the compiler binary used
+for fixed invocations (a path-like value is canonicalized against the
+editor's cwd, a bare command name is resolved through `PATH`); `--ui-dir` is
+the built UI shell (default `editor/ui/dist`); `--port 0` means ephemeral.
+
+**Security posture is not relaxed by the contract.** The host binds
+`127.0.0.1` only. Every API request requires the token (fragment or
+`x-boris-editor-token`) and a loopback `Host`; any supplied `Origin` must
+match the session origin; the CSP frames only the editor's own preview port.
+
+**Shutdown.** `SIGINT` and `SIGTERM` stop accepting, close the listener, and
+exit `0` — the same shutdown contract as `boris watch`, so an embedder treats
+`terminationReason == .uncaughtSignal` as cancel, not a crash. No new flags;
+no drain of in-flight HTTP beyond what the single-request accept loop already
+implies.
+
+## M0 gates
+
+```bash
+npm --prefix editor/ui ci
+npm --prefix editor/ui run check
+npm --prefix editor/ui run build
+npm --prefix editor/ui run test:e2e
+zig fmt --check editor/build.zig editor/build.zig.zon editor/src
+zig build --build-file editor/build.zig test
+zig build --build-file editor/build.zig
+./editor/scripts/test-contract-fixture.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor-contract-probe
+./editor/scripts/test-host.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+./editor/scripts/test-publication.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+M0 deliberately does not edit files, display diagnostics, preview a site, or
+provide completion UI.
+
+## M2 safe file editing
+
+The safe-editing slice exposes only author-owned project files: `boris.json`
+and regular files below `content/` or `themes/`. Generated output, editor state,
+absolute paths, traversal, and symlinks are excluded. API reads and mutations
+continue to require the loopback session token, valid `Host`, and matching
+`Origin` when one is supplied.
+
+The editor now supports explicit open/save, create, no-clobber rename, confirmed
+delete, and session-local content undo/redo. Save is never autosave: the host
+compares the open-time fingerprint (mtime, size, and content hash), writes a
+temporary file in the destination directory, flushes and fsyncs it, and then
+atomically renames it. A changed, deleted, or read-only disk file is reported
+without replacing it. The conflict dialog keeps both the unsaved editor buffer
+and current disk version visible and requires an explicit choice.
+
+Dirty buffers are periodically snapshotted to the disposable OS user-cache
+state root. A later editor process labels them as recovered and requires an
+explicit Restore or Discard action; recovery data never becomes repository
+truth unless the author explicitly saves it.
+
+The authenticated file API is intentionally small:
+
+- `GET /api/files` and `POST /api/files/open` enumerate and open safe files;
+- `POST /api/files/probe` compares the open-file fingerprint to disk without
+  writing; transient filesystem errors stay in-session;
+- `POST /api/files/save`, `/create`, `/rename`, and `/delete` perform explicit
+  project mutations with conflict/no-clobber checks;
+- `GET /api/recovery` and `POST /api/recovery/snapshot` or `/clear` manage
+  disposable dirty-buffer recovery.
+
+The M2 gate remains the M0 gate list above. Its host integration now exercises
+the real filesystem failure paths and a host restart, while Playwright covers
+the semantic tree, keyboard shortcuts, visible voice-command names, native
+dialogs, conflict comparison, and recovered-state labeling.
+
+M2 deliberately does not invoke Boris, parse frontmatter or Markdown, provide
+completion, autosave, Git integration, diagnostics, or preview.
+
+## M3 Boris commands and problems
+
+The host exposes one authenticated `POST /api/commands/run` endpoint backed by
+a fixed command allowlist: validate, IR build, HTML build, check, impact,
+plan, and recipe-scale.
+The UI cannot supply argv or a working directory. Commands run against saved
+repository files, so all controls are disabled while the active buffer is
+dirty.
+
+IR build diagnostics come only from Boris's `.boris/build-report.json`.
+Check and impact consume Boris Documentation Intelligence reports under
+`.boris/`. Validate consumes the machine-readable `html-build-report-0.2.0`
+(`.boris/html-build-report.json`), so problems carry exact positions and never
+fall back to stderr; HTML build uses the same report with a bounded stderr
+adapter as a compatibility fallback. Exit 1 (content), 2 (usage/configuration),
+and 3 (I/O/system) remain distinct.
+
+Problems are grouped by content-relative source, severity, and Boris code.
+Named buttons navigate to Boris-reported UTF-8 byte positions and copy a
+bounded, metadata-only diagnostic packet. Packets contain no source excerpt or
+absolute project root. Analysis findings and impact endpoints are displayed as
+Boris-owned facts; the editor does not infer either.
+
+The M3 gate adds:
+
+```bash
+./editor/scripts/test-diagnostics.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+The seeded black-box test compares the host response with Boris's generated
+build report, exercises the stderr fallback, and preserves real CLI exits 1,
+2, and 3. Playwright covers keyboard invocation, visible voice names,
+accessibility grouping, exact UTF-8 navigation, fallback labeling, and packet
+copying.
+
+M3 deliberately does not add layout diagnostics, LSP, autofix, arbitrary
+commands, source parsing, autosave, or preview serving.
+
+## Validation daemon (#652)
+
+When the installed compiler accepts `validate --watch` (probed once via
+`boris validate --help`), the host runs **one zero-write validation daemon per
+project** instead of spawning a fresh `boris validate` subprocess per request:
+
+```text
+boris validate --input content --report .boris/html-build-report.json --watch [--cooklang]
+```
+
+The daemon re-runs the preflight on its own debounced cycle after every change
+and rewrites the report file each cycle (replacement, never append), staying
+alive across recoverable content failures. The host watches that file
+(mtime + size) and adapts the newest report through the same structured-
+diagnostic path as the one-shot runner, so the report file is the single
+authority and `/api/commands/run` validate responses stay byte-compatible:
+per-cycle outcomes map to the same convention as the one-shot exit codes
+(0 success, 1 content failure), and `report_version` is
+`html-build-report-0.2.0`.
+
+- **Lazy start.** The daemon spawns on the first validate demand and stays up
+  until the host exits. `GET /api/version` advertises
+  `supported.validate_watch` so the shell knows the daemon is available.
+- **Lifecycle.** Unexpected daemon death (recoverable content failures keep it
+  alive) is reaped non-blockingly and recovered with bounded exponential
+  backoff (1s → 30s, reset on a completed cycle). On host shutdown the daemon
+  is SIGTERM'd and reaped, leaving no orphan compiler process. Process
+  management is POSIX-only; on Windows the probe reports unsupported and the
+  one-shot validate path is used unchanged.
+- **Shell state channel.** `GET /api/validate-state` returns
+  `{supported, state, cycle, failure_class, problems_count, report_age_ms}`;
+  `cycle` is the newest completed daemon cycle and `report_age_ms` is the
+  bounded age of that cycle's report, or `null` before the first report. The
+  shell polls it cheaply and re-runs validate only when the cycle counter
+  moves, so the problems surface reflects the newest report within the
+  daemon's debounce. The validation status line keeps the state label beside
+  `Cycle N · Report age: …`, making a quiet or delayed daemon visible without
+  inventing a compiler result.
+  The Problems section also names the last reported state verbatim —
+  `Validation is idle.`, `Validation is running the first cycle…`,
+  `Validation passed (cycle N).`, `Validation failed — N problem(s) (cycle N).`,
+  or `Validation daemon is restarting with backoff.` — and, when the open
+  buffer is dirty, notes that the shown problems reflect saved files. The
+  pane body also names its own empty states (#658), derived only from state
+  the host already sends: before any completed cycle it says *"No validation
+  report yet."* (daemon: `validate-state` `idle`/`running`; one-shot: no
+  command has run), and after a clean cycle it says *"No problems in the
+  newest report (cycle N)."* — so an empty pane never silently means both
+  "not checked" and "passed".
+- **Per-problem staleness (#660, #662).** While the open buffer is dirty, a
+  problem whose own source region changed since the last report is marked
+  *"Possibly stale — the open buffer changed this region since the report."*
+  in the pane card and the Source pane inline list — but only when the caret
+  sits inside that region, so editing elsewhere leaves accurate problems
+  unflagged and rewriting a failing line flags the report's complaint about
+  it as not-yet-trusted. The check compares the buffer against `baseline`
+  (the last loaded/saved content, i.e. the report-time snapshot); moving the
+  caret off the region or saving clears the mark. #662 adds **line-number
+  drift**: when the buffer's line count changed and the first divergence
+  from `baseline` sits strictly above the problem's line, the reported line
+  number may address moved text even when the text at that line happens to
+  match (e.g. adjacent identical lines) — so deleting a line above a problem
+  also flags it. That is a documented approximation that errs toward honesty
+  (the mark clears on save); identical-line insertion above stays ambiguous
+  from text alone.
+- **Validation tracks the newest save (#656).** The four file-mutating
+  endpoints (save / create / rename / delete) record the change with
+  `noteSave()`; a validate demand that lands within 3 s of one waits (bounded,
+  also 3 s) for the daemon's save-triggered cycle to rewrite the report past
+  it, so a manual *Validate project* right after a save never answers from
+  before the save. On the shell side a successful save fires the existing
+  cycle-aware refresh on a 300 ms trailing debounce (rapid saves coalesce),
+  so the problems surface follows the newest save instead of waiting for the
+  next poll tick. No pending cycle → zero added latency; one-shot fallback is
+  untouched (no daemon → no note, no wait, no save-triggered refresh).
+- **Fallback.** With a pre-daemon compiler (or a refused `--watch`), behavior
+  is byte-identical to the one-shot path: the daemon never spawns, and every
+  validate request runs `boris validate` once with the bounded 120 s timeout.
+
+The daemon gate adds:
+
+```bash
+./editor/scripts/test-validation-daemon.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+The seeded black-box test pins one daemon across repeated validates, a
+save → report rewrite → failure → fix → recovery cycle without a host restart,
+bounded-backoff recovery after `kill -9`, and SIGTERM reaping on editor exit
+(no orphan). Playwright covers the shell's cycle-driven refresh of the
+problems surface.
+
+## M4 schema and completion-aware authoring
+
+The source pane exposes an ARIA combobox whose categories are explicit, so it
+does not need to parse frontmatter or Markdown. Frontmatter keys, enums, and
+bounds come from the canonical `boris-frontmatter-1.schema.json`, embedded
+verbatim in the host at build time and checked through the contract adapter.
+Entity ids, wiki-link targets, parents, relation kinds/targets, and layout slots
+come from a successful Boris `.boris/completion.json` only.
+
+Schema suggestions remain available before an IR artifact exists. Graph-backed
+categories then explain that Build diagnostics is required. After a successful
+IR build, the UI reloads `completion.json` without restarting. The native source
+textarea remains the editing surface; completion insertion is explicit and
+undoable, with no typing-time rewrite.
+
+The diagnostics integration gate deep-compares the authoring endpoint with the
+canonical schema and a real compiler-generated completion index. Playwright
+covers listbox/combobox semantics, arrow/Enter insertion, visible voice names,
+schema-only startup, and refresh after a successful graph build.
+
+M4 deliberately does not add a frontmatter grammar, Markdown parser, LSP,
+heading-fragment completion, typing-time autocomplete, or editor-owned graph.
+
+## M5 live preview fallback
+
+Until `boris serve` is available, the host runs exactly one fixed preview
+command per requested rebuild:
+
+```text
+boris build --input content --incremental --html-dir dist
+```
+
+An explicit successful save requests that build; authors can also use the
+visibly named Rebuild preview button. The host never watches or renders source.
+A second ephemeral loopback origin serves the committed `dist/` bytes unchanged
+and terminates with the editor process. The preview origin requires its random
+session token, validates Host and any supplied Origin, rejects traversal and
+symlinks, and uses a port-scoped HttpOnly cookie for generated subresources.
+
+The UI reports idle, running, success, failed, and stale distinctly. If an
+existing `dist/index.html` is present at startup, it remains `stale` and the
+banner says that the output is from an earlier build; use **Rebuild preview**
+to refresh it. Boris's staged output commit preserves the last valid `dist/`
+tree after a failed rebuild; the iframe generation advances only on success.
+While #421 remains open, failures show bounded Boris stderr and identify that
+fallback. Embedded preview content is sandboxed; a named link opens the exact
+site origin in a new tab for full behavior.
+
+The M5 gate adds:
+
+```bash
+./editor/scripts/test-preview.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+It verifies save/rebuild behavior, byte identity with a plain Boris build,
+last-good preservation, loopback/header/token/traversal defenses, real-browser
+frame rendering through the host CSP, and server shutdown with the editor.
+Playwright covers keyboard/voice names, reload generation, and honest
+stale/failure states.
+
+M5 deliberately does not add HMR, CSS injection, a watcher, a daemon, a second
+renderer, typing-triggered builds, or editor-side HTML transformation. Replace
+this fallback with compiler-owned `boris serve` when #392 lands.
+
+## M6 graph-aware navigation
+
+The Graph pane is a read-only inspector of Boris `.boris/graph.json`, with
+relation rows taken from `.boris/completion.json`. The host exposes
+`GET /api/graph` and forwards the validated artifact; it does not invent
+nodes, edges, or backlinks. Wiki-link tokens in the open buffer are scanned
+as `[[id]]` text and resolved against graph entities — the editor does not
+parse Markdown.
+
+From the current page the inspector can go to the parent, children, siblings,
+outgoing reference/include edges, reverse-index backlinks, and completion
+relations. The command palette jumps to an entity by id or title and can run
+`boris impact` on the open page. All of those actions are named buttons.
+
+The diagnostics integration gate deep-compares `/api/graph` with the real
+compiler-generated `graph.json`. Playwright covers parent/backlink/wiki-link
+navigation, title jump, impact-on-this-page, and refresh after a successful
+graph build.
+
+M6 deliberately does not add an editable graph database, a second graph
+model, heading-fragment navigation, or theme/layout diagnostics.
+
+## M7 Cooklang / restaurant authoring
+
+A content tree of only `.cook` pages is a Cooklang project. Health reports
+`input_mode: cooklang`, and every fixed Boris invocation (validate, IR/HTML
+build, check, impact, preview) adds `--cooklang`. Mixed trees stay mixed and
+fail the way Boris fails; the editor does not guess a dialect.
+
+The Recipe pane is a read-only view of the compiler `recipe` facet on
+`graph.json` (IR 0.4.0): ingredients, cookware, timers, string quantities, and
+`recipeRef` navigation. `.cook` remains the source of truth. **Scale recipe**
+spawns `boris recipe-scale`; the editor does not classify or multiply amounts
+([Boris issue 554](https://github.com/drawmeanelephant/boris/issues/554) S3).
+Graph diagnostics on `.cook` pages that are not `ECOOKLANG` keep the existing
+best-effort confidence and are labeled as approximate (adapted Markdown locus).
+
+The M7 gate adds:
+
+```bash
+./editor/scripts/test-cooklang.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+M7 / S3 deliberately does not add editor-local scaling, structured write-back,
+pantry, `.menu`, shopping lists, or nutrition/allergen claims.
+
+## M8 theme authoring
+
+Opening a `themes/**/*.html` layout shows a Theme pane: closed slots from
+`completion.json`, which of those tokens appear in the buffer, theme assets,
+and `ILAYOUTSELECTED` findings from the HTML `--report` after Validate or
+Build HTML, including fallback winners on targets that have layout rules.
+
+Validate and HTML build now pass `--report .boris/html-build-report.json` so
+`ELAYOUT*` and `ILAYOUTSELECTED` are structured problems, not stderr-only.
+Preview widths 375 / 768 / 1440 resize the iframe only. The accessibility
+list is a review aid and says so.
+
+M8 deliberately does not invent layout-selection evidence, change the layout
+model, or claim a Voice Control certification.

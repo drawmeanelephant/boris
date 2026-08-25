@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Docs &amp; &lt;Feed&gt; "News"</title>
+    <link>https://example.test/docs&amp;guides</link>
+    <description>Recent &amp; &lt;updates&gt; "quotes"</description>
+    <generator>boris/0.8.1</generator>
+    <item>
+      <title>A &amp; &lt;B&gt; "C"</title>
+      <link>https://example.test/docs&amp;guides/posts/a.html</link>
+      <guid isPermaLink="true">https://example.test/docs&amp;guides/posts/a.html</guid>
+      <description>Summary &amp; &lt;A&gt; "B"</description>
+      <pubDate>Sun, 01 Mar 2026 00:00:00 GMT</pubDate>
+      <category>news</category>
+      <category>xml &amp; &lt;tag&gt;</category>
+    </item>
+    <item>
+      <title>B</title>
+      <link>https://example.test/docs&amp;guides/posts/b.html</link>
+      <guid isPermaLink="true">https://example.test/docs&amp;guides/posts/b.html</guid>
+      <description>Post B summary.</description>
+      <pubDate>Sun, 01 Feb 2026 00:00:00 GMT</pubDate>
+      <category>release</category>
+    </item>
+    <item>
+      <title>Café C</title>
+      <link>https://example.test/docs&amp;guides/posts/c.html</link>
+      <guid isPermaLink="true">https://example.test/docs&amp;guides/posts/c.html</guid>
+      <description>Post C summary.</description>
+      <pubDate>Sun, 01 Feb 2026 00:00:00 GMT</pubDate>
+      <category>unicode</category>
+    </item>
+  </channel>
+</rss>

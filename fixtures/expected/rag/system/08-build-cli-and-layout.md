@@ -3,8 +3,13 @@ rag_id: system/build-cli-and-layout
 rag_path: system/08-build-cli-and-layout.md
 category: system
 tags: [cli, build, layout, flags, zig]
+related:
+  - system/00-overview.md
+  - system/01-architecture-pipeline.md
+  - system/04-components-and-admonitions.md
+  - system/07-zero-copy-assembly.md
+  - system/09-rag-export.md
 ---
-
 
 # Build system, CLI, and layout contract
 
@@ -16,7 +21,7 @@ tags: [cli, build, layout, flags, zig]
   - `zig build` — compile/install
   - `zig build run -- …` — product CLI (IR default; `--rag` / `--rag-dir` for RAG)
   - `zig build test` — unit + hardening + fuzz tests
-  - `zig build test-apex-hostile` / `zig build test-apex-sanitize` — Apex extras
+  - `zig build test-render` — Oliver rendering seam contract fixtures
   - `zig build source-rag` — source-code pack tool (not product RAG)
 
 **Workshop analogy:** one foreman and one workbench (or a small crew for HTML
@@ -85,7 +90,7 @@ JSON IR is opt-in via `--out` / `--no-rag`.
 | `--incremental` | Content-addressed incremental HTML (HTML mode) |
 | `--watch` | Debounced HTML rebuild loop (implies `--incremental`; HTML mode) |
 | `--jobs N` / `-j N` | Bounded parallel HTML page workers `1–64` (HTML mode) |
-| `--quiet` | Suppress progress + diagnostic stderr (exit codes/artifacts unchanged) |
+| `--quiet` | Suppress progress + success stderr; errors always print (exit codes/artifacts unchanged) |
 | `-h`, `--help` | Print usage and exit `0` **without** scanning content |
 
 Malformed empty values for path options are usage errors (exit 2).

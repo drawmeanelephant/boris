@@ -7,11 +7,16 @@ features → incremental edit → prod vs preview → deploy the static tree.
 It is **content and process** guidance — not a second compiler dialect and
 not a change to product contracts.
 
+Metadata placement and evidence vocabulary are governed by the canonical
+[publication model contract](contracts/publication-model.md). This guide
+applies that boundary to migration work; it does not create a second metadata
+grammar.
+
 | Artifact | Role |
 |----------|------|
 | This guide | Author-facing adoption sequence |
 | [`fixtures/migration-site/`](../fixtures/migration-site/) | Contoso conversion fixture (~32 pages + theme) |
-| [`examples/reference-theme/`](../examples/reference-theme/) | Optional theme dogfood (Aside, Details, page-local assets, layout rules) |
+| [`examples/reference-site/`](../examples/reference-site/) | Optional theme dogfood (Aside, Details, page-local assets, layout rules) |
 | [`tools/migration-lab/`](../tools/migration-lab/) | Standalone **developer laboratories** (drafts + reports) |
 | [`README.md`](../README.md) | Product front door + five-minute build |
 
@@ -23,6 +28,7 @@ not a change to product contracts.
 |-------|------|--------------|
 | **Boris product** (`./zig-out/bin/boris`) | Validated Trunk/Satellite graph; HTML under a target dir; IR; RAG; Context Bundle; fail-loud wiki/includes/components | Universal import; link-checking ordinary `[]()` hrefs; analytics; hosting |
 | **Migration labs** (`boris-migration-lab`) | Read-only inventory / draft Markdown + preservation reports for named source shapes | Runtime dependency of `boris`; full site parity; network fetch |
+| **Publication configuration** (profile/plan/target) | Content root, target, theme/layout, URL, feed/sitemap, machine-output, and output-root choices | Page frontmatter; migration source evidence |
 | **Manual human review** | Frontmatter closure, graph shape, link rewrite, asset placement, theme trust, deploy choice | Automatic “done” from a green lab report |
 | **Future / unimplemented** | Full YAML/MDX, embedded HTTP server, universal Astro/MkDocs/Hugo importers, automatic analytics | Claimed in this guide |
 
@@ -44,6 +50,30 @@ Closed frontmatter + Trunk/Satellite + wiki/includes
 Static output dir → any static host                ← deployment (outside Boris)
 ```
 
+### Metadata and provenance boundary
+
+Use the following routing rule during conversion:
+
+- A page `title`, identity, `parent`, status, tags, relations, body, and
+  validated structural references are document facts. They must satisfy the
+  closed [`frontmatter.md`](contracts/frontmatter.md) and graph contracts.
+- A site URL such as `https://docs.example.com`, a public/preview target,
+  theme or layout, feed/sitemap policy, machine-output scope, and deployment
+  output root are publication facts. Keep them in publication configuration,
+  not on every page.
+- Original source paths and fields, raw values, normalization decisions,
+  confidence, unsupported constructs, dropped/preserved metadata, and reviewer
+  decisions are migration provenance. Keep them in lab reports, ledgers,
+  manifests, review records, or importer sidecars.
+
+Lab-generated candidate Markdown is a proposal for Boris source, not an
+authority that widens Boris grammar. A provenance comment placed in a candidate
+body is a lab annotation; it is not product frontmatter, graph semantics, or
+proof that the candidate is correct. Review the candidate and its provenance
+before passing it to the product compiler. See the canonical
+[publication model](contracts/publication-model.md) for the ownership matrix,
+projection boundaries, and verification vocabulary.
+
 ---
 
 ## Non-negotiables (before bulk conversion)
@@ -54,17 +84,17 @@ Static output dir → any static host                ← deployment (outside Bor
 2. **Parent key is `parent` only** — `parentEntry` / `parent_entry` fail as
    unknown keys on the product parser. The Filed migration lab rewrites those
    legacy keys to `parent` under `--out` only (with conflict/invalid review);
-   see [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
-   [`docs/dogfood/filed-parent-key-normalize.md`](dogfood/filed-parent-key-normalize.md).
+   see [`tools/migration-lab/README.md`](../tools/migration-lab/README.md).
    Do not expect product `boris` to accept the aliases.
-3. **One-level graph** — Satellites parent to **Trunks** only (no
-   satellite-of-satellite).
+3. **Explicit graph** — Every non-root page is a Satellite with one immediate
+   `parent`; the parent may be a Trunk or another Satellite. Parent chains may
+   be arbitrarily deep but must be finite and acyclic.
 4. **Entity ids** — path-derived (or `id:` override); case- and byte-exact for
    `parent` and `[[wiki-links]]`.
 5. **Includes** — `{{include path}}` relative to content root; prefer
    `includes/` (not discovered as pages).
 6. **Wiki links** — `[[entity-id]]` and `[[entity-id#heading-id]]`; heading
-   fragments must match Apex-rendered ids exactly. Wiki entity ids use an
+   fragments must match Oliver-rendered ids exactly. Wiki entity ids use an
    **ASCII** character class — prefer ASCII path stems for linkable pages.
    Missing wiki targets **fail the build**. Ordinary Markdown
    `[text](./page.md)` hrefs are **not** fully validated as a site-wide link
@@ -90,8 +120,8 @@ zig build
 ./zig-out/bin/boris --help   # optional orientation
 ```
 
-Host tools to build Boris itself: **Zig 0.16** + **CMake** (CMake is
-compile-time for vendored ApexMarkdown only). Authors who already have
+Host tools to build Boris itself: **Zig 0.16** (the Oliver dependency is
+fetched and pinned by Zig's package manager). Authors who already have
 `zig-out/bin/boris` do not need Node to publish docs.
 
 Exit codes for product `boris`: **0** ok · **1** content · **2** usage · **3** I/O.
@@ -139,13 +169,10 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 Other lab modes (WordPress WXR, Instagram Takeout, Obsidian, Notion, Filed)
 and flags: [`tools/migration-lab/README.md`](../tools/migration-lab/README.md).
 
-**Real-site dogfood (Filed.fyi adoptability history):**
-*   **First Pass (v0.5.1)**: A bounded pass against a live Filed.fyi checkout — inventory, lab modes, product HTML/IR/RAG, remediation cards, and a narrow RC recommendation — is recorded in [`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md).
-*   **Second Pass (v0.5.1)**: A pass with a five-page representative slice (landing, nested docs, page-local asset, absolute links, hard MDX dialects) is in [`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md).
-*   **Third Pass (v0.6.1 pre-release)**: A whole-site preflight of 567 pages and 19 assets under a 200-page candidate selection cap is recorded in [`docs/dogfood/filed-fyi-case-study.md`](dogfood/filed-fyi-case-study.md). It validates whole-site candidate selection, deterministic image/asset migration, automatic synthetic trunk stubs, and perfect GREEN compilation under core Boris, with detailed 5-item remediation cards for the top 5 limitations.
-*   **Fourth Pass (v0.7 development)**: The relationship-candidate sidecar was run twice against the same pinned checkout. It retained 1,370 values, proposed 182 resolved `relates_to` mappings without emitting product relations, compiled 204 generated pages, and produced byte-identical repeated output. See [`docs/dogfood/filed-relation-candidates-v07.md`](dogfood/filed-relation-candidates-v07.md).
-
-These passes provide empirical evidence for human teams planning migration tasks, rather than claiming universal automatic conversion.
+Filed.fyi and theme-materialization dogfood happened (v0.5–v0.7). The long
+reports were retired. Current state is the Labs rows in
+[`docs/STATUS.md`](STATUS.md). These passes are historical evidence, not a
+promise of universal automatic conversion.
 
 **What to open after a lab run:** `REPORT.md` / `report.json` (and mode-specific
 manifests under the `--out` dir). Treat them as **evidence for the human
@@ -176,7 +203,7 @@ For experiments **in this repository**, do **not** replace root `content/`
 | Tree | Use when |
 |------|----------|
 | `fixtures/migration-site/` | Contoso migration (~32 pages): wiki, includes, Aside, deep paths, multi-target |
-| `examples/reference-theme/` | Polished theme surface: Details, page-local `.assets/`, multi-layout rules |
+| `examples/reference-site/` | Polished theme surface: Details, page-local `.assets/`, multi-layout rules |
 
 Minimal satellite:
 
@@ -220,14 +247,20 @@ or convert manually.
 ### 3. Review preservation / migration reports
 
 **Migration lab:** open the lab `--out` directory and confirm every
-preserve / drop / rewrite decision is intentional.
+preserve / drop / rewrite decision is intentional. Treat its manifests and
+reports as migration provenance, not as product frontmatter or publication
+configuration.
 
 **Manual human review (required even when the lab is green):**
 
-- [ ] Only `id`, `title`, `parent`, `status`, `tags`, and deliberately reviewed
-  `relations` remain in page frontmatter
-- [ ] Every Satellite `parent` names a Trunk entity id (byte-exact)
-- [ ] No satellite-of-satellite edges
+- [ ] Only keys accepted by the closed [`frontmatter.md`](contracts/frontmatter.md)
+  contract remain in page frontmatter; source-only metadata stays in provenance
+- [ ] Site URL, theme/layout, feed/sitemap policy, deployment choice, and output
+  roots are publication configuration, not page metadata
+- [ ] Source-system fields, raw values, confidence, unsupported constructs, and
+  reviewer decisions remain in lab reports/manifests/sidecars
+- [ ] Every Satellite `parent` names an existing immediate parent entity id
+      (byte-exact); nested parent chains are allowed
 - [ ] Includes live under content-root `includes/` when possible
 - [ ] Wiki targets use entity ids, not `.md` paths
 - [ ] Page-local media uses exact sibling `<stem>.assets/` (not a global media library)
@@ -259,7 +292,9 @@ exit `0` on the compile itself. For JSON handoff:
 ### 4. Build HTML, page-local assets, IR, and RAG
 
 Modes do **not** mix: one invocation is HTML **or** IR **or** RAG **or**
-Context Bundle.
+Context Bundle. These are separate projection contracts; a future profile may
+coordinate them, but coordination does not blend their schemas or make one
+successful output proof of another.
 
 #### 4a. Contoso migration fixture — HTML
 
@@ -295,12 +330,12 @@ in one copy-paste command:
 
 ```bash
 ./zig-out/bin/boris \
-  --input examples/reference-theme/content \
-  --theme examples/reference-theme/theme \
+  --input examples/reference-site/content \
+  --theme themes/reference \
   --layout-rule default id:index \
-    examples/reference-theme/theme/layouts/home.html \
+    themes/reference/layouts/home.html \
   --layout-rule default role:trunk \
-    examples/reference-theme/theme/layouts/section.html \
+    themes/reference/layouts/section.html \
   --html-dir test-output/reference-theme \
   --quiet
 
@@ -333,8 +368,8 @@ rg -n 'https?://' test-output/reference-theme --glob '*.html' || true
   --quiet
 ```
 
-**Expected:** exit `0` and `manifest.json`, `graph.json`, `build-report.json`
-under `test-output/migration-ir/`.
+**Expected:** exit `0` and `manifest.json`, `graph.json`, `completion.json`,
+`build-report.json` under `test-output/migration-ir/`.
 
 #### 4d. RAG pack
 
@@ -369,7 +404,7 @@ fixtures rather than inventing a second tutorial tree.
 | Feature | Product syntax / flag | Where to see it working |
 |---------|----------------------|-------------------------|
 | Aside | `<Aside kind="tip">…</Aside>` | `fixtures/migration-site/content/guides/asides.md`; reference `guides/components.md` |
-| Details | `<Details summary="…">…</Details>` | `examples/reference-theme/content/guides/components.md` |
+| Details | `<Details summary="…">…</Details>` | `examples/reference-site/content/guides/components.md` |
 | Includes | `{{include includes/….md}}` | `fixtures/migration-site/content/guides/includes.md` |
 | Wiki page links | `[[entity-id]]` / `[[entity-id\|label]]` | `…/guides/wiki-links.md` |
 | Wiki heading links | `[[entity-id#heading-id]]` | `…/guides/heading-fragments.md` |
@@ -478,6 +513,8 @@ ls test-output/migration-preview/index.html
 - You may later give `preview` different `--layout-rule` / layout paths without
   changing content frontmatter.
 - Do **not** use one target’s `.boris-cache` as another’s.
+- The target, layout, and output-root choices are publication facts; changing
+  them does not require adding deployment or theme metadata to page frontmatter.
 
 **Future / unimplemented:** Boris does not deploy, promote, or sync targets
 to a host. Promotion is “point the host at the prod directory you built.”
@@ -494,6 +531,10 @@ to a host. Promotion is “point the host at the prod directory you built.”
 **Product behavior:** that directory is ordinary static files (`*.html`,
 copied theme `assets/`, page-local `*.assets/`). There is **no** embedded
 Boris HTTP server and **no** Node runtime required at serve time.
+
+The generated tree proves only the bounded local generation step. Deployment,
+host configuration, accessibility, and search-engine behavior remain outside
+that local claim.
 
 **Manual deployment:** copy or rsync that directory to any static host, or
 serve locally with any static file server of your choice. Open
@@ -513,7 +554,8 @@ beacon. Compile-time theme asset copy does **not** fetch CDNs.
 1. **Theme injection** — edit a layout under `theme/layouts/` (or `footer.html`
    spliced via `{{footer}}`) and add a first-party or vendor snippet you
    accept as trusted HTML. Raw HTML in layouts and Markdown is **passed
-   through** ([apex-abi](contracts/apex-abi.md) trust model).
+   through** (Oliver passes author HTML through; see
+   [oliver-renderer](contracts/oliver-renderer.md)).
 2. **Host / CDN injection** — configure the static host to inject a script
    without touching the Boris tree.
 
@@ -608,10 +650,10 @@ Use after cutover when paths or titles change.
 | Exit / symptom | Fix |
 |----------------|-----|
 | `EFRONTMATTER` unknown key | Remove/rename key; use `parent` only |
-| Missing parent | Point `parent` at a Trunk entity id |
-| Satellite of satellite | Reparent to a Trunk |
+| Missing parent | Point `parent` at an existing entity id |
+| Parent cycle | Break the cycle so the chain terminates at a root Trunk |
 | `EREFERENCEMISSING` page | Fix entity id spelling/case |
-| `EREFERENCEMISSING` heading | Copy Apex `id` from rendered HTML/TOC |
+| `EREFERENCEMISSING` heading | Copy the rendered `id` from HTML/TOC |
 | `EINCLUDEMISSING` | Fix include path relative to content root |
 | `ECOMPONENT` / invalid Details/Aside | Stick to closed component grammar |
 | `EASSET` | Fix page-local path; stay inside `<stem>.assets/` |
@@ -640,7 +682,7 @@ Before moving files, make a small manual conversion ledger:
 - [ ] **Navigation:** use `mkdocs.yml` only as an inventory, then flatten each
   nested `nav:` branch into a Trunk landing page plus direct Satellite pages.
   A Satellite cannot parent another Satellite; see the
-  [parent/graph rules](contracts/ir-schema.md#trunk--satellite-graph-rules).
+  [parent/graph rules](contracts/ir-schema.md#trunk-satellite-graph-rules).
 - [ ] **Links:** replace relative Markdown page links such as
   `[Install](../setup.md)` with `[[setup|Install]]` (and validate any heading
   fragment against the rendered heading id). The exact include/wiki syntax and
@@ -724,7 +766,7 @@ Repository `.gitignore` already covers common product output roots such as
 | Wiki links | Guides / reference throughout |
 | Heading fragments | `guides/heading-fragments.md` |
 | Aside | `guides/asides.md` |
-| Details + page-local assets + layout rules | `examples/reference-theme/` |
+| Details + page-local assets + layout rules | `examples/reference-site/` |
 | Layouts + theme assets | Each fixture’s `theme/` |
 | Unicode | `special/cafe-notes.md` (ASCII path, wiki-linkable) |
 | Deep paths | `guides/deep/nested/path/note.md` |
@@ -749,12 +791,12 @@ When you only touch content, layouts, assets, and docs (as with this guide):
 
 # Reference theme smoke (Details, assets, layout rules)
 ./zig-out/bin/boris \
-  --input examples/reference-theme/content \
-  --theme examples/reference-theme/theme \
+  --input examples/reference-site/content \
+  --theme themes/reference \
   --layout-rule default id:index \
-    examples/reference-theme/theme/layouts/home.html \
+    themes/reference/layouts/home.html \
   --layout-rule default role:trunk \
-    examples/reference-theme/theme/layouts/section.html \
+    themes/reference/layouts/section.html \
   --html-dir test-output/reference-theme \
   --quiet
 
@@ -778,10 +820,11 @@ zig build --build-file tools/migration-lab/build.zig test
 | Doc | Role |
 |-----|------|
 | [`fixtures/migration-site/README.md`](../fixtures/migration-site/README.md) | Contoso fixture how-to |
-| [`examples/reference-theme/README.md`](../examples/reference-theme/README.md) | Theme dogfood commands |
+| [`examples/reference-site/README.md`](../examples/reference-site/README.md) | Theme dogfood commands |
 | [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone labs |
 | [`README.md`](../README.md) | Product front door + CLI |
 | [`docs/STATUS.md`](STATUS.md) | Current phase |
+| [`docs/contracts/publication-model.md`](contracts/publication-model.md) | Document/publication/provenance ownership and projection claims |
 | [`docs/contracts/frontmatter.md`](contracts/frontmatter.md) | Normative FM grammar |
 | [`docs/contracts/includes-and-wiki-links.md`](contracts/includes-and-wiki-links.md) | Includes + wiki |
 | [`docs/contracts/heading-ids.md`](contracts/heading-ids.md) | Fragment ids |

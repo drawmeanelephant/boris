@@ -62,6 +62,7 @@ zig-out/bin/boris-source-rag --out=./source-rag --quiet
 | `--no-bundles` | off | Omit combined convenience bundles and parts |
 | `--bundles-only` | off | Emit combined bundles + sidecars only; omit `files/**` |
 | `--profile=NAME` | `all` | Select `all`, `core`, `docs`, or `tools` input scope |
+| `--pack-by=AXIS` | `none` | Split output into per-segment packs: `none` or `tool` |
 
 `--no-bundles` and `--bundles-only` are mutually exclusive.
 
@@ -85,6 +86,54 @@ source-rag/
   upload_manifest.json   # --bundles-only only: upload order, sizes, chars/4 token estimates
   files/**              # one markdown document per source path (omitted with --bundles-only)
 ```
+
+### `--pack-by=tool`
+
+`--profile` chooses *which files are scanned*; `--pack-by` chooses *how the
+scanned set is split across output packs*. The two are orthogonal and compose.
+
+With `--pack-by=tool` the tree above is emitted once per pack under `packs/`,
+and the root keeps only a router plus a machine-readable index:
+
+```text
+source-rag/
+  INDEX.md              # router: pack, bytes, ~tokens, files, what it answers
+  pack_manifest.json    # the same table, machine-readable
+  packs/
+    core/               # the `core` scope: src, layouts, and root files
+    docs/               # the `docs` scope: docs and content
+    tooling/            # the `tools` scope minus the tools themselves
+    tools-<name>/       # one pack per tools/<name>/
+```
+
+Each pack is self-contained — its own `INDEX.md`, `catalog.jsonl`, manifests,
+and bundles — so it can be used without the rest of the tree.
+
+**Pack boundaries are the existing profile scopes**, not a second segmentation.
+`scanDirsForProfile` already declares them, and the packs are derived from it:
+
+| profile scope | directories | pack(s) |
+|---|---|---|
+| `core` | `src`, `layouts` (+ root files) | `core` |
+| `docs` | `docs`, `content` | `docs` |
+| `tools` | `scripts`, `tools`, `test`, `SUPPORT` | one per `tools/<name>/`, remainder in `tooling` |
+
+The only thing `--pack-by=tool` adds is splitting the `tools` scope per tool.
+That gives an exact totality property, asserted by tests: each profile's scan
+equals the union of its packs, and every scanned directory belongs to exactly
+one profile scope. Adding a directory to `default_scan_dirs` without assigning
+it a profile fails the suite rather than silently landing in `core`.
+
+Tool packs are derived from the scanned paths rather than a hardcoded list, so
+adding `tools/<name>/` to the repo produces `packs/tools-<name>/` with no code
+change. Every scanned file lands in exactly one pack.
+
+`--split-size` and `--bundles-only` apply within each pack. `--pack-by=none`
+(the default) is byte-identical to the historical flat export.
+
+Sizes in the router are reported as authoritative `bytes` plus a `~tokens`
+approximation; `pack_manifest.json` records the method (`bytes/4`) next to the
+numbers. It is a heuristic, not any particular tokenizer's count.
 
 Each source document looks like:
 
@@ -277,6 +326,13 @@ subtree and root corpus files, so a generation I/O failure leaves the previous
 successful corpus intact. Documents excluded by a newer exporter therefore
 cannot remain in the pack after a successful publish. It never removes the
 selected output directory or unrelated files beside the generated artifacts.
+
+`--root` and `--out` are resolved from the process working directory before
+scanning. An output directory nested under the scan root is allowed and is
+excluded using its normalized root-relative path, so absolute paths and `./` /
+`..` spellings behave identically across reruns. An output directory equal to
+the scan root, or an ancestor containing it, is rejected to prevent managed
+artifacts from colliding with source files.
 
 ---
 

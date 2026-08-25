@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://drawmeanelephant.github.io/boris/schemas/astro-source-snapshot-1.schema.json",
+  "title": "Boris Astro source snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schema_version",
+    "tool_version",
+    "source_system",
+    "project_id",
+    "selected_content_root",
+    "policy_hash",
+    "source_tree_fingerprint",
+    "records"
+  ],
+  "properties": {
+    "format": { "const": "boris-astro-source-snapshot" },
+    "schema_version": { "const": 1 },
+    "tool_version": { "type": "string", "minLength": 1 },
+    "source_system": { "const": "astro" },
+    "project_id": { "$ref": "#/$defs/projectId" },
+    "selected_content_root": { "$ref": "#/$defs/normalizedRelativePath" },
+    "policy_hash": { "$ref": "#/$defs/sha256" },
+    "source_tree_fingerprint": { "$ref": "#/$defs/sha256" },
+    "records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/snapshotRecord" }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "normalizedRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//).+$"
+    },
+    "entityId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*[\\s#?%]).+$"
+    },
+    "sourceKind": {
+      "enum": [
+        "directory",
+        "markdown",
+        "mdx",
+        "astro",
+        "regular_file",
+        "symlink",
+        "unsupported_filesystem_object"
+      ]
+    },
+    "actionClass": {
+      "enum": [
+        "create",
+        "keep",
+        "quarantine",
+        "unsupported",
+        "review",
+        "conflict"
+      ]
+    },
+    "classification": {
+      "enum": [
+        "reference_label",
+        "fragment",
+        "root_relative",
+        "source_relative",
+        "protocol_relative",
+        "http",
+        "https",
+        "mailto",
+        "ftp",
+        "other_scheme",
+        "data_url",
+        "review"
+      ]
+    },
+    "referenceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "syntax", "target", "classification" ],
+      "properties": {
+        "syntax": {
+          "enum": [
+            "inline_link",
+            "inline_image",
+            "reference_link_use",
+            "reference_image_use",
+            "reference_definition",
+            "autolink"
+          ]
+        },
+        "target": { "type": "string", "minLength": 1 },
+        "classification": { "$ref": "#/$defs/classification" }
+      }
+    },
+    "assetRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "source_syntax", "target", "classification" ],
+      "properties": {
+        "source_syntax": {
+          "enum": [ "inline_image", "reference_image_use" ]
+        },
+        "target": { "type": "string", "minLength": 1 },
+        "classification": { "$ref": "#/$defs/classification" }
+      }
+    },
+    "snapshotRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_path",
+        "source_kind",
+        "exact_byte_hash",
+        "frontmatter_hash",
+        "body_hash",
+        "symlink_target",
+        "source_authored_identity",
+        "inferred_route_candidate",
+        "route_evidence",
+        "references",
+        "potential_asset_references",
+        "classification",
+        "evidence"
+      ],
+      "properties": {
+        "source_path": { "$ref": "#/$defs/normalizedRelativePath" },
+        "source_kind": { "$ref": "#/$defs/sourceKind" },
+        "exact_byte_hash": {
+          "anyOf": [ { "$ref": "#/$defs/sha256" }, { "type": "null" } ]
+        },
+        "frontmatter_hash": {
+          "anyOf": [ { "$ref": "#/$defs/sha256" }, { "type": "null" } ]
+        },
+        "body_hash": {
+          "anyOf": [ { "$ref": "#/$defs/sha256" }, { "type": "null" } ]
+        },
+        "symlink_target": {
+          "type": [ "string", "null" ]
+        },
+        "source_authored_identity": {
+          "anyOf": [ { "$ref": "#/$defs/entityId" }, { "type": "null" } ]
+        },
+        "inferred_route_candidate": {
+          "anyOf": [ { "$ref": "#/$defs/entityId" }, { "type": "null" } ]
+        },
+        "route_evidence": { "const": "inferred_not_observed" },
+        "references": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/referenceRecord" }
+        },
+        "potential_asset_references": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/assetRecord" }
+        },
+        "classification": { "$ref": "#/$defs/actionClass" },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]*$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "source_kind": { "const": "symlink" } },
+            "required": [ "source_kind" ]
+          },
+          "then": {
+            "properties": {
+              "exact_byte_hash": { "type": "null" },
+              "frontmatter_hash": { "type": "null" },
+              "body_hash": { "type": "null" },
+              "symlink_target": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source_kind": {
+                "enum": [ "markdown", "mdx", "astro", "regular_file" ]
+              }
+            },
+            "required": [ "source_kind" ]
+          },
+          "then": {
+            "properties": {
+              "exact_byte_hash": { "$ref": "#/$defs/sha256" },
+              "symlink_target": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "source_kind": { "const": "markdown" } },
+            "required": [ "source_kind" ]
+          },
+          "then": {
+            "properties": {
+              "frontmatter_hash": { "$ref": "#/$defs/sha256" },
+              "body_hash": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source_kind": {
+                "enum": [ "mdx", "astro", "regular_file", "directory", "unsupported_filesystem_object" ]
+              }
+            },
+            "required": [ "source_kind" ]
+          },
+          "then": {
+            "properties": {
+              "frontmatter_hash": { "type": "null" },
+              "body_hash": { "type": "null" },
+              "symlink_target": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source_kind": {
+                "enum": [ "directory", "unsupported_filesystem_object" ]
+              }
+            },
+            "required": [ "source_kind" ]
+          },
+          "then": {
+            "properties": {
+              "exact_byte_hash": { "type": "null" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

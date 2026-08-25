@@ -52,4 +52,4 @@ the table above.
 
 If your old site used Markdown admonition plugins (`!!! note`, `:::warning`),
 convert each block to an Aside wrapper with ordinary Markdown inside (see the
-fenced syntax above). Body content still goes through Apex.
+fenced syntax above). Body content still goes through Oliver.

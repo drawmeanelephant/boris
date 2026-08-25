@@ -1,0 +1,98 @@
+---
+title: Why Boris? (Comparison & Rationale)
+parent: index
+status: published
+tags: [rationale, comparison, architecture]
+---
+
+<p class="eyebrow">Why this compiler</p>
+
+# Why Boris? (Comparison & Rationale) {#why-boris}
+
+{{include includes/identity.md}}
+
+This document contrasts Boris with traditional static site generators,
+JavaScript web frameworks, hosted CMS platforms, and plain Markdown files.
+
+<Aside kind="info">
+
+**Core difference:** Boris treats documentation as a validated, directed
+graph and compiles it into static HTML, hosted publication targets,
+client-side search, and machine AI exports from a single native binary —
+without Node.js, npm dependencies, or JavaScript runtime build steps.
+
+</Aside>
+
+---
+
+## Boris vs. Other Approaches
+
+| Feature / Goal | Plain Markdown / Wiki | JS Frameworks (Docusaurus, Astro) | Boris |
+| :--- | :---: | :---: | :--- |
+| **Build Runtime** | None (Raw files) | Node.js / npm | **Single native Zig binary** |
+| **Build Execution** | N/A | Subprocess / Node pipelines | **In-process native renderer**[^speed] |
+| **Memory Design** | N/A | Garbage collected JS heap | **Per-page arena scratch reset**[^memory] |
+| **Link & Graph Safety** | None | Optional plugins | **Parent & Wiki-Link Validation** |
+| **Rich Markdown** | Basic CommonMark | MDX (arbitrary JS) | **CommonMark + GFM tables + Boris extensions**: heading ids, footnotes, definition lists, wiki-links, includes |
+| **Full-Text Search** | External service | Bundled JS indexers | **Compiler-owned rendered index + optional browser UI** |
+| **Machine & AI Exports** | Scraping / plugins | Custom build scripts | **Native Exports**: JSON IR 0.2.0, RAG, Context, `llms.txt` |
+| **Publication targets** | “Push the folder” | Adapter plugins / platform CLIs | **Registry**: local `dist/`, GitHub Pages, Standard.site |
+| **Client JS Footprint** | None | Varies by framework setup | **No required runtime; search UI is optional** |
+
+Table: Architectural Comparison Matrix
+
+---
+
+## 1. Boris vs. JavaScript Site Generators (Docusaurus, Astro, Starlight)
+
+JavaScript site generators require managing Node.js environments, `package.json` dependencies, build toolchains, and hydration runtimes. 
+
+### Structural guardrails
+- **Zero Toolchain Fatigue:** Boris is a single standalone binary with zero `node_modules` dependency tree to audit or update.
+- **Fail-Loud Validation:** If a parent relationship or supported internal wiki-link is broken, Boris halts with exit code `1` before publishing the new HTML output.
+- **Single-Source AI Exports:** Native `--rag`, `--context`, and `--llms` exports mean AI tools and LLMs read the exact same validated structure as human readers when generated from the same source revision.
+
+---
+
+## 2. Boris vs. Executable MDX
+
+MDX allows embedding arbitrary JavaScript components inside Markdown. While flexible, MDX introduces security risks, build complexity, and vendor lock-in.
+
+### Bounded authoring
+- **Rich, Safe Authoring:** Boris supports rich components like callout Aside blocks (`&lt;Aside kind="tip"&gt;`), wiki-links (`[[getting-started]]`), and transclusion (`{{include includes/shared-tip.md}}`) directly in native Markdown without executing client-side or build-side JavaScript.
+- **Closed Frontmatter Grammar:** Enforces eight documented keys (`id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, `summary`). Malformed or legacy keys raise clear diagnostic errors (`EFRONTMATTER`) instead of silently ignoring bad fields.
+
+---
+
+## 3. Boris vs. Plain Markdown Repositories
+
+Uncompiled Markdown folders in git repositories lack navigation menus, breadcrumbs, search, and validation.
+
+### A complete static output
+- **Complete Static Sites:** Turns plain text files into responsive HTML sites with sidebar navigation, breadcrumbs, in-page tables of contents, and a compiler-owned rendered search index.
+- **Fail-Loud Link Safety:** Rejects broken parent relationships and supported internal wiki-links before publishing new build outputs.
+
+<Aside kind="tip">
+**Migration Path:** Want to evaluate existing Markdown frontmatter? Run a named migration-lab mode such as `zig build --build-file tools/migration-lab/build.zig run -- --mode=frontmatter-review --content=/path/to/old-content --out=./.out-fmreview`. Astro, Obsidian, Starlight, and other adapters each require their own mode and mode-specific input (`--root`, `--vault`, and so on). See [[guides/migration|Migrating to Boris]].
+</Aside>
+
+---
+
+<Details summary="What we are not claiming">
+
+Speed. Cross-OS byte identity. That a successful `dist/` was deployed.
+That Standard.site browser OAuth works on bsky.social. Measure the
+workload. Read [[guides/publishing|Publishing Targets]] for the honest
+target list.
+
+</Details>
+
+## Next Steps
+
+- [[getting-started|Getting Started]] — Build your first site in 5 minutes.
+- [[guides/publishing|Publishing Targets]] — local `dist/`, Pages, Standard.site.
+- [[technology-and-rationale|Technology & Rationale]] — Deep dive into Zig, native Markdown rendering, and memory design.
+- [[guides/overview|Content Model & Pipeline]] — Learn how Trunk/Satellite page graphs operate.
+
+[^speed]: Builds render Markdown in-process through the Oliver library, eliminating per-page subprocess spawning and JS bundler overhead.
+[^memory]: Per-page arena allocation ensures that memory scratch space allocated while parsing a page is reset after page emission, keeping memory usage controlled throughout build runs.

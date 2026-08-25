@@ -1,74 +1,116 @@
 ---
-title: Getting Started with Boris
+title: Getting Started
 status: published
-tags: [setup, cli]
+tags: [setup, quickstart, cli]
+summary: Build Boris, preflight the sample, publish dist/, then choose a hosted target if you want one.
 ---
 
-# Getting Started
+<p class="eyebrow">Onboarding</p>
 
-Build Boris, compile this sample site, and try the product modes.
+# Getting Started with Boris {#getting-started}
 
-## Prerequisites
+{{include includes/identity.md}}
 
-- **Zig 0.16+** (CI pin: 0.16.0)
-- **CMake** at *compile time only* (builds vendored ApexMarkdown static libs)
+The shortest useful path is: build Boris, preflight the sample content, build
+the site, open the HTML. Hosted targets come after that.
 
-## First site build
+<Aside kind="info" id="search-comes-along">
+
+The default HTML build also publishes a rendered-search artifact and
+target-local publication evidence. You do not need to run a second search
+index command for a normal Boris build.
+
+</Aside>
+
+{{include includes/shared-tip.md}}
+
+## 1. Build Boris {#build-boris}
+
+Building Boris itself requires:
+
+- **Zig 0.16+** — the compiler language Boris is written in. Markdown
+  rendering uses the Oliver library, pinned in `build.zig.zon` and fetched by
+  Zig at build time — no CMake or other host tools are required.
 
 ```bash
 git clone https://github.com/drawmeanelephant/boris.git
 cd boris
 zig build
-./zig-out/bin/boris --quiet          # HTML → dist/
 ```
 
-Open `dist/index.html` (or serve `dist/` with any static file server). You should
-see site nav on the left, breadcrumb, and a page TOC when the body has headings.
+The binary is written to `./zig-out/bin/boris`.
 
-## Product modes
+## 2. Inspect the sample content {#inspect}
 
-| Mode | Command | Output |
-|------|---------|--------|
-| **HTML (default)** | `./zig-out/bin/boris` | `dist/` |
-| **JSON IR** | `./zig-out/bin/boris --out .boris` | `.boris/` |
-| **RAG corpus** | `./zig-out/bin/boris --rag` | `rag/` |
-| **Context Bundle** | `./zig-out/bin/boris --context` | `context/` |
+Pages are ordinary Markdown files under `content/`. The path without its
+extension is normally the page's entity id: `content/guides/overview.md`
+becomes `guides/overview`. Start with
+[[guides/building-pages|Building Pages]] if you want to add a page, or
+[[guides/oliver-markdown|the Markdown showcase]] if you want to see what
+Oliver will actually render.
 
-Read-only analysis (not publish modes): `boris check`, `boris impact <id>`.
+## 3. Preflight without publishing {#preflight}
 
 ```bash
-./zig-out/bin/boris --out .boris --quiet
-./zig-out/bin/boris --rag --quiet
-./zig-out/bin/boris --context --quiet
+./zig-out/bin/boris validate --quiet
 ```
 
-<Aside kind="tip">
+`validate` runs Boris's authoritative HTML source and configuration checks,
+including graph resolution, component parsing, layout loading, and bounded
+render preparation. It creates no HTML, cache, search, or publication-evidence
+files.
 
-HTML helpers (valid alone, no extra mode flag): `--watch`, `--incremental`,
-`--jobs N` (default jobs is still 1). See [[guides/cli-and-modes|CLI and modes]].
+<Aside kind="tip" id="validate-vs-check">
+
+`validate` is not `check`. `check` is graph-health policy after the graph is
+already valid. Use `validate` to ask “would this compile?” Use `check` to
+ask “is this graph healthy?”
 
 </Aside>
 
-## What you need as an author
+## 4. Publish the static site {#publish-local}
 
-1. Markdown under `content/` (case-sensitive `.md` / `.mdx`).
-2. Closed frontmatter — only `id`, `title`, `parent`, `status`, `tags`
-   ([[reference/frontmatter|frontmatter reference]]).
-3. Optional layout chrome in `layouts/main.html` (`{{content}}` required;
-   `{{nav}}` / `{{breadcrumb}}` / `{{title}}` / `{{toc}}` optional).
-4. Optional **includes** and **wiki-links** (Boris expands them on the HTML path
-   **before** Apex). Syntax examples stay raw inside fences; live forms below
-   resolve at compile time.
-
-```markdown
-{{include includes/shared-tip.md}}
-
-See also [[guides/overview|the content model]].
+```bash
+./zig-out/bin/boris build --quiet
 ```
 
-{{include includes/shared-tip.md}}
+The default target is `dist/`. Open `dist/index.html` directly for reading, or
+serve the `dist/` directory with any static file server when you want the
+browser search UI to fetch its same-origin index.
 
-{{include includes/authoring-note.md}}
+{{include includes/publish-first.md}}
 
-Next: the [[guides/overview|content model]] or jump straight to
-[[guides/trunk-satellite|Trunk vs Satellite]].
+## 5. Then choose a hosted target {#hosted}
+
+Local `dist/` is the default. It is not the only exit.
+
+| Next | When | Guide |
+| :--- | :--- | :--- |
+| Stay local | You wanted files | You are done |
+| GitHub Pages | First verified hosted target | [[guides/publishing#github-pages|Publishing → Pages]] |
+| Standard.site | Atmosphere records | [[guides/publishing#standard-site|Publishing → Standard.site]] |
+| Editor | You want a local authoring UI | [[guides/editor|Boris Editor]] |
+
+<Details summary="What you should not do on day one">
+
+Do not start with browser OAuth against bsky.social. Do not type an app
+password on argv. Do not edit files under `dist/`. Do not run the standalone
+search-index tool after a normal Boris build. Do not start day one with
+`boris nostr publish` — that family exists; it is not the first command.
+
+</Details>
+
+## What to learn next {#next}
+
+- [[guides/overview|Content Model & Pipeline]] — how discovery, graph
+  validation, rendering, and projections fit together.
+- [[guides/publishing|Publishing Targets]] — Pages, Standard.site, and the
+  evidence chain.
+- [[guides/cli-and-modes|CLI & Output Modes]] — build, validate, watch, graph
+  analysis, layouts, and machine exports.
+- [[guides/oliver-markdown|Markdown Showcase]] — tables, footnotes, definition
+  lists, heading ids, and everything this site is allowed to flex.
+- [[reference/frontmatter|Frontmatter Reference]] — the complete closed author
+  grammar.
+- [[reference/outputs|Outputs & Artifacts]] — HTML, search, IR, RAG, Context,
+  `llms.txt`, RSS, sitemap, and publication evidence.

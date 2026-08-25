@@ -1,8 +1,7 @@
 # Layout-rules fixture
 
 Acceptance fixture for deterministic page layout selection
-(`docs/designs/page-layout-selection-rfc.md`,
-`docs/contracts/templating-and-themes.md` §4).
+(`docs/contracts/templating-and-themes.md` §4).
 
 ```text
 content/                         theme-site graph shape (Trunk/Satellite)
@@ -42,7 +41,7 @@ Expected `data-layout` markers:
 
 Rule order permutations must produce byte-identical HTML. Full vs
 `--incremental` repeated runs must match (cache format
-`boris-cache-v2-layout-rules`).
+`boris-cache-v3-nav-digest`).
 
 ## Failure cases
 

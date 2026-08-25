@@ -22,6 +22,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const publication = @import("publication.zig");
 
 pub const format_id = "boris-starlight-migration-lab";
 pub const schema_version: u32 = 1;
@@ -192,6 +193,38 @@ const RelationCandidate = struct {
     relation_ordinal: ?usize,
     within_product_limit: ?bool,
     review_reason: ?[]const u8,
+};
+
+/// Site-wide, exact-key target evidence for the relationship review workflow.
+/// This is deliberately independent from relation candidate resolution: a later
+/// card may compare candidates to this artifact, but this inventory never picks
+/// a relation, guesses a match, or changes converted Markdown.
+const RelationshipTargetInventoryRow = struct {
+    source_path: []const u8,
+    source_location: []const u8,
+    source_slug_state: []const u8, // explicit | missing_fallback_path | empty_fallback_path | invalid_fallback_path | not_markdown
+    original_target_key: ?[]const u8,
+    normalized_lookup_key: ?[]const u8,
+    candidate_entity_id: ?[]const u8,
+    candidate_output_route: ?[]const u8,
+    eligibility: []const u8, // eligible | excluded | unsupported | invalid
+    reason: ?[]const u8,
+    selected: bool,
+};
+
+/// Exact-key, review-first join of relationship candidates to the target
+/// inventory. This never writes Boris product relations or picks a target
+/// without an explicit selection rule.
+const RelationshipCandidateClassification = struct {
+    source_path: []const u8,
+    source_line: u32,
+    source_field: []const u8,
+    raw_value: []const u8,
+    normalized_lookup_key: ?[]const u8,
+    classification: []const u8, // selected | inventoried | ambiguous | absent | invalid
+    matching_inventory_source_paths: []const []const u8,
+    selection_rule: ?[]const u8,
+    review_note: ?[]const u8,
 };
 
 const RawRelationValue = struct {
@@ -375,8 +408,13 @@ fn parseFrontmatterLite(allocator: std.mem.Allocator, raw: []const u8, fallback_
         };
     }
     const start: usize = if (std.mem.startsWith(u8, raw, "---\r\n")) 5 else 4;
-    const end_pat = if (std.mem.indexOfPos(u8, raw, start, "\n---\r\n") != null) "\n---\r\n" else "\n---\n";
-    const end_start = std.mem.indexOfPos(u8, raw, start, end_pat) orelse {
+    // Find the earliest terminator rather than choosing the line ending by a
+    // whole-file probe: a body containing a CRLF `---` must not shift the
+    // close to a later position and swallow the real body as frontmatter.
+    const lf_end = std.mem.indexOfPos(u8, raw, start, "\n---\n");
+    const crlf_end = std.mem.indexOfPos(u8, raw, start, "\n---\r\n");
+    const end_start: ?usize = if (lf_end) |l| if (crlf_end) |c| @min(l, c) else l else crlf_end;
+    const end_start_idx = end_start orelse {
         return .{
             .title = fallback_title,
             .frontmatter = raw,
@@ -385,8 +423,9 @@ fn parseFrontmatterLite(allocator: std.mem.Allocator, raw: []const u8, fallback_
             .all_keys = &.{},
         };
     };
-    const frontmatter = raw[start..end_start];
-    const body = raw[end_start + end_pat.len ..];
+    const end_pat = if (std.mem.startsWith(u8, raw[end_start_idx..], "\n---\r\n")) "\n---\r\n" else "\n---\n";
+    const frontmatter = raw[start..end_start_idx];
+    const body = raw[end_start_idx + end_pat.len ..];
 
     var title: []const u8 = fallback_title;
     var unmapped: std.ArrayList([]const u8) = .empty;
@@ -507,6 +546,90 @@ fn scalarLooksNonScalar(value: []const u8) bool {
     return v[0] == '{' or v[0] == '|' or v[0] == '>' or v[0] == '&' or v[0] == '*';
 }
 
+/// The review extractor only accepts YAML string scalars for a proven `slug`
+/// member.  This is intentionally narrower than general YAML: an unquoted
+/// number, boolean, or null is evidence to review, not a target identifier.
+/// Quoted spellings remain strings and are normalized by `unquoteRelationScalar`.
+fn isBareYamlNonString(value: []const u8) bool {
+    const v = trim(value);
+    if (v.len == 0 or v[0] == '\'' or v[0] == '"') return false;
+    if (std.ascii.eqlIgnoreCase(v, "true") or std.ascii.eqlIgnoreCase(v, "false") or
+        std.ascii.eqlIgnoreCase(v, "null") or std.mem.eql(u8, v, "~")) return true;
+
+    var index: usize = 0;
+    if (v[index] == '+' or v[index] == '-') index += 1;
+    const integer_start = index;
+    while (index < v.len and std.ascii.isDigit(v[index])) : (index += 1) {}
+    if (index == integer_start) return false;
+    if (index < v.len and v[index] == '.') {
+        index += 1;
+        const fraction_start = index;
+        while (index < v.len and std.ascii.isDigit(v[index])) : (index += 1) {}
+        if (index == fraction_start) return false;
+    }
+    if (index < v.len and (v[index] == 'e' or v[index] == 'E')) {
+        index += 1;
+        if (index < v.len and (v[index] == '+' or v[index] == '-')) index += 1;
+        const exponent_start = index;
+        while (index < v.len and std.ascii.isDigit(v[index])) : (index += 1) {}
+        if (index == exponent_start) return false;
+    }
+    return index == v.len;
+}
+
+fn relationFieldAllowsSlugObject(field: []const u8) bool {
+    return std.mem.eql(u8, field, "relatedHaiku") or
+        std.mem.eql(u8, field, "relatedLimerick");
+}
+
+/// Filed's haiku/limerick references are commonly emitted as `{slug: ...}`
+/// objects. Recognize only that proven shape; all other object shapes remain
+/// explicit review evidence.
+fn appendInlineSlugObject(
+    a: std.mem.Allocator,
+    out: *std.ArrayList(RawRelationValue),
+    field: []const u8,
+    line: u32,
+    value_index: *usize,
+    value: []const u8,
+) !bool {
+    const v = trim(value);
+    if (v.len < 2 or v[0] != '{' or v[v.len - 1] != '}') return false;
+    if (!relationFieldAllowsSlugObject(field)) return false;
+
+    const raw_inner = trim(v[1 .. v.len - 1]);
+    var target: ?[]const u8 = null;
+    var malformed = false;
+    var start: usize = 0;
+    var i: usize = 0;
+    while (i <= raw_inner.len) : (i += 1) {
+        if (i != raw_inner.len and raw_inner[i] != ',') continue;
+        const pair = trim(raw_inner[start..i]);
+        const colon = std.mem.indexOfScalar(u8, pair, ':') orelse {
+            malformed = true;
+            start = i + 1;
+            continue;
+        };
+        const key = trim(pair[0..colon]);
+        const item_value = trim(pair[colon + 1 ..]);
+        if (!std.mem.eql(u8, key, "slug") or item_value.len == 0 or scalarLooksNonScalar(item_value) or
+            isBareYamlNonString(item_value) or target != null)
+        {
+            malformed = true;
+        } else {
+            target = item_value;
+        }
+        start = i + 1;
+    }
+
+    if (target == null or malformed) {
+        try appendRawRelationValue(a, out, field, line, value_index, v, null, null, "non_scalar_or_ambiguous_object");
+    } else {
+        try appendRawRelationValue(a, out, field, line, value_index, v, target, null, null);
+    }
+    return true;
+}
+
 fn parseInlineRelationValues(
     a: std.mem.Allocator,
     out: *std.ArrayList(RawRelationValue),
@@ -521,6 +644,7 @@ fn parseInlineRelationValues(
         return;
     }
     if (v[0] != '[') {
+        if (try appendInlineSlugObject(a, out, field, line, value_index, v)) return;
         if (scalarLooksNonScalar(v)) {
             try appendRawRelationValue(a, out, field, line, value_index, v, null, null, "non_scalar_value");
         } else {
@@ -607,6 +731,8 @@ fn parseObjectItem(
         }
         if (std.mem.eql(u8, key, "id")) {
             if (target != null) malformed = true else target = value;
+        } else if (std.mem.eql(u8, key, "slug") and relationFieldAllowsSlugObject(field)) {
+            if (target != null or collection != null or isBareYamlNonString(value)) malformed = true else target = value;
         } else if (std.mem.eql(u8, key, "collection")) {
             if (collection != null) malformed = true else collection = value;
         } else {
@@ -928,6 +1054,188 @@ fn collectRelationCandidates(
     return try out.toOwnedSlice(a);
 }
 
+const SourceSlugEvidence = struct {
+    state: []const u8,
+    value: ?[]const u8,
+    location: []const u8,
+};
+
+fn sourceSlugEvidence(a: std.mem.Allocator, raw: []const u8) !SourceSlugEvidence {
+    const fallback: SourceSlugEvidence = .{ .state = "missing_fallback_path", .value = null, .location = "path-derived entity id" };
+    if (!std.mem.startsWith(u8, raw, "---\n") and !std.mem.startsWith(u8, raw, "---\r\n")) return fallback;
+    const start: usize = if (std.mem.startsWith(u8, raw, "---\r\n")) 5 else 4;
+    const end = std.mem.indexOfPos(u8, raw, start, "\n---\n") orelse std.mem.indexOfPos(u8, raw, start, "\n---\r\n") orelse return .{
+        .state = "invalid_fallback_path",
+        .value = null,
+        .location = "unterminated frontmatter",
+    };
+    const frontmatter = raw[start..end];
+    var line_no: usize = 2;
+    var pos: usize = 0;
+    while (pos < frontmatter.len) : (line_no += 1) {
+        const line_end = std.mem.indexOfScalarPos(u8, frontmatter, pos, '\n') orelse frontmatter.len;
+        const line = frontmatter[pos..line_end];
+        if (line.len > 0 and line[0] != ' ' and line[0] != '\t') {
+            if (std.mem.indexOfScalar(u8, line, ':')) |colon| {
+                if (std.mem.eql(u8, trim(line[0..colon]), "slug")) {
+                    const value = unquoteRelationScalar(trim(line[colon + 1 ..]));
+                    const location = try std.fmt.allocPrint(a, "frontmatter.slug line {d}", .{line_no});
+                    if (value == null or value.?.len == 0) return .{ .state = "empty_fallback_path", .value = null, .location = location };
+                    if (!isTargetLikeEntityId(value.?)) return .{ .state = "invalid_fallback_path", .value = null, .location = location };
+                    return .{ .state = "explicit", .value = try a.dupe(u8, value.?), .location = location };
+                }
+            }
+        }
+        pos = if (line_end == frontmatter.len) frontmatter.len else line_end + 1;
+    }
+    return fallback;
+}
+
+/// Draft source pages remain inventory evidence but are never conversion
+/// candidates. This is intentionally a narrow, line-oriented migration rule.
+fn hasDraftFrontmatter(a: std.mem.Allocator, raw: []const u8) !bool {
+    const parsed = try parseFrontmatterLite(a, raw, "");
+    if (parsed.frontmatter.len == 0) return false;
+    const lines = try splitFrontmatterLines(a, parsed.frontmatter);
+    for (lines) |line| {
+        const field = topLevelField(line) orelse continue;
+        const value = unquoteRelationScalar(field.value) orelse continue;
+        if (std.mem.eql(u8, field.key, "draft") and std.ascii.eqlIgnoreCase(value, "true")) return true;
+        if (std.mem.eql(u8, field.key, "status") and std.ascii.eqlIgnoreCase(value, "draft")) return true;
+    }
+    return false;
+}
+
+fn collectRelationshipTargetInventory(
+    a: std.mem.Allocator,
+    io: Io,
+    source: Io.Dir,
+    selection_rows: []const SelectionRow,
+    pages: []const SourcePage,
+    content_files: []const []const u8,
+) ![]const RelationshipTargetInventoryRow {
+    // Count original exact keys before collision disambiguation.  The converted
+    // page map is intentionally only evidence; duplicate keys remain explicit.
+    var key_counts: std.StringHashMapUnmanaged(usize) = .empty;
+    for (selection_rows) |row| {
+        const raw = try readFileAlloc(io, source, row.source_path, a);
+        const slug = try sourceSlugEvidence(a, raw);
+        const key = slug.value orelse try entityIdFromLocaleRel(a, row.content_rel);
+        const entry = try key_counts.getOrPut(a, key);
+        if (entry.found_existing) entry.value_ptr.* += 1 else entry.value_ptr.* = 1;
+    }
+
+    var rows: std.ArrayList(RelationshipTargetInventoryRow) = .empty;
+    for (selection_rows) |selection| {
+        const raw = try readFileAlloc(io, source, selection.source_path, a);
+        const slug = try sourceSlugEvidence(a, raw);
+        const key = slug.value orelse try entityIdFromLocaleRel(a, selection.content_rel);
+        const duplicate = key_counts.get(key).? > 1;
+        var page: ?SourcePage = null;
+        for (pages) |candidate| {
+            if (!candidate.is_synthetic and std.mem.eql(u8, candidate.source_path, selection.source_path)) {
+                page = candidate;
+                break;
+            }
+        }
+        const draft = try hasDraftFrontmatter(a, raw);
+        const eligibility: []const u8 = if (draft or !selection.selected) "excluded" else "eligible";
+        const reason: ?[]const u8 = if (draft)
+            "draft_frontmatter"
+        else if (!selection.selected)
+            selection.reason
+        else if (duplicate)
+            "duplicate_exact_key"
+        else
+            null;
+        try rows.append(a, .{
+            .source_path = selection.source_path,
+            .source_location = slug.location,
+            .source_slug_state = slug.state,
+            .original_target_key = key,
+            .normalized_lookup_key = key,
+            .candidate_entity_id = if (page) |p| p.entity_id else null,
+            .candidate_output_route = if (page) |p| p.route else null,
+            .eligibility = eligibility,
+            .reason = reason,
+            .selected = selection.selected,
+        });
+    }
+    for (content_files) |path| {
+        if (isMarkdownName(path)) continue;
+        try rows.append(a, .{
+            .source_path = path,
+            .source_location = "non-Markdown file under discovered content root",
+            .source_slug_state = "not_markdown",
+            .original_target_key = null,
+            .normalized_lookup_key = null,
+            .candidate_entity_id = null,
+            .candidate_output_route = null,
+            .eligibility = "unsupported",
+            .reason = "unsupported_source_file_type",
+            .selected = false,
+        });
+    }
+    std.mem.sort(RelationshipTargetInventoryRow, rows.items, {}, struct {
+        fn less(_: void, x: RelationshipTargetInventoryRow, y: RelationshipTargetInventoryRow) bool {
+            if (x.normalized_lookup_key == null) return y.normalized_lookup_key != null;
+            if (y.normalized_lookup_key == null) return false;
+            const key_order = std.mem.order(u8, x.normalized_lookup_key.?, y.normalized_lookup_key.?);
+            if (key_order != .eq) return key_order == .lt;
+            return std.mem.order(u8, x.source_path, y.source_path) == .lt;
+        }
+    }.less);
+    return try rows.toOwnedSlice(a);
+}
+
+fn classifyRelationshipCandidates(
+    a: std.mem.Allocator,
+    candidates: []const RelationCandidate,
+    inventory: []const RelationshipTargetInventoryRow,
+) ![]const RelationshipCandidateClassification {
+    var out: std.ArrayList(RelationshipCandidateClassification) = .empty;
+    for (candidates) |candidate| {
+        var matches: std.ArrayList([]const u8) = .empty;
+        if (candidate.normalized_target) |key| {
+            for (inventory) |target| {
+                if (target.normalized_lookup_key) |target_key| {
+                    if (std.mem.eql(u8, key, target_key) and std.mem.eql(u8, target.eligibility, "eligible")) {
+                        try matches.append(a, target.source_path);
+                    }
+                }
+            }
+        }
+        const classification: []const u8 = if (candidate.normalized_target == null)
+            "invalid"
+        else if (matches.items.len == 0)
+            "absent"
+        else if (matches.items.len == 1)
+            "inventoried"
+        else
+            "ambiguous";
+        const note: ?[]const u8 = if (std.mem.eql(u8, classification, "invalid"))
+            candidate.review_reason orelse "unsupported_candidate_value"
+        else if (std.mem.eql(u8, classification, "absent"))
+            "no_exact_eligible_inventory_target"
+        else if (std.mem.eql(u8, classification, "ambiguous"))
+            "multiple_exact_eligible_inventory_targets"
+        else
+            "exact_eligible_target_requires_human_selection";
+        try out.append(a, .{
+            .source_path = candidate.source_path,
+            .source_line = candidate.source_line,
+            .source_field = candidate.source_field,
+            .raw_value = candidate.raw_value,
+            .normalized_lookup_key = candidate.normalized_target,
+            .classification = classification,
+            .matching_inventory_source_paths = try matches.toOwnedSlice(a),
+            .selection_rule = null,
+            .review_note = note,
+        });
+    }
+    return try out.toOwnedSlice(a);
+}
+
 fn categoryForBlockStart(line: []const u8) ?[]const u8 {
     const s = trim(line);
     const starts = [_]struct { prefix: []const u8, category: []const u8 }{
@@ -1040,6 +1348,25 @@ fn parseAttribute(allocator: std.mem.Allocator, tag: []const u8, name: []const u
         i += 1;
     }
     return null;
+}
+
+/// Neutralize an untrusted JSX attribute value before replaying it into an
+/// emitted Boris component or Markdown. Quotes and angle brackets are replaced
+/// and control characters dropped so a hostile value cannot break out of an
+/// attribute or inject raw HTML downstream.
+fn sanitizeComponentAttr(a: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    for (value) |c| {
+        switch (c) {
+            '"' => try out.appendSlice(a, "'"),
+            '<' => try out.appendSlice(a, "&lt;"),
+            '>' => try out.appendSlice(a, "&gt;"),
+            '\n', '\r', '\t' => try out.append(a, ' '),
+            else => if (c >= 0x20 and c != 0x7f) try out.append(a, c),
+        }
+    }
+    return try out.toOwnedSlice(a);
 }
 
 fn isDynamicAssetAttribute(name: []const u8) bool {
@@ -1267,11 +1594,12 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                     try rewritten_to_buf.appendSlice(a, "\">");
 
                     if (raw_title) |t| {
+                        const safe_t = try sanitizeComponentAttr(a, t);
                         try out.appendSlice(a, "**");
-                        try out.appendSlice(a, t);
+                        try out.appendSlice(a, safe_t);
                         try out.appendSlice(a, "**\n\n");
                         try rewritten_to_buf.appendSlice(a, " (title: ");
-                        try rewritten_to_buf.appendSlice(a, t);
+                        try rewritten_to_buf.appendSlice(a, safe_t);
                         try rewritten_to_buf.appendSlice(a, ")");
                     }
 
@@ -1315,7 +1643,7 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<TabItem").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const label = (try parseAttribute(a, tag_text, "label")) orelse "Tab";
+                const label = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "label")) orelse "Tab");
                 try out.appendSlice(a, "<Details summary=\"Tab: ");
                 try out.appendSlice(a, label);
                 try out.appendSlice(a, "\" open=\"true\">\n");
@@ -1361,8 +1689,9 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<Card").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const title = (try parseAttribute(a, tag_text, "title")) orelse "Card";
-                const icon = try parseAttribute(a, tag_text, "icon");
+                const title = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "title")) orelse "Card");
+                const icon_raw = try parseAttribute(a, tag_text, "icon");
+                const icon = if (icon_raw) |ic| try sanitizeComponentAttr(a, ic) else null;
                 try out.appendSlice(a, "### [Card] ");
                 try out.appendSlice(a, title);
                 if (icon) |ic| {
@@ -1412,7 +1741,8 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
                 const type_attr = (try parseAttribute(a, tag_text, "type")) orelse (try parseAttribute(a, tag_text, "kind")) orelse "note";
-                const title = try parseAttribute(a, tag_text, "title");
+                const title_raw = try parseAttribute(a, tag_text, "title");
+                const title = if (title_raw) |t| try sanitizeComponentAttr(a, t) else null;
 
                 var is_valid_kind = false;
                 var normalized_kind: []const u8 = "note";
@@ -1439,16 +1769,22 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                         .review_reason = "manual_review_required",
                         .rewritten_to = try std.fmt.allocPrint(a, "unsupported type='{s}'", .{type_attr}),
                     });
-                } else {
-                    try events.append(a, .{
-                        .kind = "component_mapping",
-                        .target = "Aside",
-                        .line = line_no,
-                        .resolution = "rewritten",
-                        .review_reason = if (title != null) "lossy_explicit_approximation" else "safe_mechanical_mapping",
-                        .rewritten_to = try std.fmt.allocPrint(a, "<Aside kind=\"{s}\">", .{normalized_kind}),
-                    });
+                    // Never re-type an unsupported Aside to a default kind; emit
+                    // a review placeholder instead of a normalized component.
+                    try out.appendSlice(a, "<!-- boris-migration-review: unsupported Aside type -->\n");
+                    pos = if (has_newline) end + 1 else end;
+                    line_no += 1;
+                    continue;
                 }
+
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "Aside",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = if (title != null) "lossy_explicit_approximation" else "safe_mechanical_mapping",
+                    .rewritten_to = try std.fmt.allocPrint(a, "<Aside kind=\"{s}\">", .{normalized_kind}),
+                });
 
                 try out.appendSlice(a, "<Aside kind=\"");
                 try out.appendSlice(a, normalized_kind);
@@ -1473,7 +1809,7 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<Badge").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const text = (try parseAttribute(a, tag_text, "text")) orelse "Badge";
+                const text = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "text")) orelse "Badge");
                 try out.appendSlice(a, "**[");
                 try out.appendSlice(a, text);
                 try out.appendSlice(a, "]**");
@@ -1495,7 +1831,7 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<Icon").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const name = (try parseAttribute(a, tag_text, "name")) orelse "icon";
+                const name = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "name")) orelse "icon");
                 try out.appendSlice(a, "(icon: ");
                 try out.appendSlice(a, name);
                 try out.appendSlice(a, ")");
@@ -1517,9 +1853,10 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 const idx = std.mem.indexOf(u8, trimmed, "<LinkCard").?;
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
-                const title = (try parseAttribute(a, tag_text, "title")) orelse "Link";
-                const href = (try parseAttribute(a, tag_text, "href")) orelse "#";
-                const desc = try parseAttribute(a, tag_text, "description");
+                const title = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "title")) orelse "Link");
+                const href = try sanitizeComponentAttr(a, (try parseAttribute(a, tag_text, "href")) orelse "#");
+                const desc_raw = try parseAttribute(a, tag_text, "description");
+                const desc = if (desc_raw) |d| try sanitizeComponentAttr(a, d) else null;
 
                 try out.appendSlice(a, "### [Link Card] ");
                 try out.appendSlice(a, title);
@@ -1629,7 +1966,9 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
                         var k = li + 2;
                         while (k < source_line.len and source_line[k] != '>') : (k += 1) {}
                         if (k < source_line.len) k += 1;
-                        const tag_content = source_line[li + 2 .. k - 1];
+                        // `</` at end-of-line leaves `k == li + 2 == len`, which
+                        // would make `[len .. len-1]` panic; treat it as empty.
+                        const tag_content = if (k > li + 2) source_line[li + 2 .. k - 1] else "";
                         var name_end: usize = 0;
                         while (name_end < tag_content.len and !std.ascii.isWhitespace(tag_content[name_end]) and tag_content[name_end] != '/' and tag_content[name_end] != '>') : (name_end += 1) {}
                         const tag_name = tag_content[0..name_end];
@@ -2050,11 +2389,13 @@ fn migratePageImages(
                                     const source_rel = resolved.source_rel.?;
                                     // Disambiguate within-tree collisions on the same page.
                                     var within = within0;
+                                    var collision_exhausted = false;
                                     if (used_within.get(within)) |prior| {
                                         if (!std.mem.eql(u8, prior, source_rel)) {
                                             // Insert -N before extension.
                                             const ext_at = std.mem.lastIndexOfScalar(u8, within0, '.') orelse within0.len;
                                             var n: usize = 2;
+                                            var found_slot = false;
                                             while (n < 1000) : (n += 1) {
                                                 const cand = try std.fmt.allocPrint(a, "{s}-{d}{s}", .{
                                                     within0[0..ext_at],
@@ -2063,10 +2404,27 @@ fn migratePageImages(
                                                 });
                                                 if (used_within.get(cand) == null) {
                                                     within = cand;
+                                                    found_slot = true;
                                                     break;
                                                 }
                                             }
+                                            if (!found_slot) collision_exhausted = true;
                                         }
+                                    }
+                                    if (collision_exhausted) {
+                                        // Never silently overwrite a sibling asset: leave
+                                        // the source reference intact and record a review.
+                                        try events.append(a, .{
+                                            .kind = "markdown_image",
+                                            .target = try a.dupe(u8, dest_core),
+                                            .line = line_no,
+                                            .resolution = "review",
+                                            .review_reason = "asset_collision_exhausted",
+                                            .fragment = split.fragment,
+                                        });
+                                        try out.appendSlice(a, body[pos .. url_end + 1]);
+                                        pos = url_end + 1;
+                                        continue;
                                     }
                                     try used_within.put(a, within, source_rel);
 
@@ -2284,7 +2642,12 @@ fn scanAttrLinks(
         while (std.mem.indexOfPos(u8, line, search, attr.prefix)) |at| {
             const q = attr.prefix[attr.prefix.len - 1];
             const vs = at + attr.prefix.len;
-            const ve = std.mem.indexOfScalarPos(u8, line, vs, q) orelse break;
+            const ve = std.mem.indexOfScalarPos(u8, line, vs, q) orelse {
+                // Unterminated value: skip this occurrence and keep scanning for
+                // later attributes on the line instead of abandoning them all.
+                search = at + attr.prefix.len;
+                continue;
+            };
             const url = line[vs..ve];
             const ev = try classifyAndMaybeRewrite(a, route_prefix, entity_id, url, entities, attr.kind, line_no);
             // Attr links are never auto-rewritten; force explicit review when a rewrite was possible.
@@ -2478,7 +2841,10 @@ fn appendJson(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !voi
         '\n' => try buf.appendSlice(a, "\\n"),
         '\r' => try buf.appendSlice(a, "\\r"),
         '\t' => try buf.appendSlice(a, "\\t"),
-        else => try buf.append(a, c),
+        else => if (c < 0x20) {
+            var esc: [6]u8 = undefined;
+            try buf.appendSlice(a, try std.fmt.bufPrint(&esc, "\\u{x:0>4}", .{c}));
+        } else try buf.append(a, c),
     };
     try buf.append(a, '"');
 }
@@ -2515,6 +2881,32 @@ fn collectMarkdownFiles(
         } else if (entry.kind == .file and isMarkdownName(entry.name)) {
             const path = try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name });
             try out.append(a, path);
+        }
+    }
+}
+
+/// Collect regular files under the established content-root discovery boundary.
+/// Unlike `collectMarkdownFiles`, this is inventory evidence only: non-Markdown
+/// files are never considered pages or converted.
+fn collectContentFiles(
+    io: Io,
+    a: std.mem.Allocator,
+    root: Io.Dir,
+    rel_dir: []const u8,
+    out: *std.ArrayList([]const u8),
+    skip_locale_siblings: bool,
+) !void {
+    var dir = try root.openDir(io, rel_dir, .{ .iterate = true });
+    defer dir.close(io);
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind == .directory) {
+            if (isSkipDir(entry.name)) continue;
+            if (skip_locale_siblings and looksLikeLocaleDirName(entry.name)) continue;
+            const child = try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name });
+            try collectContentFiles(io, a, root, child, out, false);
+        } else if (entry.kind == .file) {
+            try out.append(a, try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name }));
         }
     }
 }
@@ -2688,14 +3080,46 @@ fn disambiguateEntityIds(
     }
 }
 
+/// Quote a closed-Boris frontmatter scalar when it contains YAML-significant or
+/// control characters; otherwise return it verbatim. Embedded double quotes are
+/// replaced with a single quote (Boris closed FM has no backslash escapes) and
+/// control characters are dropped, so hostile source titles cannot inject keys
+/// or emit invalid YAML downstream.
+fn escapeFmValue(a: std.mem.Allocator, value: []const u8) ![]u8 {
+    var needs_quote = false;
+    for (value) |c| {
+        if (c == ':' or c == '#' or c == '"' or c == '\'' or c == '[' or c == ']' or
+            c == ',' or c == '&' or c == '<' or c == '>' or c == '{' or c == '}' or
+            c == '\\' or c == '`' or c == '!' or c == '@' or c == '$' or c == '%' or c == '^' or
+            c == '*' or c == '(' or c == ')' or c == '=' or c == '+' or c == ';' or c == '?' or
+            c == '/' or c < 0x20 or c == 0x7f)
+        {
+            needs_quote = true;
+            break;
+        }
+    }
+    if (!needs_quote and value.len > 0 and (value[0] == ' ' or value[value.len - 1] == ' ')) needs_quote = true;
+    if (!needs_quote) return try a.dupe(u8, value);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    try out.append(a, '"');
+    for (value) |c| {
+        if (c == '"') try out.appendSlice(a, "'") else if (c >= 0x20 and c != 0x7f) try out.append(a, c);
+    }
+    try out.append(a, '"');
+    return try out.toOwnedSlice(a);
+}
+
 fn emitPage(a: std.mem.Allocator, p: SourcePage) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     try buf.appendSlice(a, "---\n");
     try buf.appendSlice(a, "id: ");
     try buf.appendSlice(a, p.entity_id);
     try buf.appendSlice(a, "\n");
+    const title_e = try escapeFmValue(a, p.title);
+    defer a.free(title_e);
     try buf.appendSlice(a, "title: ");
-    try buf.appendSlice(a, p.title);
+    try buf.appendSlice(a, title_e);
     try buf.appendSlice(a, "\n");
     if (p.parent) |parent| {
         try buf.appendSlice(a, "parent: ");
@@ -2721,6 +3145,8 @@ fn emitPage(a: std.mem.Allocator, p: SourcePage) ![]u8 {
 }
 
 fn emitSyntheticTrunk(a: std.mem.Allocator, entity_id: []const u8, title: []const u8) ![]u8 {
+    const title_e = try escapeFmValue(a, title);
+    defer a.free(title_e);
     return try std.fmt.allocPrint(a,
         \\---
         \\id: {s}
@@ -2734,7 +3160,7 @@ fn emitSyntheticTrunk(a: std.mem.Allocator, entity_id: []const u8, title: []cons
         \\Synthetic Trunk created by the Starlight migration lab to satisfy Boris's
         \\one-level forest (section pages are Satellites of this Trunk).
         \\
-    , .{ entity_id, title, title });
+    , .{ entity_id, title_e, title });
 }
 
 fn refuseOutputInsideSource(source: []const u8, out: []const u8) !void {
@@ -2952,6 +3378,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             return std.mem.order(u8, x, y) == .lt;
         }
     }.less);
+    var content_files: std.ArrayList([]const u8) = .empty;
+    try collectContentFiles(io, a, source, content_root, &content_files, skip_locale_siblings);
+    std.mem.sort([]const u8, content_files.items, {}, struct {
+        fn less(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.order(u8, x, y) == .lt;
+        }
+    }.less);
 
     // Deterministic candidate selection: sort order, drop underscore partials, cap max_pages.
     // No preferred-section allowlist (evcc-specific paths are not privileged).
@@ -3147,6 +3580,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     // Review-first relationship evidence from known Filed-shaped frontmatter.
     // This never mutates generated Markdown or product relation semantics.
     const relation_candidates = try collectRelationCandidates(a, pages.items, route_prefix, &entities);
+    // Whole-site target evidence is intentionally separate from candidate
+    // resolution, which remains bounded to the converted slice above.
+    const relationship_target_inventory = try collectRelationshipTargetInventory(a, io, source, selection_rows.items, pages.items, content_files.items);
+    const relationship_candidate_classification = try classifyRelationshipCandidates(a, relation_candidates, relationship_target_inventory);
 
     // Link rewrite pass (wiki targets only; Markdown images handled next).
     for (pages.items) |*p| {
@@ -3233,9 +3670,19 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         });
     }
 
-    // ---- Write outputs ----
-    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
-    var out = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
+    // ---- Write outputs (into a validated, owned stage, then commit) ----
+    var output_publication = try publication.Publication.begin(
+        io,
+        gpa,
+        opts.out_dir,
+        &.{opts.source_root_dir},
+        format_id,
+    );
+    defer {
+        output_publication.abandon(io, gpa);
+        output_publication.deinit(gpa);
+    }
+    var out = try Io.Dir.cwd().openDir(io, output_publication.stage_path, .{});
     defer out.close(io);
 
     for (pages.items) |p| {
@@ -3263,14 +3710,18 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     try writeProvenance(a, io, out, opts, content, pages.items);
     try writeLinkReview(a, io, out, pages.items);
     try writeRelationCandidates(a, io, out, relation_candidates);
+    try writeRelationshipTargetInventory(a, io, out, relationship_target_inventory);
+    try writeRelationshipCandidateClassification(a, io, out, relationship_candidate_classification);
     try writeHeadingFragments(a, io, out, pages.items);
     try writeSelectionManifest(a, io, out, content, selection_rows.items, opts.max_pages);
     try writeBoundaryManifest(a, io, out, boundary.items);
     try writeReports(a, io, out, opts, content, pages.items, inventory.items, assets.items, nav.items, selection_rows.items, boundary.items, collisions.items);
 
-    // Compile proof
-    const compile = try tryCompileWithBoris(io, gpa, a, opts, opts.out_dir);
+    // Compile proof (runs against the staged tree before it becomes live).
+    const compile = try tryCompileWithBoris(io, gpa, a, opts, output_publication.stage_path);
     try writeCompileReport(a, io, out, compile);
+
+    try output_publication.commit(io, gpa);
 
     if (!opts.quiet) {
         std.debug.print(
@@ -3582,7 +4033,7 @@ fn writeUnsupported(
 
 fn writeHeadingFragments(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const SourcePage) !void {
     var buf: std.ArrayList(u8) = .empty;
-    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-heading-fragments\",\n  \"schema_version\": 1,\n  \"policy\": \"Fragments are inventoried only. Heading ids are not verified against Apex or source headings. Page targets may still be wiki-rewritten when proven.\",\n  \"fragments\": [\n");
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-heading-fragments\",\n  \"schema_version\": 1,\n  \"policy\": \"Fragments are inventoried only. Heading ids are not verified against Oliver or source headings. Page targets may still be wiki-rewritten when proven.\",\n  \"fragments\": [\n");
     var first = true;
     for (pages) |p| {
         for (p.link_events) |ev| {
@@ -3835,6 +4286,159 @@ fn writeRelationCandidates(
     }
     try buf.appendSlice(a, "  ]\n}\n");
     try writeFile(io, out, "relation_candidates.json", buf.items);
+}
+
+fn writeRelationshipTargetInventory(
+    a: std.mem.Allocator,
+    io: Io,
+    out: Io.Dir,
+    rows: []const RelationshipTargetInventoryRow,
+) !void {
+    var eligible: usize = 0;
+    var excluded: usize = 0;
+    var unsupported: usize = 0;
+    var duplicate_keys: usize = 0;
+    for (rows) |row| {
+        if (std.mem.eql(u8, row.eligibility, "eligible")) eligible += 1;
+        if (std.mem.eql(u8, row.eligibility, "excluded")) excluded += 1;
+        if (std.mem.eql(u8, row.eligibility, "unsupported")) unsupported += 1;
+        if (row.reason) |reason| {
+            if (std.mem.eql(u8, reason, "duplicate_exact_key")) duplicate_keys += 1;
+        }
+    }
+
+    var json: std.ArrayList(u8) = .empty;
+    try json.appendSlice(a, "{\n  \"format\": \"boris-starlight-relationship-target-inventory\",\n" ++
+        "  \"schema_version\": 2,\n" ++
+        "  \"policy\": \"Site-wide deterministic discovery evidence only. Explicit frontmatter.slug keys are retained when safe; missing, empty, or invalid slug values fall back to a path-derived exact key with their state recorded. Non-Markdown files under the discovered content root remain explicit unsupported rows. Duplicate exact keys remain visible. This artifact does not select targets, perform fuzzy matching, emit relations, or mutate source or converted pages.\",\n" ++
+        "  \"counts\": { \"total\": ");
+    try appendUsize(&json, a, rows.len);
+    try json.appendSlice(a, ", \"eligible\": ");
+    try appendUsize(&json, a, eligible);
+    try json.appendSlice(a, ", \"excluded\": ");
+    try appendUsize(&json, a, excluded);
+    try json.appendSlice(a, ", \"unsupported\": ");
+    try appendUsize(&json, a, unsupported);
+    try json.appendSlice(a, ", \"duplicate_exact_key_records\": ");
+    try appendUsize(&json, a, duplicate_keys);
+    try json.appendSlice(a, " },\n  \"targets\": [\n");
+    for (rows, 0..) |row, i| {
+        try json.appendSlice(a, "    { \"source_path\": ");
+        try appendJson(&json, a, row.source_path);
+        try json.appendSlice(a, ", \"source_location\": ");
+        try appendJson(&json, a, row.source_location);
+        try json.appendSlice(a, ", \"source_slug_state\": ");
+        try appendJson(&json, a, row.source_slug_state);
+        try json.appendSlice(a, ", \"original_target_key\": ");
+        if (row.original_target_key) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"normalized_lookup_key\": ");
+        if (row.normalized_lookup_key) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"candidate_entity_id\": ");
+        if (row.candidate_entity_id) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"candidate_output_route\": ");
+        if (row.candidate_output_route) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"eligibility\": ");
+        try appendJson(&json, a, row.eligibility);
+        try json.appendSlice(a, ", \"reason\": ");
+        if (row.reason) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"selected\": ");
+        try appendBool(&json, a, row.selected);
+        try json.appendSlice(a, " }");
+        if (i + 1 < rows.len) try json.append(a, ',');
+        try json.append(a, '\n');
+    }
+    try json.appendSlice(a, "  ]\n}\n");
+    try writeFile(io, out, "relationship_target_inventory.json", json.items);
+
+    var markdown: std.ArrayList(u8) = .empty;
+    try markdown.appendSlice(a, "# Relationship target inventory\n\n");
+    try markdown.appendSlice(a, "This deterministic sidecar is discovery evidence only; it does not classify relationship candidates or alter generated content.\n\n");
+    try markdown.appendSlice(a, "| Total | Eligible | Excluded | Unsupported | Duplicate-key records |\n|---:|---:|---:|---:|---:|\n| ");
+    try appendUsize(&markdown, a, rows.len);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, eligible);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, excluded);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, unsupported);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, duplicate_keys);
+    try markdown.appendSlice(a, " |\n");
+    try writeFile(io, out, "RELATIONSHIP_TARGET_INVENTORY.md", markdown.items);
+}
+
+fn writeRelationshipCandidateClassification(
+    a: std.mem.Allocator,
+    io: Io,
+    out: Io.Dir,
+    rows: []const RelationshipCandidateClassification,
+) !void {
+    var selected: usize = 0;
+    var inventoried: usize = 0;
+    var ambiguous: usize = 0;
+    var absent: usize = 0;
+    var invalid: usize = 0;
+    for (rows) |row| {
+        if (std.mem.eql(u8, row.classification, "selected")) selected += 1;
+        if (std.mem.eql(u8, row.classification, "inventoried")) inventoried += 1;
+        if (std.mem.eql(u8, row.classification, "ambiguous")) ambiguous += 1;
+        if (std.mem.eql(u8, row.classification, "absent")) absent += 1;
+        if (std.mem.eql(u8, row.classification, "invalid")) invalid += 1;
+    }
+    var json: std.ArrayList(u8) = .empty;
+    try json.appendSlice(a, "{\n  \"format\": \"boris-starlight-relationship-candidate-classification\",\n  \"schema_version\": 1,\n  \"policy\": \"Exact eligible inventory-key matching only. selected requires an explicit rule and is not inferred by this tool. This report is review evidence only; it emits no Boris semantic relations and mutates no source or converted page.\",\n  \"counts\": { \"selected\": ");
+    try appendUsize(&json, a, selected);
+    try json.appendSlice(a, ", \"inventoried\": ");
+    try appendUsize(&json, a, inventoried);
+    try json.appendSlice(a, ", \"ambiguous\": ");
+    try appendUsize(&json, a, ambiguous);
+    try json.appendSlice(a, ", \"absent\": ");
+    try appendUsize(&json, a, absent);
+    try json.appendSlice(a, ", \"invalid\": ");
+    try appendUsize(&json, a, invalid);
+    try json.appendSlice(a, " },\n  \"candidates\": [\n");
+    for (rows, 0..) |row, i| {
+        try json.appendSlice(a, "    { \"source_path\": ");
+        try appendJson(&json, a, row.source_path);
+        try json.appendSlice(a, ", \"source_line\": ");
+        try appendUsize(&json, a, @intCast(row.source_line));
+        try json.appendSlice(a, ", \"source_field\": ");
+        try appendJson(&json, a, row.source_field);
+        try json.appendSlice(a, ", \"raw_value\": ");
+        try appendJson(&json, a, row.raw_value);
+        try json.appendSlice(a, ", \"normalized_lookup_key\": ");
+        if (row.normalized_lookup_key) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"classification\": ");
+        try appendJson(&json, a, row.classification);
+        try json.appendSlice(a, ", \"matching_inventory_source_paths\": [");
+        for (row.matching_inventory_source_paths, 0..) |path, mi| {
+            if (mi > 0) try json.appendSlice(a, ", ");
+            try appendJson(&json, a, path);
+        }
+        try json.appendSlice(a, "], \"selection_rule\": ");
+        if (row.selection_rule) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"review_note\": ");
+        if (row.review_note) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, " }");
+        if (i + 1 < rows.len) try json.append(a, ',');
+        try json.append(a, '\n');
+    }
+    try json.appendSlice(a, "  ]\n}\n");
+    try writeFile(io, out, "relationship_candidate_classification.json", json.items);
+
+    var markdown: std.ArrayList(u8) = .empty;
+    try markdown.appendSlice(a, "# Relationship candidate classification\n\nThis deterministic sidecar is exact-key review evidence only; it does not select targets without an explicit rule or emit Boris relations.\n\n| Selected | Inventoried | Ambiguous | Absent | Invalid |\n|---:|---:|---:|---:|---:|\n| ");
+    try appendUsize(&markdown, a, selected);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, inventoried);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, ambiguous);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, absent);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, invalid);
+    try markdown.appendSlice(a, " |\n");
+    try writeFile(io, out, "RELATIONSHIP_CANDIDATE_CLASSIFICATION.md", markdown.items);
 }
 
 fn writeSelectionManifest(
@@ -4324,6 +4928,181 @@ test "starlight: relation candidates retain over-limit and ambiguous evidence" {
     try std.testing.expectEqualStrings("ambiguous_target_in_converted_entity_map", candidates.items[17].review_reason.?);
 }
 
+test "starlight: proven slug relation objects resolve only for haiku and limerick" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    try entities.put(a, "poems/one", "poems/one");
+
+    const page: SourcePage = .{
+        .source_path = "src/content/docs/en/source.mdx",
+        .locale_rel = "source.mdx",
+        .entity_id = "source",
+        .route = "/en/source",
+        .output_path = "content/source.md",
+        .title = "Source",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter =
+        \\relatedHaiku: {slug: poems/one}
+        \\relatedLimerick:
+        \\  - slug: poems/one
+        \\mascotRef: {slug: poems/one}
+        \\relatedHaiku: {id: poems/one}
+        ,
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+
+    var candidates: std.ArrayList(RelationCandidate) = .empty;
+    try collectRelationCandidatesForPage(a, page, "/en", &entities, &candidates);
+    try std.testing.expectEqual(@as(usize, 4), candidates.items.len);
+
+    try std.testing.expectEqualStrings("relatedHaiku", candidates.items[0].source_field);
+    try std.testing.expectEqualStrings("resolved", candidates.items[0].target_resolution);
+    try std.testing.expectEqualStrings("poems/one", candidates.items[0].resolved_entity.?);
+    try std.testing.expectEqualStrings("relates_to", candidates.items[0].proposed_kind.?);
+
+    try std.testing.expectEqualStrings("relatedLimerick", candidates.items[1].source_field);
+    try std.testing.expectEqualStrings("resolved", candidates.items[1].target_resolution);
+    try std.testing.expectEqualStrings("poems/one", candidates.items[1].resolved_entity.?);
+    try std.testing.expectEqualStrings("duplicate_product_relation", candidates.items[1].review_reason.?);
+
+    try std.testing.expectEqualStrings("mascotRef", candidates.items[2].source_field);
+    try std.testing.expectEqualStrings("not_attempted", candidates.items[2].target_resolution);
+    try std.testing.expectEqualStrings("non_scalar_value", candidates.items[2].review_reason.?);
+
+    try std.testing.expectEqualStrings("relatedHaiku", candidates.items[3].source_field);
+    try std.testing.expectEqualStrings("not_attempted", candidates.items[3].target_resolution);
+    try std.testing.expectEqualStrings("non_scalar_or_ambiguous_object", candidates.items[3].review_reason.?);
+}
+
+test "starlight: slug objects retain malformed scalar and structural evidence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    try entities.put(a, "poems/one", "poems/one");
+    try entities.put(a, "poems/雪", "poems/雪");
+
+    const page: SourcePage = .{
+        .source_path = "src/content/docs/en/shape-matrix.mdx",
+        .locale_rel = "shape-matrix.mdx",
+        .entity_id = "shape-matrix",
+        .route = "/en/shape-matrix",
+        .output_path = "content/shape-matrix.md",
+        .title = "Shape matrix",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter =
+        \\relatedHaiku: {slug: poems/one}
+        \\relatedHaiku: {slug: }
+        \\relatedHaiku: {}
+        \\relatedHaiku: {slug: 7}
+        \\relatedHaiku: {slug: true}
+        \\relatedHaiku: {slug: null}
+        \\relatedHaiku: {slug: poems/one, title: extra}
+        \\relatedHaiku: {slug: {value: poems/one}}
+        \\relatedHaiku: [{slug: poems/one}]
+        \\relatedHaiku: {slug: poems/雪}
+        \\relatedHaiku: {slug: ../escape}
+        ,
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+
+    var candidates: std.ArrayList(RelationCandidate) = .empty;
+    try collectRelationCandidatesForPage(a, page, "/en", &entities, &candidates);
+    try std.testing.expectEqual(@as(usize, 11), candidates.items.len);
+    try std.testing.expectEqual(@as(u32, 2), candidates.items[0].source_line);
+    try std.testing.expectEqualStrings("{slug: poems/one}", candidates.items[0].raw_value);
+    try std.testing.expectEqualStrings("poems/one", candidates.items[0].normalized_target.?);
+    try std.testing.expectEqualStrings("resolved", candidates.items[0].target_resolution);
+
+    // Empty/missing, typed scalars, extra keys, nesting, and arrays remain
+    // source-located review rows; no partial target is accepted.
+    for (candidates.items[1..9]) |candidate| {
+        try std.testing.expect(candidate.normalized_target == null);
+        try std.testing.expectEqualStrings("not_attempted", candidate.target_resolution);
+        try std.testing.expect(candidate.review_reason != null);
+    }
+    try std.testing.expectEqualStrings("malformed_inline_list", candidates.items[8].review_reason.?);
+
+    try std.testing.expectEqualStrings("poems/雪", candidates.items[9].normalized_target.?);
+    try std.testing.expectEqualStrings("resolved", candidates.items[9].target_resolution);
+    try std.testing.expectEqualStrings("{slug: ../escape}", candidates.items[10].raw_value);
+    try std.testing.expect(candidates.items[10].normalized_target == null);
+    try std.testing.expectEqualStrings("malformed_or_non_target_scalar", candidates.items[10].review_reason.?);
+}
+
+test "starlight: duplicate slug candidates from distinct pages retain deterministic provenance" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    try entities.put(a, "poems/one", "poems/one");
+
+    const page_a: SourcePage = .{
+        .source_path = "src/content/docs/en/a.mdx",
+        .locale_rel = "a.mdx",
+        .entity_id = "a",
+        .route = "/en/a",
+        .output_path = "content/a.md",
+        .title = "A",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter = "relatedHaiku: {slug: poems/one}",
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+    const page_b: SourcePage = .{
+        .source_path = "src/content/docs/en/b.mdx",
+        .locale_rel = "b.mdx",
+        .entity_id = "b",
+        .route = "/en/b",
+        .output_path = "content/b.md",
+        .title = "B",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter = "relatedLimerick: {slug: poems/one}",
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+    const candidates = try collectRelationCandidates(a, &.{ page_b, page_a }, "/en", &entities);
+    try std.testing.expectEqual(@as(usize, 2), candidates.len);
+    try std.testing.expectEqualStrings("a", candidates[0].source_entity);
+    try std.testing.expectEqualStrings("b", candidates[1].source_entity);
+    for (candidates) |candidate| {
+        try std.testing.expectEqualStrings("poems/one", candidate.normalized_target.?);
+        try std.testing.expectEqualStrings("poems/one", candidate.resolved_entity.?);
+    }
+}
+
 test "starlight: duplicate product relation candidates keep evidence without consuming ordinals" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4462,6 +5241,10 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
         "selection_manifest.json",
         "link_review.json",
         "relation_candidates.json",
+        "relationship_target_inventory.json",
+        "RELATIONSHIP_TARGET_INVENTORY.md",
+        "relationship_candidate_classification.json",
+        "RELATIONSHIP_CANDIDATE_CLASSIFICATION.md",
         "assets_manifest.json",
         "boundary_manifest.json",
         "heading_fragments.json",
@@ -4503,6 +5286,33 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
     try std.testing.expect(std.mem.indexOf(u8, relations, "review_only_field_no_relation_kind") != null);
     try std.testing.expect(std.mem.indexOf(u8, relations, "duplicate_product_relation") != null);
     try std.testing.expect(std.mem.indexOf(u8, relations, "\"duplicates\": 3") != null);
+
+    const targets = try readFileAlloc(io, ao, "relationship_target_inventory.json", std.testing.allocator);
+    defer std.testing.allocator.free(targets);
+    const parsed_targets = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, targets, .{});
+    defer parsed_targets.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, targets, "boris-starlight-relationship-target-inventory") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"normalized_lookup_key\": \"features/alpha\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"candidate_output_route\": \"/en/features/alpha\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"eligibility\": \"excluded\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"schema_version\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"normalized_lookup_key\": \"inventory/über\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"source_slug_state\": \"empty_fallback_path\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"source_slug_state\": \"missing_fallback_path\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"source_slug_state\": \"not_markdown\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "unsupported_source_file_type") != null);
+    try std.testing.expect(std.mem.count(u8, targets, "\"normalized_lookup_key\": \"inventory/shared\"") == 2);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"duplicate_exact_key_records\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"normalized_lookup_key\": \"inventory/draft\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "draft_frontmatter") != null);
+
+    const classification = try readFileAlloc(io, ao, "relationship_candidate_classification.json", std.testing.allocator);
+    defer std.testing.allocator.free(classification);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "boris-starlight-relationship-candidate-classification") != null);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "\"classification\": \"inventoried\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "\"classification\": \"ambiguous\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "\"classification\": \"absent\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "\"classification\": \"invalid\"") != null);
 
     const report = try readFileAlloc(io, ao, "report.json", std.testing.allocator);
     defer std.testing.allocator.free(report);
@@ -4637,6 +5447,40 @@ test "starlight: root-locale fixture discovery and routes" {
 test "starlight: refuse output inside source" {
     try std.testing.expectError(error.OutputInsideSource, refuseOutputInsideSource("/tmp/src", "/tmp/src"));
     try std.testing.expectError(error.OutputInsideSource, refuseOutputInsideSource("/tmp/src", "/tmp/src/out"));
+}
+
+test "starlight: output is lab-owned, reruns replace it, nested out refused" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const out_rel = "fixtures/.test-starlight-owned";
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+
+    try run(io, gpa, .{
+        .source_root_dir = "fixtures/mini-starlight",
+        .out_dir = out_rel,
+        .quiet = true,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out.close(io);
+    const marker = try readFileAlloc(io, out, publication.marker_name, gpa);
+    defer gpa.free(marker);
+    try std.testing.expect(std.mem.indexOf(u8, marker, "format=boris-migration-lab-output") != null);
+
+    // A second run replaces the lab-owned output rather than refusing it.
+    try run(io, gpa, .{
+        .source_root_dir = "fixtures/mini-starlight",
+        .out_dir = out_rel,
+        .quiet = true,
+    });
+
+    // A --out nested inside --root is refused before any write.
+    try std.testing.expectError(error.OutputInsideSource, run(io, gpa, .{
+        .source_root_dir = "fixtures/mini-starlight",
+        .out_dir = "fixtures/mini-starlight/src",
+        .quiet = true,
+    }));
 }
 
 test "starlight: dogfood fixture is deterministic at scale and preserves source" {
@@ -5065,6 +5909,98 @@ test "starlight: sanitizeMdxBody preserves attributed Aside and Details" {
     try std.testing.expect(std.mem.indexOf(u8, res.body, "</Details>") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "<Aside type=\"note\" title=\"Custom Aside Title\" class=\"extra-style\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "</Aside>") != null);
+}
+
+test "starlight: sanitizeMdxBody tolerates a line ending with `</`" {
+    const a = std.testing.allocator;
+    // A truncated closing tag at end-of-line must not panic the run; it should
+    // be preserved verbatim as an inert fragment rather than sliced backwards.
+    const body =
+        \\line ending in:
+        \\</
+    ;
+
+    const res = try sanitizeMdxBody(a, body);
+    defer {
+        a.free(res.body);
+        for (res.imports) |imp| a.free(imp);
+        a.free(res.imports);
+        for (res.components) |cmp| a.free(cmp);
+        a.free(res.components);
+        for (res.asset_events) |event| a.free(event.target);
+        a.free(res.asset_events);
+    }
+
+    // The truncated `</` is neutralized (dropped) rather than crashing; the
+    // preceding text survives and no backward slice is emitted.
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "line ending in:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "</") == null);
+}
+
+test "starlight: escapeFmValue quotes YAML-significant titles" {
+    const a = std.testing.allocator;
+
+    const e1 = try escapeFmValue(a, "WordPress: A Guide");
+    defer a.free(e1);
+    try std.testing.expectEqualStrings("\"WordPress: A Guide\"", e1);
+
+    const e2 = try escapeFmValue(a, "[leading bracket");
+    defer a.free(e2);
+    try std.testing.expectEqualStrings("\"[leading bracket\"", e2);
+
+    // Plain titles stay unquoted.
+    const e3 = try escapeFmValue(a, "plain title");
+    defer a.free(e3);
+    try std.testing.expectEqualStrings("plain title", e3);
+
+    // Embedded quotes are neutralized and control chars dropped.
+    const e4 = try escapeFmValue(a, "quote\" inside");
+    defer a.free(e4);
+    try std.testing.expectEqualStrings("\"quote' inside\"", e4);
+
+    const e5 = try escapeFmValue(a, "tab\there");
+    defer a.free(e5);
+    try std.testing.expectEqualStrings("\"tabhere\"", e5);
+}
+
+test "starlight: appendJson escapes control characters and quotes" {
+    const a = std.testing.allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(a);
+    try appendJson(&buf, a, "a\"b\\c\x01");
+    try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\u0001\"", buf.items);
+}
+
+test "starlight: sanitizeComponentAttr neutralizes hostile attribute values" {
+    const a = std.testing.allocator;
+    const s1 = try sanitizeComponentAttr(a, "x\"><script>alert(1)</script>");
+    defer a.free(s1);
+    try std.testing.expectEqualStrings("x'&gt;&lt;script&gt;alert(1)&lt;/script&gt;", s1);
+    try std.testing.expect(std.mem.indexOf(u8, s1, "<script>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, s1, "\"") == null);
+
+    const s2 = try sanitizeComponentAttr(a, "line\nbreak\there");
+    defer a.free(s2);
+    try std.testing.expectEqualStrings("line break here", s2);
+}
+
+test "starlight: LF frontmatter terminator wins over body CRLF ---" {
+    const a = std.testing.allocator;
+    // LF-closed frontmatter, then a body containing a CRLF `---` (e.g. a
+    // horizontal rule edited by a Windows tool). The real close must win so
+    // the body is not swallowed as frontmatter.
+    const raw = "---\ntitle: Foo\n---\nbody line one\nkey: value\n---\r\nbody tail\n";
+    const parsed = try parseFrontmatterLite(a, raw, "fallback");
+    defer {
+        a.free(parsed.title);
+        for (parsed.unmapped) |k| a.free(k);
+        a.free(parsed.unmapped);
+        for (parsed.all_keys) |k| a.free(k);
+        a.free(parsed.all_keys);
+    }
+    try std.testing.expectEqualStrings("Foo", parsed.title);
+    try std.testing.expectEqualStrings("body line one\nkey: value\n---\r\nbody tail\n", parsed.body);
+    try std.testing.expectEqual(@as(usize, 0), parsed.unmapped.len);
 }
 
 test "starlight: prefix-colliding Aside component stays reviewable" {

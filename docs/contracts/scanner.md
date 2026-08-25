@@ -21,10 +21,13 @@
 
 | Input | Meaning |
 |-------|---------|
-| `content_root` | Directory to walk (CLI `--input`, default `content`) |
-| `input_format` | Whole-tree page family: Markdown by default; Textile only with `--textile` |
+| `content_root` | Directory to walk (CLI `--input`, default `content`). The [source provider](source-provider.md) memory adapter enumerates an in-memory path list with the same discovery rules and does not open a host directory. |
+| `input_format` | Whole-tree page family: Markdown by default; Textile only with `--textile`; Cooklang only with `--cooklang` |
 | long-lived retain allocator | Owns all strings on discovered records |
 | list allocator | Owns the flat list spine and temporary walk state |
+
+`--textile` and `--cooklang` are mutually exclusive whole-tree modes; supplying
+both is a usage error (`ConflictingFlags`) before discovery starts.
 
 No configuration files. No environment variables. No frontmatter parse at this stage.
 
@@ -37,7 +40,7 @@ No configuration files. No environment variables. No frontmatter parse at this s
 3. For each directory entry:
    - **Symlink** → reject (`SymlinkRejected`); do **not** enter.
    - **Directory** → enter once per filesystem inode; re-visit → `SymlinkCycle`.
-   - **Regular file** → accept only the selected case-sensitive page family: `.md` / `.mdx` by default, or `.textile` in explicit Textile mode.
+   - **Regular file** → accept only the selected case-sensitive page family: `.md` / `.mdx` by default, `.textile` in explicit Textile mode, or `.cook` in explicit Cooklang mode.
    - Other kinds / extensions → ignore (including `.txt`, `.MD`, `.MDX`).
 4. For each accepted file, build a `Page` record (see Record shape).
 5. **Sort** the flat list before any caller processes it.
@@ -51,7 +54,8 @@ No configuration files. No environment variables. No frontmatter parse at this s
 | `.md`  | **yes** (case-sensitive) |
 | `.mdx` | **yes** (case-sensitive) |
 | `.textile` | **only with `--textile`** (case-sensitive) |
-| recognized page extension from the other family | **error** (`InputFormatMismatch` → `ETEXTILE`) |
+| `.cook` | **only with `--cooklang`** (case-sensitive) |
+| recognized page extension from the other family | **error** (`InputFormatMismatch` → `ETEXTILE` for the Textile family, `ECOOKLANG` for the Cooklang family) |
 | uppercase/mixed-case variants | **no** (ignored) |
 | `.txt` and all other | **no** (ignored) |
 
@@ -82,7 +86,7 @@ Flat collection only. Each record minimally includes:
 | `source_path` | Content-root-relative path, `/` only | retain allocator |
 | `entity_id` | From `identity.canonicalEntityId` | retain allocator |
 | `output_path` | From `identity.safeOutputRelativePath` | retain allocator |
-| `kind` | `.md`, `.mdx`, or explicit `.textile` | value type |
+| `kind` | `.md`, `.mdx`, explicit `.textile`, or explicit `.cook` | value type |
 
 **Openable source strategy:** open the content root as `Io.Dir`, then open
 `source_path` relative to that handle. Logical metadata never stores host
@@ -121,6 +125,7 @@ Examples:
 | `Guides/Intro.md` | `Guides/Intro` | `Guides/Intro.html` |
 | `my.notes.md` | `my.notes` | `my.notes.html` |
 | `guides/intro.textile` (Textile mode) | `guides/intro` | `guides/intro.html` |
+| `recipes/carbonara.cook` (Cooklang mode) | `recipes/carbonara` | `recipes/carbonara.html` |
 
 Rejected: absolute paths, empty / `.` / `..` segments, unsupported extensions,
 empty stem (`.md`), oversize ids (> 255 UTF-8 bytes).
@@ -159,7 +164,7 @@ host denies symlink creation (`AccessDenied` / `PermissionDenied`).
 | Directory or page symlink under root | `SymlinkRejected` |
 | Directory inode re-entry | `SymlinkCycle` |
 | Illegal path / identity after normalize | `InvalidPath` |
-| Recognized page from the non-selected input family | `InputFormatMismatch` (`ETEXTILE` at the pipeline) |
+| Recognized page from the non-selected input family | `InputFormatMismatch` (`ETEXTILE` / `ECOOKLANG` at the pipeline) |
 | I/O / allocator failures | propagated |
 
 ---
@@ -169,7 +174,7 @@ host denies symlink creation (`AccessDenied` / `PermissionDenied`).
 - Frontmatter parse
 - Graph resolution / parent edges
 - Product RAG generation
-- Apex / HTML rendering
+- Renderer / HTML output
 - Concurrency / watch mode
 - mmap
 - Following any content-tree symlink

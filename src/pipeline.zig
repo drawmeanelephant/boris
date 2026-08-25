@@ -2,7 +2,7 @@
 //!   scan → parse frontmatter → promote PageDb → graph validate → freeze
 //!   → IR emit (`run`) or shared compile for RAG (`compile`)
 //!
-//! No HTML, layouts, or Apex on this path.
+//! No HTML, layouts, or Markdown rendering on this path.
 
 const std = @import("std");
 const Io = std.Io;
@@ -18,19 +18,36 @@ const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
+const source_provider = @import("source_provider.zig");
+const artifact_sink = @import("artifact_sink.zig");
+const doclink = @import("doclink.zig");
+const target_mod = @import("target.zig");
+const timings = @import("timings.zig");
 
 pub const schema_version = "0.2.0";
-pub const compiler_id = "boris/0.8.0";
+pub const compiler_id = "boris/0.8.1";
 pub const semantic_schema_version = "0.3.0";
-pub const semantic_compiler_id = "boris/0.8.0+semantic-relations";
+pub const semantic_compiler_id = "boris/0.8.1+semantic-relations";
+/// IR 0.4 adds the `recipe` node facet. Like semantic relations before it, the
+/// bump is conditional: a corpus with no recipes still publishes 0.2.0 or
+/// 0.3.0, so adding Cooklang support does not reshape existing artifacts.
+pub const recipe_schema_version = "0.4.0";
+pub const recipe_compiler_id = "boris/0.8.1+cooklang";
 /// Product version string (package / catalog_meta.boris_version).
-pub const boris_version = "0.8.0";
+pub const boris_version = "0.8.1";
 
 pub const Options = struct {
     content_root: []const u8 = "content",
     out_dir: []const u8 = ".boris",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
+    /// When null, `run` opens a filesystem source adapter on `content_root`.
+    sources: ?source_provider.Provider = null,
+    /// When null, `run` publishes through a filesystem sink on `out_dir`.
+    sink: ?artifact_sink.Sink = null,
 };
 
 /// Shared load options for IR and RAG (no output paths).
@@ -38,6 +55,10 @@ pub const CompileOptions = struct {
     content_root: []const u8 = "content",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
+    /// When null, `compile` opens a filesystem adapter on `content_root`.
+    sources: ?source_provider.Provider = null,
 };
 
 pub const PageEntry = graph_mod.Node;
@@ -137,6 +158,28 @@ fn edgeEql(a: DependencyEdge, b: DependencyEdge) bool {
         std.mem.eql(u8, a.kind, b.kind);
 }
 
+const ReverseEndpointContext = struct {
+    pub fn hash(_: @This(), endpoint: Endpoint) u64 {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(&[_]u8{@intCast(@intFromEnum(endpoint.type))});
+        hasher.update(endpoint.value);
+        return hasher.final();
+    }
+
+    pub fn eql(_: @This(), a: Endpoint, b: Endpoint) bool {
+        return endpointEql(a, b);
+    }
+};
+
+const ReverseBucket = struct {
+    target: Endpoint,
+    incoming_edges: std.ArrayList(u32),
+};
+
+fn reverseBucketLess(_: void, a: ReverseBucket, b: ReverseBucket) bool {
+    return endpointLess(a.target, b.target);
+}
+
 fn findPage(nodes: []const PageEntry, id: []const u8) bool {
     for (nodes) |node| {
         if (std.mem.eql(u8, node.id, id)) return true;
@@ -144,72 +187,30 @@ fn findPage(nodes: []const PageEntry, id: []const u8) bool {
     return false;
 }
 
-fn validateSemanticRelations(
-    list_gpa: std.mem.Allocator,
-    retain: std.mem.Allocator,
-    nodes: []const PageEntry,
-    diagnostics: *std.ArrayList(diag.Diagnostic),
-) !void {
-    for (nodes) |node| {
-        for (node.semantic_relations, 0..) |relation, relation_index| {
-            if (std.mem.eql(u8, node.id, relation.target)) {
-                try diagnostics.append(list_gpa, .{
-                    .severity = .error_,
-                    .code = .ERELATIONSELF,
-                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets its source page", .{relation.kind.name()}),
-                    .remediation = try retain.dupe(u8, "Choose a different target page"),
-                    .source_path = node.source_path,
-                    .line = 1,
-                    .column = 1,
-                    .id = node.id,
-                });
-                continue;
-            }
-            if (!findPage(nodes, relation.target)) {
-                try diagnostics.append(list_gpa, .{
-                    .severity = .error_,
-                    .code = .ERELATIONMISSING,
-                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets missing page \"{s}\"", .{ relation.kind.name(), relation.target }),
-                    .remediation = try retain.dupe(u8, "Create the target page or remove the relation"),
-                    .source_path = node.source_path,
-                    .line = 1,
-                    .column = 1,
-                    .id = node.id,
-                });
-            }
-            var prior: usize = 0;
-            while (prior < relation_index) : (prior += 1) {
-                const earlier = node.semantic_relations[prior];
-                if (earlier.kind == relation.kind and std.mem.eql(u8, earlier.target, relation.target)) {
-                    try diagnostics.append(list_gpa, .{
-                        .severity = .error_,
-                        .code = .ERELATIONDUPLICATE,
-                        .message = try std.fmt.allocPrint(retain, "duplicate semantic relation {s} -> \"{s}\"", .{ relation.kind.name(), relation.target }),
-                        .remediation = try retain.dupe(u8, "Keep each semantic relation tuple only once"),
-                        .source_path = node.source_path,
-                        .line = 1,
-                        .column = 1,
-                        .id = node.id,
-                    });
-                    break;
-                }
-            }
-        }
-    }
-}
-
 const DependencyResolver = struct {
-    io: Io,
     gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
-    content_dir: Io.Dir,
+    sources: source_provider.Provider,
     nodes: []const PageEntry,
     edges: *std.ArrayList(DependencyEdge),
     diagnostics: *std.ArrayList(diag.Diagnostic),
     scanned_sources: std.StringHashMapUnmanaged(void) = .empty,
+    /// Lazily built once per resolver (#731). Rebuilding the same source→node
+    /// map for every page made dependency resolution O(pages × nodes); with
+    /// the map shared, the whole pass stays linear like every other consumer
+    /// of the #726 seam.
+    doclink_source_map: ?doclink.SourceNodeMap = null,
 
     fn deinit(self: *DependencyResolver) void {
         self.scanned_sources.deinit(self.gpa);
+        if (self.doclink_source_map) |*m| m.deinit(self.gpa);
+    }
+
+    fn doclinkMap(self: *DependencyResolver) !*const doclink.SourceNodeMap {
+        if (self.doclink_source_map == null) {
+            self.doclink_source_map = try doclink.buildSourceNodeMap(self.gpa, self.nodes);
+        }
+        return &self.doclink_source_map.?;
     }
 
     fn appendEdge(self: *DependencyResolver, from: Endpoint, to: Endpoint, kind: []const u8) !void {
@@ -220,10 +221,11 @@ const DependencyResolver = struct {
         });
     }
 
-    fn scanWiki(self: *DependencyResolver, body: []const u8, locus: []const u8, from: Endpoint) !void {
+    fn scanWiki(self: *DependencyResolver, body: []const u8, locus: []const u8, from: Endpoint, line_base: u32) !void {
         var hits: std.ArrayList(wikilink.WikiHit) = .empty;
         defer hits.deinit(self.gpa);
-        var fail: wikilink.FailInfo = .{};
+        // Offsets are body-relative; the diagnostics contract wants the file line.
+        var fail: wikilink.FailInfo = .{ .line_base = line_base };
         wikilink.scanWikiLinks(body, self.gpa, &hits, &fail, locus) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {
@@ -235,6 +237,7 @@ const DependencyResolver = struct {
         for (hits.items) |hit| {
             if (!findPage(self.nodes, hit.entity_id)) {
                 fail.set(hit.line, hit.column, hit.entity_id, locus);
+                if (wikilink.nearestNodeIdInNodes(self.gpa, self.nodes, hit.entity_id)) |s| fail.setHint(s);
                 try self.diagnostics.append(self.gpa, try wikilink.makeDiagnostic(
                     self.retain,
                     error.ReferenceMissing,
@@ -254,10 +257,12 @@ const DependencyResolver = struct {
         from: Endpoint,
         stack: *std.ArrayList([]const u8),
         depth: usize,
+        line_base: u32,
     ) !void {
         var hits: std.ArrayList(include_mod.ScanHit) = .empty;
         defer hits.deinit(self.gpa);
-        var fail: include_mod.FailInfo = .{};
+        // Offsets are body-relative; the diagnostics contract wants the file line.
+        var fail: include_mod.FailInfo = .{ .line_base = line_base };
         include_mod.scanIncludeDirectives(body, self.gpa, &hits, &fail, locus) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {
@@ -298,7 +303,7 @@ const DependencyResolver = struct {
             }
             if (self.scanned_sources.contains(hit.path)) continue;
 
-            const source = include_mod.readSourceAlloc(self.io, self.content_dir, hit.path, self.gpa) catch |err| switch (err) {
+            const source = self.sources.readInclude(hit.path, self.gpa) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => {
                     fail.set(hit.line, hit.column, hit.path, locus);
@@ -312,37 +317,53 @@ const DependencyResolver = struct {
             defer _ = stack.pop();
             const source_body = include_mod.bodyOfSource(source);
             const source_from: Endpoint = .{ .type = .source, .value = hit.path };
-            try self.scanWiki(source_body, hit.path, source_from);
-            try self.scanIncludes(source_body, hit.path, source_from, stack, depth + 1);
+            try self.scanWiki(source_body, hit.path, source_from, include_mod.lineBaseOfSource(source));
+            try self.scanIncludes(source_body, hit.path, source_from, stack, depth + 1, include_mod.lineBaseOfSource(source));
 
             const retained_path = try self.retain.dupe(u8, hit.path);
             try self.scanned_sources.put(self.gpa, retained_path, {});
         }
     }
 
-    fn scanPage(self: *DependencyResolver, page: PageEntry, body: []const u8) !void {
+    fn scanPage(self: *DependencyResolver, page: PageEntry, body: []const u8, line_base: u32) !void {
+        return self.scanPageWithHtmlLinks(page, body, false, line_base);
+    }
+
+    fn scanPageWithHtmlLinks(self: *DependencyResolver, page: PageEntry, body: []const u8, include_html_links: bool, line_base: u32) !void {
         const from: Endpoint = .{ .type = .page, .value = page.id };
-        try self.scanWiki(body, page.source_path, from);
+        try self.scanWiki(body, page.source_path, from, line_base);
+        if (include_html_links) {
+            var references: std.ArrayList([]const u8) = .empty;
+            defer references.deinit(self.gpa);
+            const rewritten = try doclink.rewriteWithSourceMap(self.gpa, body, .{
+                .nodes = self.nodes,
+                .source_path = page.source_path,
+                .output_path = page.id,
+                .reference_ids = &references,
+            }, try self.doclinkMap());
+            self.gpa.free(rewritten);
+            for (references.items) |id| {
+                try self.appendEdge(from, .{ .type = .page, .value = id }, "html-link");
+            }
+        }
         var stack: std.ArrayList([]const u8) = .empty;
         defer stack.deinit(self.gpa);
         try stack.append(self.gpa, page.source_path);
-        try self.scanIncludes(body, page.source_path, from, &stack, 0);
+        try self.scanIncludes(body, page.source_path, from, &stack, 0, line_base);
     }
 };
 
 fn resolveDependencies(
-    io: Io,
     gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
-    content_dir: Io.Dir,
+    sources: source_provider.Provider,
     input_format: identity.InputFormat,
     result: *Result,
 ) !void {
     var resolver: DependencyResolver = .{
-        .io = io,
         .gpa = gpa,
         .retain = retain,
-        .content_dir = content_dir,
+        .sources = sources,
         .nodes = result.pages.items,
         .edges = &result.edges,
         .diagnostics = &result.diagnostics,
@@ -350,7 +371,7 @@ fn resolveDependencies(
     defer resolver.deinit();
 
     for (result.pages.items) |page| {
-        const source = readFileAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+        const source = sources.readPage(page.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EIO,
@@ -369,9 +390,17 @@ fn resolveDependencies(
             const adapted = try textile.toMarkdown(source[page.body_offset..], gpa);
             if (!adapted.isOk()) return error.InvalidTextile;
             defer gpa.free(adapted.markdown);
-            try resolver.scanPage(page, adapted.markdown);
+            try resolver.scanPage(page, adapted.markdown, 0);
+        } else if (input_format == .cook) {
+            // The adapted Markdown is what carries a recipe reference's wiki
+            // link, so dependency resolution has to see the adapted body or
+            // `@./sauces/Hollandaise` would never become a graph edge.
+            const adapted = try cooklang_seam.toMarkdown(source[page.body_offset..], gpa);
+            defer adapted.deinit(gpa);
+            if (!adapted.isOk()) return error.InvalidCooklang;
+            try resolver.scanPage(page, adapted.markdown, 0);
         } else {
-            try resolver.scanPage(page, source[page.body_offset..]);
+            try resolver.scanPage(page, source[page.body_offset..], include_mod.frontmatterLineBase(source, page.body_offset));
         }
     }
 }
@@ -387,8 +416,9 @@ pub fn populateDependencyIndex(
     nodes: []const graph_mod.Node,
     quiet: bool,
     index: *dependency.DependencyIndex,
+    sink: ?*diag.Collector,
 ) !void {
-    return populateDependencyIndexFormat(io, gpa, retain, content_root, nodes, quiet, .markdown, index);
+    return populateDependencyIndexFormat(io, gpa, retain, content_root, nodes, quiet, .markdown, index, sink);
 }
 
 /// Mode-aware dependency population used by explicit Textile builds. The
@@ -402,6 +432,7 @@ pub fn populateDependencyIndexFormat(
     quiet: bool,
     input_format: identity.InputFormat,
     index: *dependency.DependencyIndex,
+    sink: ?*diag.Collector,
 ) !void {
     var content_dir = try Io.Dir.cwd().openDir(io, content_root, .{});
     defer content_dir.close(io);
@@ -411,11 +442,16 @@ pub fn populateDependencyIndexFormat(
     var diagnostics: std.ArrayList(diag.Diagnostic) = .empty;
     defer diagnostics.deinit(gpa);
 
-    var resolver: DependencyResolver = .{
+    var dir_adapter = source_provider.Dir{
         .io = io,
+        .dir = content_dir,
+        .input_format = input_format,
+        .owns_dir = false,
+    };
+    var resolver: DependencyResolver = .{
         .gpa = gpa,
         .retain = retain,
-        .content_dir = content_dir,
+        .sources = .{ .dir = &dir_adapter },
         .nodes = nodes,
         .edges = &edges,
         .diagnostics = &diagnostics,
@@ -423,8 +459,8 @@ pub fn populateDependencyIndexFormat(
     defer resolver.deinit();
 
     for (nodes) |page| {
-        const source = readFileAlloc(io, content_dir, page.source_path, gpa) catch |err| {
-            if (!quiet) std.debug.print("error: EIO: failed to read {s}: {s}\n", .{ page.source_path, @errorName(err) });
+        const source = dir_adapter.readPage(page.source_path, gpa) catch |err| {
+            std.debug.print("error: EIO: failed to read {s}: {s}\n", .{ page.source_path, @errorName(err) });
             return err;
         };
         defer gpa.free(source);
@@ -433,9 +469,14 @@ pub fn populateDependencyIndexFormat(
             const adapted = try textile.toMarkdown(source[page.body_offset..], gpa);
             if (!adapted.isOk()) return error.InvalidTextile;
             defer gpa.free(adapted.markdown);
-            try resolver.scanPage(page, adapted.markdown);
+            try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true, 0);
+        } else if (input_format == .cook) {
+            const adapted = try cooklang_seam.toMarkdown(source[page.body_offset..], gpa);
+            defer adapted.deinit(gpa);
+            if (!adapted.isOk()) return error.InvalidCooklang;
+            try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true, 0);
         } else {
-            try resolver.scanPage(page, source[page.body_offset..]);
+            try resolver.scanPageWithHtmlLinks(page, source[page.body_offset..], true, include_mod.frontmatterLineBase(source, page.body_offset));
         }
         if (page.parent) |parent| {
             try resolver.appendEdge(
@@ -448,13 +489,14 @@ pub fn populateDependencyIndexFormat(
 
     if (diag.countErrors(diagnostics.items) > 0) {
         var include_failure = false;
-        if (!quiet) {
-            diag.sortDiagnostics(diagnostics.items);
-            for (diagnostics.items) |d| {
-                const line = diag.formatText(d, gpa) catch continue;
-                defer gpa.free(line);
-                std.debug.print("{s}\n", .{line});
-            }
+        // Errors always reach stderr. `--quiet` suppresses progress, success
+        // output, and sub-error diagnostics — never the explanation for a
+        // nonzero exit.
+        diag.sortDiagnostics(diagnostics.items);
+        if (sink) |s| for (diagnostics.items) |d| s.append(d);
+        for (diagnostics.items) |d| {
+            if (quiet and d.severity != .error_) continue;
+            diag.printText(d, gpa);
         }
         for (diagnostics.items) |d| switch (d.code) {
             .EINCLUDESYNTAX, .EINCLUDEMISSING, .EINCLUDECYCLE, .EINVALIDPATH => include_failure = true,
@@ -481,6 +523,8 @@ pub fn populateDependencyIndexFormat(
             .include
         else if (std.mem.eql(u8, edge.kind, "reference"))
             .reference
+        else if (std.mem.eql(u8, edge.kind, "html-link"))
+            .html_link
         else
             unreachable;
         try index.addDependency(edge.from.value, edge.to.value, kind);
@@ -509,44 +553,44 @@ fn freezeDependencyIndex(gpa: std.mem.Allocator, result: *Result) !void {
     }
     result.edges.items.len = write;
 
-    var targets: std.ArrayList(Endpoint) = .empty;
-    defer targets.deinit(gpa);
-    for (result.edges.items) |edge| try targets.append(gpa, edge.to);
-    std.mem.sort(Endpoint, targets.items, {}, struct {
-        fn less(_: void, a: Endpoint, b: Endpoint) bool {
-            return endpointLess(a, b);
-        }
-    }.less);
-    write = 0;
-    for (targets.items) |target| {
-        if (write == 0 or !endpointEql(targets.items[write - 1], target)) {
-            targets.items[write] = target;
-            write += 1;
-        }
+    // Edges are already canonical, so one scan both discovers each target and
+    // appends ascending final edge indices to its bucket. Hash-map iteration is
+    // deliberately not used for output; buckets are sorted below.
+    var buckets: std.ArrayList(ReverseBucket) = .empty;
+    defer {
+        for (buckets.items) |*bucket| bucket.incoming_edges.deinit(gpa);
+        buckets.deinit(gpa);
     }
-    targets.items.len = write;
+    var bucket_by_target: std.HashMapUnmanaged(
+        Endpoint,
+        usize,
+        ReverseEndpointContext,
+        std.hash_map.default_max_load_percentage,
+    ) = .empty;
+    defer bucket_by_target.deinit(gpa);
 
-    for (targets.items) |target| {
-        var incoming: std.ArrayList(u32) = .empty;
-        errdefer incoming.deinit(gpa);
-        for (result.edges.items, 0..) |edge, i| {
-            if (endpointEql(edge.to, target)) try incoming.append(gpa, @intCast(i));
+    for (result.edges.items, 0..) |edge, edge_index| {
+        const target_entry = try bucket_by_target.getOrPut(gpa, edge.to);
+        if (!target_entry.found_existing) {
+            const bucket_index = buckets.items.len;
+            try buckets.append(gpa, .{
+                .target = edge.to,
+                .incoming_edges = .empty,
+            });
+            target_entry.value_ptr.* = bucket_index;
         }
-        const owned_incoming = try incoming.toOwnedSlice(gpa);
-        errdefer gpa.free(owned_incoming);
+        try buckets.items[target_entry.value_ptr.*].incoming_edges.append(gpa, @intCast(edge_index));
+    }
+
+    std.mem.sort(ReverseBucket, buckets.items, {}, reverseBucketLess);
+    for (buckets.items) |*bucket| {
+        const incoming_edges = try bucket.incoming_edges.toOwnedSlice(gpa);
+        errdefer gpa.free(incoming_edges);
         try result.reverse_index.append(gpa, .{
-            .target = target,
-            .incoming_edges = owned_incoming,
+            .target = bucket.target,
+            .incoming_edges = incoming_edges,
         });
     }
-}
-
-fn parserCategoryToCode(cat: parser.Category) diag.Code {
-    return switch (cat) {
-        .EFRONTMATTER => .EFRONTMATTER,
-        .EINVALIDUTF8 => .EINVALIDUTF8,
-        .EINVALIDPATH => .EINVALIDPATH,
-    };
 }
 
 fn statusName(st: ?page_mod.Status) ?[]const u8 {
@@ -564,6 +608,8 @@ pub fn renderManifest(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         .compiler_id = compiler_id,
         .semantic_schema_version = semantic_schema_version,
         .semantic_compiler_id = semantic_compiler_id,
+        .recipe_schema_version = recipe_schema_version,
+        .recipe_compiler_id = recipe_compiler_id,
     });
 }
 
@@ -573,6 +619,19 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         .compiler_id = compiler_id,
         .semantic_schema_version = semantic_schema_version,
         .semantic_compiler_id = semantic_compiler_id,
+        .recipe_schema_version = recipe_schema_version,
+        .recipe_compiler_id = recipe_compiler_id,
+    });
+}
+
+pub fn renderCompletion(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
+    return ir_emit.renderCompletion(gpa, result, .{
+        .schema_version = schema_version,
+        .compiler_id = compiler_id,
+        .semantic_schema_version = semantic_schema_version,
+        .semantic_compiler_id = semantic_compiler_id,
+        .recipe_schema_version = recipe_schema_version,
+        .recipe_compiler_id = recipe_compiler_id,
     });
 }
 
@@ -582,6 +641,8 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         .compiler_id = compiler_id,
         .semantic_schema_version = semantic_schema_version,
         .semantic_compiler_id = semantic_compiler_id,
+        .recipe_schema_version = recipe_schema_version,
+        .recipe_compiler_id = recipe_compiler_id,
     });
 }
 
@@ -591,10 +652,10 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
 
 /// Artifact publication policy (v0.1):
 ///
-/// **Success (`ok`):** write `manifest.json`, `graph.json`, and
-/// `build-report.json` under a sibling staging directory
+/// **Success (`ok`):** write `manifest.json`, `graph.json`, `completion.json`,
+/// and `build-report.json` under a sibling staging directory
 /// (`{out_dir}.boris-stage`), then rename each file into `out_dir`. This avoids
-/// publishing a partial three-file set if a mid-write fails. Staging lives
+/// publishing a partial file set if a mid-write fails. Staging lives
 /// next to the final directory (same parent) so same-filesystem rename is
 /// likely; **cross-volume atomic replace is not claimed**.
 ///
@@ -608,20 +669,20 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
 /// used (same as HTML stage publish). Cross-volume **atomic** replace is not
 /// claimed. Not proven cross-platform atomic for concurrent readers. Temp
 /// staging path names never appear inside JSON.
-fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
-    const cwd = Io.Dir.cwd();
-    try cwd.createDirPath(io, result.out_dir);
-
+fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result, sink_opt: ?artifact_sink.Sink) !void {
     const report = try renderBuildReport(gpa, result);
     defer gpa.free(report);
 
+    var dir_sink: ?artifact_sink.Dir = null;
+    defer if (dir_sink) |*d| d.deinit();
+    const sink = sink_opt orelse blk: {
+        dir_sink = artifact_sink.Dir.init(io, gpa, result.out_dir, result.content_root);
+        break :blk artifact_sink.Sink{ .dir = &dir_sink.? };
+    };
+
     if (!result.ok) {
-        // Remove graph-dependent artifacts from a previous successful build.
-        var out = try cwd.openDir(io, result.out_dir, .{});
-        defer out.close(io);
-        out.deleteFile(io, "manifest.json") catch {};
-        out.deleteFile(io, "graph.json") catch {};
-        try out.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
+        try sink.emit("build-report.json", artifact_sink.json_media_type, report);
+        try sink.commit(false);
         result.published_graph_ir = false;
         return;
     }
@@ -630,41 +691,14 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
     defer gpa.free(manifest);
     const graph_json = try renderGraph(gpa, result);
     defer gpa.free(graph_json);
+    const completion_json = try renderCompletion(gpa, result);
+    defer gpa.free(completion_json);
 
-    // Sibling staging directory: `{out_dir}.boris-stage`
-    const stage_rel = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{result.out_dir});
-    defer gpa.free(stage_rel);
-
-    cwd.deleteTree(io, stage_rel) catch {};
-    try cwd.createDirPath(io, stage_rel);
-
-    {
-        var stage = try cwd.openDir(io, stage_rel, .{});
-        defer stage.close(io);
-        try stage.writeFile(io, .{ .sub_path = "manifest.json", .data = manifest });
-        try stage.writeFile(io, .{ .sub_path = "graph.json", .data = graph_json });
-        try stage.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
-    }
-
-    // Publish: rename each staged file into the final directory (replaces if present).
-    // Cross-device: copy then delete source (not atomic; same honesty as HTML/RAG).
-    var stage_dir = try cwd.openDir(io, stage_rel, .{});
-    defer stage_dir.close(io);
-    var out_dir = try cwd.openDir(io, result.out_dir, .{});
-    defer out_dir.close(io);
-
-    const names = [_][]const u8{ "manifest.json", "graph.json", "build-report.json" };
-    for (names) |name| {
-        stage_dir.rename(name, out_dir, name, io) catch |err| switch (err) {
-            error.CrossDevice => {
-                try stage_dir.copyFile(name, out_dir, name, io, .{ .replace = true });
-                stage_dir.deleteFile(io, name) catch {};
-            },
-            else => return err,
-        };
-    }
-
-    cwd.deleteTree(io, stage_rel) catch {};
+    try sink.emit("manifest.json", artifact_sink.json_media_type, manifest);
+    try sink.emit("graph.json", artifact_sink.json_media_type, graph_json);
+    try sink.emit("completion.json", artifact_sink.json_media_type, completion_json);
+    try sink.emit("build-report.json", artifact_sink.json_media_type, report);
+    try sink.commit(true);
     result.published_graph_ir = true;
 }
 
@@ -718,7 +752,38 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var scan_list = page_mod.PageList.init(gpa, retain);
     defer scan_list.deinit();
 
-    scanner.scan(io, .{ .content_root = options.content_root, .input_format = options.input_format }, &scan_list) catch |err| switch (err) {
+    var dir_adapter: ?source_provider.Dir = null;
+    defer if (dir_adapter) |*d| d.close();
+    const sources = options.sources orelse blk: {
+        dir_adapter = source_provider.Dir.open(io, options.content_root, options.input_format) catch |err| switch (err) {
+            error.ContentDirMissing => {
+                try result.diagnostics.append(gpa, .{
+                    .severity = .error_,
+                    .code = .EIO,
+                    .message = try std.fmt.allocPrint(retain, "content root \"{s}\" not found or not a directory", .{options.content_root}),
+                    .remediation = try retain.dupe(u8, "Create the content directory or pass --input=DIR"),
+                });
+                result.failure = .io;
+                diag.sortDiagnostics(result.diagnostics.items);
+                return result;
+            },
+            else => {
+                try result.diagnostics.append(gpa, .{
+                    .severity = .error_,
+                    .code = .EIO,
+                    .message = try std.fmt.allocPrint(retain, "failed to open content root \"{s}\": {s}", .{ options.content_root, @errorName(err) }),
+                    .remediation = try retain.dupe(u8, "Check that the content directory is readable"),
+                });
+                result.failure = .io;
+                diag.sortDiagnostics(result.diagnostics.items);
+                return result;
+            },
+        };
+        break :blk source_provider.Provider{ .dir = &dir_adapter.? };
+    };
+
+    if (options.timings) |t| t.start(.scan);
+    sources.scan(&scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
@@ -753,11 +818,21 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             return result;
         },
         error.InputFormatMismatch => {
+            // Name the offending family so the fix (--cooklang / --textile)
+            // is visible without trial and error (#744). The probe runs only
+            // against a real content directory; injected memory sources keep
+            // the requested-mode wording. The code follows the offending
+            // family per docs/contracts/scanner.md.
+            const offender: ?identity.ContentKind = if (dir_adapter) |*d|
+                scanner.probeForeignFamily(io, d.dir, options.input_format)
+            else
+                null;
+            const guidance = scanner.modeMismatchGuidance(options.input_format, offender);
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
-                .code = .ETEXTILE,
-                .message = try retain.dupe(u8, "content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode"),
-                .remediation = try retain.dupe(u8, "Use Markdown-only input by default, or pass --textile for a .textile-only tree"),
+                .code = guidance.code,
+                .message = try retain.dupe(u8, guidance.message),
+                .remediation = try retain.dupe(u8, guidance.remediation),
             });
             result.failure = .content;
             diag.sortDiagnostics(result.diagnostics.items);
@@ -777,29 +852,17 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         },
     };
 
+    if (options.timings) |t| t.stop(.scan);
     logCompile(options.quiet, "boris: roll  parsing {d} page(s)\n", .{scan_list.len()});
 
     // --- 2–3. Read, parse, promote durable metadata only --------------------
     var db = page_mod.PageDb.init(gpa, retain);
     defer db.deinit();
 
-    const cwd = Io.Dir.cwd();
-    var content_dir = cwd.openDir(io, options.content_root, .{}) catch |err| {
-        try result.diagnostics.append(gpa, .{
-            .severity = .error_,
-            .code = .EIO,
-            .message = try std.fmt.allocPrint(retain, "failed to open content root \"{s}\": {s}", .{ options.content_root, @errorName(err) }),
-            .remediation = try retain.dupe(u8, "Check that the content directory is readable"),
-        });
-        result.failure = .io;
-        diag.sortDiagnostics(result.diagnostics.items);
-        return result;
-    };
-    defer content_dir.close(io);
-
     // Per-file scratch: freed after each promote so no parser slice can leak.
+    if (options.timings) |t| t.start(.parse);
     for (scan_list.items()) |disc| {
-        const source = readFileAlloc(io, content_dir, disc.source_path, gpa) catch |err| {
+        const source = sources.readPage(disc.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EIO,
@@ -819,9 +882,9 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         if (parsed.diagnostic) |pd| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
-                .code = parserCategoryToCode(pd.category),
+                .code = diag.parserCategoryToCode(pd.category),
                 .message = try retain.dupe(u8, pd.message),
-                .remediation = try retain.dupe(u8, "Fix the frontmatter or encoding for this file"),
+                .remediation = try retain.dupe(u8, if (pd.remediation.len > 0) pd.remediation else "Fix the frontmatter or encoding for this file"),
                 .source_path = disc.source_path,
                 .line = pd.line,
                 .column = pd.column,
@@ -829,10 +892,22 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             // Skip durable page on hard parse failure.
             continue;
         }
+        if (parsed.doc.unicode_warning) |uw| {
+            try result.diagnostics.append(gpa, .{
+                .severity = .warning,
+                .code = .EUNICODE,
+                .message = try retain.dupe(u8, uw.message),
+                .remediation = try retain.dupe(u8, uw.remediation),
+                .source_path = disc.source_path,
+                .line = uw.line,
+                .column = uw.column,
+            });
+        }
 
-        // Textile mode adapts only the already-frontmatter-split body. The
-        // adapted Markdown then enters the same component/parser pipeline.
+        // An explicit adapter converts only the already-frontmatter-split body.
+        // The adapted Markdown then enters the same component/parser pipeline.
         // Scratch arena owns tokenizer arrays; only diagnostics are retained.
+        var recipe: cooklang_seam.Recipe = .{};
         {
             var tok_arena = std.heap.ArenaAllocator.init(gpa);
             defer tok_arena.deinit();
@@ -855,6 +930,44 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                     body = "";
                 } else {
                     body = adapted.markdown;
+                }
+            } else if (options.input_format == .cook) {
+                // Allocated from `retain`, not the scratch arena: the recipe is
+                // promoted onto the page and has to outlive this block. That
+                // retains the adapted Markdown for the whole build too, which is
+                // the cost of keeping the adapter's one-allocation ownership
+                // model rather than splitting its result across two allocators.
+                const adapted = try cooklang_seam.toMarkdown(body, retain);
+                if (adapted.diagnostic) |cd| {
+                    const body_line_base = countLinesUpTo(source, parsed.doc.body_offset);
+                    try result.diagnostics.append(gpa, .{
+                        .severity = .error_,
+                        .code = .ECOOKLANG,
+                        .message = try retain.dupe(u8, cd.message),
+                        .remediation = try retain.dupe(u8, "Use only the bounded Cooklang subset"),
+                        .source_path = disc.source_path,
+                        .line = body_line_base + cd.line - 1,
+                        .column = cd.column,
+                    });
+                    body = "";
+                } else {
+                    // Oliver's structural warnings (unclosed `{`, `(`, `[-`,
+                    // frontmatter fence) degrade to literal text; they reach
+                    // the author as warnings, not failures.
+                    for (adapted.warnings) |w| {
+                        const body_line_base = countLinesUpTo(source, parsed.doc.body_offset);
+                        try result.diagnostics.append(gpa, .{
+                            .severity = .warning,
+                            .code = .ECOOKLANG,
+                            .message = try retain.dupe(u8, w.message),
+                            .remediation = try retain.dupe(u8, "Fix or remove the malformed Cooklang syntax"),
+                            .source_path = disc.source_path,
+                            .line = body_line_base + w.line - 1,
+                            .column = w.column,
+                        });
+                    }
+                    body = adapted.markdown;
+                    recipe = adapted.recipe;
                 }
             }
             const tok = aside.tokenizeBody(body, tok_arena.allocator()) catch |err| switch (err) {
@@ -900,8 +1013,10 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
 
         // Promote copies all durable strings into retain before source free.
-        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
+        try db.promote(disc, final_id, parsed.doc.meta.id != null, parsed.doc.meta, parsed.doc.body_offset, recipe);
+        if (options.timings) |t| t.bump(.page_reads, 1);
     }
+    if (options.timings) |t| t.stop(.parse);
 
     // --- 4. Build provisional graph nodes from PageDb -----------------------
     try result.pages.ensureTotalCapacity(gpa, db.len());
@@ -909,31 +1024,40 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         try result.pages.append(gpa, .{
             .id = p.entity_id,
             .source_path = p.source_path,
+            .id_explicit = p.id_explicit,
             .title = p.title,
             .parent = p.parent,
             .status = statusName(p.status),
+            .published_at = p.published_at,
+            .summary = p.summary,
+            .servings = p.servings,
             .tags = p.tags,
             .body_offset = p.body_offset,
             .role = if (p.parent != null) .satellite else .trunk,
             .semantic_relations = p.relations,
+            .recipe = p.recipe,
         });
     }
 
     // --- 5. Validate page identity/topology, then direct dependencies -------
     logCompile(options.quiet, "boris: ignite validating graph\n", .{});
+    if (options.timings) |t| t.start(.graph_validate);
     try graph_mod.validate(gpa, retain, result.pages.items, &result.diagnostics);
     diag.sortDiagnostics(result.diagnostics.items);
 
     var err_count = diag.countErrors(result.diagnostics.items);
     if (err_count == 0) {
-        try validateSemanticRelations(gpa, retain, result.pages.items, &result.diagnostics);
+        try graph_mod.validateSemanticRelations(gpa, retain, result.pages.items, &result.diagnostics);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
     }
+    if (options.timings) |t| t.stop(.graph_validate);
     if (err_count == 0) {
-        try resolveDependencies(io, gpa, retain, content_dir, options.input_format, &result);
+        if (options.timings) |t| t.start(.dependency_resolve);
+        try resolveDependencies(gpa, retain, sources, options.input_format, &result);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
+        if (options.timings) |t| t.stop(.dependency_resolve);
     }
     result.ok = err_count == 0;
     if (!result.ok) {
@@ -958,10 +1082,16 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 /// Full IR pipeline. Validates the whole graph before publishing artifacts.
 /// Graph-dependent IR is published only when validation succeeds.
 pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
+    if (options.sink == null) {
+        try target_mod.validateExportPath(io, gpa, options.content_root, options.out_dir);
+    }
+
     var result = try compile(io, gpa, .{
         .content_root = options.content_root,
         .quiet = options.quiet,
         .input_format = options.input_format,
+        .timings = options.timings,
+        .sources = options.sources,
     });
     errdefer result.deinit();
 
@@ -971,7 +1101,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
     if (result.ok) {
         log(options, "boris: ignite emitting IR → {s}\n", .{options.out_dir});
     }
-    try publishArtifacts(io, gpa, &result);
+    try publishArtifacts(io, gpa, &result, options.sink);
     if (result.ok) {
         log(options, "boris: reset done ({d} page(s))\n", .{result.pages.items.len});
     }
@@ -979,8 +1109,15 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
 }
 
 /// Print diagnostics to stderr (text form). Does not change artifacts.
-pub fn printDiagnostics(gpa: std.mem.Allocator, diags: []const diag.Diagnostic) !void {
+///
+/// `quiet` (`--quiet`) drops warnings and info, which are chatter. Errors are
+/// always printed: a nonzero exit must explain itself even when the caller
+/// asked for silence. Suppressed entirely where diagnostic text is suppressed
+/// (`--watch-json`, unit-test binaries; see `diag.text_suppressed`).
+pub fn printDiagnostics(gpa: std.mem.Allocator, diags: []const diag.Diagnostic, quiet: bool) !void {
+    if (diag.text_suppressed.load(.unordered)) return;
     for (diags) |d| {
+        if (quiet and d.severity != .error_) continue;
         const line = try diag.formatText(d, gpa);
         defer gpa.free(line);
         std.debug.print("{s}\n", .{line});
@@ -1022,6 +1159,77 @@ fn readOutFile(io: Io, gpa: std.mem.Allocator, dir_path: []const u8, name: []con
     var dir = try cwd.openDir(io, dir_path, .{});
     defer dir.close(io);
     return try readFileAlloc(io, dir, name, gpa);
+}
+
+test "compileBundle-shaped memory provider needs no content directory" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const files = [_]source_provider.File{
+        .{ .path = "index.md", .bytes = "---\ntitle: Home\nstatus: published\n---\n# Home\n\n{{include includes/tip.md}}\n" },
+        .{ .path = "includes/tip.md", .bytes = "a tip\n" },
+    };
+    var mem = try source_provider.Memory.init(gpa, &files, .markdown);
+    defer mem.deinit();
+    var result = try compile(io, gpa, .{
+        .content_root = "memory://bundle",
+        .quiet = true,
+        .sources = .{ .memory = &mem },
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    try std.testing.expectEqual(@as(usize, 1), result.pages.items.len);
+    try std.testing.expectEqualStrings("index", result.pages.items[0].id);
+}
+
+test "memory source plus memory sink publishes IR without a host directory" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const files = [_]source_provider.File{
+        .{ .path = "index.md", .bytes = "---\ntitle: Home\nstatus: published\n---\n# Home\n" },
+    };
+    var mem = try source_provider.Memory.init(gpa, &files, .markdown);
+    defer mem.deinit();
+    var sink = artifact_sink.Memory.init(gpa);
+    defer sink.deinit();
+    var result = try run(io, gpa, .{
+        .content_root = "memory://bundle",
+        .out_dir = "",
+        .quiet = true,
+        .sources = .{ .memory = &mem },
+        .sink = .{ .memory = &sink },
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    try std.testing.expect(result.published_graph_ir);
+    try std.testing.expect(sink.get("manifest.json") != null);
+    try std.testing.expect(sink.get("graph.json") != null);
+    try std.testing.expect(sink.get("completion.json") != null);
+    try std.testing.expect(sink.get("build-report.json") != null);
+}
+
+test "memory sink failure emits build-report only" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const files = [_]source_provider.File{
+        .{ .path = "orphan.md", .bytes = "---\ntitle: Orphan\nparent: missing\n---\n# Orphan\n" },
+    };
+    var mem = try source_provider.Memory.init(gpa, &files, .markdown);
+    defer mem.deinit();
+    var sink = artifact_sink.Memory.init(gpa);
+    defer sink.deinit();
+    var result = try run(io, gpa, .{
+        .content_root = "memory://bundle",
+        .out_dir = "",
+        .quiet = true,
+        .sources = .{ .memory = &mem },
+        .sink = .{ .memory = &sink },
+    });
+    defer result.deinit();
+    try std.testing.expect(!result.ok);
+    try std.testing.expect(!result.published_graph_ir);
+    try std.testing.expect(sink.get("build-report.json") != null);
+    try std.testing.expect(sink.get("manifest.json") == null);
+    try std.testing.expect(sink.get("graph.json") == null);
 }
 
 test "e2e valid fixture builds three JSON artifacts" {
@@ -1185,6 +1393,121 @@ test "Textile mode preserves graph identity and fails closed" {
     try std.testing.expectEqual(diag.Code.ETEXTILE, mixed.diagnostics.items[0].code);
 }
 
+test "Cooklang mode extracts recipes, links them, and fails closed" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var valid = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/content",
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer valid.deinit();
+    try std.testing.expect(valid.ok);
+    try std.testing.expect(valid.graph_frozen);
+    try std.testing.expectEqual(@as(usize, 3), valid.pages.items.len);
+
+    // Nodes are id-sorted after freeze: carbonara, index, sauces/pepper-oil.
+    const carbonara = valid.pages.items[0];
+    try std.testing.expectEqualStrings("carbonara", carbonara.id);
+    try std.testing.expectEqualStrings("carbonara.cook", carbonara.source_path);
+    try std.testing.expectEqual(@as(u32, 2), carbonara.servings.?.count);
+
+    // The structured recipe is the point of the format; prose alone would make
+    // an ingredient unqueryable.
+    try std.testing.expectEqual(@as(usize, 7), carbonara.recipe.ingredients.len);
+    try std.testing.expectEqualStrings("spaghetti", carbonara.recipe.ingredients[0].name);
+    try std.testing.expectEqualStrings("400", carbonara.recipe.ingredients[0].quantity.amount);
+    try std.testing.expectEqualStrings("g", carbonara.recipe.ingredients[0].quantity.unit);
+    try std.testing.expectEqualStrings("cut into strips", carbonara.recipe.ingredients[4].preparation);
+    try std.testing.expectEqual(@as(usize, 3), carbonara.recipe.cookware.len);
+    try std.testing.expectEqualStrings("large pot", carbonara.recipe.cookware[0].name);
+    try std.testing.expectEqual(@as(usize, 2), carbonara.recipe.timers.len);
+    try std.testing.expectEqualStrings("pasta", carbonara.recipe.timers[1].name);
+
+    // A Markdown page in the same tree has no recipe, and says so.
+    try std.testing.expectEqualStrings("index", valid.pages.items[1].id);
+    try std.testing.expect(valid.pages.items[1].recipe.isEmpty());
+
+    // `@./sauces/pepper-oil` must be a validated graph edge, not dead prose:
+    // that is what makes a recipe reference break the build when it rots.
+    const last = valid.pages.items[2];
+    try std.testing.expectEqualStrings("sauces/pepper-oil", last.id);
+    try std.testing.expectEqualStrings("sauces/pepper-oil", carbonara.recipe.ingredients[6].recipe_ref);
+    var saw_reference_edge = false;
+    for (valid.edges.items) |e| {
+        if (std.mem.eql(u8, e.kind, "reference") and
+            std.mem.eql(u8, e.from.value, "carbonara") and
+            std.mem.eql(u8, e.to.value, "sauces/pepper-oil")) saw_reference_edge = true;
+    }
+    try std.testing.expect(saw_reference_edge);
+
+    // A recipe corpus publishes IR 0.4; a corpus without one is untouched.
+    const graph_bytes = try renderGraph(gpa, &valid);
+    defer gpa.free(graph_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"schemaVersion\": \"0.4.0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"recipeRef\": \"sauces/pepper-oil\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"recipe\": null") != null);
+
+    var malformed = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/invalid/content",
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer malformed.deinit();
+    try std.testing.expect(!malformed.ok);
+    try std.testing.expect(!malformed.graph_frozen);
+    var saw_cooklang = false;
+    for (malformed.diagnostics.items) |d| if (d.code == .ECOOKLANG) {
+        saw_cooklang = true;
+    };
+    try std.testing.expect(saw_cooklang);
+
+    // A mixed tree is refused, and the diagnostic names Cooklang rather than
+    // sending the author looking for Textile files that do not exist.
+    var mixed = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/mixed/content",
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer mixed.deinit();
+    try std.testing.expect(!mixed.ok);
+    try std.testing.expectEqual(diag.Code.ECOOKLANG, mixed.diagnostics.items[0].code);
+
+    // Default (Markdown) mode over a .cook-only tree must blame Cooklang and
+    // name --cooklang — not send the author hunting for Textile files (#744).
+    var unflagged_cook = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/content",
+        .quiet = true,
+    });
+    defer unflagged_cook.deinit();
+    try std.testing.expect(!unflagged_cook.ok);
+    try std.testing.expectEqual(diag.Code.ECOOKLANG, unflagged_cook.diagnostics.items[0].code);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        unflagged_cook.diagnostics.items[0].remediation,
+        "--cooklang",
+    ) != null);
+}
+
+test "a corpus without recipes keeps its existing IR version" {
+    // The conditional bump is the whole reason adding Cooklang is not a
+    // breaking IR change; a regression here reshapes every consumer's graph.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var result = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/content",
+        .quiet = true,
+        .input_format = .textile,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    const graph_bytes = try renderGraph(gpa, &result);
+    defer gpa.free(graph_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"schemaVersion\": \"0.2.0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"recipe\"") == null);
+}
+
 test "F8 graph-native fixture matches full graph golden" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -1213,6 +1536,51 @@ test "F8 graph-native fixture matches full graph golden" {
     );
     defer gpa.free(expected);
     try std.testing.expectEqualStrings(expected, actual);
+
+    // Keep the reverse-index projection pinned independently of the surrounding
+    // graph golden so an implementation-only reordering cannot hide here.
+    const reverse_key = "\"reverseIndex\": ";
+    const actual_reverse_start = (std.mem.indexOf(u8, actual, reverse_key) orelse return error.MissingReverseIndex) + reverse_key.len;
+    const expected_reverse_start = (std.mem.indexOf(u8, expected, reverse_key) orelse return error.MissingReverseIndex) + reverse_key.len;
+    const reverse_end_marker = ",\n  \"nav\":";
+    const actual_reverse_end = std.mem.indexOfPos(u8, actual, actual_reverse_start, reverse_end_marker) orelse return error.MissingReverseIndex;
+    const expected_reverse_end = std.mem.indexOfPos(u8, expected, expected_reverse_start, reverse_end_marker) orelse return error.MissingReverseIndex;
+    try std.testing.expectEqualSlices(
+        u8,
+        expected[expected_reverse_start..expected_reverse_end],
+        actual[actual_reverse_start..actual_reverse_end],
+    );
+}
+
+test "incremental dependency index records ordinary Markdown links separately" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content = try outRel(gpa, &tmp, "content");
+    defer gpa.free(content);
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, content);
+    var dir = try cwd.openDir(io, content, .{});
+    defer dir.close(io);
+    try dir.writeFile(io, .{ .sub_path = "index.md", .data = "[Guide](guide.md)\n" });
+    try dir.writeFile(io, .{ .sub_path = "guide.md", .data = "# Guide\n" });
+
+    var index = dependency.DependencyIndex.init(gpa);
+    defer index.deinit();
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "guide", .source_path = "guide.md" },
+        .{ .id = "index", .source_path = "index.md" },
+    };
+    var retain_arena = std.heap.ArenaAllocator.init(gpa);
+    defer retain_arena.deinit();
+    try populateDependencyIndex(io, gpa, retain_arena.allocator(), content, &nodes, true, &index, null);
+    const deps = index.forward.get("index") orelse return error.TestUnexpectedResult;
+    var found = false;
+    for (deps.items) |dep| {
+        if (dep.kind == .html_link and std.mem.eql(u8, dep.path, "guide")) found = true;
+    }
+    try std.testing.expect(found);
 }
 
 test "include and wiki failures prevent dependency graph freeze and publication" {
@@ -1251,7 +1619,7 @@ test "include and wiki failures prevent dependency graph freeze and publication"
 }
 
 test "Feature 9 IR: wiki fragment still emits page reference edge only" {
-    // IR does not validate heading membership (no Apex); fragment syntax must not
+    // IR does not validate heading membership (no renderer); fragment syntax must not
     // break edge projection and must not invent a new edge kind.
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -1274,28 +1642,28 @@ test "Feature 9 IR: wiki fragment still emits page reference edge only" {
     try dir.writeFile(io, .{
         .sub_path = "index.md",
         .data =
-            \\---
-            \\title: Home
-            \\---
-            \\
-            \\# Home
-            \\
-            \\See [[guides/t#sec]] and [[guides/t]].
-            \\
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\See [[guides/t#sec]] and [[guides/t]].
+        \\
         ,
     });
     try dir.writeFile(io, .{
         .sub_path = "guides/t.md",
         .data =
-            \\---
-            \\title: T
-            \\parent: index
-            \\---
-            \\
-            \\# T
-            \\
-            \\## Sec
-            \\
+        \\---
+        \\title: T
+        \\parent: index
+        \\---
+        \\
+        \\# T
+        \\
+        \\## Sec
+        \\
         ,
     });
 
@@ -1372,13 +1740,11 @@ test "invalid graph fixtures emit stable categories" {
     const dir_cases = [_]Case{
         .{ .root = "docs/contracts/fixtures/missing-parent/content", .code = .EPARENTMISSING },
         .{ .root = "docs/contracts/fixtures/self-parent/content", .code = .EPARENTSELF },
-        .{ .root = "docs/contracts/fixtures/satellite-of-satellite/content", .code = .EPARENTNOTTRUNK },
         .{ .root = "docs/contracts/fixtures/cycles/content", .code = .EPARENTCYCLE },
         .{ .root = "docs/contracts/fixtures/longer-cycle/content", .code = .EPARENTCYCLE },
         .{ .root = "docs/contracts/fixtures/case-id-collision/content", .code = .EINVALIDPATH },
         .{ .root = "fixtures/content/invalid/duplicate-id", .code = .EDUPLICATEID },
         .{ .root = "fixtures/content/invalid/cycle", .code = .EPARENTCYCLE },
-        .{ .root = "fixtures/content/invalid/satellite-of-satellite", .code = .EPARENTNOTTRUNK },
     };
 
     for (dir_cases, 0..) |c, i| {
@@ -1487,15 +1853,51 @@ test "fixtures/content/valid builds and orders by id" {
     });
     defer result.deinit();
     try std.testing.expect(result.ok);
-    // empty-no-fm, nested/deep/page, satellite-child (parent home), trunk-root (id home)
-    try std.testing.expectEqual(@as(usize, 4), result.pages.items.len);
-    // Sorted by id: empty-no-fm, home (from trunk-root id:), nested/deep/page, satellite-child
+    // empty-no-fm, four-level hierarchy, nested/deep/page, satellite-child,
+    // trunk-root (id home)
+    try std.testing.expectEqual(@as(usize, 8), result.pages.items.len);
+    // Sorted by id: empty-no-fm, hierarchy great-grandchild/leaf/mid/trunk,
+    // home, nested/deep/page, satellite-child.
     try std.testing.expectEqualStrings("empty-no-fm", result.pages.items[0].id);
-    try std.testing.expectEqualStrings("home", result.pages.items[1].id);
-    try std.testing.expect(result.pages.items[1].role == .trunk);
-    try std.testing.expectEqualStrings("nested/deep/page", result.pages.items[2].id);
-    try std.testing.expectEqualStrings("satellite-child", result.pages.items[3].id);
+    try std.testing.expectEqualStrings("hierarchy-great-grandchild", result.pages.items[1].id);
+    try std.testing.expect(result.pages.items[1].role == .satellite);
+    try std.testing.expectEqualStrings("hierarchy-leaf", result.pages.items[2].id);
+    try std.testing.expect(result.pages.items[2].role == .satellite);
+    try std.testing.expectEqualStrings("hierarchy-mid", result.pages.items[3].id);
     try std.testing.expect(result.pages.items[3].role == .satellite);
+    try std.testing.expectEqualStrings("hierarchy-trunk", result.pages.items[4].id);
+    try std.testing.expect(result.pages.items[4].role == .trunk);
+    try std.testing.expectEqualStrings("home", result.pages.items[5].id);
+    try std.testing.expectEqualStrings("nested/deep/page", result.pages.items[6].id);
+    try std.testing.expectEqualStrings("satellite-child", result.pages.items[7].id);
+    try std.testing.expect(result.pages.items[7].role == .satellite);
+
+    // Every parent_index is the immediate parent after the id-sorted freeze.
+    try std.testing.expectEqualStrings("hierarchy-leaf", result.pages.items[1].parent.?);
+    try std.testing.expectEqualStrings("hierarchy-mid", result.pages.items[2].parent.?);
+    try std.testing.expectEqualStrings("hierarchy-trunk", result.pages.items[3].parent.?);
+    try std.testing.expectEqual(@as(u32, 2), result.pages.items[1].parent_index.?);
+    try std.testing.expectEqual(@as(u32, 3), result.pages.items[2].parent_index.?);
+    try std.testing.expectEqual(@as(u32, 4), result.pages.items[3].parent_index.?);
+
+    const expected_parent_edges = [_]struct { from: []const u8, to: []const u8 }{
+        .{ .from = "hierarchy-great-grandchild", .to = "hierarchy-leaf" },
+        .{ .from = "hierarchy-leaf", .to = "hierarchy-mid" },
+        .{ .from = "hierarchy-mid", .to = "hierarchy-trunk" },
+    };
+    for (expected_parent_edges) |expected| {
+        var found = false;
+        for (result.edges.items) |edge| {
+            if (std.mem.eql(u8, edge.kind, "parent") and
+                std.mem.eql(u8, edge.from.value, expected.from) and
+                std.mem.eql(u8, edge.to.value, expected.to))
+            {
+                found = true;
+                break;
+            }
+        }
+        try std.testing.expect(found);
+    }
 }
 
 test "promoted metadata survives source buffer free (via PageDb unit + pipeline)" {
@@ -1635,4 +2037,41 @@ test "golden expected IR shape for valid fixture" {
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 81") != null);
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 51") != null);
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"tags\": [\"guide\", \"intro\"]") != null);
+}
+
+test "compile with a --timings recorder records core phases and counters" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "timings-out");
+    defer gpa.free(out);
+
+    var recorder = timings.Recorder.init(io);
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .quiet = true,
+        .timings = &recorder,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+
+    // Core compiler phases ran on the IR path; HTML-only phases did not.
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.scan)] > 0);
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.parse)] > 0);
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.graph_validate)] > 0);
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.dependency_resolve)] > 0);
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.render)] == 0);
+    try std.testing.expectEqual(@as(u64, 3), recorder.counters[@intFromEnum(timings.Counter.page_reads)]);
+
+    // The report is well-formed JSON with only recorded phases.
+    const report = try recorder.renderJson(gpa, "ir");
+    defer gpa.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"format\": \"boris-timings\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"scan\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"render\"") == null);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, report, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("boris-timings", parsed.value.object.get("format").?.string);
 }

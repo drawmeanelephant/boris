@@ -7,6 +7,7 @@ const std = @import("std");
 const diag = @import("diag.zig");
 const identity = @import("identity.zig");
 const page_mod = @import("page.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
 
 pub const Role = enum {
     trunk,
@@ -22,15 +23,32 @@ pub const Node = struct {
     index: u32 = 0,
     id: []const u8,
     source_path: []const u8,
+    /// Whether `id` came from an explicit frontmatter `id:` override rather
+    /// than being derived from `source_path`. Path-derived ids are `false`.
+    ///
+    /// Consumers that mint rename-stable external identity — the Nostr
+    /// long-form projection, whose article address must survive a source-path
+    /// rename — require `true` and must refuse to publish otherwise.
+    id_explicit: bool = false,
+    /// Canonical HTML output path. Empty in graph-only unit fixtures, where
+    /// consumers may derive the legacy `{id}.html` path.
+    output_path: []const u8 = "",
     title: ?[]const u8 = null,
     parent: ?[]const u8 = null,
     parent_index: ?u32 = null,
     status: ?[]const u8 = null,
+    /// RSS-only author metadata; deliberately not serialized in the base IR.
+    published_at: ?[]const u8 = null,
+    summary: ?[]const u8 = null,
+    /// Cooklang convention count; deliberately not serialized in graph.json.
+    servings: ?page_mod.Servings = null,
     tags: []const []const u8 = &.{},
     role: Role = .trunk,
     body_offset: usize = 0,
     /// Author semantic relations; never used for build dependency walks.
     semantic_relations: []const page_mod.SemanticRelation = &.{},
+    /// Structured recipe for a Cooklang page; empty for every other format.
+    recipe: cooklang_seam.Recipe = .{},
 };
 
 pub const Edge = struct {
@@ -53,7 +71,8 @@ pub const NavEntry = struct {
     breadcrumb: []const u32,
     /// Direct children (satellites naming this page as parent), id order.
     children: []const u32,
-    /// Same-Trunk satellite peers excluding self; empty for Trunk pages.
+    /// Other direct children of this page's immediate parent, excluding self;
+    /// empty for Trunk pages.
     siblings: []const u32,
 };
 
@@ -178,9 +197,9 @@ pub fn diagnoseDuplicateIds(
 /// emit (`graph.json`, RAG `graph/*`, catalog edges). Do not reimplement parent
 /// resolution, duplicate-id checks, or cycle detection in those modules.
 ///
-/// Order is normative (contracts `parent-relationships.md`):
+/// Order is normative (contract `ir-schema.md`):
 ///   1. `EDUPLICATEID` — detect duplicate entity ids first
-///   2. Topology — self / missing / not-trunk / cycles (`validateTopology`)
+///   2. Topology — self / missing / cycles (`validateTopology`)
 ///
 /// Aggregates all diagnostics (does not abort early — callers check
 /// `diag.countErrors`). Mutates nodes' `role` / `parent_index`.
@@ -194,6 +213,67 @@ pub fn validate(
     try validateTopology(list_gpa, retain, nodes, diags);
 }
 
+/// Validate bounded authored semantic relations against the same provisional
+/// page set used by graph validation. This is a source-validity phase: every
+/// compiler projection that accepts semantic relations must call this after
+/// identity/topology validation and before graph freeze.
+pub fn validateSemanticRelations(
+    list_gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    nodes: []const Node,
+    diagnostics: *std.ArrayList(diag.Diagnostic),
+) !void {
+    var by_id = try buildIdIndex(list_gpa, nodes);
+    defer by_id.deinit(list_gpa);
+
+    for (nodes) |node| {
+        for (node.semantic_relations, 0..) |relation, relation_index| {
+            if (std.mem.eql(u8, node.id, relation.target)) {
+                try diagnostics.append(list_gpa, .{
+                    .severity = .error_,
+                    .code = .ERELATIONSELF,
+                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets its source page", .{relation.kind.name()}),
+                    .remediation = try retain.dupe(u8, "Choose a different target page"),
+                    .source_path = node.source_path,
+                    .line = 1,
+                    .column = 1,
+                    .id = node.id,
+                });
+                continue;
+            }
+            if (by_id.get(relation.target) == null) {
+                try diagnostics.append(list_gpa, .{
+                    .severity = .error_,
+                    .code = .ERELATIONMISSING,
+                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets missing page \"{s}\"", .{ relation.kind.name(), relation.target }),
+                    .remediation = try retain.dupe(u8, "Create the target page or remove the relation"),
+                    .source_path = node.source_path,
+                    .line = 1,
+                    .column = 1,
+                    .id = node.id,
+                });
+            }
+            var prior: usize = 0;
+            while (prior < relation_index) : (prior += 1) {
+                const earlier = node.semantic_relations[prior];
+                if (earlier.kind.eql(relation.kind) and std.mem.eql(u8, earlier.target, relation.target)) {
+                    try diagnostics.append(list_gpa, .{
+                        .severity = .error_,
+                        .code = .ERELATIONDUPLICATE,
+                        .message = try std.fmt.allocPrint(retain, "duplicate semantic relation {s} -> \"{s}\"", .{ relation.kind.name(), relation.target }),
+                        .remediation = try retain.dupe(u8, "Keep each semantic relation tuple only once"),
+                        .source_path = node.source_path,
+                        .line = 1,
+                        .column = 1,
+                        .id = node.id,
+                    });
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /// Parent resolution, role classification, and cycle detection.
 ///
 /// Prefer `validate` at product call sites so duplicate ids are never skipped.
@@ -205,14 +285,12 @@ pub fn validate(
 /// Checks (in order):
 ///   1. `EPARENTSELF` — parent equals own id
 ///   2. `EPARENTMISSING` — parent id not in the page set
-///   3. `EPARENTNOTTRUNK` — parent is itself a satellite (hard error)
-///   4. `EPARENTCYCLE` — DFS with visiting (gray) set
+///   3. `EPARENTCYCLE` — DFS with visiting (gray) set
 ///
 /// Algorithm (single-threaded):
 ///   1. Hash map entity id → index (O(n))
 ///   2. Validate + classify each node (O(n) expected)
-///   3. Multi-hop / satellite-of-satellite pass
-///   4. DFS gray-set cycle detection (roadmap-safe if nesting is later allowed)
+///   3. DFS gray-set cycle detection
 pub fn validateTopology(
     list_gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
@@ -263,35 +341,11 @@ pub fn validateTopology(
         }
     }
 
-    // Satellite-of-satellite: parent exists but is itself a satellite.
-    // v0.1 model is one-level only; multi-hop has no defined semantics — hard fail.
-    for (nodes) |n| {
-        if (n.parent_index) |pi| {
-            const parent = nodes[pi];
-            if (parent.parent != null) {
-                try diags.append(list_gpa, .{
-                    .severity = .error_,
-                    .code = .EPARENTNOTTRUNK,
-                    .message = try std.fmt.allocPrint(
-                        retain,
-                        "parent \"{s}\" is a satellite (multi-hop parent chains are unsupported in v0.1)",
-                        .{parent.id},
-                    ),
-                    .remediation = try retain.dupe(u8, "Point parent at a trunk page (no parent of its own)"),
-                    .source_path = n.source_path,
-                    .line = 1,
-                    .column = 1,
-                    .id = n.id,
-                });
-            }
-        }
-    }
-
     // Cycle detection via parent links (iterative DFS; gray = visiting set).
     // Each node has at most one parent, so the walk is a single chain — still
     // iterative so a pathological long parent chain cannot blow the C stack.
-    // Today cycles need mutual/parent chains; the algorithm stays even if
-    // nesting is later allowed so cycles remain proven absent, not assumed.
+    // Nested parent chains are valid; this iterative walk keeps cycle
+    // detection independent of hierarchy depth and avoids C-stack growth.
     const Color = enum { white, gray, black };
     const colors = try list_gpa.alloc(Color, nodes.len);
     defer list_gpa.free(colors);
@@ -533,8 +587,7 @@ pub fn buildNav(list_gpa: std.mem.Allocator, nodes: []const Node) ![]NavEntry {
     return nav;
 }
 
-/// Root → self node-index chain. v0.1 graphs are one-level forests (depth ≤ 2),
-/// but the walk follows `parent_index` generically without assuming depth.
+/// Root → self node-index chain for the validated hierarchy.
 fn buildBreadcrumb(list_gpa: std.mem.Allocator, nodes: []const Node, start: usize) ![]u32 {
     var chain: std.ArrayList(u32) = .empty;
     errdefer chain.deinit(list_gpa);
@@ -559,8 +612,8 @@ fn buildBreadcrumb(list_gpa: std.mem.Allocator, nodes: []const Node, start: usiz
     return try chain.toOwnedSlice(list_gpa);
 }
 
-/// Trunk-level siblings: other direct children of the same parent, excluding self.
-/// Empty for Trunk pages (no parent) and for nodes with an unresolved parent.
+/// Siblings: other direct children of the same parent, excluding self.
+/// Empty for root Trunks and nodes with an unresolved parent.
 fn buildSiblings(
     list_gpa: std.mem.Allocator,
     child_lists: []const std.ArrayList(u32),
@@ -692,6 +745,86 @@ test "validate detects duplicate ids before parent resolution" {
     try std.testing.expect(diag.countErrors(diags.items) >= 1);
 }
 
+test "validateSemanticRelations preserves diagnostic order and text" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    const source_relations = [_]page_mod.SemanticRelation{
+        .{ .kind = .{ .value = "relates_to" }, .target = "source" },
+        .{ .kind = .{ .value = "depends_on" }, .target = "missing" },
+        .{ .kind = .{ .value = "supersedes" }, .target = "target" },
+        .{ .kind = .{ .value = "supersedes" }, .target = "target" },
+    };
+    var nodes = [_]Node{
+        .{ .id = "source", .source_path = "source.md", .semantic_relations = &source_relations },
+        .{ .id = "target", .source_path = "target.md" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    try validateSemanticRelations(gpa, retain, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 3), diags.items.len);
+    try std.testing.expectEqual(diag.Code.ERELATIONSELF, diags.items[0].code);
+    try std.testing.expectEqualStrings("semantic relation relates_to targets its source page", diags.items[0].message);
+    try std.testing.expectEqual(diag.Code.ERELATIONMISSING, diags.items[1].code);
+    try std.testing.expectEqualStrings("semantic relation depends_on targets missing page \"missing\"", diags.items[1].message);
+    try std.testing.expectEqual(diag.Code.ERELATIONDUPLICATE, diags.items[2].code);
+    try std.testing.expectEqualStrings("duplicate semantic relation supersedes -> \"target\"", diags.items[2].message);
+}
+
+test "validateSemanticRelations handles a relation-dense page set" {
+    const gpa = std.testing.allocator;
+    const page_count: usize = 1024;
+    const relations_per_page: usize = 16;
+
+    const ids = try gpa.alloc([]u8, page_count);
+    defer {
+        for (ids) |id| if (id.len > 0) gpa.free(id);
+        gpa.free(ids);
+    }
+    for (ids) |*id| id.* = &.{};
+
+    var relation_pages = try gpa.alloc([]page_mod.SemanticRelation, page_count);
+    defer {
+        for (relation_pages) |relations| if (relations.len > 0) gpa.free(relations);
+        gpa.free(relation_pages);
+    }
+    for (relation_pages) |*relations| relations.* = &.{};
+
+    const nodes = try gpa.alloc(Node, page_count);
+    defer gpa.free(nodes);
+
+    for (ids, 0..) |*id, i| {
+        id.* = try std.fmt.allocPrint(gpa, "page-{d:0>4}", .{i});
+    }
+    for (nodes, 0..) |*node, i| {
+        const relations = try gpa.alloc(page_mod.SemanticRelation, relations_per_page);
+        relation_pages[i] = relations;
+        for (relations, 0..) |*relation, offset| {
+            const target = (i + offset + 1) % page_count;
+            relation.* = .{
+                .kind = .{ .value = "relates_to" },
+                .target = ids[target],
+            };
+        }
+        node.* = .{
+            .id = ids[i],
+            .source_path = ids[i],
+            .semantic_relations = relations,
+        };
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    try validateSemanticRelations(gpa, arena.allocator(), nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diags.items.len);
+}
+
 test "freeze assigns indices by id order" {
     const gpa = std.testing.allocator;
     var nodes = [_]Node{
@@ -751,36 +884,55 @@ test "freeze emits layout edges when layout_path set" {
     }
 }
 
-test "validateTopology satellite-of-satellite is hard error EPARENTNOTTRUNK" {
+test "validateTopology accepts four-level hierarchy with immediate parents" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const retain = arena.allocator();
 
-    // trunk t ← sat s1 ← sat s2 (two-hop, unsupported)
+    // trunk t ← sat s1 ← sat s2 ← sat s3 (three-hop hierarchy)
     var nodes = [_]Node{
         .{ .id = "t", .source_path = "t.md" },
         .{ .id = "s1", .source_path = "s1.md", .parent = "t" },
         .{ .id = "s2", .source_path = "s2.md", .parent = "s1" },
+        .{ .id = "s3", .source_path = "s3.md", .parent = "s2" },
     };
     var diags: std.ArrayList(diag.Diagnostic) = .empty;
     defer diags.deinit(gpa);
     try validateTopology(gpa, retain, &nodes, &diags);
 
-    var not_trunk: usize = 0;
-    for (diags.items) |d| {
-        if (d.code == .EPARENTNOTTRUNK) {
-            not_trunk += 1;
-            try std.testing.expect(d.severity == .error_);
-            try std.testing.expect(d.isError());
-            try std.testing.expectEqualStrings("s2", d.id);
-        }
-    }
-    try std.testing.expectEqual(@as(usize, 1), not_trunk);
-    try std.testing.expectEqual(@as(usize, 1), diag.countErrors(diags.items));
-    // Still classifies both as satellites; does not invent multi-hop semantics.
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
+    try std.testing.expect(nodes[0].role == .trunk);
     try std.testing.expect(nodes[1].role == .satellite);
     try std.testing.expect(nodes[2].role == .satellite);
+    try std.testing.expect(nodes[3].role == .satellite);
+    try std.testing.expectEqual(@as(?u32, 0), nodes[1].parent_index);
+    try std.testing.expectEqual(@as(?u32, 1), nodes[2].parent_index);
+    try std.testing.expectEqual(@as(?u32, 2), nodes[3].parent_index);
+}
+
+test "validateTopology rejects a deep parent cycle" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    var nodes = [_]Node{
+        .{ .id = "a", .source_path = "a.md", .parent = "b" },
+        .{ .id = "b", .source_path = "b.md", .parent = "c" },
+        .{ .id = "c", .source_path = "c.md", .parent = "d" },
+        .{ .id = "d", .source_path = "d.md", .parent = "a" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    try validateTopology(gpa, retain, &nodes, &diags);
+    try expectCodeCount(diags.items, .EPARENTCYCLE, 4);
+    for (diags.items) |d| {
+        if (d.code == .EPARENTCYCLE) {
+            try std.testing.expect(std.mem.indexOf(u8, d.message, "a -> b -> c -> d -> a") != null);
+        }
+    }
 }
 
 test "resolve is alias of validateTopology" {
@@ -821,12 +973,15 @@ test "diagnoseDuplicateIds byte-exact still EDUPLICATEID" {
     try std.testing.expect(diags.items[0].code == .EDUPLICATEID);
 }
 
-test "buildNav breadcrumb children siblings from frozen graph" {
+test "buildNav preserves four-level breadcrumbs and direct relationships" {
     const gpa = std.testing.allocator;
-    // Two trunks; trunk `t` has satellites s-a, s-b (id order after freeze).
+    // Two trunks; t has two direct children, and s-b owns a two-level
+    // descendant chain. All non-root nodes remain Satellites.
     var nodes = [_]Node{
         .{ .id = "s-a", .source_path = "s-a.md", .parent = "t" },
         .{ .id = "s-b", .source_path = "s-b.md", .parent = "t" },
+        .{ .id = "s-b-deep", .source_path = "s-b-deep.md", .parent = "s-b" },
+        .{ .id = "s-b-great", .source_path = "s-b-great.md", .parent = "s-b-deep" },
         .{ .id = "t", .source_path = "t.md" },
         .{ .id = "u", .source_path = "u.md" },
     };
@@ -837,42 +992,67 @@ test "buildNav breadcrumb children siblings from frozen graph" {
     const g = try freeze(gpa, &nodes, null);
     defer gpa.free(g.edges);
 
-    // Freeze id order: s-a, s-b, t, u
+    // Freeze id order: s-a, s-b, s-b-deep, s-b-great, t, u
     try std.testing.expectEqualStrings("s-a", g.nodes[0].id);
     try std.testing.expectEqualStrings("s-b", g.nodes[1].id);
-    try std.testing.expectEqualStrings("t", g.nodes[2].id);
-    try std.testing.expectEqualStrings("u", g.nodes[3].id);
+    try std.testing.expectEqualStrings("s-b-deep", g.nodes[2].id);
+    try std.testing.expectEqualStrings("s-b-great", g.nodes[3].id);
+    try std.testing.expectEqualStrings("t", g.nodes[4].id);
+    try std.testing.expectEqualStrings("u", g.nodes[5].id);
 
     const nav = try buildNav(gpa, g.nodes);
     defer freeNav(gpa, nav);
-    try std.testing.expectEqual(@as(usize, 4), nav.len);
+    try std.testing.expectEqual(@as(usize, 6), nav.len);
 
-    // Trunk t: breadcrumb [self], children [s-a, s-b], no siblings
-    try std.testing.expectEqual(@as(u32, 2), nav[2].index);
-    try std.testing.expectEqual(@as(usize, 1), nav[2].breadcrumb.len);
-    try std.testing.expectEqual(@as(u32, 2), nav[2].breadcrumb[0]);
-    try std.testing.expectEqual(@as(usize, 2), nav[2].children.len);
-    try std.testing.expectEqual(@as(u32, 0), nav[2].children[0]);
-    try std.testing.expectEqual(@as(u32, 1), nav[2].children[1]);
-    try std.testing.expectEqual(@as(usize, 0), nav[2].siblings.len);
+    // Trunk t: breadcrumb [self], children [s-a, s-b], no siblings.
+    try std.testing.expectEqual(@as(u32, 4), nav[4].index);
+    try std.testing.expectEqual(@as(usize, 1), nav[4].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 4), nav[4].breadcrumb[0]);
+    try std.testing.expectEqual(@as(usize, 2), nav[4].children.len);
+    try std.testing.expectEqual(@as(u32, 0), nav[4].children[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[4].children[1]);
+    try std.testing.expectEqual(@as(usize, 0), nav[4].siblings.len);
 
-    // Satellite s-a: breadcrumb [t, s-a], no children, sibling s-b
+    // Direct child s-a: sibling s-b only; descendants of s-b are not siblings.
     try std.testing.expectEqual(@as(usize, 2), nav[0].breadcrumb.len);
-    try std.testing.expectEqual(@as(u32, 2), nav[0].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 4), nav[0].breadcrumb[0]);
     try std.testing.expectEqual(@as(u32, 0), nav[0].breadcrumb[1]);
     try std.testing.expectEqual(@as(usize, 0), nav[0].children.len);
     try std.testing.expectEqual(@as(usize, 1), nav[0].siblings.len);
     try std.testing.expectEqual(@as(u32, 1), nav[0].siblings[0]);
 
-    // Satellite s-b: sibling s-a (id order)
+    // Direct child s-b: sibling s-a and direct child s-b-deep.
+    try std.testing.expectEqual(@as(usize, 2), nav[1].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 4), nav[1].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[1].breadcrumb[1]);
+    try std.testing.expectEqual(@as(usize, 1), nav[1].children.len);
+    try std.testing.expectEqual(@as(u32, 2), nav[1].children[0]);
     try std.testing.expectEqual(@as(usize, 1), nav[1].siblings.len);
     try std.testing.expectEqual(@as(u32, 0), nav[1].siblings[0]);
 
-    // Lonely trunk u
-    try std.testing.expectEqual(@as(usize, 1), nav[3].breadcrumb.len);
-    try std.testing.expectEqual(@as(u32, 3), nav[3].breadcrumb[0]);
+    // Grandchild and great-grandchild have complete breadcrumbs, direct-only
+    // children, and no peers when they are the only child of their parent.
+    try std.testing.expectEqual(@as(usize, 3), nav[2].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 4), nav[2].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[2].breadcrumb[1]);
+    try std.testing.expectEqual(@as(u32, 2), nav[2].breadcrumb[2]);
+    try std.testing.expectEqual(@as(usize, 1), nav[2].children.len);
+    try std.testing.expectEqual(@as(u32, 3), nav[2].children[0]);
+    try std.testing.expectEqual(@as(usize, 0), nav[2].siblings.len);
+
+    try std.testing.expectEqual(@as(usize, 4), nav[3].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 4), nav[3].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[3].breadcrumb[1]);
+    try std.testing.expectEqual(@as(u32, 2), nav[3].breadcrumb[2]);
+    try std.testing.expectEqual(@as(u32, 3), nav[3].breadcrumb[3]);
     try std.testing.expectEqual(@as(usize, 0), nav[3].children.len);
     try std.testing.expectEqual(@as(usize, 0), nav[3].siblings.len);
+
+    // Lonely trunk u.
+    try std.testing.expectEqual(@as(usize, 1), nav[5].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 5), nav[5].breadcrumb[0]);
+    try std.testing.expectEqual(@as(usize, 0), nav[5].children.len);
+    try std.testing.expectEqual(@as(usize, 0), nav[5].siblings.len);
 }
 
 test "buildNav empty graph" {

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-layout="entry">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Field Notes Archive</title>
+  <link rel="stylesheet" href="{{asset-url assets/archive.css}}">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="entry-site-header" role="banner">
+    <div class="entry-shell">
+      <p class="eyebrow">Field Notes Archive</p>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <div class="entry-layout entry-shell">
+    <main id="main-content" tabindex="-1">
+    {{metadata}}
+    <article class="entry-copy">{{content}}</article>
+    <section class="entry-children" aria-labelledby="entry-children-heading">
+      <p class="module-label" id="entry-children-heading">More entries</p>
+      {{children}}
+    </section>
+    </main>
+    <aside class="entry-sidebar" aria-label="Archive tools">
+      <section class="archive-module">
+        <p class="module-label">Browse</p>
+        {{nav}}
+      </section>
+      <section class="archive-module">
+        <p class="module-label">On this page</p>
+        {{toc}}
+      </section>
+    </aside>
+  </div>
+  <footer class="archive-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

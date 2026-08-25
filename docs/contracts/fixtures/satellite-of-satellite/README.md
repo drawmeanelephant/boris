@@ -1,6 +1,6 @@
 # Fixture: satellite-of-satellite (multi-hop)
 
-**Expect:** exit `1`, `EPARENTNOTTRUNK`.
+**Expect:** exit `0`; this is a valid multi-level hierarchy.
 
 ## Layout
 
@@ -8,7 +8,10 @@
 content/
   trunk.md   # trunk (no parent)
   mid.md     # parent: trunk  (satellite)
-  leaf.md    # parent: mid    (satellite-of-satellite — hard error)
+  leaf.md    # parent: mid    (third level)
+  great-grandchild.md # parent: leaf (fourth level)
 ```
 
-v0.1 is one-level Trunk → Satellite only. Nested parent chains fail hard.
+Every non-root page is a Satellite of its immediate parent, while the complete
+root/child/grandchild/great-grandchild chain proves that validated parent chains
+may be nested to represent a real documentation hierarchy.

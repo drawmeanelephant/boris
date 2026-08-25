@@ -2,8 +2,7 @@
 //!
 //! Pure selector logic over canonical entity id + resolved graph role.
 //! No filesystem, no frontmatter dialect, no declaration-order precedence.
-//! See docs/designs/page-layout-selection-rfc.md and
-//! docs/contracts/templating-and-themes.md §4.
+//! See docs/contracts/templating-and-themes.md §4.
 
 const std = @import("std");
 const identity = @import("identity.zig");

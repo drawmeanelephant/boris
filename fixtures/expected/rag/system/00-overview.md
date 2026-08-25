@@ -3,8 +3,13 @@ rag_id: system/overview
 rag_path: system/00-overview.md
 category: system
 tags: [boris, overview, content-compiler, zig]
+related:
+  - system/01-architecture-pipeline.md
+  - system/02-data-model-page.md
+  - system/03-trunk-and-satellite.md
+  - system/04-components-and-admonitions.md
+  - system/10-name-and-metaphor.md
 ---
-
 
 # Boris overview
 
@@ -20,7 +25,7 @@ tobacco or rolling-paper brand.
 ## What you get
 
 - A **static docs site** from Markdown (default CLI → `dist/`)
-- **Real ApexMarkdown Unified** (tables, footnotes, modern constructs) in-process
+- **Oliver** (CommonMark + GFM tables + heading ids/IAL, footnotes, definition lists) as a native Zig module
 - **Callouts on the page** via constrained `<Aside>` (document order)
 - A **Trunk/Satellite graph** that fails loud when parents/cycles break
 - Optional **JSON IR** and **deterministic RAG** from the same content tree
@@ -32,7 +37,7 @@ tobacco or rolling-paper brand.
 
 Discover content → closed frontmatter → graph validate → emit HTML, IR, or RAG.
 Normative detail: `docs/contracts/`. Living phase: `docs/STATUS.md`. Historical
-campaign notes may live under `archive/` and are not required reading.
+historical campaign notes were removed from the tree and are not required reading.
 
 Narrative seeds must not overclaim untested guarantees (see STATUS and
 RELEASE-GATE).
@@ -55,7 +60,7 @@ RELEASE-GATE).
 | `content/` | Author source markdown (+ optional registered components) |
 | `layouts/main.html` | Site chrome with a single `{{content}}` splice marker (HTML path) |
 | `src/` | Zig compiler (HTML path + IR + RAG modules) |
-| `vendor/apex/` | Host C-ABI adapter linked into the Boris binary |
+| Oliver (`build.zig.zon` pin) | Native Zig markdown library consumed through `src/render.zig` |
 | `dist/` | Generated HTML (**default** CLI output) |
 | `.boris/` | Generated IR (via `--out` / `--no-rag`) |
 | `docs/rag/system/` | Curated system knowledge seeds for the RAG exporter |
@@ -83,4 +88,4 @@ Useful flags:
 
 Boris is a Zig documentation compiler that turns Markdown into a validated
 Trunk/Satellite site under `dist/` by default (or JSON IR / RAG on request),
-with real ApexMarkdown Unified rendering and constrained in-page Asides.
+with Oliver rendering and constrained in-page Asides.

@@ -1,0 +1,305 @@
+{
+  "format": "boris-publication-touches",
+  "schema_version": 1,
+  "target": "public",
+  "inputs": {
+    "artifacts": {
+      "path": "_boris/proof/artifacts.json",
+      "bytes": 420,
+      "sha256": "d0d8632af6caf84f050a7702713aa65ee4d69c9350f0c6baad6d2042998160d6",
+      "format": "boris-publication-artifacts",
+      "schema_version": 1,
+      "target": "public",
+      "artifact_count": 2
+    },
+    "checks": {
+      "path": "_boris/proof/checks.json",
+      "bytes": 976,
+      "sha256": "14ce6014f9e0799ffbaae4bbad2aad348defafe68dedb75a3da8358a654cf26c",
+      "format": "boris-publication-checks",
+      "schema_version": 1,
+      "target": "public",
+      "check_count": 3,
+      "finding_count": 0
+    },
+    "claims": {
+      "path": "_boris/proof/claims.json",
+      "bytes": 1298,
+      "sha256": "cf8d7234ea3d45c494ece8cfc0a938a1862077a6f895fa2541ff6aa98db12252",
+      "format": "boris-publication-claims",
+      "schema_version": 1,
+      "target": "public",
+      "claim_count": 3,
+      "limitation_count": 6
+    }
+  },
+  "nodes": [
+    {
+      "kind": "target",
+      "id": "target",
+      "metadata": {
+        "target": "public"
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:index.html",
+      "metadata": {
+        "inventory_index": 0,
+        "path": "index.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:assets/site.css",
+      "metadata": {
+        "inventory_index": 1,
+        "path": "assets/site.css",
+        "kind": "theme-asset",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:artifact-integrity",
+      "metadata": {
+        "check_index": 0,
+        "check_id": "artifact-integrity",
+        "status": "passed",
+        "coverage": "complete"
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:rendered-html",
+      "metadata": {
+        "check_index": 1,
+        "check_id": "rendered-html",
+        "status": "passed",
+        "coverage": "complete"
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:rendered-search",
+      "metadata": {
+        "check_index": 2,
+        "check_id": "rendered-search",
+        "status": "not-applicable",
+        "coverage": "not-applicable"
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:committed-artifacts-match-inventory",
+      "metadata": {
+        "claim_index": 0,
+        "claim_id": "committed-artifacts-match-inventory",
+        "status": "verified"
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:rendered-html-passed-declared-audit",
+      "metadata": {
+        "claim_index": 1,
+        "claim_id": "rendered-html-passed-declared-audit",
+        "status": "verified"
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:rendered-search-matches-selected-html",
+      "metadata": {
+        "claim_index": 2,
+        "claim_id": "rendered-search-matches-selected-html",
+        "status": "not-verified"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:target-local-only",
+      "metadata": {
+        "limitation_index": 0,
+        "limitation_id": "target-local-only",
+        "source": "docs/contracts/publication-checks.md#authority-and-transaction-boundary"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-deployment-verification",
+      "metadata": {
+        "limitation_index": 1,
+        "limitation_id": "no-deployment-verification",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-accessibility-verification",
+      "metadata": {
+        "limitation_index": 2,
+        "limitation_id": "no-accessibility-verification",
+        "source": "docs/contracts/publication-model.md#projections"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-prose-quality-verification",
+      "metadata": {
+        "limitation_index": 3,
+        "limitation_id": "no-prose-quality-verification",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-universal-reproducibility-claim",
+      "metadata": {
+        "limitation_index": 4,
+        "limitation_id": "no-universal-reproducibility-claim",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:omitted-projections-not-certified",
+      "metadata": {
+        "limitation_index": 5,
+        "limitation_id": "omitted-projections-not-certified",
+        "source": "docs/contracts/publication-model.md#the-conductor-rule"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:index.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:assets/site.css"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:assets/site.css",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:artifact-integrity",
+      "to": "claim:committed-artifacts-match-inventory"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:rendered-html",
+      "to": "claim:rendered-html-passed-declared-audit"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:rendered-search",
+      "to": "claim:rendered-search-matches-selected-html"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:omitted-projections-not-certified"
+    }
+  ]
+}

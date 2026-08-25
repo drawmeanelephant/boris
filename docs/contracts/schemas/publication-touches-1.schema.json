@@ -1,0 +1,374 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris publication Touch Atlas (schema v1)",
+  "description": "Deterministic target-local relationship index derived only from the committed artifact, checks, and claims evidence reports.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version", "target", "inputs", "nodes", "edges"],
+  "properties": {
+    "format": { "const": "boris-publication-touches" },
+    "schema_version": { "const": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "inputs": { "$ref": "#/$defs/inputs" },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/target_node" },
+          { "$ref": "#/$defs/artifact_node" },
+          { "$ref": "#/$defs/check_node" },
+          { "$ref": "#/$defs/finding_node" },
+          { "$ref": "#/$defs/claim_node" },
+          { "$ref": "#/$defs/limitation_node" }
+        ]
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/target_owns_artifact" },
+          { "$ref": "#/$defs/artifact_subject_of_check" },
+          { "$ref": "#/$defs/artifact_supports_check" },
+          { "$ref": "#/$defs/check_reported_finding" },
+          { "$ref": "#/$defs/check_supports_claim" },
+          { "$ref": "#/$defs/claim_limited_by" }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$)).+$"
+    },
+    "artifact_kind": {
+      "enum": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms"]
+    },
+    "artifact_status": {
+      "enum": ["committed", "omitted-by-plan", "not-applicable"]
+    },
+    "check_id": {
+      "enum": ["artifact-integrity", "rendered-html", "rendered-search"]
+    },
+    "check_status": {
+      "enum": ["passed", "failed", "incomplete", "not-applicable"]
+    },
+    "coverage": {
+      "enum": ["complete", "incomplete", "not-applicable"]
+    },
+    "finding_code": {
+      "enum": [
+        "ARTIFACT_MISSING", "ARTIFACT_SIZE_MISMATCH", "ARTIFACT_DIGEST_MISMATCH",
+        "HTML_PAGE_MISSING", "HTML_MALFORMED", "HTML_URL_MALFORMED",
+        "HTML_LOCAL_ROUTE_MISSING", "HTML_LOCAL_ROUTE_ESCAPE", "HTML_FRAGMENT_MISSING",
+        "HTML_DUPLICATE_ID", "SEARCH_MISSING", "SEARCH_MALFORMED",
+        "SEARCH_DOCUMENT_MISSING", "SEARCH_DOCUMENT_STALE", "SEARCH_CONTENT_MISMATCH"
+      ]
+    },
+    "severity": {
+      "enum": ["error", "warning", "info"]
+    },
+    "claim_id": {
+      "enum": [
+        "committed-artifacts-match-inventory",
+        "rendered-html-passed-declared-audit",
+        "rendered-search-matches-selected-html"
+      ]
+    },
+    "claim_status": {
+      "enum": ["verified", "failed", "not-verified"]
+    },
+    "limitation_id": {
+      "enum": [
+        "target-local-only",
+        "no-deployment-verification",
+        "no-accessibility-verification",
+        "no-prose-quality-verification",
+        "no-universal-reproducibility-claim",
+        "omitted-projections-not-certified"
+      ]
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^artifact:.+$"
+    },
+    "check_node_id": {
+      "type": "string",
+      "pattern": "^check:(artifact-integrity|rendered-html|rendered-search)$"
+    },
+    "finding_id": {
+      "type": "string",
+      "pattern": "^finding:(artifact-integrity|rendered-html|rendered-search):[0-9]+$"
+    },
+    "claim_node_id": {
+      "type": "string",
+      "pattern": "^claim:(committed-artifacts-match-inventory|rendered-html-passed-declared-audit|rendered-search-matches-selected-html)$"
+    },
+    "limitation_node_id": {
+      "type": "string",
+      "pattern": "^limitation:(target-local-only|no-deployment-verification|no-accessibility-verification|no-prose-quality-verification|no-universal-reproducibility-claim|omitted-projections-not-certified)$"
+    },
+    "input_common": {
+      "type": "object",
+      "required": ["path", "bytes", "sha256", "format", "schema_version", "target"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "format": { "type": "string", "minLength": 1 },
+        "schema_version": { "const": 1 },
+        "target": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifacts_input": {
+      "allOf": [
+        { "$ref": "#/$defs/input_common" },
+        {
+          "type": "object",
+          "required": ["artifact_count"],
+          "properties": {
+            "path": { "const": "_boris/proof/artifacts.json" },
+            "format": { "const": "boris-publication-artifacts" },
+            "artifact_count": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "checks_input": {
+      "allOf": [
+        { "$ref": "#/$defs/input_common" },
+        {
+          "type": "object",
+          "required": ["check_count", "finding_count"],
+          "properties": {
+            "path": { "const": "_boris/proof/checks.json" },
+            "format": { "const": "boris-publication-checks" },
+            "check_count": { "const": 3 },
+            "finding_count": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "claims_input": {
+      "allOf": [
+        { "$ref": "#/$defs/input_common" },
+        {
+          "type": "object",
+          "required": ["claim_count", "limitation_count"],
+          "properties": {
+            "path": { "const": "_boris/proof/claims.json" },
+            "format": { "const": "boris-publication-claims" },
+            "claim_count": { "const": 3 },
+            "limitation_count": { "const": 6 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifacts", "checks", "claims"],
+      "properties": {
+        "artifacts": { "$ref": "#/$defs/artifacts_input" },
+        "checks": { "$ref": "#/$defs/checks_input" },
+        "claims": { "$ref": "#/$defs/claims_input" }
+      }
+    },
+    "target_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "metadata"],
+      "properties": {
+        "kind": { "const": "target" },
+        "id": { "const": "target" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["target"],
+          "properties": { "target": { "type": "string", "minLength": 1 } }
+        }
+      }
+    },
+    "artifact_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "metadata"],
+      "properties": {
+        "kind": { "const": "artifact" },
+        "id": { "$ref": "#/$defs/artifact_id" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["inventory_index", "path", "kind", "status", "required"],
+          "properties": {
+            "inventory_index": { "type": "integer", "minimum": 0 },
+            "path": { "$ref": "#/$defs/relative_path" },
+            "kind": { "$ref": "#/$defs/artifact_kind" },
+            "status": { "$ref": "#/$defs/artifact_status" },
+            "required": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "check_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "metadata"],
+      "properties": {
+        "kind": { "const": "check" },
+        "id": { "$ref": "#/$defs/check_node_id" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["check_index", "check_id", "status", "coverage"],
+          "properties": {
+            "check_index": { "type": "integer", "minimum": 0 },
+            "check_id": { "$ref": "#/$defs/check_id" },
+            "status": { "$ref": "#/$defs/check_status" },
+            "coverage": { "$ref": "#/$defs/coverage" }
+          }
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "target"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 },
+        "target": { "type": ["string", "null"] }
+      }
+    },
+    "finding_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "metadata"],
+      "properties": {
+        "kind": { "const": "finding" },
+        "id": { "$ref": "#/$defs/finding_id" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finding_index", "check_id", "check_finding_index", "code", "severity", "subject"],
+          "properties": {
+            "finding_index": { "type": "integer", "minimum": 0 },
+            "check_id": { "$ref": "#/$defs/check_id" },
+            "check_finding_index": { "type": "integer", "minimum": 0 },
+            "code": { "$ref": "#/$defs/finding_code" },
+            "severity": { "$ref": "#/$defs/severity" },
+            "subject": { "$ref": "#/$defs/subject" }
+          }
+        }
+      }
+    },
+    "claim_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "metadata"],
+      "properties": {
+        "kind": { "const": "claim" },
+        "id": { "$ref": "#/$defs/claim_node_id" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["claim_index", "claim_id", "status"],
+          "properties": {
+            "claim_index": { "type": "integer", "minimum": 0 },
+            "claim_id": { "$ref": "#/$defs/claim_id" },
+            "status": { "$ref": "#/$defs/claim_status" }
+          }
+        }
+      }
+    },
+    "limitation_node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "metadata"],
+      "properties": {
+        "kind": { "const": "limitation" },
+        "id": { "$ref": "#/$defs/limitation_node_id" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["limitation_index", "limitation_id", "source"],
+          "properties": {
+            "limitation_index": { "type": "integer", "minimum": 0 },
+            "limitation_id": { "$ref": "#/$defs/limitation_id" },
+            "source": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "target_owns_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to"],
+      "properties": {
+        "kind": { "const": "target-owns-artifact" },
+        "from": { "const": "target" },
+        "to": { "$ref": "#/$defs/artifact_id" }
+      }
+    },
+    "artifact_subject_of_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to"],
+      "properties": {
+        "kind": { "const": "artifact-subject-of-check" },
+        "from": { "$ref": "#/$defs/artifact_id" },
+        "to": { "$ref": "#/$defs/check_node_id" }
+      }
+    },
+    "artifact_supports_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to"],
+      "properties": {
+        "kind": { "const": "artifact-supports-check" },
+        "from": { "$ref": "#/$defs/artifact_id" },
+        "to": { "$ref": "#/$defs/check_node_id" }
+      }
+    },
+    "check_reported_finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to"],
+      "properties": {
+        "kind": { "const": "check-reported-finding" },
+        "from": { "$ref": "#/$defs/check_node_id" },
+        "to": { "$ref": "#/$defs/finding_id" }
+      }
+    },
+    "check_supports_claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to"],
+      "properties": {
+        "kind": { "const": "check-supports-claim" },
+        "from": { "$ref": "#/$defs/check_node_id" },
+        "to": { "$ref": "#/$defs/claim_node_id" }
+      }
+    },
+    "claim_limited_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to"],
+      "properties": {
+        "kind": { "const": "claim-limited-by" },
+        "from": { "$ref": "#/$defs/claim_node_id" },
+        "to": { "$ref": "#/$defs/limitation_node_id" }
+      }
+    }
+  }
+}

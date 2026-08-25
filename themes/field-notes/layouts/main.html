@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" data-theme="field-notes" data-layout="main">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Field Notes</title>
+  <link rel="stylesheet" href="{{asset-url assets/field-notes.css}}">
+  {{head}}
+</head>
+<body data-layout="main">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header" role="banner">
+    <div class="site-header__inner">
+      <p class="brand" aria-label="Field Notes">
+        <span class="brand__mark" aria-hidden="true">PF</span>
+        <span class="brand__text">Field Notes</span>
+      </p>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <div class="page-grid">
+    <aside class="rail rail--browse" aria-label="Browse">
+      <details class="browse-disclosure" open>
+        <summary>Browse the notes</summary>
+        {{nav}}
+      </details>
+    </aside>
+    <main id="main-content" class="reading-column" tabindex="-1" data-boris-search-root>
+      {{metadata}}
+      <article class="prose">
+        {{content}}
+      </article>
+    </main>
+    <aside class="rail rail--toc" aria-label="On this page" data-boris-search-exclude>
+      <p class="rail__eyebrow">On this page</p>
+      {{toc}}
+    </aside>
+  </div>
+  <footer class="theme-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

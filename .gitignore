@@ -1,24 +1,37 @@
 .boris-*/
 .boris/
 .DS_Store
+.freebuff
 .release-gate/
 .zig-cache/
 .zig-global-cache/
 zig-cache/
+/zig-pkg/
 *.a
 *.o
 /dist/
+/.tmp/
 /packages/
 /rag/
 /rag1/
 /rag2/
 /source-rag/
 /test-output/
-/zig-out/
+# Unanchored so nested tool builds (tools/<name>/zig-out/) are covered too, not
+# just the repo root — matches how .zig-cache/ and zig-cache/ are handled above.
+zig-out/
 
-# ApexMarkdown vendor: cmake/local build trees (sources stay tracked)
-/vendor/apex-markdown/build/
-/vendor/apex-markdown/**/build/
+# Boris Editor local toolchain and browser-test outputs.
+/editor/ui/node_modules/
+/editor/ui/dist/
+/editor/ui/playwright-report/
+/editor/ui/test-results/
+
+# Cloudflare Worker host glue: copied wasm and optional Wrangler deps.
+/hosts/cloudflare-worker/src/*.wasm
+/hosts/cloudflare-worker/node_modules/
+.wrangler/
+
 
 
 # Local scratch / private drop (images, notes dumps) — not product source
@@ -26,3 +39,6 @@ zig-cache/
 
 # Local smoke kit / agent kit
 /boris-agent-kit/
+
+# Takeout migration lab: real exports stay local and uncommitted.
+/tools/migration-lab/fixtures/takeout-intake/raw-local/

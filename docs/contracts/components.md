@@ -109,7 +109,7 @@ HTML is exactly a native semantic shape with no client state or ARIA shim:
 
 Any open tag matching `<[A-Z][A-Za-z0-9_-]*` with a valid tag-name boundary that
 is neither exactly `Aside` nor exactly `Details` is a **hard error** (`unregistered_component` →
-`ECOMPONENT`). Tags are not silently left for Apex as free HTML.
+`ECOMPONENT`). Tags are not silently left for the renderer as free HTML.
 
 Examples of hard errors: `<Figure>`, `<Broside>`, `<AsideFoo>` is **not** matched
 as Aside (name boundary requires next byte space/`/`/`>` — `AsideFoo` is a
@@ -130,7 +130,7 @@ On the **shared** `pipeline.compile` path (IR and RAG):
 Experimental HTML (`compile.renderAndPublishPage`):
 
 ```text
-segments → Apex(markdown) | Aside HTML | Details HTML → ordered HTML body
+segments → Oliver(markdown) | Aside HTML | Details HTML → ordered HTML body
 ```
 
 No raw registered-component tags in published HTML.
@@ -139,35 +139,22 @@ No raw registered-component tags in published HTML.
 
 ## RAG export representation
 
-Parsed asides are inlined into the parent page segment as directive-style blocks:
-
-```md
-:::tip{id="006-1"}
-Always declare parent…
-:::
-```
-
-Details use an analogous inline projection retaining their closed metadata:
-
-```md
-:::details{summary="Why does this matter?" id="why-details" open="true"}
-The body is ordinary Markdown.
-:::
-```
-
-Without id:
-
-```md
-:::note
-Body…
-:::
-```
+Product RAG (schema v2) exports **verbatim authoring documents** for Markdown
+input: parsed `<Aside>` / `<Details>` tags stay exactly as the author wrote
+them in the retrieval payload (working packs and complete-corpus pages).
+Textile input is deterministically adapted to Boris-authorable Markdown by the
+Textile adapter, which does not carry component syntax. There is no `:::kind`
+directive projection — that v1 export representation was removed because it is
+not round-trippable Boris input and broke authoring fidelity.
 
 Properties:
 
-- **Export representation only** for retrieval — **not** the authoring grammar.
-- **Not** round-trippable as input (Boris does not parse `:::` as authoring).
-- No `rag/content/asides/` tree and no one-document-per-aside rule.
+- **Authoring fidelity** — for Markdown input, the retrieval payload is the
+  actual source document; a model can hand generated Markdown straight to
+  Boris validation. Textile exports are the adapted Markdown, not raw Textile.
+- **No `rag/content/asides/` tree** and no one-document-per-aside rule.
+- Raw registered-component tags are still rejected at compile time
+  (`ECOMPONENT`) before any export; the graph must validate first.
 
 ---
 
@@ -194,7 +181,7 @@ Properties:
 
 - Generic HTML component systems / MDX / executable expressions
 - Nested or cross-nested components
-- Markdown-native `:::` authoring (export only)
+- Markdown-native `:::` authoring
 - Standalone aside pages or graph nodes
 - Concurrency
 
@@ -207,5 +194,5 @@ Properties:
 - Nested/cross-nested components; unknown component tag
 - Component-looking text inside fenced code remains literal
 - HTML escaping for attribute sinks
-- RAG `:::kind` representation when RAG is enabled
+- RAG keeps `<Aside>` / `<Details>` authoring syntax verbatim
 - `zig build test` (includes `src/aside.zig` + `src/hardening_test.zig`)

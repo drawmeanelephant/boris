@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const layout_select = @import("layout_select.zig");
+const render = @import("render.zig");
 const theme_mod = @import("theme.zig");
 
 /// User-configured target specification from the CLI.
@@ -14,6 +15,10 @@ pub const TargetSpec = struct {
     /// Canonical `--layout-rule` table for this target (GPA-owned slice of rules;
     /// rule string fields are typically argv views). Empty when no rules.
     layout_rules: []const layout_select.LayoutRule = &.{},
+    /// Optional per-target Oliver serialization profile (`--target-profile`;
+    /// `.xhtml` opts into the XML-compatible output profile, #448). When null,
+    /// the target renders with the default `.html` profile.
+    html_profile: ?render.OutputProfile = null,
 };
 
 /// Fully resolved and validated execution target plan.
@@ -25,6 +30,8 @@ pub const TargetPlan = struct {
     layout_path: []const u8,
     /// Rule table view (not owned; points into TargetSpec).
     layout_rules: []const layout_select.LayoutRule = &.{},
+    /// Effective per-target serialization profile (spec override, else default).
+    html_profile: ?render.OutputProfile = null,
 };
 
 /// Effective layout for a target given the global default.
@@ -81,7 +88,13 @@ pub fn hasAbsPathPrefix(path: []const u8, prefix: []const u8, case_insensitive: 
     else
         std.mem.eql(u8, head, prefix);
     if (!eq) return false;
-    return path.len == prefix.len or path[prefix.len] == '/';
+    if (path.len == prefix.len) return true;
+    // The filesystem root is a valid prefix for every absolute path. The
+    // component-boundary check below would otherwise reject every path when
+    // the workspace is the root (e.g. boris-job-runner with cwd `/` in a
+    // container image): path[1] is never `/`.
+    if (prefix.len == 1 and prefix[0] == '/') return true;
+    return path[prefix.len] == '/';
 }
 
 /// True when either path equals the other or one is a proper nested child of the other.
@@ -121,11 +134,10 @@ fn resolveNormalized(gpa: Allocator, cwd_path: []const u8, rel: []const u8) ![]u
     return abs;
 }
 
-/// Walk progressive components of a relative path and reject any existing symlink.
-/// Best-effort: missing path components are ignored; absolute-path edge cases on
-/// Windows that cannot be stated relative to cwd are skipped (workspace resolve
-/// still applies).
-/// Reject any existing symlink component on a relative output/layout path.
+/// Walk progressive components of a path and reject any existing symlink.
+/// Missing path components are ignored. Absolute paths are checked using their
+/// absolute progressive prefixes; callers still constrain them to the workspace
+/// before publication.
 /// Call at validate time and again immediately before opening output dirs
 /// to shrink the TOCTOU window after validateTargets.
 pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []const u8) !void {
@@ -136,9 +148,9 @@ pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []c
     normalizeSlashesInPlace(norm);
     norm = stripTrailingSlash(norm);
 
-    // Skip drive-absolute prefixes like `C:/...` — only walk relative trees.
+    // Drive-absolute paths are not portable to a relative Io.Dir walk. The
+    // workspace membership check still rejects drive paths outside the cwd.
     if (norm.len >= 2 and norm[1] == ':') return;
-    if (norm.len > 0 and norm[0] == '/') return;
 
     var start: usize = 0;
     while (start < norm.len) {
@@ -149,7 +161,9 @@ pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []c
         }
         const slash = std.mem.indexOfScalarPos(u8, norm, start, '/') orelse norm.len;
         const progressive = norm[0..slash];
-        if (progressive.len > 0 and !std.mem.eql(u8, progressive, ".") and !std.mem.eql(u8, progressive, "..")) {
+        if (progressive.len > 0 and !std.mem.eql(u8, progressive, ".") and !std.mem.eql(u8, progressive, "..") and
+            !(progressive.len == 1 and progressive[0] == '/'))
+        {
             if (cwd.statFile(io, progressive, .{ .follow_symlinks = false })) |st| {
                 if (st.kind == .sym_link) {
                     return error.TargetOutputSymlink;
@@ -159,6 +173,40 @@ pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []c
         if (slash >= norm.len) break;
         start = slash + 1;
     }
+}
+
+/// Validate a generated export destination before any staging or publication.
+/// Destinations must remain inside the workspace and must not equal or nest
+/// with the content root. This is shared by non-HTML exporters, which do not
+/// use multi-target HTML validation.
+pub fn validateExportPath(
+    io: Io,
+    gpa: Allocator,
+    content_root: []const u8,
+    output_path: []const u8,
+) !void {
+    if (output_path.len == 0) return error.EmptyTargetDirectory;
+    const cwd_owned = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_owned);
+    normalizeSlashesInPlace(cwd_owned);
+    const cwd_path = stripTrailingSlash(cwd_owned);
+    const case_insensitive = caseInsensitiveFs();
+    const output_abs = try resolveNormalized(gpa, cwd_path, output_path);
+    defer gpa.free(output_abs);
+    if (!hasAbsPathPrefix(output_abs, cwd_path, case_insensitive)) return error.WorkspaceEscape;
+    const content_abs = try resolveNormalized(gpa, cwd_path, content_root);
+    defer gpa.free(content_abs);
+    if (pathsNestOrEqual(output_abs, content_abs, case_insensitive)) return error.TargetOutputCollision;
+    try rejectSymlinkAlongPath(io, Io.Dir.cwd(), gpa, output_path);
+
+    // Reserve compiler-derived IR stage path: `{output_path}.boris-stage`
+    const stage_path = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{output_path});
+    defer gpa.free(stage_path);
+    const stage_abs = try resolveNormalized(gpa, cwd_path, stage_path);
+    defer gpa.free(stage_abs);
+    if (!hasAbsPathPrefix(stage_abs, cwd_path, case_insensitive)) return error.WorkspaceEscape;
+    if (pathsNestOrEqual(stage_abs, content_abs, case_insensitive)) return error.TargetOutputCollision;
+    try rejectSymlinkAlongPath(io, Io.Dir.cwd(), gpa, stage_path);
 }
 
 /// Validate target name grammar. Must be non-empty alphanumeric plus '-', '_', '.'.
@@ -288,6 +336,7 @@ pub fn validateTargets(
             .resolved_output_dir = normalized,
             .layout_path = layout,
             .layout_rules = target.layout_rules,
+            .html_profile = target.html_profile,
         });
     }
 
@@ -331,6 +380,25 @@ pub fn validateTargets(
             }
         }
 
+        // Reserve compiler-derived IR stage path for target plan
+        const stage_path = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{plan.output_dir});
+        defer gpa.free(stage_path);
+        const stage_abs = try resolveNormalized(gpa, cwd_path, stage_path);
+        defer gpa.free(stage_abs);
+
+        if (!hasAbsPathPrefix(stage_abs, cwd_path, case_insensitive)) {
+            return error.WorkspaceEscape;
+        }
+        if (pathsNestOrEqual(stage_abs, content_abs, case_insensitive)) {
+            return error.TargetOutputCollision;
+        }
+        for (protected_layouts.items) |prot| {
+            if (pathsNestOrEqual(stage_abs, prot, case_insensitive)) {
+                return error.TargetOutputCollision;
+            }
+        }
+        try rejectSymlinkAlongPath(io, cwd_dir, gpa, stage_path);
+
         // Reject symlink at the target root or any intermediate component.
         try rejectSymlinkAlongPath(io, cwd_dir, gpa, plan.output_dir);
 
@@ -339,6 +407,9 @@ pub fn validateTargets(
             const path_b = other.resolved_output_dir;
 
             if (pathsNestOrEqual(path_a, path_b, case_insensitive)) {
+                return error.TargetOutputCollision;
+            }
+            if (pathsNestOrEqual(stage_abs, path_b, case_insensitive)) {
                 return error.TargetOutputCollision;
             }
         }
@@ -391,6 +462,81 @@ test "hasAbsPathPrefix boundary" {
     try std.testing.expect(!hasAbsPathPrefix("/tmp/ws2/out", "/tmp/ws", false));
     try std.testing.expect(hasAbsPathPrefix("/tmp/ws/dist/prod", "/tmp/ws/dist", false));
     try std.testing.expect(!hasAbsPathPrefix("/tmp/ws/dist-prod", "/tmp/ws/dist", false));
+    // Root workspace: every absolute path is under `/` (boris-job-runner
+    // runs with cwd `/` inside the official container image).
+    try std.testing.expect(hasAbsPathPrefix("/tmp/ws/dist", "/", false));
+    try std.testing.expect(hasAbsPathPrefix("/", "/", false));
+    try std.testing.expect(!hasAbsPathPrefix("relative", "/", false));
+}
+
+test "validateExportPath rejects content aliases and workspace escapes" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    try std.testing.expectError(error.TargetOutputCollision, validateExportPath(io, gpa, "content", "content"));
+    try std.testing.expectError(error.TargetOutputCollision, validateExportPath(io, gpa, "content", "content/rag"));
+    try std.testing.expectError(error.WorkspaceEscape, validateExportPath(io, gpa, "content", "../outside"));
+    try validateExportPath(io, gpa, "content", "rag-out");
+}
+
+test "validateExportPath accepts absolute outputs inside cwd, rejects outside" {
+    // The workspace-containment rule (docs/contracts/cli.md) applies to IR/RAG/
+    // context/llms exports exactly as it does to HTML targets: the boundary is
+    // the process cwd, checked lexically on the resolved absolute path. An
+    // absolute output path that resolves inside the cwd is accepted; one that
+    // resolves outside is WorkspaceEscape, and the workspace root itself is
+    // TargetOutputCollision.
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const cwd_owned = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_owned);
+    normalizeSlashesInPlace(cwd_owned);
+    const cwd_path = stripTrailingSlash(cwd_owned);
+
+    const inside_abs = try std.fs.path.join(gpa, &.{ cwd_path, "ir-abs-inside" });
+    defer gpa.free(inside_abs);
+    try validateExportPath(io, gpa, "content", inside_abs);
+
+    const outside_abs = try std.fs.path.join(gpa, &.{ cwd_path, "..", "boris-ir-outside-workspace" });
+    defer gpa.free(outside_abs);
+    try std.testing.expectError(error.WorkspaceEscape, validateExportPath(io, gpa, "content", outside_abs));
+
+    // Workspace root itself (any spelling that resolves to cwd) is a collision,
+    // not an escape: targeting cwd would publish over the source tree.
+    try std.testing.expectError(error.TargetOutputCollision, validateExportPath(io, gpa, "content", cwd_path));
+}
+
+test "validateTargets accepts absolute output inside cwd, rejects outside and root" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const opts = ValidateTargetsOptions{};
+    const cwd_owned = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_owned);
+    normalizeSlashesInPlace(cwd_owned);
+    const cwd_path = stripTrailingSlash(cwd_owned);
+
+    const inside_abs = try std.fs.path.join(gpa, &.{ cwd_path, "tgt-abs-inside" });
+    defer gpa.free(inside_abs);
+    {
+        const specs = [_]TargetSpec{.{ .name = "t", .output_dir = inside_abs }};
+        const plans = try validateTargets(io, gpa, &specs, opts);
+        defer {
+            for (plans) |plan| gpa.free(plan.resolved_output_dir);
+            gpa.free(plans);
+        }
+        try std.testing.expectEqual(@as(usize, 1), plans.len);
+    }
+
+    const outside_abs = try std.fs.path.join(gpa, &.{ cwd_path, "..", "boris-tgt-outside-workspace" });
+    defer gpa.free(outside_abs);
+    {
+        const specs = [_]TargetSpec{.{ .name = "t", .output_dir = outside_abs }};
+        try std.testing.expectError(error.WorkspaceEscape, validateTargets(io, gpa, &specs, opts));
+    }
+
+    {
+        const specs = [_]TargetSpec{.{ .name = "t", .output_dir = cwd_path }};
+        try std.testing.expectError(error.TargetOutputCollision, validateTargets(io, gpa, &specs, opts));
+    }
 }
 
 test "validateTargets overlap, nesting, sort, and escape checks" {

@@ -1,20 +1,21 @@
 # Boris scale smoke
 
-This is an opt-in, synthetic scale smoke harness. It is intentionally not a
-build step or CI gate.
+This is an opt-in, synthetic scale smoke harness. It is intentionally not part
+of the root build or CI gate.
 
-From the repository root, build Boris, then run the Zig harness:
+From the repository root, build Boris and this standalone harness, then run it:
 
 ```bash
 zig build
-zig run tools/scale-smoke/main.zig -- --pages 100 --boris ./zig-out/bin/boris
+zig build --build-file tools/scale-smoke/build.zig
+./tools/scale-smoke/zig-out/bin/boris-scale-smoke --pages 100 --boris ./zig-out/bin/boris
 ```
 
 `--pages` is the exact number of discovered pages; the default is `100`. The
 same deterministic generator supports a larger local smoke when wanted:
 
 ```bash
-zig run tools/scale-smoke/main.zig -- --pages 10000 --boris ./zig-out/bin/boris
+./tools/scale-smoke/zig-out/bin/boris-scale-smoke --pages 10000 --boris ./zig-out/bin/boris
 ```
 
 Each generated site has Trunk and Satellite pages, valid `parent` references,

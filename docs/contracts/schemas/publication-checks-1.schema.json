@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris publication checks evidence (schema v1)",
+  "description": "Deterministic target-local evidence derived from the committed Boris artifact inventory and exact payload bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version", "target", "artifact_inventory", "checks", "findings"],
+  "properties": {
+    "format": { "const": "boris-publication-checks" },
+    "schema_version": { "const": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "artifact_inventory": { "$ref": "#/$defs/inventory_binding" },
+    "checks": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/check",
+          "properties": { "id": { "const": "artifact-integrity" } }
+        },
+        {
+          "$ref": "#/$defs/check",
+          "properties": { "id": { "const": "rendered-html" } }
+        },
+        {
+          "$ref": "#/$defs/check",
+          "properties": { "id": { "const": "rendered-search" } }
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "inventory_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256", "format", "schema_version", "target", "artifact_count"],
+      "properties": {
+        "path": { "const": "_boris/proof/artifacts.json" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "format": { "const": "boris-publication-artifacts" },
+        "schema_version": { "const": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "artifact_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_statuses", "subject_kinds", "subject_sha256", "supporting_statuses", "supporting_kinds", "supporting_sha256"],
+      "properties": {
+        "subject_statuses": { "type": "array", "items": { "$ref": "#/$defs/status" } },
+        "subject_kinds": { "type": "array", "items": { "$ref": "#/$defs/kind" } },
+        "subject_sha256": { "$ref": "#/$defs/sha256" },
+        "supporting_statuses": { "type": "array", "items": { "$ref": "#/$defs/status" } },
+        "supporting_kinds": { "type": "array", "items": { "$ref": "#/$defs/kind" } },
+        "supporting_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible", "checked", "findings"],
+      "properties": {
+        "eligible": { "type": "integer", "minimum": 0 },
+        "checked": { "type": "integer", "minimum": 0 },
+        "findings": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "eligible", "ran", "status", "coverage", "scope", "counts", "finding_offset"],
+      "properties": {
+        "id": { "enum": ["artifact-integrity", "rendered-html", "rendered-search"] },
+        "eligible": { "type": "boolean" },
+        "ran": { "type": "boolean" },
+        "status": { "enum": ["passed", "failed", "incomplete", "not-applicable"] },
+        "coverage": { "enum": ["complete", "incomplete", "not-applicable"] },
+        "scope": { "$ref": "#/$defs/scope" },
+        "counts": { "$ref": "#/$defs/counts" },
+        "finding_offset": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "status": {
+      "enum": ["committed", "omitted-by-plan", "not-applicable"]
+    },
+    "kind": {
+      "enum": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms"]
+    },
+    "location": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["path", "line", "column"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 0 },
+        "column": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "domain", "severity", "confidence", "owner", "subject", "source_location", "output_location", "configuration_location", "evidence", "remediation", "fixability"],
+      "properties": {
+        "code": {
+          "enum": [
+            "ARTIFACT_MISSING", "ARTIFACT_SIZE_MISMATCH", "ARTIFACT_DIGEST_MISMATCH",
+            "HTML_PAGE_MISSING", "HTML_MALFORMED", "HTML_URL_MALFORMED",
+            "HTML_LOCAL_ROUTE_MISSING", "HTML_LOCAL_ROUTE_ESCAPE", "HTML_FRAGMENT_MISSING",
+            "HTML_DUPLICATE_ID", "SEARCH_MISSING", "SEARCH_MALFORMED",
+            "SEARCH_DOCUMENT_MISSING", "SEARCH_DOCUMENT_STALE", "SEARCH_CONTENT_MISMATCH"
+          ]
+        },
+        "domain": { "enum": ["rendered_html", "artifact"] },
+        "severity": { "enum": ["error", "warning", "info"] },
+        "confidence": { "enum": ["certain", "high", "limited"] },
+        "owner": { "enum": ["content", "theme", "publication", "configuration", "unknown"] },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id", "target"],
+          "properties": {
+            "kind": { "type": "string", "minLength": 1 },
+            "id": { "type": "string", "minLength": 1 },
+            "target": { "type": ["string", "null"] }
+          }
+        },
+        "source_location": { "$ref": "#/$defs/location" },
+        "output_location": { "$ref": "#/$defs/location" },
+        "configuration_location": { "$ref": "#/$defs/location" },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["observed", "expected", "related"],
+          "properties": {
+            "observed": { "type": "string" },
+            "expected": { "type": "string" },
+            "related": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "remediation": { "type": "string", "minLength": 1 },
+        "fixability": { "enum": ["source_edit", "layout_edit", "configuration_edit", "regenerate", "not_actionable"] }
+      }
+    }
+  }
+}

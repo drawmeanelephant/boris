@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris hosted job result (v1)",
+  "description": "Result of one boris-job-runner invocation. The prose contract in docs/contracts/cloudflare-container-runner.md remains normative. timings, jobId, and imageDigest are transport metadata and are excluded from Linux-vs-Linux artifact parity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "format",
+    "ok",
+    "status",
+    "runnerClass",
+    "exitCode",
+    "compilerId",
+    "borisVersion",
+    "runnerId",
+    "imageDigest",
+    "jobId",
+    "command",
+    "diagnostics",
+    "artifacts",
+    "limits",
+    "timings",
+    "workspaceRemoved",
+    "retried"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "boris-job-1" },
+    "format": { "const": "boris-job" },
+    "ok": {
+      "type": "boolean",
+      "description": "true iff runnerClass is ok and Boris exited 0 with zero error diagnostics."
+    },
+    "status": { "enum": ["success", "failed"] },
+    "runnerClass": {
+      "enum": ["ok", "content", "usage", "io", "archive", "limit", "timeout", "auth", "process"]
+    },
+    "exitCode": { "type": ["integer", "null"], "minimum": 0, "maximum": 255 },
+    "compilerId": { "type": ["string", "null"] },
+    "borisVersion": { "type": ["string", "null"] },
+    "runnerId": { "type": "string", "minLength": 1 },
+    "imageDigest": { "type": ["string", "null"] },
+    "jobId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "command": { "enum": ["build", "validate"] },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "limits": { "$ref": "#/$defs/limits" },
+    "timings": { "$ref": "#/$defs/timings" },
+    "workspaceRemoved": { "type": "boolean" },
+    "retried": { "const": false }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "code", "message", "remediation", "sourcePath", "line", "column", "id"],
+      "properties": {
+        "severity": { "enum": ["error", "warning", "info"] },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "remediation": { "type": "string" },
+        "sourcePath": { "type": ["string", "null"] },
+        "line": { "type": ["integer", "null"] },
+        "column": { "type": ["integer", "null"] },
+        "id": { "type": ["string", "null"] }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "size": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceBytes", "expandedBytes", "artifactBytes", "fileCount", "timeoutMs"],
+      "properties": {
+        "sourceBytes": { "type": "integer", "minimum": 1 },
+        "expandedBytes": { "type": "integer", "minimum": 1 },
+        "artifactBytes": { "type": "integer", "minimum": 1 },
+        "fileCount": { "type": "integer", "minimum": 1 },
+        "timeoutMs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "timings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallMs", "unpackMs", "compileMs"],
+      "properties": {
+        "wallMs": { "type": "integer", "minimum": 0 },
+        "unpackMs": { "type": "integer", "minimum": 0 },
+        "compileMs": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

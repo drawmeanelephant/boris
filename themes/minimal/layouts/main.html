@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · Minimal</title>
+  <link rel="stylesheet" href="{{asset-url assets/minimal.css}}">
+  {{head}}
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<div class="app-container">
+<header class="header">
+  <span class="header-logo">Minimal</span>
+</header>
+<div class="main-wrapper">
+  <aside class="sidebar">
+    <details class="mobile-nav-details" open>
+      <summary class="mobile-nav-summary">Menu</summary>
+      <div class="mobile-nav-wrapper">{{nav}}</div>
+    </details>
+  </aside>
+  <main id="main-content" class="content-area" tabindex="-1" data-boris-search-root>
+    {{breadcrumb}}
+    {{metadata}}
+    <div class="boris-content">{{content}}</div>
+    {{children}}
+    {{relations}}
+    {{backlinks}}
+  </main>
+  <aside class="toc-sidebar" aria-label="On this page" data-boris-search-exclude>{{toc}}</aside>
+</div>
+<footer class="site-footer">{{footer}}</footer>
+</div>
+</body>
+</html>

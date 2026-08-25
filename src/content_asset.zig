@@ -20,6 +20,7 @@ const Io = std.Io;
 const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
 const diag = @import("diag.zig");
+const svg_policy = @import("svg_policy.zig");
 
 pub const AssetError = error{
     AssetPath,
@@ -27,6 +28,7 @@ pub const AssetError = error{
     AssetSymlink,
     AssetNotFile,
     AssetCollision,
+    AssetUnsafeSvg,
     ReadFailed,
     OutOfMemory,
 };
@@ -113,11 +115,16 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, gpa: std.mem.Allocator) 
 }
 
 /// Source-path stem with page extension stripped (`guides/intro.md` → `guides/intro`).
+///
+/// Delegates to `identity.pageExtensionLen` rather than keeping a second copy
+/// of the extension table. The copy that used to live here fell behind when
+/// `.cook` was added: a recipe page's sibling asset root resolved to
+/// `carbonara.cook.assets`, so an author following the documented
+/// `<stem>.assets` convention had their whole asset tree ignored with no
+/// diagnostic. One table cannot drift from itself.
 pub fn sourceStem(source_path: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, source_path, ".mdx")) return source_path[0 .. source_path.len - 4];
-    if (std.mem.endsWith(u8, source_path, ".md")) return source_path[0 .. source_path.len - 3];
-    if (std.mem.endsWith(u8, source_path, ".textile")) return source_path[0 .. source_path.len - 8];
-    return source_path;
+    const ext_len = identity.pageExtensionLen(source_path) orelse return source_path;
+    return source_path[0 .. source_path.len - ext_len];
 }
 
 /// Content-root-relative sibling asset root for a page source path.
@@ -156,13 +163,41 @@ pub fn validateWithinTreePath(path: []const u8) bool {
     return true;
 }
 
+/// Media types a `data:` URL may carry in an image slot.
+///
+/// `image/svg+xml` is deliberately absent. An inline SVG is a script-bearing
+/// document, not a picture, and admitting it here would reintroduce active
+/// content through the one image path that has no file on disk to inspect.
+const data_image_types = [_][]const u8{
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+};
+
+/// True when a `data:` URL declares one of the media types above.
+///
+/// The old check accepted any `data:` prefix, so `data:text/html;base64,…` was
+/// passed through into an `<img src>` — a document, in an image slot, with no
+/// type validation at all.
+fn isImageDataUrl(dest: []const u8) bool {
+    const rest = dest["data:".len..];
+    const end = std.mem.indexOfAny(u8, rest, ";,") orelse return false;
+    const media_type = rest[0..end];
+    for (data_image_types) |allowed| {
+        if (std.ascii.eqlIgnoreCase(media_type, allowed)) return true;
+    }
+    return false;
+}
+
 /// True when `dest` is a non-local URL scheme Boris does not rewrite or fetch.
 pub fn isPassthroughImageDest(dest: []const u8) bool {
     if (dest.len == 0) return false;
     if (std.mem.startsWith(u8, dest, "https://")) return true;
     if (std.mem.startsWith(u8, dest, "http://")) return true;
     if (std.mem.startsWith(u8, dest, "//")) return true;
-    if (std.mem.startsWith(u8, dest, "data:")) return true;
+    if (std.mem.startsWith(u8, dest, "data:")) return isImageDataUrl(dest);
     if (std.mem.startsWith(u8, dest, "mailto:")) return true;
     return false;
 }
@@ -216,6 +251,7 @@ pub fn loadPageAssets(
     content_dir: Io.Dir,
     source_path: []const u8,
     entity_id: []const u8,
+    fail_out: ?*FailInfo,
 ) !PageAssetBundle {
     var bundle: PageAssetBundle = .{
         .gpa = gpa,
@@ -285,6 +321,21 @@ pub fn loadPageAssets(
 
         const bytes = try readFileAlloc(io, content_dir, source_rel, gpa);
         errdefer gpa.free(bytes);
+        if (isSvgPath(within_buf) and svg_policy.default_policy == .refuse_active_content) {
+            if (svg_policy.firstViolation(bytes)) |violation| {
+                var detail_buf: [320]u8 = undefined;
+                setAssetFail(fail_out, source_rel, svgViolationDetail(
+                    io,
+                    gpa,
+                    content_dir,
+                    source_path,
+                    within_buf,
+                    violation.description(),
+                    &detail_buf,
+                ));
+                return error.AssetUnsafeSvg;
+            }
+        }
         const output_rel = try outputRelFor(entity_id, within_buf, gpa);
         errdefer gpa.free(output_rel);
 
@@ -313,6 +364,7 @@ pub fn loadSiteAssets(
     content_dir: Io.Dir,
     source_paths: []const []const u8,
     entity_ids: []const []const u8,
+    fail_out: ?*FailInfo,
 ) !SiteAssetInventory {
     std.debug.assert(source_paths.len == entity_ids.len);
     var inv: SiteAssetInventory = .{ .gpa = gpa };
@@ -328,10 +380,39 @@ pub fn loadSiteAssets(
     }
 
     for (source_paths, entity_ids, 0..) |sp, eid, i| {
-        inv.pages[i] = try loadPageAssets(io, gpa, content_dir, sp, eid);
+        inv.pages[i] = try loadPageAssets(io, gpa, content_dir, sp, eid, fail_out);
         filled = i + 1;
     }
     return inv;
+}
+
+fn isSvgPath(path: []const u8) bool {
+    return path.len > 4 and std.ascii.eqlIgnoreCase(path[path.len - 4 ..], ".svg");
+}
+
+fn setAssetFail(fail_out: ?*FailInfo, source_rel: []const u8, detail: []const u8) void {
+    if (fail_out) |fail| fail.set(1, 1, detail, source_rel);
+}
+
+/// Enrich an unsafe-SVG EASSET detail when the owning page's source never
+/// mentions the offending within-tree path. Any valid Markdown image
+/// destination into the sibling tree must contain that path as a substring,
+/// so absence proves the file is unreferenced; presence stays silent because
+/// a mention is not proof of a reference. An unreadable page source also
+/// stays silent (fail-safe direction).
+fn svgViolationDetail(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    source_path: []const u8,
+    within_tree: []const u8,
+    base: []const u8,
+    buf: []u8,
+) []const u8 {
+    const text = readFileAlloc(io, content_dir, source_path, gpa) catch return base;
+    defer gpa.free(text);
+    if (std.mem.indexOf(u8, text, within_tree) != null) return base;
+    return std.fmt.bufPrint(buf, "{s} (file not referenced by any page)", .{base}) catch base;
 }
 
 /// Fail when a content-local asset path collides with a page HTML path or theme asset.
@@ -460,7 +541,7 @@ fn scrubOrphanContentAssetsInner(
 }
 
 // ---------------------------------------------------------------------------
-// Markdown image rewrite (pre-Apex, fence-aware)
+// Markdown image rewrite (pre-render, fence-aware)
 // ---------------------------------------------------------------------------
 
 fn atLineStart(body: []const u8, i: usize) bool {
@@ -485,6 +566,18 @@ fn fenceAtLineStart(body: []const u8, i: usize) ?struct { u8, usize } {
     return .{ ch, run };
 }
 
+/// True when a line-start fence opener appears in body[from..to]. A
+/// would-be inline-code span must not cross one: the closer search would
+/// otherwise swallow the fence opener and let fenced content be scanned as
+/// real images.
+fn fenceOpenerInRange(body: []const u8, from: usize, to: usize) bool {
+    var j = from;
+    while (j < to) : (j += 1) {
+        if (atLineStart(body, j) and fenceAtLineStart(body, j) != null) return true;
+    }
+    return false;
+}
+
 const ImageHit = struct {
     /// Destination slice view into body (inside the parens, not including titles).
     dest: []const u8,
@@ -505,7 +598,8 @@ fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail: []cons
     }
 }
 
-/// Scan for inline Markdown images outside fenced code. Views into `body`.
+/// Scan for inline Markdown images outside fenced code and inline code spans.
+/// Views into `body`.
 fn scanImages(
     body: []const u8,
     allocator: std.mem.Allocator,
@@ -538,6 +632,24 @@ fn scanImages(
 
         if (fence_ch != 0) {
             i += 1;
+            continue;
+        }
+
+        if (body[i] == '`') {
+            // Inline code spans stay literal; only skip a span when a
+            // matching equal-length closer exists ahead — and not across a
+            // line-start fence, which the closer search would otherwise
+            // swallow. An unmatched backtick is literal and cannot suppress
+            // scanning for the rest of the body.
+            if (include_mod.inlineCodeSpanEnd(body, i)) |end| {
+                if (fenceOpenerInRange(body, i, end)) {
+                    i += include_mod.backtickRunLength(body, i);
+                } else {
+                    i = end;
+                }
+            } else {
+                i += include_mod.backtickRunLength(body, i);
+            }
             continue;
         }
 
@@ -611,7 +723,7 @@ fn scanImages(
 
             const dest = body[dest_start..dest_end];
             if (dest.len == 0) {
-                // Empty dest — leave for Apex / later validation if local.
+                // Empty dest — leave for the renderer / later validation if local.
                 continue;
             }
             const lc = include_mod.lineColAt(body, start);
@@ -636,12 +748,21 @@ fn scanImages(
 /// Passthrough schemes (`http(s)`, `//`, `data:`, `mailto:`) are left unchanged.
 /// Every other destination must resolve into this page's sibling asset tree and
 /// exist as a regular inventoried file. Returns a new body (arena/allocator owned).
+///
+/// When `base_url` is non-null, each rewritten destination is the absolute
+/// canonical asset URL (`base_url ++ "/" ++ <published asset path>`) instead of
+/// a path relative to `output_path`. Consumers that publish the Markdown
+/// *outside* the site — the Nostr NIP-23 projection — must not emit relative
+/// destinations, which a reader client resolves against the wrong origin.
+/// `null` keeps today's relative destinations byte-for-byte. `base_url` carries
+/// no trailing slash.
 pub fn rewriteImageLinks(
     allocator: std.mem.Allocator,
     body: []const u8,
     bundle: *const PageAssetBundle,
     output_path: []const u8,
     fail_out: ?*FailInfo,
+    base_url: ?[]const u8,
 ) AssetError![]const u8 {
     var hits: std.ArrayList(ImageHit) = .empty;
     defer hits.deinit(allocator);
@@ -713,15 +834,23 @@ pub fn rewriteImageLinks(
             return error.AssetMissing;
         };
 
-        const href = identity.relativeHref(allocator, output_path, entry.output_rel) catch {
-            setFail(fail_out, body, hit.offset, hit.dest, bundle.source_path);
-            return error.AssetPath;
+        const href = href_blk: {
+            if (base_url) |base| {
+                // A published asset path never begins with `/`, so this single
+                // separator is the only one in the joined URL.
+                break :href_blk try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, entry.output_rel });
+            }
+            break :href_blk identity.relativeHref(allocator, output_path, entry.output_rel) catch {
+                setFail(fail_out, body, hit.offset, hit.dest, bundle.source_path);
+                return error.AssetPath;
+            };
         };
         defer allocator.free(href);
 
         if (hit.angle) {
             // Preserve angle-bracket form when the author used it.
-            // Our href is always a safe relative path without spaces.
+            // Our href is a safe published path (or its absolute form) with
+            // no spaces, so the bracket form needs no escaping either way.
             try out.appendSlice(allocator, href);
         } else {
             try out.appendSlice(allocator, href);
@@ -732,13 +861,14 @@ pub fn rewriteImageLinks(
     return try out.toOwnedSlice(allocator);
 }
 
-pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []const u8, fail: FailInfo) void {
+pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []const u8, fail: FailInfo, sink: ?*diag.Collector) void {
     const code: diag.Code = switch (err) {
         error.AssetPath => .EASSET,
         error.AssetMissing => .EASSET,
         error.AssetSymlink => .EASSET,
         error.AssetNotFile => .EASSET,
         error.AssetCollision => .EASSET,
+        error.AssetUnsafeSvg => .EASSET,
         else => .EIO,
     };
     const message: []const u8 = switch (err) {
@@ -747,6 +877,7 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         error.AssetSymlink => "content-local asset path rejects symlinks",
         error.AssetNotFile => "content-local asset must be a regular file",
         error.AssetCollision => "content-local asset path collides with page or theme output",
+        error.AssetUnsafeSvg => "content-local SVG contains active content",
         else => "content-local asset I/O failure",
     };
     const remediation: []const u8 = switch (err) {
@@ -755,10 +886,17 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         error.AssetSymlink => "Replace symlinks with regular files under <stem>.assets/",
         error.AssetNotFile => "Publish only regular files under <stem>.assets/",
         error.AssetCollision => "Rename the asset or page so published paths do not collide",
+        error.AssetUnsafeSvg => "Remove the named active construct or publish an inert SVG; Boris does not sanitize assets",
         else => "Check content-local asset files are readable regular files",
     };
     const locus = if (fail.locus().len > 0) fail.locus() else source_path;
     const detail = fail.detail();
+    // A rejected `data:` URL is a media-type problem, not a missing file, so
+    // say the thing the author actually has to change.
+    const guidance: []const u8 = if (std.mem.startsWith(u8, detail, "data:"))
+        "Inline data: images must declare image/png, image/jpeg, image/gif, image/webp or image/avif; image/svg+xml and document types are not images"
+    else
+        remediation;
     const msg = if (detail.len > 0)
         std.fmt.allocPrint(gpa, "{s}: {s}", .{ message, detail }) catch message
     else
@@ -769,11 +907,13 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         .severity = .error_,
         .code = code,
         .message = msg,
-        .remediation = remediation,
+        .remediation = guidance,
         .source_path = locus,
         .line = fail.line,
         .column = fail.column,
     };
+    if (sink) |s| s.append(d);
+    if (diag.text_suppressed.load(.unordered)) return;
     if (diag.formatText(d, gpa)) |line| {
         defer gpa.free(line);
         std.debug.print("{s}\n", .{line});
@@ -799,11 +939,15 @@ fn writeTreeFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !v
 
 test "sourceStem and assetRootForSource" {
     const gpa = std.testing.allocator;
+    // Every page extension, so this cannot fall behind `identity` again.
     try std.testing.expectEqualStrings("guides/intro", sourceStem("guides/intro.md"));
     try std.testing.expectEqualStrings("a/b", sourceStem("a/b.mdx"));
-    const root = try assetRootForSource("guides/intro.md", gpa);
+    try std.testing.expectEqualStrings("a/b", sourceStem("a/b.textile"));
+    try std.testing.expectEqualStrings("recipes/carbonara", sourceStem("recipes/carbonara.cook"));
+    try std.testing.expectEqualStrings("notes.txt", sourceStem("notes.txt"));
+    const root = try assetRootForSource("recipes/carbonara.cook", gpa);
     defer gpa.free(root);
-    try std.testing.expectEqualStrings("guides/intro.assets", root);
+    try std.testing.expectEqualStrings("recipes/carbonara.assets", root);
 }
 
 test "validateWithinTreePath rejects traversal and backslash" {
@@ -821,6 +965,17 @@ test "isPassthroughImageDest" {
     try std.testing.expect(isPassthroughImageDest("http://example.com/x.png"));
     try std.testing.expect(isPassthroughImageDest("//cdn/x.png"));
     try std.testing.expect(isPassthroughImageDest("data:image/png;base64,xx"));
+    try std.testing.expect(isPassthroughImageDest("data:image/jpeg,xx"));
+    try std.testing.expect(isPassthroughImageDest("data:IMAGE/WebP;base64,xx"));
+    // A document in an image slot is not an image, and neither is a
+    // script-bearing SVG. Both fall through to local-path handling and fail
+    // with EASSET rather than reaching dist/.
+    try std.testing.expect(!isPassthroughImageDest("data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="));
+    try std.testing.expect(!isPassthroughImageDest("data:image/svg+xml;base64,xx"));
+    try std.testing.expect(!isPassthroughImageDest("data:application/javascript,alert(1)"));
+    try std.testing.expect(!isPassthroughImageDest("data:image/pngX;base64,xx"));
+    try std.testing.expect(!isPassthroughImageDest("data:"));
+    try std.testing.expect(!isPassthroughImageDest("data:image/png"));
     try std.testing.expect(!isPassthroughImageDest("intro.assets/x.svg"));
     try std.testing.expect(!isPassthroughImageDest("/abs.svg"));
 }
@@ -852,7 +1007,7 @@ test "loadPageAssets discovers nested files sorted" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro");
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
     defer bundle.deinit();
 
     try std.testing.expectEqual(@as(usize, 2), bundle.entries.len);
@@ -860,6 +1015,18 @@ test "loadPageAssets discovers nested files sorted" {
     try std.testing.expectEqualStrings("z.svg", bundle.entries[1].within_tree);
     try std.testing.expectEqualStrings("guides/intro.assets/z.svg", bundle.entries[1].source_rel);
     try std.testing.expectEqualStrings("guides/intro.assets/z.svg", bundle.entries[1].output_rel);
+}
+
+test "rewrite skips adjacent inline-code spans without pairing closers" {
+    // The closer of the first span must not pair with the opener of the
+    // second: per-backtick pairing would "consume" the second span's opener
+    // and resume scanning inside it at `![x](u)` (a false local asset).
+    const gpa = std.testing.allocator;
+    var bundle: PageAssetBundle = .{ .gpa = gpa, .source_path = "guides/intro.md", .entity_id = "guides/intro" };
+    defer bundle.deinit();
+    const body = "to the `alt` string — `![x](u)` stays literal\n";
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    try std.testing.expectEqualStrings(body, out);
 }
 
 test "rewriteImageLinks rewrites sibling asset and leaves remote" {
@@ -880,7 +1047,7 @@ test "rewriteImageLinks rewrites sibling asset and leaves remote" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro");
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
     defer bundle.deinit();
 
     const body =
@@ -889,7 +1056,7 @@ test "rewriteImageLinks rewrites sibling asset and leaves remote" {
         \\![r](https://example.com/r.png)
         \\
     ;
-    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "intro.assets/diagram.svg") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "https://example.com/r.png") != null);
@@ -914,14 +1081,62 @@ test "rewriteImageLinks rejects traversal absolute backslash and outside tree" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro");
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
     defer bundle.deinit();
 
-    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](../secret.png)\n", &bundle, "guides/intro.html", null));
-    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](/abs.svg)\n", &bundle, "guides/intro.html", null));
-    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](intro.assets\\ok.svg)\n", &bundle, "guides/intro.html", null));
-    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](other.assets/ok.svg)\n", &bundle, "guides/intro.html", null));
-    try std.testing.expectError(error.AssetMissing, rewriteImageLinks(gpa, "![x](intro.assets/missing.svg)\n", &bundle, "guides/intro.html", null));
+    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](../secret.png)\n", &bundle, "guides/intro.html", null, null));
+    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](/abs.svg)\n", &bundle, "guides/intro.html", null, null));
+    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](intro.assets\\ok.svg)\n", &bundle, "guides/intro.html", null, null));
+    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](other.assets/ok.svg)\n", &bundle, "guides/intro.html", null, null));
+    try std.testing.expectError(error.AssetMissing, rewriteImageLinks(gpa, "![x](intro.assets/missing.svg)\n", &bundle, "guides/intro.html", null, null));
+}
+
+test "unsafe svg diagnostic notes unreferenced file" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-unref", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "![c](intro.assets/clean.png)\n");
+    try writeTreeFile(io, work, "content/guides/intro.assets/clean.png", "p");
+    try writeTreeFile(io, work, "content/guides/intro.assets/evil.svg", "<svg><script>alert(1)</script></svg>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.AssetUnsafeSvg, loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", &fail));
+    try std.testing.expect(std.mem.indexOf(u8, fail.detail(), "(file not referenced by any page)") != null);
+}
+
+test "unsafe svg diagnostic stays silent when page mentions the path" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-ref", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "![x](intro.assets/bad.svg)\n");
+    try writeTreeFile(io, work, "content/guides/intro.assets/bad.svg", "<svg><script>alert(1)</script></svg>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.AssetUnsafeSvg, loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", &fail));
+    try std.testing.expect(std.mem.indexOf(u8, fail.detail(), "(file not referenced by any page)") == null);
+    try std.testing.expect(std.mem.indexOf(u8, fail.detail(), "active SVG <script> element") != null);
 }
 
 test "rewrite skips fenced image-looking text" {
@@ -934,9 +1149,122 @@ test "rewrite skips fenced image-looking text" {
         \\```
         \\
     ;
-    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     // body unchanged (same slice or equal)
     try std.testing.expectEqualStrings(body, out);
+}
+
+test "rewrite skips inline-code image-looking text and still rewrites real images" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-inline-code", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    const body =
+        \\`![x](../escape.svg)` stays literal
+        \\![d](intro.assets/diagram.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    defer gpa.free(out);
+    // The image-looking text inside the backtick span is untouched: its `..`
+    // path must not be treated as a content-local asset (no AssetPath error,
+    // span bytes preserved).
+    try std.testing.expect(std.mem.indexOf(u8, out, "`![x](../escape.svg)`") != null);
+    // The real local image after the span is still resolved to its asset href.
+    try std.testing.expect(std.mem.indexOf(u8, out, "![d](intro.assets/diagram.svg)") != null);
+}
+
+test "unmatched backtick does not suppress later image rewriting" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-unmatched-tick", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    // The stray tick has no matching closer, so it is literal text: the real
+    // local image after it must still be resolved (no persistent span state).
+    const body =
+        \\an ` stray tick
+        \\![d](intro.assets/diagram.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "an ` stray tick") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "![d](intro.assets/diagram.svg)") != null);
+}
+
+test "stray backtick does not swallow a later fence opener" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-fence-cross", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    // The stray tick must not pair with the equal-length tick inside the
+    // fenced block: that would swallow the fence opener and scan the
+    // image-looking text inside the fence as a real local asset. A real
+    // local image after the fence keeps the returned buffer owned.
+    const body =
+        \\a ` stray tick
+        \\```
+        \\code with ` and ![x](../escape.svg)
+        \\```
+        \\
+        \\![d](intro.assets/diagram.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    defer gpa.free(out);
+    // The fenced content was never scanned: the image-looking text inside
+    // it is preserved verbatim (its `..` path would otherwise fail).
+    try std.testing.expect(std.mem.indexOf(u8, out, "![x](../escape.svg)") != null);
+    // The real local image after the fence is still resolved.
+    try std.testing.expect(std.mem.indexOf(u8, out, "![d](intro.assets/diagram.svg)") != null);
 }
 
 test "copyAssetsToOutput and scrub orphans" {
@@ -958,7 +1286,7 @@ test "copyAssetsToOutput and scrub orphans" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var inv = try loadSiteAssets(io, gpa, content_dir, &.{"index.md"}, &.{"index"});
+    var inv = try loadSiteAssets(io, gpa, content_dir, &.{"index.md"}, &.{"index"}, null);
     defer inv.deinit();
 
     const out_rel = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
@@ -980,7 +1308,7 @@ test "copyAssetsToOutput and scrub orphans" {
     try cwd.deleteFile(io, drop_src);
 
     inv.deinit();
-    inv = try loadSiteAssets(io, gpa, content_dir, &.{"index.md"}, &.{"index"});
+    inv = try loadSiteAssets(io, gpa, content_dir, &.{"index.md"}, &.{"index"}, null);
 
     try copyAssetsToOutput(io, out_dir, &inv);
     scrubOrphanContentAssets(io, out_dir, gpa, &inv);
@@ -1025,11 +1353,114 @@ test "id override rewrites to entity-scoped asset URL" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "custom");
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "custom", null);
     defer bundle.deinit();
     try std.testing.expectEqualStrings("custom.assets/d.svg", bundle.entries[0].output_rel);
 
-    const out = try rewriteImageLinks(gpa, "![d](intro.assets/d.svg)\n", &bundle, "custom.html", null);
+    const out = try rewriteImageLinks(gpa, "![d](intro.assets/d.svg)\n", &bundle, "custom.html", null, null);
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "custom.assets/d.svg") != null);
+}
+
+test "loadPageAssets rejects active SVG and records the asset construct" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-active-svg", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# hi\\n");
+    try writeTreeFile(io, work, "content/index.assets/logo.SVG", "<svg><script>alert(1)</script></svg>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.AssetUnsafeSvg, loadPageAssets(io, gpa, content_dir, "index.md", "index", &fail));
+    try std.testing.expectEqualStrings("index.assets/logo.SVG", fail.locus());
+    try std.testing.expectEqualStrings("active SVG <script> element (file not referenced by any page)", fail.detail());
+}
+
+test "rewriteImageLinks emits absolute asset URLs under base_url" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-abs", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    const body = "![d](intro.assets/diagram.svg)\n";
+
+    // `null` keeps the site-relative destination byte-for-byte.
+    const rel = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    defer gpa.free(rel);
+    try std.testing.expectEqualStrings("![d](intro.assets/diagram.svg)\n", rel);
+
+    // Non-null joins the published path onto the base, which is what a Nostr
+    // reader client needs: a relative path would resolve against relay origin.
+    const abs = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, "https://example.com/docs");
+    defer gpa.free(abs);
+    try std.testing.expectEqualStrings(
+        "![d](https://example.com/docs/guides/intro.assets/diagram.svg)\n",
+        abs,
+    );
+
+    // Exactly one separator between base and path: the only `//` in the
+    // result belongs to the scheme.
+    const after_scheme = std.mem.indexOf(u8, abs, "://").? + 3;
+    try std.testing.expect(std.mem.indexOf(u8, abs[after_scheme..], "//") == null);
+}
+
+test "rewriteImageLinks reports unresolvable assets in absolute mode" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-abs-fail", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/ok.svg", "ok");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    // Absolute mode is a destination change, not a relaxation: a missing
+    // sibling asset still fails loud with the same located FailInfo.
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.AssetMissing, rewriteImageLinks(
+        gpa,
+        "![x](intro.assets/missing.svg)\n",
+        &bundle,
+        "guides/intro.html",
+        &fail,
+        "https://example.com/docs",
+    ));
+    try std.testing.expectEqualStrings("intro.assets/missing.svg", fail.detail());
+    try std.testing.expectEqualStrings("guides/intro.md", fail.locus());
+    try std.testing.expectEqual(@as(u32, 1), fail.line);
 }

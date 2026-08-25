@@ -25,18 +25,19 @@ Rules:
   and the equals sign;
 - entries contain no quotes, nested lists, escapes, or additional equals signs;
 - targets are canonical page entity IDs in the existing identity namespace;
-- maximum 16 entries per page; maximum target length is the existing entity-ID
+- maximum 128 entries per page; maximum target length is the existing entity-ID
   bound;
 - duplicate `(kind, target)` tuples are rejected, not silently deduplicated;
 - author order is accepted for readability but is not an IR ordering promise.
 
 An empty list is valid and is equivalent to an absent field. A missing or
-malformed value is a frontmatter content error. No arbitrary relation kind is
-accepted.
+malformed value is a frontmatter content error. Relation kinds must match the
+bounded ASCII token grammar `[a-z][a-z0-9_]{0,63}`. Boris preserves these
+opaque tokens but does not assign new domain meanings to them.
 
-## Closed relation vocabulary
+## Constrained open relation-kind vocabulary
 
-The initial vocabulary is deliberately small:
+The original names remain valid:
 
 | Kind | Meaning |
 |------|---------|
@@ -56,14 +57,16 @@ before IR freeze/publication:
 - target not present in the page set → `ERELATIONMISSING`;
 - source equals target → `ERELATIONSELF`;
 - duplicate tuple → `ERELATIONDUPLICATE`;
-- unknown kind or malformed entry → `EFRONTMATTER`;
+- malformed or grammar-invalid kind token or malformed entry → `EFRONTMATTER`;
 - relation failures prevent graph freeze and publish no partial IR.
 
 All diagnostics carry the originating page source path and frontmatter line.
-HTML, RAG, and Documentation Intelligence must either consume the same
-validated relation set or explicitly document that they do not expose semantic
-relations; they must not invent a second parser or silently ignore invalid
-relations.
+The IR pipeline and HTML graph freeze, including `boris validate`, invoke the
+same graph-owned semantic-relation validator. HTML exposes relations only
+through the explicit slots below. RAG and Documentation Intelligence must
+either consume the same validated relation set or explicitly document that they
+do not expose semantic relations; no projection may invent a second parser or
+silently ignore invalid relations.
 
 ## IR 0.3 shape
 
@@ -96,12 +99,45 @@ edges, but both endpoints must have `type: "page"`. `relations` is sorted by
 byte order. It has no reverse index in IR 0.3; consumers that need reverse
 semantic lookup can build one without confusing it with build invalidation.
 
+Opening the constrained kind token grammar does not change this JSON shape:
+`kind` remains a string, relation-bearing artifacts remain IR 0.3, and no
+schema-version bump is required. A future change to endpoint shape, ordering,
+or relation representation would require the normal schema decision.
+
+## HTML presentation
+
+The closed theme vocabulary accepts `{{relations}}` and `{{backlinks}}`.
+Each optional slot emits an empty string when its view is empty; Boris does not
+add a wrapper around an empty slot.
+
+- `{{relations}}` renders outgoing relations from the current page.
+- `{{backlinks}}` derives incoming relations from the same validated set; no
+  duplicate backlink authoring is accepted or needed.
+- Outgoing entries sort by kind, then target entity id. Backlinks sort by source
+  entity id, then kind. Ordering is bytewise and independent of author order or
+  worker count.
+- Each entry links through the canonical page output path and carries a
+  `data-relation-kind` attribute and `semantic-relation--<kind>` class.
+- Boris does not infer reciprocal relations, hierarchy/include/wiki/reference
+  edges, or meaning from a kind name.
+
+## Incremental HTML behavior
+
+Relations remain distinct from build-dependency edges. A page whose selected
+layout uses a relation slot includes page-local relation material—endpoint ids,
+kinds, titles, and output paths—in its HTML fingerprint. Changing a relation
+therefore re-renders its source and affected backlink targets. A page whose
+layout uses neither relation slot includes no relation material and is not
+dirtied by unrelated relation changes. This is an HTML planner/cache concern,
+not a new IR dependency edge.
+
 ## Compatibility and products
 
 - IR 0.2 consumers must reject the 0.3 artifact by schema version rather than
   silently dropping `relations`.
 - `--no-rag` / `--out` remains the explicit IR path; the bare HTML path does
-  not change its output solely because relations exist.
+  not change its output solely because relations exist. HTML build and
+  no-publication validation still reject an invalid relation set before render.
 - RAG may later export semantic relations as metadata, but that is a separate
   RAG contract amendment and must preserve the existing `boris-rag` schema.
 - Documentation Intelligence may report semantic relations only after its own

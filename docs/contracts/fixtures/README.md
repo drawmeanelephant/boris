@@ -25,16 +25,23 @@ Layout selection (`--layout-rule`) lives under:
 | `layout-rules/` | Multi-layout theme + exact/glob/role selection markers |
 | `layout-rules/adversarial/` | Frontmatter `layout:` rejection; mixed theme roots |
 | `layout-rules/hostile/` | Hostile integration harness fixtures + audit report |
+| `archive-layout-audit/` | Realistic archive-shaped acceptance fixture, deterministic audit, and black-box harness |
 
-ApexMarkdown Unified compatibility (read-only audit) lives under:
+Oliver renderer compatibility (read-only audit) lives under:
 
 | Fixture | Role |
 |---------|------|
-| `apex-unified-compat/` | Feature fixtures + `MATRIX.md` / `REPORT.md` for Unified surface through Boris |
+| `oliver-compat/` | Construct matrix + classifications for the Oliver rendering seam (pin in [`oliver-renderer.md`](../oliver-renderer.md)) |
+
+The optional Emoji Kitchen portability experiment lives under:
+
+| Fixture | Role |
+|---------|------|
+| `emoji-kitchen-prototype/` | Non-rendered context cases for a future local-only parser/asset adapter |
 
 HTML integration coverage is in `src/compile.zig` / `src/wikilink.zig`; the
 release gate smokes the missing-fragment fixture for exit **1**. Fragment
-existence is validated on the **HTML** path only (requires Apex-rendered ids);
+existence is validated on the **HTML** path only (requires Oliver-rendered ids);
 IR still projects page→page `reference` edges without heading membership checks.
 
 The repository-root [`../../../fixtures/`](../../../fixtures/) remains the

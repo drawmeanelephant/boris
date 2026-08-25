@@ -1,0 +1,3 @@
+### Docs
+
+- Move completion report template to GitHub templates and slim the docs pointer per [#694](https://github.com/drawmeanelephant/boris/issues/694): add [`.github/PULL_REQUEST_TEMPLATE.md`](/.github/PULL_REQUEST_TEMPLATE.md) and [`.github/ISSUE_TEMPLATE/completion-report.md`](/.github/ISSUE_TEMPLATE/completion-report.md) with the canonical 12-field evidence block, slim [`docs/COMPLETION-REPORT-TEMPLATE.md`](/docs/COMPLETION-REPORT-TEMPLATE.md) to a one-paragraph pointer (<10 lines), and update [`AGENTS.md`](/AGENTS.md) and [`docs/AGENT-PLAYBOOK.md`](/docs/AGENT-PLAYBOOK.md). Links: [`.github/PULL_REQUEST_TEMPLATE.md`](/.github/PULL_REQUEST_TEMPLATE.md), [`docs/COMPLETION-REPORT-TEMPLATE.md`](/docs/COMPLETION-REPORT-TEMPLATE.md), [`AGENTS.md`](/AGENTS.md).

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://drawmeanelephant.github.io/boris/schemas/recipe-scale-view-0.2.0.schema.json",
+  "title": "Boris recipe-scale view (0.2.0)",
+  "description": "Derived scaled Cooklang recipe view. The prose contract in cooklang-compatibility.md remains normative. graph.json and source .cook files are not rewritten. 0.2.0 adds the per-timer scaling marker so an unchanged scalable timer amount is self-describing, never ambiguous (#743).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schemaVersion", "compiler", "factor", "page", "ingredients", "cookware", "timers"],
+  "properties": {
+    "format": { "type": "string", "const": "boris-recipe-scale" },
+    "schemaVersion": { "type": "string", "const": "0.2.0" },
+    "compiler": { "type": "string", "const": "boris/0.8.1+cooklang" },
+    "factor": { "$ref": "#/$defs/factor" },
+    "servings": { "$ref": "#/$defs/servings" },
+    "page": { "type": "string", "minLength": 1 },
+    "ingredients": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ingredient" }
+    },
+    "cookware": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/namedQuantity" }
+    },
+    "timers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/timer" }
+    }
+  },
+  "$defs": {
+    "factor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["num", "den"],
+      "properties": {
+        "num": { "type": "integer", "minimum": 1 },
+        "den": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "servings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "target", "authored"],
+      "properties": {
+        "current": { "type": "integer", "minimum": 1 },
+        "target": { "type": "integer", "minimum": 1 },
+        "authored": { "type": ["string", "null"] }
+      }
+    },
+    "amount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "original", "scaled"],
+      "properties": {
+        "class": { "type": "string", "enum": ["empty", "scalable", "fixed"] },
+        "original": { "type": "string" },
+        "scaled": { "type": "string" }
+      }
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "unit"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/amount" },
+        "unit": { "type": "string" }
+      }
+    },
+    "ingredient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "quantity", "preparation", "recipeRef"],
+      "properties": {
+        "name": { "type": "string" },
+        "quantity": { "$ref": "#/$defs/quantity" },
+        "preparation": { "type": "string" },
+        "recipeRef": { "type": ["string", "null"] }
+      }
+    },
+    "namedQuantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "quantity"],
+      "properties": {
+        "name": { "type": "string" },
+        "quantity": { "$ref": "#/$defs/quantity" }
+      }
+    },
+    "timer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "quantity", "scaling"],
+      "properties": {
+        "name": { "type": "string" },
+        "quantity": { "$ref": "#/$defs/quantity" },
+        "scaling": { "type": "string", "const": "locked" }
+      }
+    }
+  }
+}

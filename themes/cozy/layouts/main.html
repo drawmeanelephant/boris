@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" data-layout="cozy-corner">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · The Cozy Corner</title>
+  <link rel="stylesheet" href="{{asset-url assets/cozy.css}}">
+  {{head}}
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <div class="site-shell">
+    <header class="site-header" role="banner">
+      <p class="site-kicker">personal web archive // 2004—forever</p>
+      <h1>The Cozy Corner</h1>
+      <p class="tagline">Ramblings, thoughts, and web design in the mid-2000s</p>
+    </header>
+    <div class="layout">
+      <main id="main-content" class="site-main" tabindex="-1" data-boris-search-root>
+        <div class="breadcrumb">{{breadcrumb}}</div>
+        <article class="entry">
+          <header class="entry-header">
+            <p class="entry-meta">hand-coded entry · static archive</p>
+            {{metadata}}
+          </header>
+          <div class="entry-content">{{content}}</div>
+          <footer class="entry-footer">comments and TrackBacks are preserved as authored metadata</footer>
+        </article>
+        <section class="recent-posts" aria-labelledby="recent-posts">
+          <h2 id="recent-posts">Recent posts</h2>
+          {{children}}
+        </section>
+      </main>
+      <aside class="sidebar" aria-label="Site sidebar">
+        <section class="sidebar-module">
+          <h2>About Me</h2>
+          <div class="avatar" aria-hidden="true">A</div>
+          <p>I code in plain text editors, drink too much coffee, and keep a
+          small corner of the web tidy.</p>
+        </section>
+        <nav class="sidebar-module" aria-label="Site navigation">
+          <h2>Navigation</h2>
+          {{nav}}
+        </nav>
+        <section class="sidebar-module toc-module" aria-label="On this page" data-boris-search-exclude>{{toc}}</section>
+      </aside>
+    </div>
+    <footer class="site-footer">{{footer}}</footer>
+  </div>
+</body>
+</html>

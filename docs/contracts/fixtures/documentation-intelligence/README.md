@@ -8,6 +8,8 @@ The acceptance tree must include:
 - one root Trunk with two Satellites;
 - a valid root page with no inbound `reference` edge;
 - a shared include referenced by multiple pages;
+- an include-consumed page outside the reserved `includes/` library, proving
+  composition counts as inbound use and is never flagged unreferenced;
 - a multi-hop reference/include impact chain;
 - deterministic output after shuffled fixture creation order;
 - invalid graph and missing-target cases proving analysis does not run on an

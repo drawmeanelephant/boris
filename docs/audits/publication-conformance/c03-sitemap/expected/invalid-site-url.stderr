@@ -1,0 +1,2 @@
+error: invalid value for --input
+usage: boris <command> [options] (run boris --help for the full option list)

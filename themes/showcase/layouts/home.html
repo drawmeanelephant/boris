@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" data-layout="home" data-theme="boris-showcase">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Boris Showcase</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body data-layout="home">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="hero">
+    <div class="hero__inner">
+      <img class="hero__mark" src="{{asset-url assets/img/mark.svg}}" width="48" height="48" alt="">
+      <div>
+        <p class="hero__kicker">Static theme experiment</p>
+        <p class="hero__title">Boris theme showcase</p>
+        <p class="hero__lead">
+          Polished docs + blog layout using Boris themes, local assets,
+          closed layout slots, and <code>--layout-rule</code> selection.
+          Page title from frontmatter appears in the document
+          <code>&lt;title&gt;</code> and body headings.
+        </p>
+      </div>
+    </div>
+  </header>
+  <div class="home-grid">
+    <section class="card home-card">
+      <h2 class="card__title">Browse the site</h2>
+      {{nav}}
+    </section>
+    <main id="main-content" class="card home-card home-card--wide" tabindex="-1">
+      {{metadata}}
+      <article class="prose">
+        {{content}}
+      </article>
+      <section class="home-outline" aria-label="On this page">
+        <p class="sidebar__label">On this page</p>
+        {{toc}}
+      </section>
+    </main>
+  </div>
+  <footer class="footer">{{footer}}</footer>
+</body>
+</html>

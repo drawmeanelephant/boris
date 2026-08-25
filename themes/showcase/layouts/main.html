@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-layout="main" data-theme="boris-showcase">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Boris Showcase</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body data-layout="main">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="navbar">
+    <div class="navbar__brand">
+      <img class="navbar__mark" src="{{asset-url assets/img/mark.svg}}" width="28" height="28" alt="">
+      <span class="navbar__title">Boris Showcase</span>
+      <span class="badge badge--primary">docs</span>
+    </div>
+    {{breadcrumb}}
+  </header>
+  <div class="shell">
+    <aside class="sidebar card">
+      <p class="sidebar__label">Site</p>
+      {{nav}}
+    </aside>
+    <main id="main-content" class="main card" tabindex="-1">
+      {{metadata}}
+      {{toc}}
+      <article class="prose">
+        {{content}}
+      </article>
+      <section class="children-panel" aria-labelledby="main-children-heading">
+        <p class="sidebar__label" id="main-children-heading">Related pages</p>
+        {{children}}
+      </section>
+    </main>
+  </div>
+  <footer class="footer">{{footer}}</footer>
+</body>
+</html>

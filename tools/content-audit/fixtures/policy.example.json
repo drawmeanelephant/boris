@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "eligible_collections": {
+    "lorelog": ["aphorism", "haiku", "limerick"],
+    "mascots": ["aphorism", "haiku", "limerick"],
+    "reference": ["aphorism", "haiku", "limerick"],
+    "posts": ["aphorism", "haiku", "limerick"]
+  },
+  "poetry_collections": {
+    "aphorisms": "aphorism",
+    "haikus": "haiku",
+    "limericks": "limerick"
+  },
+  "excluded_statuses": ["draft"],
+  "excluded_ids": [],
+  "placeholder": {
+    "exact_lines": ["Awaiting context"],
+    "title_prefixes": ["Stub:"],
+    "case_sensitive": false
+  },
+  "density_bands": {
+    "aphorism": [1, 5, 8],
+    "haiku": [1, 3, 5],
+    "limerick": [1, 5, 10]
+  },
+  "exact_mappings": {}
+}

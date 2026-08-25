@@ -8,24 +8,51 @@ const std = @import("std");
 const Io = std.Io;
 const parser = @import("parser.zig");
 const aside = @import("aside.zig");
-const apex = @import("apex.zig");
+const render = @import("render.zig");
 const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const textile = @import("textile.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
 const diag = @import("diag.zig");
 const content_asset = @import("content_asset.zig");
+const doclink = @import("doclink.zig");
+const source_provider = @import("source_provider.zig");
 
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
-    quiet: bool = true,
     nodes: []const graph_mod.Node = &.{},
+    /// Prebuilt wiki id→node map covering exactly `nodes` (#726). When set, the
+    /// wiki rewrite reuses it instead of rebuilding a per-page map; callers
+    /// rendering many pages against one frozen graph should supply it.
+    shared_node_map: ?*const wikilink.NodeMap = null,
+    /// Prebuilt source_path→node map covering exactly `nodes` (#726), for the
+    /// documentation-link rewrite. Same sharing contract as `shared_node_map`.
+    shared_doclink_map: ?*const doclink.SourceNodeMap = null,
     heading_index: ?*const wikilink.HeadingIndex = null,
     /// When non-null, rewrite Markdown image destinations into this page's
     /// sibling asset tree (see `docs/contracts/content-local-assets.md`).
     page_assets: ?*const content_asset.PageAssetBundle = null,
+    /// Optional HTML-path report collector; every diagnostic printed by this
+    /// module is also appended here.
+    diagnostics: ?*diag.Collector = null,
+    /// Oliver serialization profile (#448). `.html` is the byte-identical
+    /// default; `.xhtml` renders XML-compatible output and fails closed on
+    /// verbatim raw HTML (`error.RawHtmlNotXmlWellFormed`).
+    output_profile: render.OutputProfile = .html,
+    /// When set, include expansion reads through this provider instead of `content_dir`.
+    sources: ?source_provider.Provider = null,
+    /// Build-scoped include expansion memo (#760). Callers rendering many
+    /// pages in one build supply one shared cache; each unique fragment is
+    /// then read and expanded once instead of once per consuming page.
+    include_cache: ?*include_mod.IncludeCache = null,
 };
+
+fn readIncludeFromProvider(ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) include_mod.IncludeError![]u8 {
+    const provider: *source_provider.Provider = @ptrCast(@alignCast(ptr));
+    return provider.readInclude(path, allocator);
+}
 
 fn sourceLineAt(source: []const u8, offset: usize) u32 {
     var line: u32 = 1;
@@ -63,18 +90,48 @@ fn printComponentDiagnostics(
     body_offset: usize,
     source_path: []const u8,
     diagnostics: []const aside.Diagnostic,
+    sink: ?*diag.Collector,
 ) !void {
     for (diagnostics) |component_diag| {
         const structured = try componentDiagnostic(gpa, source, body_offset, source_path, component_diag);
         defer gpa.free(structured.message);
-        const text = try diag.formatText(structured, gpa);
-        defer gpa.free(text);
-        std.debug.print("{s}\n", .{text});
+        if (sink) |s| s.append(structured);
+        diag.printText(structured, gpa);
     }
 }
 
-/// Convert a parsed page body when the whole tree explicitly uses Textile.
-/// Returned bytes are views into the supplied Whiteboard allocator.
+fn parserDiagnostic(source_path: []const u8, parsed: parser.Diagnostic) diag.Diagnostic {
+    return .{
+        .severity = .error_,
+        .code = diag.parserCategoryToCode(parsed.category),
+        .message = parsed.message,
+        .remediation = if (parsed.remediation.len > 0) parsed.remediation else "Fix the frontmatter or encoding for this file",
+        .source_path = source_path,
+        .line = parsed.line,
+        .column = parsed.column,
+    };
+}
+
+fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed: parser.Diagnostic, sink: ?*diag.Collector) !void {
+    const structured = parserDiagnostic(source_path, parsed);
+    if (sink) |s| s.append(structured);
+    diag.printText(structured, gpa);
+}
+
+/// An adapted page body plus whatever structured data the adapter recovered.
+pub const AdaptedBody = struct {
+    markdown: []const u8,
+    /// Non-empty only for Cooklang input.
+    recipe: cooklang_seam.Recipe = .{},
+};
+
+/// Convert a parsed page body when the whole tree explicitly uses one of the
+/// non-Markdown input formats. Returned bytes are views into the supplied
+/// allocator, so a caller that needs the recipe to outlive a per-page scratch
+/// arena must pass a longer-lived one.
+///
+/// An adaptation diagnostic is fatal, so it is never gated on `--quiet`: that
+/// flag suppresses progress and success output only.
 pub fn bodyForInput(
     allocator: std.mem.Allocator,
     input_format: identity.InputFormat,
@@ -82,28 +139,60 @@ pub fn bodyForInput(
     body: []const u8,
     body_offset: usize,
     source_path: []const u8,
-    quiet: bool,
-) ![]const u8 {
-    if (input_format == .markdown) return body;
-    const adapted = try textile.toMarkdown(body, allocator);
-    if (adapted.diagnostic) |td| {
-        if (!quiet) {
-            std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
-                source_path,
-                sourceLineAt(source, body_offset) + td.line - 1,
-                td.column,
-                td.message,
-            });
-        }
-        return error.TextileFailed;
+    /// Print degraded-structure warnings to stderr. Only the load-time
+    /// validation call in `compile.zig` prints; the render and heading-harvest
+    /// passes pass false so each warning surfaces exactly once per build.
+    print_warnings: bool,
+) !AdaptedBody {
+    switch (input_format) {
+        .markdown => return .{ .markdown = body },
+        .textile => {
+            const adapted = try textile.toMarkdown(body, allocator);
+            if (adapted.diagnostic) |td| {
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
+                    source_path,
+                    sourceLineAt(source, body_offset) + td.line - 1,
+                    td.column,
+                    td.message,
+                });
+                return error.TextileFailed;
+            }
+            return .{ .markdown = adapted.markdown };
+        },
+        .cook => {
+            const adapted = try cooklang_seam.toMarkdown(body, allocator);
+            if (adapted.diagnostic) |cd| {
+                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: ECOOKLANG: {s}:{d}:{d}: {s} [Use only the bounded Cooklang subset]\n", .{
+                    source_path,
+                    sourceLineAt(source, body_offset) + cd.line - 1,
+                    cd.column,
+                    cd.message,
+                });
+                return error.CooklangFailed;
+            }
+            // Oliver's structural warnings degrade to literal text; they
+            // surface as warnings, not failures. The load-time validation call
+            // passes `print_warnings = true`; the render and heading-harvest
+            // passes stay silent so the build prints each warning once.
+            if (print_warnings and !diag.text_suppressed.load(.unordered)) {
+                for (adapted.warnings) |w| {
+                    std.debug.print("warning: ECOOKLANG: {s}:{d}:{d}: {s}\n", .{
+                        source_path,
+                        sourceLineAt(source, body_offset) + w.line - 1,
+                        w.column,
+                        w.message,
+                    });
+                }
+            }
+            return .{ .markdown = adapted.markdown, .recipe = adapted.recipe };
+        },
     }
-    return adapted.markdown;
 }
 
 /// Render one already-read page source through Boris's ordered HTML body path.
 ///
 /// Ordering is contractual: parse/adapt, include expansion, wiki rewrite,
-/// content-local image rewrite, Aside tokenization, then Apex/Aside body
+/// content-local image rewrite, Aside tokenization, then Oliver/Aside body
 /// streaming. Diagnostics retain the same source-locus behavior as the old
 /// compile-local implementation.
 pub fn renderSource(
@@ -117,54 +206,14 @@ pub fn renderSource(
     options: Options,
 ) ![]const u8 {
     const arena = doc_arena.allocator();
-    const parsed = parser.parse(source);
-    if (parsed.diagnostic != null) return error.ParseFailed;
-    const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, options.quiet);
-
-    var include_fail: include_mod.FailInfo = .{};
-    const expanded = include_mod.expandIncludes(
-        io,
-        content_dir,
-        gpa,
-        arena,
-        body,
-        source_path,
-        &include_fail,
-    ) catch |err| {
-        if (!options.quiet) include_mod.printDiagnostic(gpa, err, source_path, include_fail);
-        return error.IncludeFailed;
-    };
-
-    var wiki_fail: wikilink.FailInfo = .{};
-    const with_wiki = wikilink.rewriteWikiLinksOpts(arena, expanded, options.nodes, output_path, &wiki_fail, .{
-        .heading_index = options.heading_index,
-        .validate_fragments = options.heading_index != null,
-    }) catch |err| {
-        if (!options.quiet) wikilink.printDiagnostic(gpa, err, source_path, wiki_fail);
-        return error.ReferenceFailed;
-    };
-
-    // Content-local Markdown images → published sibling-tree URLs (pre-Apex).
-    const with_assets = if (options.page_assets) |bundle| blk: {
-        var asset_fail: content_asset.FailInfo = .{};
-        break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail) catch |err| {
-            if (!options.quiet) content_asset.printDiagnostic(gpa, err, source_path, asset_fail);
-            return error.AssetFailed;
-        };
-    } else with_wiki;
-
-    const tok = try aside.tokenizeBody(with_assets, arena);
-    if (tok.hasErrors()) {
-        if (!options.quiet) try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics);
-        return error.ComponentFailed;
-    }
+    const prepared = try prepareBody(io, gpa, content_dir, doc_arena, source, source_path, output_path, options);
 
     var html_buf: std.ArrayList(u8) = .empty;
-    for (tok.segments) |seg| {
+    for (prepared.tok.segments) |seg| {
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try apex.render(md, doc_arena);
+                const h = try render.renderProfile(md, doc_arena, options.output_profile);
                 try html_buf.appendSlice(arena, h.bytes);
             },
             .aside => |component| {
@@ -178,6 +227,163 @@ pub fn renderSource(
         }
     }
     return html_buf.items;
+}
+
+/// Render one already-read page source through the same ordered preprocessing
+/// as `renderSource`, then project each segment to deterministic semantic
+/// plain text (`docs/contracts/plain-text-projection.md`). Markdown segments go
+/// through the Oliver typed-document walk in `render.renderPlainText`; Aside and
+/// Details components render their body text without their admonition chrome.
+pub fn renderSourcePlainText(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    doc_arena: *std.heap.ArenaAllocator,
+    source: []const u8,
+    source_path: []const u8,
+    output_path: []const u8,
+    options: Options,
+) ![]const u8 {
+    const arena = doc_arena.allocator();
+    const prepared = try prepareBody(io, gpa, content_dir, doc_arena, source, source_path, output_path, options);
+
+    var text_buf: std.ArrayList(u8) = .empty;
+    for (prepared.tok.segments) |seg| {
+        const text: []const u8 = switch (seg) {
+            .markdown => |md| blk: {
+                if (std.mem.trim(u8, md, " \t\r\n").len == 0) break :blk "";
+                break :blk (try render.renderPlainText(md, doc_arena)).bytes;
+            },
+            .aside => |component| try aside.renderPlainText(component, doc_arena),
+            .details => |component| try aside.renderDetailsPlainText(component, doc_arena),
+        };
+        try appendPlainSegment(&text_buf, arena, text);
+    }
+    if (text_buf.items.len > 0) try text_buf.append(arena, '\n');
+    return text_buf.items;
+}
+
+/// Preprocessing shared by the HTML and plain-text body paths: parse/adapt,
+/// documentation-link rewrite, include expansion, wiki rewrite, content-local
+/// image rewrite, and Aside tokenization — in that fixed order. The returned
+/// segments are slices into `doc_arena`.
+const PreparedBody = struct {
+    tok: aside.TokenizeResult,
+};
+
+fn prepareBody(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    doc_arena: *std.heap.ArenaAllocator,
+    source: []const u8,
+    source_path: []const u8,
+    output_path: []const u8,
+    options: Options,
+) !PreparedBody {
+    const arena = doc_arena.allocator();
+    const parsed = parser.parse(source);
+    if (parsed.diagnostic) |pd| {
+        try printParserDiagnostic(gpa, source_path, pd, options.diagnostics);
+        return error.ParseFailed;
+    }
+    const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, false)).markdown;
+
+    // Graph-backed Markdown documentation links → canonical page URLs
+    // (pre-render). This runs before include expansion so source-relative links
+    // retain the owning page's source context; included fragments are a
+    // deliberate first-slice limitation.
+    const with_doc_links = (if (options.shared_doclink_map) |shared_map|
+        doclink.rewriteWithSourceMap(arena, body, .{
+            .nodes = options.nodes,
+            .source_path = source_path,
+            .output_path = output_path,
+        }, shared_map)
+    else
+        doclink.rewrite(arena, body, .{
+            .nodes = options.nodes,
+            .source_path = source_path,
+            .output_path = output_path,
+        })) catch return error.ReferenceFailed;
+
+    // Scanners below measure offsets in the body slice, but the diagnostics
+    // contract specifies the full-source line. Shift by the frontmatter.
+    const fail_line_base = include_mod.frontmatterLineBase(source, parsed.doc.body_offset);
+
+    var include_fail: include_mod.FailInfo = .{ .line_base = fail_line_base };
+    var provider_storage = options.sources;
+    const include_reader: ?include_mod.IncludeReader = if (provider_storage) |*p| .{
+        .ptr = @ptrCast(p),
+        .readFn = readIncludeFromProvider,
+    } else null;
+    const expanded = (if (options.include_cache) |cache|
+        include_mod.expandIncludesWithCache(
+            io,
+            content_dir,
+            include_reader,
+            gpa,
+            arena,
+            with_doc_links,
+            source_path,
+            &include_fail,
+            cache,
+        )
+    else
+        include_mod.expandIncludesWithReader(
+            io,
+            content_dir,
+            include_reader,
+            gpa,
+            arena,
+            with_doc_links,
+            source_path,
+            &include_fail,
+        )) catch |err| {
+        include_mod.printDiagnostic(gpa, err, source_path, include_fail, options.diagnostics);
+        return error.IncludeFailed;
+    };
+
+    var wiki_fail: wikilink.FailInfo = .{ .line_base = fail_line_base };
+    const with_wiki = (if (options.shared_node_map) |shared_map|
+        wikilink.rewriteWikiLinksWithMapOpts(arena, expanded, shared_map, output_path, &wiki_fail, .{
+            .heading_index = options.heading_index,
+            .validate_fragments = options.heading_index != null,
+        })
+    else
+        wikilink.rewriteWikiLinksOpts(arena, expanded, options.nodes, output_path, &wiki_fail, .{
+            .heading_index = options.heading_index,
+            .validate_fragments = options.heading_index != null,
+        })) catch |err| {
+        wikilink.printDiagnostic(gpa, err, source_path, wiki_fail, options.diagnostics);
+        return error.ReferenceFailed;
+    };
+
+    // Content-local Markdown images → published sibling-tree URLs (pre-render).
+    const with_assets = if (options.page_assets) |bundle| blk: {
+        var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
+        break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail, null) catch |err| {
+            content_asset.printDiagnostic(gpa, err, source_path, asset_fail, options.diagnostics);
+            return error.AssetFailed;
+        };
+    } else with_wiki;
+
+    const tok = try aside.tokenizeBody(with_assets, arena);
+    if (tok.hasErrors()) {
+        try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics, options.diagnostics);
+        return error.ComponentFailed;
+    }
+    return .{ .tok = tok };
+}
+
+/// Join one segment's plain text into the accumulated output with a single
+/// blank line between non-empty segments. Trailing whitespace of each segment
+/// (typically a code block's terminal newline) is treated as a terminator, not
+/// content.
+fn appendPlainSegment(buf: *std.ArrayList(u8), arena: std.mem.Allocator, text: []const u8) !void {
+    const trimmed = std.mem.trim(u8, text, " \t\r\n");
+    if (trimmed.len == 0) return;
+    if (buf.items.len > 0) try buf.appendSlice(arena, "\n\n");
+    try buf.appendSlice(arena, trimmed);
 }
 
 fn writeTestFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !void {
@@ -223,6 +429,19 @@ test "component diagnostics use ECOMPONENT and full-source locator" {
     );
 }
 
+test "parser diagnostics retain shared code and source locator" {
+    const parsed = parser.parse("---\nunknown: value\n---\n\nBody\n");
+    try std.testing.expect(parsed.diagnostic != null);
+    const structured = parserDiagnostic("bad-frontmatter.md", parsed.diagnostic.?);
+
+    try std.testing.expectEqual(diag.Code.EFRONTMATTER, structured.code);
+    try std.testing.expectEqual(@as(?u32, 2), structured.line);
+    try std.testing.expectEqual(@as(?u32, 1), structured.column);
+    const text = try diag.formatText(structured, std.testing.allocator);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.startsWith(u8, text, "error: EFRONTMATTER: bad-frontmatter.md:2:1: "));
+}
+
 test "shared body pipeline preserves include wiki Aside render order" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -241,17 +460,51 @@ test "shared body pipeline preserves include wiki Aside render order" {
 
     const nodes = [_]graph_mod.Node{.{
         .id = "guides/target",
-        .source_path = "target.md",
+        .source_path = "guides/target.md",
         .title = "Target",
     }};
-    const html = try renderSource(io, gpa, content_dir, &whiteboard,
-        "Before\n\n{{include includes/fragment.md}}\n\n[[guides/target]]\n\n<Aside kind=\"tip\">\nInside\n</Aside>\n\nAfter\n",
-        "index.md", "index.html", .{ .nodes = &nodes });
+    const html = try renderSource(io, gpa, content_dir, &whiteboard, "Before\n\n{{include includes/fragment.md}}\n\n[[guides/target]]\n\n[Docs](guides/target.md?x=1&y=2#section)\n\n<Aside kind=\"tip\">\nInside\n</Aside>\n\nAfter\n", "index.md", "index.html", .{ .nodes = &nodes });
 
     const before = std.mem.indexOf(u8, html, "Before").?;
     const included = std.mem.indexOf(u8, html, "Included").?;
     const wiki = std.mem.indexOf(u8, html, "href=\"guides/target.html\"").?;
+    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"guides/target.html?x=1&amp;y=2#section\"") != null);
     const aside_at = std.mem.indexOf(u8, html, "<aside").?;
     const after = std.mem.indexOf(u8, html, "After").?;
     try std.testing.expect(before < included and included < wiki and wiki < aside_at and aside_at < after);
+}
+
+test "plain-text body pipeline keeps words and drops chrome across segments" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/plain-body", .{tmp.sub_path});
+    defer gpa.free(root);
+    try writeTestFile(io, root, "content/includes/fragment.md", "## Included\n");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{root});
+    defer gpa.free(content_path);
+    var content_dir = try Io.Dir.cwd().openDir(io, content_path, .{});
+    defer content_dir.close(io);
+    var whiteboard = std.heap.ArenaAllocator.init(gpa);
+    defer whiteboard.deinit();
+
+    const nodes = [_]graph_mod.Node{.{
+        .id = "guides/target",
+        .source_path = "guides/target.md",
+        .title = "Target",
+    }};
+    const text = try renderSourcePlainText(io, gpa, content_dir, &whiteboard, "Before\n\n{{include includes/fragment.md}}\n\n[[guides/target]]\n\n[Docs](guides/target.md?x=1&y=2#section)\n\n<Aside kind=\"tip\">\nInside **aside**\n</Aside>\n\n<Details summary=\"More\">\nBody text\n</Details>\n\nAfter\n", "index.md", "index.html", .{ .nodes = &nodes });
+
+    // Markdown syntax, admonition chrome, and the `<Aside>`/`<Details>` tags
+    // are gone; include-expanded headings, wiki link labels, and link labels
+    // survive as prose, and segments join with single blank lines.
+    try std.testing.expectEqualStrings(
+        "Before\n\nIncluded\n\nTarget\n\nDocs\n\nInside aside\n\nMore\nBody text\n\nAfter\n",
+        text,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, text, "<Aside") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "<Details") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "**") == null);
 }

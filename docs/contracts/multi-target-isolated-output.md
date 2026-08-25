@@ -1,7 +1,7 @@
 # Multi-Target Isolated Output & Cache Namespaces Contract (P3.3 / P4 ergonomics)
 
 **Status:** normative contract  
-**Version:** Boris/0.8.0 · IR schema 0.2.0
+**Version:** Boris/0.8.1 · IR schema 0.2.0
 
 This document specifies the CLI grammar, target validation, structural cache isolation, scheduling, and error boundaries for multi-target HTML site generation in Boris.
 
@@ -16,19 +16,40 @@ To support multiple explicitly named HTML build targets, we introduce a repeatab
 
 Layout selection:
 ```text
---html-layout <PATH>           # global default (default: layouts/main.html)
+--html-layout <PATH>           # global default (default: themes/boris/layouts/main.html)
 --target-layout <NAME>=<PATH>  # per-target override (NAME must match a --target or "default")
 --layout-rule <TARGET> <SELECTOR> <LAYOUT_PATH>  # repeatable page layout rules (HTML only)
+--target-profile <NAME>=<PROFILE>  # per-target serializer profile: html (default) or xhtml
 ```
 
+Serialization profile:
+- `--target-profile NAME=xhtml` renders the target with Oliver's XHTML
+  output profile — an XML-compatible serialization of the same normalized
+  document (see `oliver-renderer.md`). The default is `html` and is
+  byte-identical to pre-profile output.
+- The profile is a serializer switch, not a new document model: the layout
+  still owns the full-document wrapper, so an XHTML *document* requires the
+  layout template to emit the XML declaration + `<html
+  xmlns="http://www.w3.org/1999/xhtml">`; the page-body slot receives the
+  XHTML fragment.
+- **Fail-closed:** verbatim raw HTML (HTML blocks, inline raw HTML) in a
+  page's content is a hard build error on an XHTML target
+  (`error.RawHtmlNotXmlWellFormed`, surfaced with page/offset context in the
+  diagnostics surface). Flipping a target to XHTML requires a raw-HTML sweep
+  of its content first; the same bytes render fine under `html`.
+
 ### Constraints & Conflict Rules:
-1. **Implies HTML mode:** Providing `--target` or `--target-layout` automatically sets the build mode to `.html`.
+1. **Implies HTML mode:** Providing `--target`, `--target-layout`, or `--target-profile` automatically sets the build mode to `.html`.
 2. **Bare HTML / default target:** If no `--target` is specified, Boris synthesizes a single target named `"default"` with output directory `--html-dir` when provided, otherwise `"dist"`. This applies to bare `boris`, `--html`, and `--html-dir`.
 3. **Mutual Exclusivity:**
    - `--target` cannot be combined with `--html-dir`, since targets explicitly define their own output directories.
    - `--target` is mutually exclusive with `--out`, `--rag`, and `--rag-dir`.
-4. **Permitted Combinations:** `--html` is allowed alongside `--target` to explicitly declare HTML mode, but is redundant. `--html-layout` and `--target-layout` are HTML-only. `--target` may be combined with `--watch`, `--incremental`, and `--jobs` (global to all targets; `--watch` implies incremental).
+4. **Permitted Combinations:** `--html` is allowed alongside `--target` to explicitly declare HTML mode, but is redundant. `--html-layout` and `--target-layout` are HTML-only, and `--target-profile` selects the serializer profile (HTML-only values rejected). `--target` may be combined with `--watch`, `--incremental`, and `--jobs` (global to all targets; `--watch` implies incremental).
 5. **Global options:** `--watch`, `--incremental`, and `--jobs` apply globally to all targets.
+6. **Public sitemap URL:** `--sitemap` / `--sitemap-path` plus one unqualified
+   `--site-url` is accepted only for a single target. More than one target is
+   ambiguous and fails as usage before discovery or publication. See
+   [xml-sitemap.md](xml-sitemap.md).
 
 ### Argument-order independence:
 1. **`--target` order:** Multiple `--target` flags may appear in any order. After parse, `Options.targets` is sorted alphabetically by target name. Equivalent permutations produce equivalent configuration.
@@ -77,7 +98,7 @@ Cache isolation is strictly structural. Each target has its cache namespace and 
 
 ### Configuration Identity Hashing:
 Every page fingerprint hashes a stable **Target Configuration Identity**. The fingerprint includes:
-- Cache-format/version discriminator (e.g., `boris-cache-v2-layout-rules`)
+- Cache-format/version discriminator (e.g., `boris-cache-v3-nav-digest`)
 - Target configuration digest, including:
   - Target name / stable namespace string
   - Global/target-specific layout path and layout template bytes/fingerprint
@@ -92,7 +113,7 @@ This ensures that:
 - Target A's cache manifest cannot be read or overwritten by Target B.
 - Accidental cache hits cannot leak across targets if their configuration, layouts, or settings differ.
 - Old or pre-P3 cache directories (lacking a matching configuration/format discriminator) are safely invalidated, triggering a clean cold rebuild.
-- On-disk `manifest.json` `format_version` must equal the fingerprint discriminator (currently `boris-cache-v2-layout-rules`). Manifests with any other version string are ignored (cold rebuild for that target).
+- On-disk `manifest.json` `format_version` must equal the fingerprint discriminator (currently `boris-cache-v3-nav-digest`). Manifests with any other version string are ignored (cold rebuild for that target).
 
 ---
 

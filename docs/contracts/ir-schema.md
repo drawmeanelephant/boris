@@ -1,35 +1,70 @@
 # Intermediate representation (IR) schema (v0.2)
 
 **Status:** normative Feature 8 contract — F8.1–F8.3 implemented
-**Target product / compiler id:** `0.8.0` / `boris/0.8.0`
-**schemaVersion:** `0.2.0`
+**Target product / compiler id:** `0.8.1` / `boris/0.8.1`
+**schemaVersion:** `0.2.0` base; `0.3.0` / `0.4.0` for optional facets
 
 IR is explicit (`--out DIR` / `--no-rag`) and deterministic. Bare `boris`
 continues to emit HTML under `dist/`; this schema does not change CLI mode
 selection.
 
-The v0.8.0 compiler emits this unchanged dependency shape with
-`schemaVersion: "0.2.0"` and compiler id `boris/0.8.0`.
+The v0.8.1 compiler emits this unchanged dependency shape with
+`schemaVersion: "0.2.0"` and compiler id `boris/0.8.1`.
+
+### Machine-readable schemas
+
+This document is **normative**. For consumers that would otherwise hand-roll a
+parser from prose, the same shapes are published as JSON Schema (draft 2020-12):
+
+| Artifact | Schema |
+|----------|--------|
+| `manifest.json` | [`schemas/ir-manifest-0.2.0.schema.json`](schemas/ir-manifest-0.2.0.schema.json) |
+| `graph.json` | [`schemas/ir-graph-0.2.0.schema.json`](schemas/ir-graph-0.2.0.schema.json) |
+| `completion.json` | [`schemas/boris-completion-1.schema.json`](schemas/boris-completion-1.schema.json) |
+| `build-report.json` | [`schemas/ir-build-report-0.2.0.schema.json`](schemas/ir-build-report-0.2.0.schema.json) |
+| `graph.json` with the `recipe` facet | [`schemas/ir-graph-0.4.0.schema.json`](schemas/ir-graph-0.4.0.schema.json) |
+
+Where the two disagree, this document wins and the schema is a bug. They are
+kept honest mechanically: `zig build test-ir-schema` validates freshly emitted
+IR against each schema and fails on drift in either direction — a required
+property the emitter dropped, or a property the emitter added that the schema
+does not describe. Key order is required by the determinism contract but cannot
+be expressed in JSON Schema, so it remains prose-only here.
 
 ---
 
 ## Artifacts
 
-On a **successful** compile (`ok: true`), Boris publishes three files under the
+On a **successful** compile (`ok: true`), Boris publishes four files under the
 output directory (CLI default `.boris/`):
 
 ```text
 .boris/
   manifest.json       # required — page summaries
   graph.json          # required — frozen nodes + dependency edges + reverse index + nav
+  completion.json     # required — editor completion surface derived from the frozen graph
   build-report.json   # required — ok flag, errorCount, diagnostics
 ```
+
+`completion.json` (`format: "boris-completion-index"`) is a deterministic
+editor/tooling surface: entity ids (with title, parent, role, status, tags,
+and validated semantic relations for display), the relation-kind vocabulary
+(canonical kinds plus any kinds observed in the graph), distinct parent
+targets, and the closed layout-slot set. Wiki-link fragment **heading ids**
+are Oliver-rendered on the HTML path and are deliberately **not** in the IR
+completion index; the entity id list serves the `[[entity#…]]` prefix, and
+heading-level completion remains an HTML-path concern. The author-facing
+frontmatter grammar has its own machine-readable twin:
+[`schemas/boris-frontmatter-1.schema.json`](schemas/boris-frontmatter-1.schema.json)
+(the parsed field set as a JSON object; see
+[frontmatter.md](frontmatter.md)).
 
 On **content validation failure** (`ok: false`):
 
 - `build-report.json` is written with `ok: false` and diagnostics
-- **Graph-dependent** artifacts (`manifest.json`, `graph.json`) are **not**
-  published; any prior copies under the out directory are removed
+- **Graph-dependent** artifacts (`manifest.json`, `graph.json`,
+  `completion.json`) are **not** published; any prior copies under the out
+  directory are removed
 - The process exits **1**
 
 On **I/O/system failure** (exit **3**), files may be missing or partial;
@@ -63,13 +98,42 @@ Every top-level IR document **must** include:
 | Rule | Detail |
 |------|--------|
 | Type | JSON string |
-| v0.2 value | exactly `"0.2.0"` |
+| Base v0.2 value | exactly `"0.2.0"` |
+| Conditional facet values | `"0.3.0"` or `"0.4.0"` — see below |
 | Breaking change | Typed dependency endpoints and `reverseIndex`; old writers must not silently emit these under `"0.1.0"` |
 
 Also required on success paths: a compiler id string of the form
-`boris/<product-version>` (target `boris/0.8.0`). Product version bumps may
+`boris/<product-version>` (target `boris/0.8.1`). Product version bumps may
 update this string without changing the IR schema, but this breaking IR change
 requires both the schema and compiler/product bumps.
+
+### Conditional facet versions
+
+Two optional facets raise the emitted version **only when the corpus actually
+carries them**. A corpus without either is byte-identical to base v0.2, so
+adding a facet to the compiler never reshapes an existing consumer's artifacts.
+
+| Corpus carries | `schemaVersion` | Compiler id | Adds |
+|---|---|---|---|
+| neither facet | `0.2.0` | `boris/0.8.1` | — |
+| author semantic relations | `0.3.0` | `boris/0.8.1+semantic-relations` | top-level `relations` in `graph.json` |
+| Cooklang recipes | `0.4.0` | `boris/0.8.1+cooklang` | `recipe` on every `graph.json` node |
+
+`0.4.0` is a superset of `0.3.0`: a recipe corpus that also carries semantic
+relations still emits `relations`, so one version string describes both rather
+than requiring a matrix of them.
+
+The `recipe` facet is normatively specified in
+[cooklang-compatibility.md](cooklang-compatibility.md) and published as
+[`schemas/ir-graph-0.4.0.schema.json`](schemas/ir-graph-0.4.0.schema.json),
+which `zig build test-ir-schema` validates against freshly emitted recipe IR.
+Two of its properties are contractual and easy to get wrong: quantities are
+**strings** (Cooklang admits `1/2` and `1-2`, so the compiler never converts one
+to a number), and ingredient references are **never merged** (adding `200%g` to
+`1%cup` is not decidable without a unit model).
+
+Consumers MUST branch on `schemaVersion` and MUST tolerate a facet they do not
+understand; they must not infer shape from the compiler id.
 
 ### v0.1 → v0.2 migration
 
@@ -91,7 +155,7 @@ from the compiler id.
 
 | Stage | Name | Input | Output |
 |------:|------|-------|--------|
-| 1 | Discover | content root on disk | set of source paths (`.md` / `.mdx`) |
+| 1 | Discover | content root on disk | set of source paths (`.md` / `.mdx`, or `.textile` / `.cook` in an explicit input mode) |
 | 2 | Identify | source paths | `sourcePath` + path-derived `id` per page |
 | 3 | Parse + promote | file bytes | durable PageDb fields + `bodyOffset` |
 | 4 | Validate pages | pages + `parent` fields | identity/topology diagnostics; **no freeze yet** |
@@ -117,10 +181,25 @@ Every page has exactly one role after resolution:
 | **trunk** | `parent` is null / omitted |
 | **satellite** | `parent` is a non-null string |
 
+### Relationship vocabulary and depth
+
+- A **Trunk** is a root page and has no parent.
+- A **Satellite** is any non-root page with one immediate `parent`; its
+  immediate parent may be either a Trunk or another Satellite.
+- The terminal ancestor of every valid parent chain is a root Trunk.
+- Parent chains may have arbitrary finite depth. Missing parents, self-parenting,
+  cycles, duplicate ids, and case-colliding ids remain invalid.
+- `children` contains only direct children that name the page as their immediate
+  parent. `siblings` contains only the other direct children of the same
+  immediate parent; root Trunks have no siblings.
+- `breadcrumb` contains the complete validated chain from root Trunk to the
+  current page, inclusive. These are navigation projections, not additional
+  graph roles: the only roles are `trunk` and `satellite`.
+
 ### Normative rules
 
 1. A **Trunk** has no `parent`.
-2. A **Satellite** has **exactly one** `parent` naming a **Trunk** entity id.
+2. A **Satellite** has **exactly one** `parent` naming another page entity id.
 3. The `parent` value is a full **entity id** (see
    [identity-and-paths.md](identity-and-paths.md)), **not** a filesystem path
    with `.md`, a URL, or a display title.
@@ -132,14 +211,13 @@ Every page has exactly one role after resolution:
 | Two pages share the same `id` | [`EDUPLICATEID`](diagnostics.md) |
 | `parent` id not present in the page set | [`EPARENTMISSING`](diagnostics.md) |
 | `parent` equals own `id` | [`EPARENTSELF`](diagnostics.md) |
-| `parent` resolves to a Satellite | [`EPARENTNOTTRUNK`](diagnostics.md) |
 | Cycle in parent edges | [`EPARENTCYCLE`](diagnostics.md) |
 
-6. **Satellite-of-satellite** is unsupported: multi-hop chains are hard errors,
-   not a nested navigation feature.
-7. Multiple satellites may share the same Trunk parent.
-8. Valid graphs are a **one-level forest**: roots are Trunks; every Satellite
-   edges to exactly one Trunk.
+6. Multiple Satellites may share the same immediate parent.
+7. A Satellite may parent other Satellites; every valid parent chain has
+   arbitrary finite depth and terminates at a root Trunk.
+8. Valid graphs are rooted forests: roots are Trunks and every Satellite edges
+   to exactly one immediate parent page in the same forest.
 9. **Do not claim the structure is a DAG (or frozen forest) until validation
    succeeds and freeze runs.** On failure, `frozen` is never true and
    `graph.json` is not published.
@@ -150,9 +228,8 @@ Every page has exactly one role after resolution:
 2. [`EDUPLICATEID`](diagnostics.md) (global; detected before map overwrite can hide it)
 3. [`EPARENTSELF`](diagnostics.md)
 4. [`EPARENTMISSING`](diagnostics.md)
-5. [`EPARENTNOTTRUNK`](diagnostics.md)
-6. After all pages processed: [`EPARENTCYCLE`](diagnostics.md) (global)
-7. Include/reference diagnostics in stable locus order after page identity and
+5. After all pages processed: [`EPARENTCYCLE`](diagnostics.md) (global)
+6. Include/reference diagnostics in stable locus order after page identity and
    topology are known valid
 
 Diagnostics are sorted for emit by (`sourcePath`, `line`, `column`, `code`,
@@ -211,7 +288,7 @@ Implementation (`src/pipeline.zig`):
 | Same-directory file rename after staging | Used on success path |
 | Whole-directory atomic replace of `outDir` | **Not** used |
 | Cross-volume / cross-device atomic publish | **Not claimed** |
-| Concurrent readers never observe a torn three-file set | Best-effort via staging; not formally proven on all hosts |
+| Concurrent readers never observe a torn artifact set | Best-effort via staging; not formally proven on all hosts |
 | Staging path names inside JSON | Never — only final `outDir` string as passed to the CLI |
 
 ---
@@ -227,12 +304,21 @@ schemaVersion, compiler, contentRoot, pageCount, pages
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `schemaVersion` | string | yes | `"0.2.0"` |
-| `compiler` | string | yes | e.g. `"boris/0.8.0"` |
+| `compiler` | string | yes | e.g. `"boris/0.8.1"` |
 | `contentRoot` | string | yes | Content root path string as passed to the pipeline (no trailing slash) |
 | `pageCount` | integer | yes | `pages.length` |
 | `pages` | array | yes | Summary entries sorted by `id` |
 
 Diagnostics are **not** on the manifest; they live in `build-report.json`.
+
+### Publication-URL boundary
+
+IR v0.2/v0.3 stores source paths, entity ids, and graph semantics; it does not
+store a public origin, deployment base path, canonical URL, or HTML route URL.
+An IR export therefore has no applicable publication-location assertion and is
+not location-verified by the HTML Pages gate. A future URL-bearing IR field
+would require an explicit schema/contract change rather than an inferred copy
+of HTML or sitemap data.
 
 ### Manifest page summary object
 
@@ -253,7 +339,7 @@ Example (shape only):
 ```json
 {
   "schemaVersion": "0.2.0",
-  "compiler": "boris/0.8.0",
+  "compiler": "boris/0.8.1",
   "contentRoot": "content",
   "pageCount": 2,
   "pages": [
@@ -375,7 +461,7 @@ Key order: `from`, `to`, `kind`. Endpoint object key order is `type`, `value`.
 
 | `kind` | Allowed `from` | Required `to` | Meaning |
 |--------|----------------|---------------|---------|
-| `"parent"` | `page` | `page` | Satellite depends on its Trunk parent |
+| `"parent"` | `page` | `page` | Satellite depends on its direct parent page |
 | `"include"` | `page` or `source` | `source` | Body directly contains an active include of target bytes |
 | `"reference"` | `page` or `source` | `page` | Body directly contains an active wiki-link to target entity |
 
@@ -450,14 +536,14 @@ index, id, breadcrumb, children, siblings
 | `id` | string | Entity id (redundant with `nodes[i].id`; stable for consumers) |
 | `breadcrumb` | array of integer | Parent chain **root → self** (inclusive), node indices |
 | `children` | array of integer | Direct child node indices, entity id ascending |
-| `siblings` | array of integer | Same-Trunk satellite peers **excluding self**, id ascending; **empty for Trunk** |
+| `siblings` | array of integer | Direct peers sharing the same parent, id ascending; **empty for root Trunks** |
 
 #### Normative rules
 
 1. **Input:** frozen nodes only (`parent_index` remapped after id sort). No I/O.
 2. **Breadcrumb:** walk `parent_index` from the page to the root Trunk, then
-   emit root → self. For a Trunk this is `[selfIndex]`. For a Satellite in the
-   v0.2 one-level forest this is `[parentIndex, selfIndex]`.
+   emit root → self. For a Trunk this is `[selfIndex]`; deeper pages include
+   every validated ancestor in order.
 3. **Children:** every node `c` with `c.parentIndex == page.index`, ordered by
    entity id. Equivalent to scanning the id-sorted node array once and
    appending — **do not** sort via hash-map iteration.
@@ -465,8 +551,8 @@ index, id, breadcrumb, children, siblings
    children of `P` excluding self (id order). If the page is a Trunk,
    `siblings` is `[]` (other roots are **not** siblings).
 5. **Empty arrays** are written as `[]`, never omitted.
-6. v0.2 forests are one-level: satellites never have children under valid
-graphs; multi-hop chains remain hard errors at validate time.
+6. Valid forests may have arbitrary finite depth; cycles remain hard errors at
+   validate time.
 
 Example (dependency fields abbreviated; the F8 fixture pins the complete edge
 and reverse-index skeleton):
@@ -522,18 +608,41 @@ and reverse-index skeleton):
 Key order (root):
 
 ```text
-schemaVersion, ok, contentRoot, outDir, pageCount, errorCount, diagnostics
+schemaVersion, compiler, ok, contentRoot, outDir, pageCount, errorCount, diagnostics
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `schemaVersion` | string | `"0.2.0"` |
+| `compiler` | string | Compiler identity; identical to `manifest.json`'s `compiler` on the same run (e.g. `"boris/0.8.1"`, or a `+`-suffixed variant for Cooklang / semantic-relations corpora) |
 | `ok` | boolean | `true` iff zero error diagnostics and freeze succeeded |
 | `contentRoot` | string | Same string as pipeline option |
 | `outDir` | string | Same string as pipeline option |
 | `pageCount` | integer | Number of page nodes retained after successful parses |
 | `errorCount` | integer | Count of severity=`error` diagnostics |
 | `diagnostics` | array | Sorted diagnostics (see [diagnostics.md](diagnostics.md)) |
+
+`compiler` is written on **both** the success and the content-failure path, so
+a tool reading diagnostics from a failed run can always attribute them to the
+exact compiler that produced them without consulting a sidecar.
+
+### Compiler identity across artifacts
+
+The same compiler identity is recorded under deliberately different field
+names per artifact family. Consumers key off one lookup per artifact; no
+rename is planned because renaming would break existing readers:
+
+| Artifact | Field | Value source |
+|----------|-------|--------------|
+| `manifest.json` | `compiler` | `artifactCompilerId` |
+| `build-report.json` | `compiler` | `artifactCompilerId` |
+| `completion.json` | `compiler_id` | `artifactCompilerId` |
+| `html-build-report` (`build`/`validate --report`) | `compilerId` | `pipeline.compiler_id` |
+| `graph.json` | — | identity-free by design; topology only |
+
+`graph.json` deliberately carries no identity field: it is the frozen topology
+artifact and is always published alongside `manifest.json`, whose `compiler`
+field is the identity of record for that artifact set.
 
 ### Diagnostic object (in report)
 
@@ -580,7 +689,7 @@ component lists under this schema version.
 | Feature | Status |
 |---------|--------|
 | HTML `dist/` as IR output | **Out of IR** — HTML is the default CLI mode but not part of this schema; see [html-output.md](html-output.md) |
-| Apex markdown render | Out of IR acceptance |
+| Markdown render output | Out of IR acceptance |
 | Product RAG export | Optional product path; separate [rag-export.md](rag-export.md) |
 | Full YAML frontmatter | Rejected — [frontmatter.md](frontmatter.md) |
 | Concurrency / worker pools | **Out of IR emit** — HTML-only via [parallel-rendering.md](parallel-rendering.md) |

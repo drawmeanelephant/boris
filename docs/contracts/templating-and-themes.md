@@ -2,13 +2,14 @@
 
 **Status:** F9.1 + F9.2 + layout selection implemented (closed layout plan,
 metadata/footer/asset-url, target-owned assets, layout UTF-8 at split,
-orphan asset scrub, `--layout-rule` selection). Later slices (external
-stylesheets, DaisyUI experiment, IR layout/asset edges) remain open per §12.
+orphan asset scrub, `--layout-rule` selection). The default Boris theme ships
+an external copied stylesheet; DaisyUI and IR layout/asset edges remain open
+per §12.
 
 **Authority:** normative for the F9.1/F9.2 HTML theme path. Subordinate contracts:
 [HTML output](html-output.md), [multi-target](multi-target-isolated-output.md),
 [identity/path](identity-and-paths.md). Does not change frontmatter grammar,
-IR `schemaVersion`, or the Apex trust model.
+IR `schemaVersion`, or the raw-HTML trust model.
 
 This design keeps Boris as a Zig compiler that emits static HTML. It adds no
 MDX, JavaScript execution, runtime hydration, child-process renderer, live CDN,
@@ -16,16 +17,18 @@ or application-language dependency.
 
 ## 1. Problem and design boundary
 
-`layouts/main.html` is already useful for a small site: it has `content`,
-`title`, `nav`, `breadcrumb`, `toc`, and `children` markers. Real documentation sites
-usually need a theme-owned stylesheet, a stable footer, page metadata, several
-page shapes, and more than one output target. The practical extension is a
-small, closed template vocabulary plus explicit static asset ownership.
+`themes/boris/layouts/main.html` is the shipped default theme. Additional
+first-class themes live beside it under [`themes/`](../../themes/README.md);
+`examples/` holds sample sites and unfinished studies, not a second theme
+attic. Real documentation sites usually need a theme-owned stylesheet, a
+stable footer, page metadata, several page shapes, and more than one output
+target. The practical extension is a small, closed template vocabulary plus
+explicit static asset ownership.
 
 The design has four boundaries:
 
 1. Markdown, frontmatter, graph validation, includes, wiki-links, Aside tokens,
-   and Apex remain the existing pipeline.
+   and rendering remain the existing pipeline.
 2. A layout is trusted static HTML with named Boris insertion points. It is not
    a programming language: no conditionals, loops, expressions, arbitrary
    partial calls, or user-defined functions.
@@ -60,6 +63,12 @@ Only regular files below `layouts/`, the optional `footer.html`, and
 separators, cannot be absolute, and cannot contain empty, `.` or `..`
 segments. A theme cannot write outside its target output root.
 
+Shipped themes must stay offline: no remote stylesheets, fonts, or scripts;
+no linked or vendored JavaScript. A named webfont requires the font files
+and their license under the theme. A vendored CSS library is allowed only as
+already-present static bytes with name, version, license, and upstream URL
+recorded in that theme's README. See [`themes/README.md`](../../themes/README.md).
+
 The first implementation may accept a layout path directly and derive its
 theme root from an explicit `--theme` path. A theme manifest is not required
 for this design; if one is later introduced, it must be a Boris-owned closed
@@ -69,27 +78,48 @@ configuration format and cannot turn layouts into executable content.
 
 Templates are UTF-8 HTML files. Boris scans the complete file before compiling
 content. Static bytes are streamed unchanged; slot values are generated per
-page. Every known marker may occur at most once.
+page.
+
+The vocabulary has two construct kinds with different multiplicity rules:
+
+- **Slots** — the eleven closed markers in §3.1. Each slot marker may occur at
+  most **once** per layout; a duplicate is a hard layout error.
+- **`asset-url` helper** (§3.2) — argument-bearing and **repeatable**, with
+  bounded multiplicity: up to **16** occurrences per layout, and the total
+  layout segment count (static text + slots + asset-urls) is capped at
+  **32**; beyond either bound is a hard layout error
+  (`LayoutTooManyAssetUrls` / `LayoutTooManySegments`). Each occurrence
+  emits one page-relative URL; the referenced file is copied once per
+  distinct path.
 
 ### 3.1 Slots
 
 | Marker | Required | Value and escaping |
 |---|---:|---|
-| `{{content}}` | yes | Rendered Apex Markdown and ordered Aside HTML. Raw HTML behavior remains the current trusted-author behavior. |
+| `{{content}}` | yes | Rendered Markdown (Oliver) and ordered Aside HTML. Raw HTML behavior remains the current trusted-author behavior. |
 | `{{title}}` | no | Page `title`, or entity id when the title is absent; HTML-escaped text. |
-| `{{nav}}` | no | Deterministic graph forest from the frozen Trunk/Satellite graph; generated HTML as in `html-output.md`. |
+| `{{nav}}` | no | Deterministic graph forest from the frozen Trunk/Satellite graph; generated HTML as in `html-output.md`. May also be written `{{nav depth=N}}` (N ≥ 1, ASCII digits) to cap the rendered levels (level 1 = root Trunks); plain `{{nav}}` stays unbounded. Both spellings are the same once-per-layout slot. |
 | `{{breadcrumb}}` | no | Root-to-current graph chain; generated HTML as in `html-output.md`. |
-| `{{toc}}` | no | Page-local h1–h3 outline from Apex-emitted heading ids; generated HTML as in `html-output.md`. |
+| `{{toc}}` | no | Page-local h1–h3 outline from Oliver-emitted heading ids; generated HTML as in `html-output.md`. |
 | `{{children}}` | no | Deterministic direct-child list from the frozen graph; title-or-id labels and links are escaped, and childless pages emit empty. No recursive graph semantics or query language is introduced. |
 | `{{metadata}}` | no | Boris-generated page metadata fragment. Only current closed frontmatter fields are represented; text and attribute values are escaped. |
+| `{{relations}}` | no | Current page's outgoing validated semantic relations with canonical links and stable kind attributes/classes; empty when none. |
+| `{{backlinks}}` | no | Incoming relations derived from the validated semantic relation set with canonical links and stable kind attributes/classes; empty when none. |
 | `{{footer}}` | no | Contents of the theme's optional `footer.html`, or the empty string. This is theme-owned trusted static HTML, not page-authored executable content. |
+| `{{head}}` | no | Compiler-owned head-only output (Standard.site document links, Nostr naddr alternates). Empty when the page has nothing to emit. Layouts opt in; omitting the slot never silently claims verification. |
 
-`{{content}}` must occur exactly once. Missing or duplicate markers, unknown
-markers, invalid UTF-8, or an unclosed marker are hard layout errors before
-content compilation. Layout UTF-8 is validated at **plan split / load**
-(`Layout.split` / `loadLayout`), not later during page writes. An absent
-optional slot emits no wrapper of its own, so a theme controls its surrounding
-HTML.
+`{{content}}` must occur exactly once. Missing `{{content}}`, a duplicate or
+unknown marker, invalid UTF-8, or an unclosed marker are hard layout errors
+before content compilation. Layout UTF-8 is validated at **plan split /
+load** (`Layout.split` / `loadLayout`), not later during page writes.
+
+**Empty output.** A slot omitted from the layout emits nothing, so a theme
+controls its surrounding HTML. A slot present in the layout but with no data
+for a page emits the empty fragment with no wrapper of its own: `{{children}}` on
+a childless page, `{{footer}}` when the theme has no `footer.html`,
+`{{relations}}` / `{{backlinks}}` when the page has none. `{{asset-url}}` is
+never empty: each occurrence resolves to a real theme-owned file (missing
+file → `AssetNotFound`) or the layout fails to load.
 
 `metadata` is intentionally boring and deterministic. A future implementation
 may emit a stable fragment such as:
@@ -136,9 +166,11 @@ are not rewritten by Boris.
 
 ## 4. Layout selection
 
-Frontmatter remains the closed five-key grammar. In particular, Boris must not
-add a `layout` or `template` frontmatter key. Layout choice is build
-configuration (`--layout-rule`), not page-authored executable metadata.
+Frontmatter remains the closed grammar defined by
+[`frontmatter.md`](frontmatter.md): `id`, `title`, `parent`, `status`, `tags`,
+`relations`, `published_at`, and `summary`. In particular, Boris must not add a
+`layout` or `template` frontmatter key. Layout choice is build configuration
+(`--layout-rule`), not page-authored executable metadata.
 Unknown keys such as `layout:` continue to produce `EFRONTMATTER`.
 
 ### 4.1 CLI grammar
@@ -182,7 +214,7 @@ For each `(target, page)` pair:
 3. Role rule for the page’s resolved role.
 4. Target fallback (`--target-layout NAME=PATH`).
 5. Global fallback (`--html-layout`, including `--theme ROOT` sugar).
-6. Product default `layouts/main.html`.
+6. Product default `themes/boris/layouts/main.html`.
 
 Rule declaration order never affects selection. Canonical rule order for
 diagnostics and plan digests is `(selector rank, selector bytes, layout path)`.
@@ -202,7 +234,7 @@ apply to the whole target; rules do not create per-page asset namespaces.
 
 ### 4.4 Cache and watch
 
-HTML cache format is `boris-cache-v2-layout-rules`. Each page entry records
+HTML cache format is `boris-cache-v3-nav-digest`. Each page entry records
 `selected_layout`. Fingerprints hash the effective selected layout path and
 bytes (plus theme material for that layout), not the full rule table. Watch
 observes every declared layout path; a changed layout rebuilds only targets
@@ -283,7 +315,7 @@ changing the existing cache namespace rules.
 ## 7. Trust, raw HTML, and external stylesheets
 
 Boris currently documents the HTML path as intended for trusted authors, and
-Apex may pass raw HTML through. A theme layout and `footer.html` are also
+The renderer passes raw HTML through. A theme layout and `footer.html` are also
 trusted build inputs. F9 must not advertise them as a sanitizer or security
 boundary.
 
@@ -360,6 +392,10 @@ For the first implementation:
   once asset publication is independently tracked.
 - A `nav` layout retains the current global nav-material behavior: a relevant
   graph title/parent/role change dirties every page using that layout.
+- A layout using `{{relations}}` or `{{backlinks}}` includes page-local semantic
+  relation material in its fingerprint. A changed relation dirties the source
+  and affected backlink pages; a page whose layout has neither slot does not
+  include unrelated relation material.
 - Page-specific dependency records are target-keyed. No cache entry from one
   target can satisfy another target merely because the page id matches.
 
@@ -378,20 +414,22 @@ remain per-target and deterministic.
 
 Migration is deliberately additive:
 
-1. Keep `layouts/main.html` working as the v0.3.1 default. Existing layouts
-   containing only the current five markers remain valid.
+1. Ship `themes/boris/layouts/main.html` as the default, with its stylesheet
+   copied from `themes/boris/assets/`. Existing layouts containing only the
+   current five markers remain valid when selected explicitly.
 2. Continue accepting `--html-layout PATH` and `--target-layout NAME=PATH`.
    These are the compatibility bridge for a layout outside a theme root.
 3. Introduce a theme root with `layouts/main.html` and `assets/`; `--theme`
    should be syntactic sugar for selecting that layout plus its asset root,
    not a second renderer.
-4. Move the current inline `<style>` from `layouts/main.html` into a copied
-   theme CSS file, then replace it with `{{asset-url assets/css/docs.css}}`.
+4. Keep CSS in a copied theme asset and link it with
+   `{{asset-url assets/css/boris.css}}`; do not grow the default layout with
+   inline stylesheet rules.
 5. Add `metadata`, `footer`, and page layout rules only when their contracts
    and fixture goldens are implemented. A missing optional marker does not
    force every existing layout to change.
 6. Keep the existing Trunk/Satellite graph, `parent` key, output path rules,
-   Aside stream, Apex in-process adapter, and target staging/cache behavior.
+   Aside stream, the Oliver seam, and target staging/cache behavior.
 
 No migration step changes author frontmatter or requires a JavaScript build
 stage. A legacy layout with direct relative `href` values may continue to
@@ -418,7 +456,7 @@ assets/css/docs.css              byte-identical to the theme input
 ```
 
 Generated title, labels, tags, and ids are escaped. The page body preserves
-the existing Apex/Aside behavior.
+the existing render/Aside behavior.
 
 ### Selection and isolation
 
@@ -463,6 +501,7 @@ Node, a bundler, or network access.
 | 8 | Layout UTF-8 boundary | **F9.2** — `Layout.split` / `loadLayout` (`LayoutInvalidUtf8`) |
 | 9 | Orphan theme-asset scrub | **F9.2** — post-publish under managed theme roots only |
 | 10 | Footer UTF-8 boundary | **Accepted** — `footer.html` validated at theme load (`FooterInvalidUtf8`); same encoding contract as layout, even though footer is not marker-scanned |
+| 11 | Bounded site navigation | **Accepted** — `{{nav depth=N}}` (N ≥ 1) caps rendered levels; grammar extension over layout-rule or CSS-only alternatives (#744(3)) |
 
 ### Known limitations (not silent failures)
 
@@ -496,8 +535,9 @@ Node, a bundler, or network access.
 
 - `--layout-rule TARGET SELECTOR LAYOUT_PATH` with `id:` / `glob:` / `role:`.
 - Deterministic precedence, one theme root per target, cache format
-  `boris-cache-v2-layout-rules` with per-page `selected_layout`.
+  `boris-cache-v3-nav-digest` with per-page `selected_layout`.
 - Fixtures: `docs/contracts/fixtures/layout-rules/`; pure selector module
   `src/layout_select.zig`. No IR schema change; no DaisyUI/Node/CSS pipeline.
 
-The existing `layouts/main.html` remains the regression fixture throughout.
+Explicit legacy layouts remain regression fixtures; the product default is the
+managed Boris theme.

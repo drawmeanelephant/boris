@@ -1,0 +1,27 @@
+---
+id: index
+title: Textile Tribute
+status: published
+tags: [textile]
+---
+h1. Textile Tribute
+
+h2. A heading
+
+A paragraph with *strong*, _emphasis_, +inserted+, -deleted-, and @inline code@.
+
+"Official docs":https://textile-lang.com/ and "mail":mailto:dean@example.test and a "fragment":#note and the "satellite":./guides/satellite.html.
+
+Literal comparison: 5 < 7 & 8 > 3 with Unicode café 東京 and emoji 🦫.
+
+bq. A small language can leave a long shadow.
+
+* One
+* Two
+
+p. Then an ordered list:
+
+# First
+# Second
+
+h3. Note

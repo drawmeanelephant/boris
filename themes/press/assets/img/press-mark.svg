@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Press Notes mark</title>
+  <desc id="desc">A crimson square containing a cream typographic T.</desc>
+  <rect width="64" height="64" rx="6" fill="#8c2323"/>
+  <path fill="#f8f5ef" d="M14 15h36v8H37v27h-10V23H14z"/>
+  <path fill="#d6a04a" d="M18 12h28v3H18z"/>
+</svg>

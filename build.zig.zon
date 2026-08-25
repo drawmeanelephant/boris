@@ -1,9 +1,23 @@
 .{
     .name = .boris,
-    .version = "0.8.0",
+    .version = "0.8.1",
     .fingerprint = 0x6cd378330da76efc, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        // Oliver pin (shared). oliver#77 merged (d742494): public Cooklang
+        // string-quantity classify/scale and mixed numbers, on the same
+        // revision that already carries the Markdown renderer extensions
+        // (oliver#39). See docs/contracts/oliver-renderer.md for the pin
+        // table.
+        .oliver = .{
+            .url = "https://github.com/drawmeanelephant/oliver/archive/d74249415975d652654e521b7abea40c85b13255.tar.gz",
+            .hash = "oliver-0.0.0-LOsZkBCwIgDvYwuL75BY2DBWzhUvfeliKZ7vQlKfi5-I",
+        },
+        .secp256k1 = .{
+            .url = "git+https://github.com/bitcoin-core/secp256k1#6e2c8bc4ecdc6e71dbe7a368f360d8d453ce435d",
+            .hash = "N-V-__8AAFwQbQAc-L8ZUw4rqyk_OWdYX4-V8crqiWlJ1dhl",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

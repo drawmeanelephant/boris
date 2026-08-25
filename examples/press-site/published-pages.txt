@@ -1,0 +1,13 @@
+archive.html
+archive/001-first-roll.html
+archive/040-night-bus.html
+archive/120-last-light.html
+blog.html
+blog/first-post.html
+blog/second-post.html
+guides.html
+guides/components.html
+guides/getting-started.html
+index.html
+reference.html
+reference/slots.html

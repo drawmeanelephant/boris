@@ -4,6 +4,27 @@
 **Module:** `src/parser.zig` (product frontmatter); pipeline invokes parse before
 Aside tokenize and graph validation.
 
+**Machine-readable twin:** the parsed field set as a JSON object is published
+as [`schemas/boris-frontmatter-1.schema.json`](schemas/boris-frontmatter-1.schema.json)
+(draft 2020-12). Frontmatter source is not JSON, so tools convert parsed
+fields to that object shape before validating — the same conversion the
+schema-conformance test applies to every fixture tree. Key order is
+irrelevant; the closed key set (`additionalProperties: false`) and the
+bounds below are normative.
+
+Two caveats for schema consumers, because JSON Schema cannot express the
+parser's exact rules:
+
+1. **Length units.** The schema's `maxLength` counts **Unicode code points**
+   (JSON Schema semantics); the parser's limits in the bounds table are
+   **UTF-8 bytes**. A multibyte value can therefore pass the schema and still
+   exceed the parser's byte bound — treat the parser as the authority and the
+   schema as a looser pre-check.
+2. **Calendar validity.** The `published_at` pattern checks shape only; the
+   parser additionally requires a **real Gregorian calendar date** (via
+   `rss_date.parse`, e.g. `2026-02-29T…` is rejected). Editors validating
+   against the pattern alone will not catch invalid calendar dates.
+
 Boris frontmatter is a **deliberately closed, bounded grammar**. It is **not**
 general YAML and must never be documented or implemented as “YAML support.”
 Implementations must not grow into a YAML 1.1/1.2 subset by accident.
@@ -26,7 +47,8 @@ Implementations must not grow into a YAML 1.1/1.2 subset by accident.
 
 ## Ownership of parsed metadata
 
-At the parser layer, field values (`id`, `title`, `parent`, tag tokens, and the
+At the parser layer, field values (`id`, `title`, `parent`, `published_at`,
+`summary`, tag tokens, and the
 body slice) are **views into the caller-supplied source buffer**. The parser
 does not allocate copies of field text. Callers that need durable storage
 (PageDb / retain arena) must **dupe** before releasing the source buffer.
@@ -128,16 +150,43 @@ Do **not** half-parse these; emit [`EFRONTMATTER`](diagnostics.md):
 
 ## Canonical author-facing keys (closed set)
 
-Exactly these six keys are accepted. **No aliases.**
+Exactly these nine keys are accepted. This is still a closed grammar, not
+open YAML. The ninth key is a documented Cooklang-convention exception.
 
 | Key | Required | Value | Notes |
 |-----|----------|-------|-------|
 | `id` | no | plain/dquoted entity id | Override path-derived id; shape rules in [identity-and-paths.md](identity-and-paths.md) |
 | `title` | no | plain/dquoted string | ≤512 UTF-8 bytes |
-| `parent` | no | plain/dquoted entity id | Foreign key to a **Trunk** entity id; ≤255 bytes |
-| `status` | no | `draft` \| `published` \| `archived` | Exact spellings only |
+| `parent` | no | plain/dquoted entity id | Foreign key to a direct parent page; ≤255 bytes |
+| `status` | no | `draft` \| `published` \| `archived` | Exact spellings only. Eligibility is projection-specific: on the default HTML target a draft is emitted but not advertised (see [html-output.md](html-output.md) § Status gating); Standard.site, Nostr, RSS, sitemap, and search exclude drafts; IR and RAG keep every page. |
 | `tags` | no | `[a, b, "c"]` only | Bracket list; plain or double-quoted items |
-| `relations` | no | `[kind=target, …]` only | Bounded semantic relations; closed kinds and validation in [semantic-relations.md](semantic-relations.md) |
+| `relations` | no | `[kind=target, …]` only | ≤128 bounded semantic relations; token grammar and validation in [semantic-relations.md](semantic-relations.md) |
+| `published_at` | no | `YYYY-MM-DDTHH:MM:SSZ` | Explicit UTC calendar time only; requires `summary` when present |
+| `summary` | no | plain/dquoted string | One line, 1–1,024 UTF-8 bytes; may occur without `published_at` |
+| `servings` | no | leading positive integer, optional units | Cooklang convention count; see below |
+
+### Cooklang exception: `servings` / `serves` / `yield`
+
+Cooklang [canonical metadata](https://cooklang.org/docs/conventions/) names
+`servings`, `serves`, and `yield` as the keys for “how many people this is
+for,” used to scale quantities. Boris accepts those three **author spellings**
+as one field. They are not a second grammar and they do not open the door:
+
+- The stored field is always `servings`.
+- `serves` and `yield` are input aliases for that same field. Two of them on
+  one page is a duplicate key → [`EFRONTMATTER`](diagnostics.md).
+- The value is a **leading positive integer**, optionally a space/tab and
+  units text (`2`, `15 cups worth`). `0`, `many`, `2.5`, and `1/2` fail.
+- Missing `servings` means current count **1** at `recipe-scale --servings`
+  time. The page still builds.
+- Every other Cooklang metadata name stays unknown: `source`, `author`,
+  `course`, `locale`, `time`, `prep time`, `cook time`, `difficulty`,
+  `cuisine`, `diet`, `image`, and the rest → [`EFRONTMATTER`](diagnostics.md).
+- `servings` is not written into `graph.json`. Scale remains a command
+  ([cooklang-compatibility.md](cooklang-compatibility.md)).
+
+This is **not** Astro-style open YAML. Adding another Cooklang metadata name
+requires the same explicit contract change.
 
 ### Forbidden key names and forms
 
@@ -164,7 +213,7 @@ If content uses `parentEntry` or `parent_entry`, the compiler treats them as
 | **Product parse path** (`src/parser.zig`) | Shared by IR, RAG **input**, and experimental HTML. `parentEntry` / `parent_entry` are **not** aliases: they fail as unknown keys → [`EFRONTMATTER`](diagnostics.md). No silent map to `parent`. |
 | **IR JSON** | Field name is always `parent` (never `parentEntry`). |
 | **RAG export** | Catalog column and exported page metadata may use the name **`parent_entry`** for the same parent entity-id string (or `""`). That is **export packaging only**, not author grammar. See [rag-export.md](rag-export.md). |
-| **Non-product helpers** | `frontmatter.zig` (fuzz) and historical `harness.zig` must not reintroduce a second accepted author dialect. Prefer `parent` only. |
+| **Non-product tools** | Standalone review and migration tools may inspect source for reporting, but they are not author-grammar authorities and must not accept a dialect that the product parser would reject. Prefer `parent` only. |
 
 Historical notes and older code sometimes described a second dialect that accepted `parentEntry` on HTML/RAG helpers. **Active product source input does not.** Accepting those keys as aliases would not change Trunk/Satellite semantics (same foreign-key id string), but would create a dual grammar that can diverge — which this contract forbids.
 
@@ -179,12 +228,13 @@ There is **no** scheduled removal date in repository planning material for the R
 | `parent` omitted or null | **Trunk** |
 | `parent` present (non-empty entity id) | **Satellite** |
 
-Further graph rules (missing parent, self-parent, satellite-of-satellite,
-cycles, duplicate ids) are specified in [ir-schema.md](ir-schema.md) and
+Further graph rules (missing parent, self-parent, cycles, duplicate ids) are
+specified in [ir-schema.md](ir-schema.md) and
 diagnostics in [diagnostics.md](diagnostics.md).
 
-A **Trunk** has no `parent` field (or omits it).  
-A **Satellite** has **exactly one** `parent` naming a Trunk entity id.
+A **Trunk** has no `parent` field (or omits it). A **Satellite** has exactly
+one `parent` naming another page in the hierarchy. A Satellite may itself have
+Satellites; parent chains are finite and must be acyclic.
 
 ---
 
@@ -197,6 +247,9 @@ A **Satellite** has **exactly one** `parent` naming a Trunk entity id.
 | `id` | `null` at parse time; pipeline later uses path-derived entity id ([identity-and-paths.md](identity-and-paths.md)) |
 | `status` | `null` (unset) |
 | `tags` | empty list |
+| `published_at` | `null` |
+| `summary` | `null` |
+| `servings` | `null` (scale treats missing current as `1`) |
 
 ### Empty page with no frontmatter
 
@@ -219,7 +272,7 @@ with no opening `---` fence.
 ## Body
 
 Everything after the closing fence (or the entire file if no frontmatter) is
-**opaque body bytes** for the metadata / IR stage. Markdown AST, Apex render,
+**opaque body bytes** for the metadata / IR stage. Markdown AST, render,
 and component tokenization (`<Aside>`) are **out of scope** for the v0.1 IR
 compiler surface.
 
@@ -236,13 +289,21 @@ Unless noted, overflow → [`EFRONTMATTER`](diagnostics.md).
 | Frontmatter block bytes (inside fences, excluding fence lines) | 64 KiB | [`EFRONTMATTER`](diagnostics.md) |
 | Frontmatter field count (non-blank field lines) | 32 | [`EFRONTMATTER`](diagnostics.md) |
 | Title bytes | 512 | [`EFRONTMATTER`](diagnostics.md) |
+| Summary bytes | 1,024 | [`EFRONTMATTER`](diagnostics.md) |
+| Servings value bytes | 64 | [`EFRONTMATTER`](diagnostics.md) |
 | Entity id / parent value bytes | 255 | length → [`EFRONTMATTER`](diagnostics.md); illegal **id** shape → [`EINVALIDPATH`](diagnostics.md) |
 | Tag count | 32 | [`EFRONTMATTER`](diagnostics.md) |
 | Tag token bytes (after quote strip) | 64 | [`EFRONTMATTER`](diagnostics.md) |
 
 Constants live on `page.zig` (`max_source_bytes`, `max_frontmatter_bytes`,
-`max_frontmatter_fields`, `max_title_bytes`, `max_entity_id_bytes`,
-`max_tag_count`, `max_tag_bytes`) and are re-exported by `parser.zig`.
+`max_frontmatter_fields`, `max_title_bytes`, `max_summary_bytes`,
+`max_servings_bytes`, `max_entity_id_bytes`, `max_tag_count`, `max_tag_bytes`)
+and are re-exported by `parser.zig`.
+
+Authoring-page readers enforce the total-source bound before parsing: they
+allocate at most `max_source_bytes + 1` bytes, with the extra byte preserving
+the parser's stable `EFRONTMATTER` oversized-source diagnostic. Include
+fragments retain their separate expansion budget.
 
 ---
 

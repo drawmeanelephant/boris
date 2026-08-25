@@ -1,0 +1,1 @@
+error: ETEXTILE: t.textile:1:1: this Textile block type is outside the compatibility subset [Use only the bounded Textile compatibility subset]

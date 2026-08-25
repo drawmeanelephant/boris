@@ -17,7 +17,7 @@ value). Curly punctuation is fine in the **body**.
 
 ## Café résumé
 
-Diacritics in headings are allowed. Apex GFM heading ids typically strip them
+Diacritics in headings are allowed. Oliver heading ids strip them
 (see [[guides/heading-fragments]]). Link with the rendered id, not a guessed
 Unicode slug.
 

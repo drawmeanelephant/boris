@@ -1,0 +1,14 @@
+boris: load  scanning fixtures/content/invalid
+boris: roll  parsing 11 page(s)
+boris: ignite validating graph
+boris: content validation failed (10 error(s))
+error: EPARENTCYCLE: cycle/a.md:1:1: parent cycle involving cycle-a -> cycle-b -> cycle-a [Break the cycle by changing or removing a parent link]
+error: EPARENTCYCLE: cycle/b.md:1:1: parent cycle involving cycle-a -> cycle-b -> cycle-a [Break the cycle by changing or removing a parent link]
+error: EDUPLICATEID: duplicate-id/b.md:1:1: duplicate id "shared" (also duplicate-id/a.md) [Give each document a unique id (path-derived or id: override)]
+error: EFRONTMATTER: duplicate-key.md:3:1: duplicate frontmatter key "title" [Fix the frontmatter or encoding for this file]
+error: EINVALIDPATH: invalid-path-id.md:2:1: id is not a valid canonical entity id [Fix the frontmatter or encoding for this file]
+error: EINVALIDUTF8: invalid-utf8.md:1:1: source is not valid UTF-8 [Fix the frontmatter or encoding for this file]
+error: EPARENTMISSING: missing-parent.md:1:1: parent "does-not-exist" does not exist [Create the parent document or fix the parent id]
+error: EFRONTMATTER: nested-mapping.md:2:1: frontmatter value must be a non-empty plain or double-quoted string [Fix the frontmatter or encoding for this file]
+error: EPARENTSELF: self-parent.md:1:1: parent "loop" refers to this document [Remove parent or point it at a different document id]
+error: EFRONTMATTER: unclosed-frontmatter.md:1:1: unclosed frontmatter: missing closing --- [Fix the frontmatter or encoding for this file]

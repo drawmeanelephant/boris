@@ -3,8 +3,12 @@ rag_id: system/components-and-admonitions
 rag_path: system/04-components-and-admonitions.md
 category: system
 tags: [components, asides, admonitions, directives, registry]
+related:
+  - system/02-data-model-page.md
+  - system/03-trunk-and-satellite.md
+  - system/06-oliver-renderer.md
+  - system/10-name-and-metaphor.md
 ---
-
 
 # Components and admonitions
 
@@ -48,7 +52,7 @@ inside fences stays literal. Normative detail: `docs/contracts/components.md`.
 
 ## HTML and RAG
 
-- HTML (opt-in path): ordered stream → Apex for markdown, `aside.renderHtml`
+- HTML (opt-in path): ordered stream → Oliver for markdown, `aside.renderHtml`
   for callouts → semantic `<aside class="admonition admonition--{kind}">`.
 - RAG: export representation `:::kind` / `:::kind{id="…"}` only — **not**
   round-trippable authoring syntax.

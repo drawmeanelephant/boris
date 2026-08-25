@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" data-layout="archive">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Field Notes Archive</title>
+  <link rel="stylesheet" href="{{asset-url assets/archive.css}}">
+</head>
+<body class="archive-page">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="archive-header" role="banner">
+    <div class="archive-shell">
+      <p class="eyebrow">Field Notes Archive</p>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <div class="archive-shell archive-layout">
+    <main id="main-content" tabindex="-1">
+    <header class="masthead">
+      <p class="eyebrow">Personal index · 2018—2024</p>
+      <h1>{{title}}</h1>
+      <p class="lede">Small records, held in order.</p>
+    </header>
+    {{metadata}}
+    <section class="archive-index" aria-labelledby="archive-entries">
+      <div class="section-label">
+        <p id="archive-entries">Selected entries</p>
+        <span aria-hidden="true">↓</span>
+      </div>
+      {{children}}
+    </section>
+    <article class="archive-note">{{content}}</article>
+    </main>
+    <aside class="archive-sidebar" aria-label="Archive tools">
+      <section class="archive-module">
+        <p class="module-label">Browse</p>
+        {{nav}}
+      </section>
+      <section class="archive-module">
+        <p class="module-label">On this page</p>
+        {{toc}}
+      </section>
+    </aside>
+  </div>
+  <footer class="archive-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

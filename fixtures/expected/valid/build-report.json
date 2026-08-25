@@ -1,5 +1,6 @@
 {
   "schemaVersion": "0.2.0",
+  "compiler": "boris/0.8.1",
   "ok": true,
   "contentRoot": "fixtures/content/valid",
   "outDir": "fixtures/expected/valid",

@@ -1,4 +1,0 @@
-module ApexC {
-  header "apexc.h"
-  export *
-}

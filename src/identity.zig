@@ -17,7 +17,8 @@
 //! - Entity ids preserve letter case of the source stem.
 //! - Separators in logical metadata are always `/`.
 //! - Page extensions are **case-sensitive**: `.md` / `.mdx` in the default
-//!   input format, or `.textile` in the explicit Textile input format.
+//!   input format, `.textile` in the explicit Textile input format, or `.cook`
+//!   in the explicit Cooklang input format.
 //! - Output paths are built only from validated entity ids (cannot escape).
 
 const std = @import("std");
@@ -40,11 +41,13 @@ pub const PathError = error{
 pub const InputFormat = enum {
     markdown,
     textile,
+    cook,
 
     pub fn accepts(self: InputFormat, kind: ContentKind) bool {
         return switch (self) {
             .markdown => kind == .md or kind == .mdx,
             .textile => kind == .textile,
+            .cook => kind == .cook,
         };
     }
 };
@@ -53,12 +56,14 @@ pub const ContentKind = enum {
     md,
     mdx,
     textile,
+    cook,
 
     pub fn extension(self: ContentKind) []const u8 {
         return switch (self) {
             .md => ".md",
             .mdx => ".mdx",
             .textile => ".textile",
+            .cook => ".cook",
         };
     }
 };
@@ -70,6 +75,7 @@ fn isSep(c: u8) bool {
 /// Case-sensitive page-extension check on a basename or full relative path.
 pub fn isPageFile(name: []const u8) bool {
     return std.mem.endsWith(u8, name, ".textile") or
+        std.mem.endsWith(u8, name, ".cook") or
         std.mem.endsWith(u8, name, ".mdx") or
         std.mem.endsWith(u8, name, ".md");
 }
@@ -77,6 +83,7 @@ pub fn isPageFile(name: []const u8) bool {
 /// Length of the accepted trailing page extension, or null if not a page file.
 pub fn pageExtensionLen(path: []const u8) ?usize {
     if (std.mem.endsWith(u8, path, ".textile")) return 8;
+    if (std.mem.endsWith(u8, path, ".cook")) return 5;
     if (std.mem.endsWith(u8, path, ".mdx")) return 4;
     if (std.mem.endsWith(u8, path, ".md")) return 3;
     return null;
@@ -85,6 +92,7 @@ pub fn pageExtensionLen(path: []const u8) ?usize {
 /// Content kind for a path ending with an accepted page extension.
 pub fn contentKind(path: []const u8) PathError!ContentKind {
     if (std.mem.endsWith(u8, path, ".textile")) return .textile;
+    if (std.mem.endsWith(u8, path, ".cook")) return .cook;
     if (std.mem.endsWith(u8, path, ".mdx")) return .mdx;
     if (std.mem.endsWith(u8, path, ".md")) return .md;
     return error.UnsupportedExtension;
@@ -161,7 +169,7 @@ pub fn validateEntityId(id: []const u8) bool {
         if (seg.len == 0) return false;
         if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
         for (seg) |c| {
-            if (c == ' ' or c == '\t' or c == '\n' or c == '\r') return false;
+            if (c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == '#' or c == '?' or c == '%') return false;
         }
         if (i < id.len) i += 1; // skip '/'
     }
@@ -269,24 +277,27 @@ pub fn relativeHref(allocator: std.mem.Allocator, from_output: []const u8, to_ou
     const to_dir = std.fs.path.dirnamePosix(to_output) orelse "";
     const to_base = std.fs.path.basenamePosix(to_output);
 
-    // Split directory paths into components (empty dir → zero components).
-    var from_parts: [32][]const u8 = undefined;
-    var to_parts: [32][]const u8 = undefined;
-    const from_n = splitPathComponents(from_dir, &from_parts);
-    const to_n = splitPathComponents(to_dir, &to_parts);
+    // Split directory paths into allocator-owned component tables. Do not
+    // truncate deep site paths; relative links must remain exact at any depth.
+    var from_parts: std.ArrayList([]const u8) = .empty;
+    defer from_parts.deinit(allocator);
+    var to_parts: std.ArrayList([]const u8) = .empty;
+    defer to_parts.deinit(allocator);
+    try splitPathComponents(from_dir, &from_parts, allocator);
+    try splitPathComponents(to_dir, &to_parts, allocator);
 
     var common: usize = 0;
-    while (common < from_n and common < to_n) : (common += 1) {
-        if (!std.mem.eql(u8, from_parts[common], to_parts[common])) break;
+    while (common < from_parts.items.len and common < to_parts.items.len) : (common += 1) {
+        if (!std.mem.eql(u8, from_parts.items[common], to_parts.items[common])) break;
     }
 
-    var up = from_n - common;
+    var up = from_parts.items.len - common;
     // Build: (../)* + remaining to_dir components + basename
     var total: usize = 0;
     total += up * 3; // "../"
     var i = common;
-    while (i < to_n) : (i += 1) {
-        total += to_parts[i].len + 1; // component + '/'
+    while (i < to_parts.items.len) : (i += 1) {
+        total += to_parts.items[i].len + 1; // component + '/'
     }
     total += to_base.len;
 
@@ -300,9 +311,9 @@ pub fn relativeHref(allocator: std.mem.Allocator, from_output: []const u8, to_ou
         off += 3;
     }
     i = common;
-    while (i < to_n) : (i += 1) {
-        @memcpy(out[off .. off + to_parts[i].len], to_parts[i]);
-        off += to_parts[i].len;
+    while (i < to_parts.items.len) : (i += 1) {
+        @memcpy(out[off .. off + to_parts.items[i].len], to_parts.items[i]);
+        off += to_parts.items[i].len;
         out[off] = '/';
         off += 1;
     }
@@ -312,22 +323,18 @@ pub fn relativeHref(allocator: std.mem.Allocator, from_output: []const u8, to_ou
     return out;
 }
 
-fn splitPathComponents(dir: []const u8, out: [][]const u8) usize {
-    if (dir.len == 0) return 0;
-    var n: usize = 0;
+fn splitPathComponents(dir: []const u8, out: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
+    if (dir.len == 0) return;
     var start: usize = 0;
     var i: usize = 0;
     while (i <= dir.len) : (i += 1) {
         if (i == dir.len or dir[i] == '/') {
             if (i > start) {
-                if (n >= out.len) return n; // truncate defensively
-                out[n] = dir[start..i];
-                n += 1;
+                try out.append(allocator, dir[start..i]);
             }
             start = i + 1;
         }
     }
-    return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -451,15 +458,35 @@ test "canonicalEntityId rejects traversal non-page and empty stem" {
     try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".md"));
     try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".mdx"));
     try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".textile"));
+    try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".cook"));
+    try std.testing.expectError(error.UnsupportedExtension, canonicalEntityId(gpa, "notes.COOK"));
 }
 
 test "InputFormat admits one explicit source family" {
     try std.testing.expect(InputFormat.markdown.accepts(.md));
     try std.testing.expect(InputFormat.markdown.accepts(.mdx));
     try std.testing.expect(!InputFormat.markdown.accepts(.textile));
+    try std.testing.expect(!InputFormat.markdown.accepts(.cook));
     try std.testing.expect(InputFormat.textile.accepts(.textile));
     try std.testing.expect(!InputFormat.textile.accepts(.md));
     try std.testing.expect(!InputFormat.textile.accepts(.mdx));
+    try std.testing.expect(!InputFormat.textile.accepts(.cook));
+    // A recipe tree is its own family: mixing `.cook` with Markdown would make
+    // the ingredient index depend on which files happened to be scanned.
+    try std.testing.expect(InputFormat.cook.accepts(.cook));
+    try std.testing.expect(!InputFormat.cook.accepts(.md));
+    try std.testing.expect(!InputFormat.cook.accepts(.mdx));
+    try std.testing.expect(!InputFormat.cook.accepts(.textile));
+}
+
+test "a .cook path derives an entity id like any other page" {
+    const gpa = std.testing.allocator;
+    const id = try canonicalEntityId(gpa, "recipes/Carbonara.cook");
+    defer gpa.free(id);
+    try std.testing.expectEqualStrings("recipes/Carbonara", id);
+    try std.testing.expect(isPageFile("Carbonara.cook"));
+    try std.testing.expectEqual(@as(?usize, 5), pageExtensionLen("Carbonara.cook"));
+    try std.testing.expectEqual(ContentKind.cook, try contentKind("Carbonara.cook"));
 }
 
 test "canonicalEntityId rejects oversize stem" {
@@ -500,4 +527,25 @@ test "validateEntityId shape" {
     try std.testing.expect(!validateEntityId("a/./b"));
     try std.testing.expect(!validateEntityId("a/b/"));
     try std.testing.expect(!validateEntityId("has space"));
+    try std.testing.expect(!validateEntityId("has#fragment"));
+    try std.testing.expect(!validateEntityId("has?query"));
+    try std.testing.expect(!validateEntityId("has%escape"));
+}
+
+test "relativeHref does not truncate deep paths" {
+    const gpa = std.testing.allocator;
+    var from: std.ArrayList(u8) = .empty;
+    defer from.deinit(gpa);
+    var to: std.ArrayList(u8) = .empty;
+    defer to.deinit(gpa);
+    for (0..40) |_| {
+        try from.appendSlice(gpa, "from/");
+        try to.appendSlice(gpa, "to/");
+    }
+    try from.appendSlice(gpa, "page.html");
+    try to.appendSlice(gpa, "target.html");
+    const href = try relativeHref(gpa, from.items, to.items);
+    defer gpa.free(href);
+    try std.testing.expect(std.mem.startsWith(u8, href, "../../../../"));
+    try std.testing.expect(std.mem.endsWith(u8, href, "to/target.html"));
 }

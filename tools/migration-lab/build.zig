@@ -11,12 +11,26 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // Initial-create apply validates every generated file through Boris's
+    // native parser before it can be published.  Keeping this as a build-time
+    // module dependency preserves the migration lab's no-runtime-dependency
+    // boundary.
+    const boris_parser = b.createModule(.{
+        .root_source_file = b.path("../../src/parser.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    root_mod.addImport("boris_parser", boris_parser);
 
     const exe = b.addExecutable(.{
         .name = "boris-migration-lab",
         .root_module = root_mod,
     });
     b.installArtifact(exe);
+
+    // The black-box apply test runs the installed `zig-out/bin` artifact. Its
+    // explicit install dependency below means a missing executable is a build
+    // failure, never a skip.
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -32,6 +46,25 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     // Tests open fixtures/ relative to this package directory.
     run_unit_tests.setCwd(b.path("."));
+    run_unit_tests.step.dependOn(b.getInstallStep());
+
+    // The WordPress integration test launches the installed product binary as
+    // a black box. Build it first so this proof cannot silently skip when the
+    // migration lab is invoked on its own.
+    const build_product = b.addSystemCommand(&.{ "zig", "build" });
+    build_product.setCwd(b.path("../.."));
+    run_unit_tests.step.dependOn(&build_product.step);
+
     const test_step = b.step("test", "Run migration-lab unit + fixture tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const schema_test_cmd = b.addSystemCommand(&.{
+        "npm",
+        "--prefix",
+        "schema-validation",
+        "test",
+    });
+    schema_test_cmd.setCwd(b.path("."));
+    const schema_test_step = b.step("schema-test", "Run the real Draft 2020-12 Astro import schema matrix (requires npm ci in schema-validation)");
+    schema_test_step.dependOn(&schema_test_cmd.step);
 }

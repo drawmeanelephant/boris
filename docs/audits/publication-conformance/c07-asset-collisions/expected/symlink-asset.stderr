@@ -1,0 +1,2 @@
+error: content-local asset discovery failed: AssetSymlink
+error: target 'default' compilation failed: AssetSymlink

@@ -1,0 +1,73 @@
+{
+  "schema": "boris-live-smoke-result",
+  "schemaVersion": 1,
+  "overall": "passed",
+  "namespace": "boris-live-20260816c",
+  "client": {
+    "boris": "boris/0.8.1",
+    "oliver": "oliver@c0b3d2b683f0cecf2181b22a800908619e56d0d7"
+  },
+  "server": {
+    "did": "did:plc:fqf5y5yyddraj7pywme4al2i",
+    "pds": "https://morel.us-east.host.bsky.network",
+    "authorizationServer": "https://bsky.social"
+  },
+  "spec": {
+    "baseline": [
+      "AT Protocol DID — retrieved 2026-08-14",
+      "AT Protocol OAuth — retrieved 2026-08-15",
+      "AT Protocol Handle — retrieved 2026-08-14",
+      "AT Protocol HTTP API/XRPC — retrieved 2026-08-14",
+      "RFC 9728 (OAuth 2.0 Protected Resource Metadata), April 2025",
+      "RFC 9449 (OAuth 2.0 Demonstrating Proof of Possession), September 2023",
+      "Standard.site permission contract — retrieved 2026-08-15"
+    ]
+  },
+  "phases": {
+    "discovery": "passed",
+    "authorization": "passed",
+    "write": {
+      "publication": {
+        "status": "passed",
+        "rkey": "boris-live-20260816c-publication",
+        "atUri": "at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.publication/boris-live-20260816c-publication",
+        "cid": "bafyreiam6udpunlvznmvbmalyu2echxi4md6bt7v5lbumsakwiwnxp2if4"
+      },
+      "document": {
+        "status": "passed",
+        "rkey": "boris-live-20260816c-document",
+        "atUri": "at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.document/boris-live-20260816c-document",
+        "cid": "bafyreif26gsle67zxleycfos7uwihn565n5ngs7cdyudk7xh5ci4utygqy"
+      }
+    },
+    "readback": {
+      "publication": {
+        "status": "passed",
+        "atUriMatches": true,
+        "valueMatches": true,
+        "cidPresent": true,
+        "cid": "bafyreiam6udpunlvznmvbmalyu2echxi4md6bt7v5lbumsakwiwnxp2if4"
+      },
+      "document": {
+        "status": "passed",
+        "atUriMatches": true,
+        "valueMatches": true,
+        "cidPresent": true,
+        "cid": "bafyreif26gsle67zxleycfos7uwihn565n5ngs7cdyudk7xh5ci4utygqy"
+      }
+    },
+    "verificationSurface": {
+      "status": "skipped",
+      "note": "no --surface-url configured"
+    },
+    "indexer": {
+      "status": "lagged",
+      "note": "indexer has not indexed at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.document/boris-live-20260816c-document yet (status 400)"
+    },
+    "cleanup": {
+      "status": "passed",
+      "cleanedPublication": true,
+      "cleanedDocument": true
+    }
+  }
+}

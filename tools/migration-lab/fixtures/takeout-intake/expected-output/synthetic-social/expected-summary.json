@@ -1,0 +1,13 @@
+{
+  "fixture_id": "synthetic-social-v1",
+  "expected_pages": [
+    { "id": "posts/post-demo-001", "source_id": "post-demo-001", "media": ["media/demo-lantern.svg"] },
+    { "id": "posts/post-demo-002", "source_id": "post-demo-002", "media": [] },
+    { "id": "albums/album-demo-001", "source_id": "album-demo-001", "media": ["media/demo-lantern.svg"] }
+  ],
+  "expected_links": [
+    { "source_id": "post-demo-001", "url": "notes/lantern.md", "handling": "review-as-document-reference" },
+    { "source_id": "post-demo-002", "url": "https://example.invalid/demo", "handling": "preserve-as-external-reference" }
+  ],
+  "expected_timestamp_policy": "preserve source ISO-8601 values until a timezone policy is recorded"
+}

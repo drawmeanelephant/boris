@@ -1,10 +1,10 @@
 //! Boris-mediated wiki-links (`[[entity-id]]` / `[[entity-id|label]]` /
 //! `[[entity-id#heading]]` / `[[entity-id#heading|label]]`).
 //!
-//! Resolved against the frozen page graph by entity id **before** Apex.
-//! Optional heading fragments match Apex-rendered `id` attributes on the
-//! target page (see `docs/contracts/heading-ids.md`). Fence-aware: links
-//! inside fenced code stay literal.
+//! Resolved against the frozen page graph by entity id **before** rendering.
+//! Optional heading fragments match Oliver-rendered `id` attributes on the
+//! target page (see `docs/contracts/heading-ids.md`). Fence- and
+//! inline-code-aware: links inside Markdown code stay literal.
 //!
 //! Normative: `docs/contracts/includes-and-wiki-links.md`,
 //! `docs/contracts/heading-ids.md`.
@@ -36,7 +36,7 @@ pub const WikiHit = struct {
     column: u32,
 };
 
-/// Per-entity set of Apex-rendered heading ids (views or owned — caller owns lifetime).
+/// Per-entity set of Oliver-rendered heading ids (views or owned — caller owns lifetime).
 pub const HeadingIndex = struct {
     /// entity_id → list of unique heading id strings for that page.
     map: std.StringHashMapUnmanaged([]const []const u8) = .{},
@@ -200,6 +200,15 @@ pub fn scanWikiLinks(
             continue;
         }
 
+        if (body[i] == '`') {
+            if (include_mod.inlineCodeSpanEnd(body, i)) |end| {
+                i = end;
+            } else {
+                i += include_mod.backtickRunLength(body, i);
+            }
+            continue;
+        }
+
         if (i + 3 <= body.len and body[i] == '[' and body[i + 1] == '[') {
             const start = i;
             i += 2;
@@ -273,8 +282,8 @@ pub fn scanWikiLinks(
     }
 }
 
-fn buildNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !std.StringHashMapUnmanaged(graph_mod.Node) {
-    var map: std.StringHashMapUnmanaged(graph_mod.Node) = .{};
+pub fn buildNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !NodeMap {
+    var map: NodeMap = .{};
     errdefer map.deinit(allocator);
     try map.ensureTotalCapacity(allocator, @intCast(nodes.len));
     for (nodes) |n| {
@@ -284,8 +293,96 @@ fn buildNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !st
     return map;
 }
 
-fn findNodeMap(map: *const std.StringHashMapUnmanaged(graph_mod.Node), id: []const u8) ?graph_mod.Node {
+fn findNodeMap(map: *const NodeMap, id: []const u8) ?graph_mod.Node {
     return map.get(id);
+}
+
+/// Bounded Levenshtein distance between `a` and `b`, or null when the distance
+/// provably exceeds `allowed`. `scratch` needs `2 * (max(b.len, a.len) + 1)`
+/// bytes of usize cells.
+fn boundedEditDistance(scratch: []usize, a: []const u8, b: []const u8, allowed: usize) ?usize {
+    if (a.len > b.len + allowed or b.len > a.len + allowed) return null;
+    const width = b.len + 1;
+    if (scratch.len < 2 * width) return null;
+    var prev = scratch[0..width];
+    var cur = scratch[width .. 2 * width];
+    for (0..width) |j| prev[j] = j;
+    for (a, 0..) |ca, i| {
+        cur[0] = i + 1;
+        var row_min = cur[0];
+        for (b, 0..) |cb, j| {
+            const sub = prev[j] + @as(usize, if (ca == cb) 0 else 1);
+            const del = prev[j + 1] + 1;
+            const ins = cur[j] + 1;
+            const v = @min(sub, @min(del, ins));
+            cur[j + 1] = v;
+            if (v < row_min) row_min = v;
+        }
+        // Whole row already over budget → final distance cannot come back down.
+        if (row_min > allowed) return null;
+        const tmp = prev;
+        prev = cur;
+        cur = tmp;
+    }
+    const dist = prev[b.len];
+    return if (dist <= allowed) dist else null;
+}
+
+/// Nearest existing entity id for did-you-mean diagnostics (#742).
+///
+/// Deterministic by construction: the lowest bounded edit distance wins and
+/// ties break toward the lexicographically smaller id, so hash-map iteration
+/// order cannot leak into output. The per-candidate allowance is relative to
+/// the longer id (capped) so unrelated targets never produce noise hints.
+/// Returns an id borrowed from `ids`; callers must copy before freeing them.
+pub fn nearestId(allocator: std.mem.Allocator, ids: []const []const u8, target: []const u8) ?[]const u8 {
+    if (ids.len == 0 or target.len == 0) return null;
+
+    var max_len: usize = target.len;
+    for (ids) |id| {
+        if (id.len > max_len) max_len = id.len;
+    }
+    const scratch = allocator.alloc(usize, 2 * (max_len + 1)) catch return null;
+    defer allocator.free(scratch);
+
+    var best: ?[]const u8 = null;
+    var best_dist: usize = 0;
+    for (ids) |id| {
+        const allowed = @max(@as(usize, 1), @min(@as(usize, 8), @max(target.len, id.len) / 3));
+        const dist = boundedEditDistance(scratch, target, id, allowed) orelse continue;
+        const better = best == null or dist < best_dist or
+            (dist == best_dist and std.mem.order(u8, id, best.?) == .lt);
+        if (better) {
+            best = id;
+            best_dist = dist;
+        }
+    }
+    return best;
+}
+
+fn nearestNodeId(allocator: std.mem.Allocator, node_map: *const NodeMap, target: []const u8) ?[]const u8 {
+    if (node_map.count() == 0) return null;
+    var keys = std.ArrayList([]const u8).empty;
+    defer keys.deinit(allocator);
+    keys.ensureTotalCapacity(allocator, node_map.count()) catch return null;
+    var it = node_map.keyIterator();
+    while (it.next()) |key| keys.appendAssumeCapacity(key.*);
+    return nearestId(allocator, keys.items, target);
+}
+
+/// Nearest existing entity id among frozen graph nodes, for producers that
+/// hold the node list directly (pipeline dependency scans).
+pub fn nearestNodeIdInNodes(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    target: []const u8,
+) ?[]const u8 {
+    if (nodes.len == 0) return null;
+    var ids = std.ArrayList([]const u8).empty;
+    defer ids.deinit(allocator);
+    ids.ensureTotalCapacity(allocator, nodes.len) catch return null;
+    for (nodes) |n| ids.appendAssumeCapacity(n.id);
+    return nearestId(allocator, ids.items, target);
 }
 
 fn appendUniqueIdLocHashed(
@@ -320,6 +417,14 @@ pub const ResolveOptions = struct {
     /// When true, fragments require a heading index + membership (fail closed).
     /// Set false only while bootstrapping the heading index (emit, do not check).
     validate_fragments: bool = true,
+    /// When non-null, link destinations are absolute canonical web URLs
+    /// (`base_url ++ "/" ++ html_output_path`) instead of hrefs relative to
+    /// `current_output_path`. Consumers that publish the Markdown *outside*
+    /// the site — the Nostr NIP-23 projection — need links that resolve from
+    /// anywhere, since a relative href has no meaning in a reader client.
+    /// `null` keeps the site's relative hrefs byte-for-byte. `base_url`
+    /// carries no trailing slash.
+    base_url: ?[]const u8 = null,
 };
 
 fn failFragmentDetail(
@@ -400,13 +505,55 @@ pub fn rewriteWikiLinksOpts(
     var node_map = try buildNodeMap(allocator, nodes);
     defer node_map.deinit(allocator);
 
+    return rewriteWithNodeMap(allocator, body, hits.items, &node_map, current_output_path, fail_out, opts);
+}
+
+/// Id → node lookup over the frozen graph, reusable across pages of one build
+/// (#726). Build once with `buildNodeMap` and pass to
+/// `rewriteWikiLinksWithMapOpts`; contents must cover the same node list every
+/// rendered page would otherwise receive.
+pub const NodeMap = std.StringHashMapUnmanaged(graph_mod.Node);
+
+/// Rewrite wiki links using a caller-shared map instead of rebuilding one per
+/// page. Behaviorally identical to `rewriteWikiLinksOpts` over the same nodes.
+pub fn rewriteWikiLinksWithMapOpts(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    node_map: *const NodeMap,
+    current_output_path: []const u8,
+    fail_out: ?*FailInfo,
+    opts: ResolveOptions,
+) WikiError![]u8 {
+    var hits: std.ArrayList(WikiHit) = .empty;
+    defer hits.deinit(allocator);
+    try scanWikiLinks(body, allocator, &hits, fail_out, "");
+
+    if (hits.items.len == 0) {
+        return try allocator.dupe(u8, body);
+    }
+
+    return rewriteWithNodeMap(allocator, body, hits.items, node_map, current_output_path, fail_out, opts);
+}
+
+fn rewriteWithNodeMap(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    hits: []const WikiHit,
+    node_map: *const NodeMap,
+    current_output_path: []const u8,
+    fail_out: ?*FailInfo,
+    opts: ResolveOptions,
+) WikiError![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     var copy_from: usize = 0;
 
-    for (hits.items) |hit| {
-        const node = findNodeMap(&node_map, hit.entity_id) orelse {
-            if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
+    for (hits) |hit| {
+        const node = findNodeMap(node_map, hit.entity_id) orelse {
+            if (fail_out) |f| {
+                f.set(hit.line, hit.column, hit.entity_id, "");
+                if (nearestNodeId(allocator, node_map, hit.entity_id)) |s| f.setHint(s);
+            }
             return error.ReferenceMissing;
         };
 
@@ -421,9 +568,14 @@ pub fn rewriteWikiLinksOpts(
             return error.PathError;
         };
         defer allocator.free(to_out);
-        const href = identity.relativeHref(allocator, current_output_path, to_out) catch {
-            if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
-            return error.PathError;
+        const href = href_blk: {
+            if (opts.base_url) |base| {
+                break :href_blk try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, to_out });
+            }
+            break :href_blk identity.relativeHref(allocator, current_output_path, to_out) catch {
+                if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
+                return error.PathError;
+            };
         };
         defer allocator.free(href);
 
@@ -513,6 +665,17 @@ fn materialFromIdLocs(
     nodes: []const graph_mod.Node,
     fail_out: ?*FailInfo,
 ) WikiError![]u8 {
+    var node_map = try buildNodeMap(allocator, nodes);
+    defer node_map.deinit(allocator);
+    return materialFromIdLocsWithMap(allocator, locs, &node_map, fail_out);
+}
+
+fn materialFromIdLocsWithMap(
+    allocator: std.mem.Allocator,
+    locs: []const IdLoc,
+    node_map: *const NodeMap,
+    fail_out: ?*FailInfo,
+) WikiError![]u8 {
     if (locs.len == 0) return try allocator.dupe(u8, "");
 
     const sorted = try allocator.alloc(IdLoc, locs.len);
@@ -524,14 +687,14 @@ fn materialFromIdLocs(
         }
     }.less);
 
-    var node_map = try buildNodeMap(allocator, nodes);
-    defer node_map.deinit(allocator);
-
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     for (sorted) |loc| {
-        const node = findNodeMap(&node_map, loc.id) orelse {
-            if (fail_out) |f| f.set(loc.line, loc.column, loc.id, loc.locus);
+        const node = findNodeMap(node_map, loc.id) orelse {
+            if (fail_out) |f| {
+                f.set(loc.line, loc.column, loc.id, loc.locus);
+                if (nearestNodeId(allocator, node_map, loc.id)) |s| f.setHint(s);
+            }
             return error.ReferenceMissing;
         };
         const out_path = identity.htmlOutputPath(allocator, node.id) catch {
@@ -572,6 +735,22 @@ pub fn referenceMaterialMulti(
     fail_out: ?*FailInfo,
     opts: ResolveOptions,
 ) WikiError![]u8 {
+    var node_map = try buildNodeMap(allocator, nodes);
+    defer node_map.deinit(allocator);
+    return referenceMaterialMultiWithMap(allocator, bodies, body_paths, &node_map, fail_out, opts);
+}
+
+/// Union wiki targets from multiple bodies using a caller-shared node map
+/// (#727), so per-page fingerprint passes stop rebuilding it. Behaviorally
+/// identical to `referenceMaterialMulti` over the same nodes.
+pub fn referenceMaterialMultiWithMap(
+    allocator: std.mem.Allocator,
+    bodies: []const []const u8,
+    body_paths: ?[]const []const u8,
+    node_map: *const NodeMap,
+    fail_out: ?*FailInfo,
+    opts: ResolveOptions,
+) WikiError![]u8 {
     if (body_paths) |paths| {
         if (paths.len != bodies.len) return error.PathError;
     }
@@ -583,7 +762,7 @@ pub fn referenceMaterialMulti(
         const path = if (body_paths) |paths| paths[i] else "";
         try collectIdsFromBody(body, path, allocator, &locs, &seen, fail_out, opts);
     }
-    return materialFromIdLocs(allocator, locs.items, nodes, fail_out);
+    return materialFromIdLocsWithMap(allocator, locs.items, node_map, fail_out);
 }
 
 pub fn errorCode(err: WikiError) diag.Code {
@@ -613,13 +792,15 @@ fn messageFor(retain: std.mem.Allocator, err: WikiError, fail: *const FailInfo) 
         else
             try retain.dupe(u8, "malformed [[…]] wiki-link"),
         error.ReferenceMissing => blk: {
-            if (det.len > 0) {
+            const base = if (det.len > 0) base_msg: {
                 if (std.mem.indexOfScalar(u8, det, '#')) |_| {
-                    break :blk try std.fmt.allocPrint(retain, "wiki-link heading target \"{s}\" not found on the page", .{det});
+                    break :base_msg try std.fmt.allocPrint(retain, "wiki-link heading target \"{s}\" not found on the page", .{det});
                 }
-                break :blk try std.fmt.allocPrint(retain, "wiki-link target \"{s}\" not found in the page graph", .{det});
-            }
-            break :blk try retain.dupe(u8, "wiki-link target not found in the page graph");
+                break :base_msg try std.fmt.allocPrint(retain, "wiki-link target \"{s}\" not found in the page graph", .{det});
+            } else try retain.dupe(u8, "wiki-link target not found in the page graph");
+            const hint_s = fail.hint();
+            if (hint_s.len == 0) break :blk base;
+            break :blk try std.fmt.allocPrint(retain, "{s} (did you mean \"{s}\"?)", .{ base, hint_s });
         },
         error.OutOfMemory => try retain.dupe(u8, "out of memory while resolving wiki-links"),
         error.PathError => if (det.len > 0)
@@ -658,13 +839,13 @@ pub fn printDiagnostic(
     err: WikiError,
     source_path: []const u8,
     fail: FailInfo,
+    sink: ?*diag.Collector,
 ) void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const d = makeDiagnostic(arena.allocator(), err, source_path, fail) catch return;
-    const line = diag.formatText(d, gpa) catch return;
-    defer gpa.free(line);
-    std.debug.print("{s}\n", .{line});
+    if (sink) |s| s.append(d);
+    diag.printText(d, gpa);
 }
 
 // ---------------------------------------------------------------------------
@@ -704,6 +885,20 @@ test "scanWikiLinks skips tilde fences" {
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("guides/a", list.items[0].entity_id);
     try std.testing.expectEqualStrings("guides/b", list.items[1].entity_id);
+}
+
+test "scanWikiLinks ignores matching inline code spans" {
+    const body =
+        \\[[guides/before]]`[[missing#]]`[[guides/after]]
+        \\``[[missing/also]]``
+        \\
+    ;
+    var list: std.ArrayList(WikiHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanWikiLinks(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("guides/before", list.items[0].entity_id);
+    try std.testing.expectEqualStrings("guides/after", list.items[1].entity_id);
 }
 
 test "scanWikiLinks fragment and label" {
@@ -764,6 +959,219 @@ test "rewriteWikiLinks relative href" {
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "[Content Model](guides/overview.html)") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "[[") == null);
+}
+
+test "shared node map rewrite matches per-page rewrite" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{
+            .id = "guides/overview",
+            .source_path = "guides/overview.md",
+            .title = "Content Model",
+            .role = .trunk,
+            .index = 0,
+        },
+        .{
+            .id = "getting-started",
+            .source_path = "getting-started.md",
+            .title = "Getting Started",
+            .role = .trunk,
+            .index = 1,
+        },
+    };
+    var map = try buildNodeMap(gpa, &nodes);
+    defer map.deinit(gpa);
+
+    const bodies = [_][]const u8{
+        "Go to [[guides/overview]] please.",
+        "See [[getting-started]] and [[guides/overview|the guide]].",
+        "No links here at all.",
+    };
+    for (bodies) |body| {
+        const classic = try rewriteWikiLinksOpts(gpa, body, &nodes, "getting-started.html", null, .{});
+        defer gpa.free(classic);
+        const shared = try rewriteWikiLinksWithMapOpts(gpa, body, &map, "getting-started.html", null, .{});
+        defer gpa.free(shared);
+        try std.testing.expectEqualStrings(classic, shared);
+    }
+
+    // Missing targets fail identically through both entry points.
+    const bad = "Go to [[no/such/page]] now.";
+    var classic_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksOpts(gpa, bad, &nodes, "index.html", &classic_fail, .{}),
+    );
+    var shared_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksWithMapOpts(gpa, bad, &map, "index.html", &shared_fail, .{}),
+    );
+    try std.testing.expectEqualStrings(classic_fail.detail(), shared_fail.detail());
+}
+
+test "boundedEditDistance returns exact distances or null past allowance" {
+    var scratch: [2 * (32 + 1)]usize = undefined;
+    try std.testing.expectEqual(@as(usize, 0), boundedEditDistance(&scratch, "", "", 1).?);
+    try std.testing.expectEqual(@as(usize, 3), boundedEditDistance(&scratch, "kitten", "sitting", 3).?);
+    try std.testing.expectEqual(@as(usize, 5), boundedEditDistance(scratch[0..], "nested/child", "deep/nested/child", 6).?);
+    try std.testing.expectEqual(@as(?usize, null), boundedEditDistance(&scratch, "kitten", "sitting", 2));
+    // Length delta alone over budget.
+    try std.testing.expectEqual(@as(?usize, null), boundedEditDistance(&scratch, "a", "abcdefghij", 3));
+}
+
+test "missing wiki target suggests nearest existing entity id" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "index", .source_path = "index.md", .role = .trunk, .index = 0 },
+        .{ .id = "deep/nested/child", .source_path = "deep/nested/child.md", .role = .satellite, .parent = "index", .index = 1 },
+        .{ .id = "guides/overview", .source_path = "guides/overview.md", .role = .trunk, .index = 2 },
+    };
+    const bad = "Go to [[nested/child]] now.";
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksOpts(gpa, bad, &nodes, "index.html", &fail, .{}),
+    );
+    try std.testing.expectEqualStrings("nested/child", fail.detail());
+    try std.testing.expectEqualStrings("deep/nested/child", fail.hint());
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = try makeDiagnostic(arena.allocator(), error.ReferenceMissing, "guides/probe.md", fail);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "(did you mean \"deep/nested/child\"?)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "wiki-link target \"nested/child\" not found") != null);
+    try std.testing.expectEqualStrings("nested/child", d.id);
+}
+
+test "missing wiki target without a near match carries no hint" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "guides/overview", .source_path = "guides/overview.md", .role = .trunk, .index = 0 },
+    };
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksOpts(gpa, "See [[zzz/nothing/here/at/all]] now.", &nodes, "index.html", &fail, .{}),
+    );
+    try std.testing.expectEqual(@as(usize, 0), fail.hint().len);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = try makeDiagnostic(arena.allocator(), error.ReferenceMissing, "p.md", fail);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "did you mean") == null);
+}
+
+test "did-you-mean ties break toward the lexicographically smaller id" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "aa/bd", .source_path = "aa/bd.md", .role = .trunk, .index = 0 },
+        .{ .id = "aa/bb", .source_path = "aa/bb.md", .role = .trunk, .index = 1 },
+    };
+    var map = try buildNodeMap(gpa, &nodes);
+    defer map.deinit(gpa);
+    const s = nearestId(gpa, &[_][]const u8{ "aa/bd", "aa/bb" }, "aa/bx").?;
+    try std.testing.expectEqualStrings("aa/bb", s);
+    const via_map = nearestNodeId(gpa, &map, "aa/bx").?;
+    try std.testing.expectEqualStrings("aa/bb", via_map);
+    const via_nodes = nearestNodeIdInNodes(gpa, &nodes, "aa/bx").?;
+    try std.testing.expectEqualStrings("aa/bb", via_nodes);
+}
+
+test "fingerprint material failure also reports did-you-mean" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "deep/nested/child", .source_path = "deep/nested/child.md", .role = .satellite, .index = 0 },
+    };
+    const bodies = [_][]const u8{"See [[nested/child]]."};
+    const paths = [_][]const u8{"guides/page.md"};
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        referenceMaterialMulti(gpa, &bodies, &paths, &nodes, &fail, .{}),
+    );
+    try std.testing.expectEqualStrings("deep/nested/child", fail.hint());
+}
+
+test "heading-fragment mismatch keeps its message and gains no page hint" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "guides/a", .source_path = "guides/a.md", .role = .satellite, .index = 0 },
+    };
+    // Fragment validation without a heading index fails with the '#' detail.
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        rewriteWikiLinksOpts(gpa, "See [[guides/a#wrong-slug]].", &nodes, "index.html", &fail, .{
+            .validate_fragments = true,
+            .heading_index = null,
+        }),
+    );
+    try std.testing.expectEqualStrings("guides/a#wrong-slug", fail.detail());
+    try std.testing.expectEqual(@as(usize, 0), fail.hint().len);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = try makeDiagnostic(arena.allocator(), error.ReferenceMissing, "p.md", fail);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "heading target") != null);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "did you mean") == null);
+}
+
+test "shared node map reference material matches per-page material" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{
+            .id = "guides/overview",
+            .source_path = "guides/overview.md",
+            .title = "Content Model",
+            .role = .trunk,
+            .index = 0,
+        },
+    };
+    var map = try buildNodeMap(gpa, &nodes);
+    defer map.deinit(gpa);
+
+    const bodies = [_][]const u8{ "Link [[guides/overview]] here.", "Include [[guides/overview|guide]] too." };
+    const paths = [_][]const u8{ "page.md", "include.md" };
+
+    const classic = try referenceMaterialMulti(gpa, &bodies, &paths, &nodes, null, .{});
+    defer gpa.free(classic);
+    const shared = try referenceMaterialMultiWithMap(gpa, &bodies, &paths, &map, null, .{});
+    defer gpa.free(shared);
+    try std.testing.expectEqualStrings(classic, shared);
+
+    // Missing targets fail identically through both entry points.
+    const bad_bodies = [_][]const u8{"Link [[no/such/page]] here."};
+    var classic_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        referenceMaterialMulti(gpa, &bad_bodies, null, &nodes, &classic_fail, .{}),
+    );
+    var shared_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceMissing,
+        referenceMaterialMultiWithMap(gpa, &bad_bodies, null, &map, &shared_fail, .{}),
+    );
+    try std.testing.expectEqualStrings(classic_fail.detail(), shared_fail.detail());
+}
+
+test "wiki inline code spans stay out of rewrite and fingerprint material" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{.{
+        .id = "guides/live",
+        .source_path = "guides/live.md",
+        .title = "Live",
+        .role = .trunk,
+        .index = 0,
+    }};
+    const body = "[[guides/live]] `[[missing/page#missing-heading]]`";
+    const out = try rewriteWikiLinks(gpa, body, &nodes, "index.html", null);
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "[Live](guides/live.html)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "`[[missing/page#missing-heading]]`") != null);
+
+    const material = try referenceMaterial(gpa, "`[[missing/page]]`", &nodes);
+    defer gpa.free(material);
+    try std.testing.expectEqualStrings("", material);
 }
 
 test "rewriteWikiLinks with validated fragment" {
@@ -880,6 +1288,25 @@ test "scanWikiLinks fragment inside fence is skipped" {
     try scanWikiLinks(body, std.testing.allocator, &list, null, "");
     try std.testing.expectEqual(@as(usize, 1), list.items.len);
     try std.testing.expectEqualStrings("live", list.items[0].fragment.?);
+}
+
+test "collectFragmentTargetIds ignores inline code spans" {
+    const gpa = std.testing.allocator;
+    var ids: std.ArrayList([]const u8) = .empty;
+    defer ids.deinit(gpa);
+    var seen: std.StringHashMapUnmanaged(void) = .{};
+    defer seen.deinit(gpa);
+
+    try collectFragmentTargetIds(
+        "`[[guides/ignored#nope]]` [[guides/live#section]]",
+        gpa,
+        &ids,
+        &seen,
+        null,
+        "page.md",
+    );
+    try std.testing.expectEqual(@as(usize, 1), ids.items.len);
+    try std.testing.expectEqualStrings("guides/live", ids.items[0]);
 }
 
 test "HeadingIndex lookup distinguishes unknown entity from unknown fragment" {
@@ -1062,4 +1489,59 @@ test "referenceMaterialMulti missing target keeps include locus" {
     try std.testing.expectEqualStrings("missing/id", fail.detail());
     try std.testing.expectEqualStrings("includes/blurb.md", fail.locus());
     try std.testing.expectEqual(@as(u32, 2), fail.line);
+}
+
+fn absoluteUrlTestNodes() [2]graph_mod.Node {
+    return .{
+        .{
+            .id = "guides/intro",
+            .source_path = "guides/intro.md",
+            .title = "Intro",
+            .role = .trunk,
+            .index = 0,
+        },
+        .{
+            .id = "getting-started",
+            .source_path = "getting-started.md",
+            .title = "Getting Started",
+            .role = .trunk,
+            .index = 1,
+        },
+    };
+}
+
+test "rewriteWikiLinks stays relative when no base url is configured" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteUrlTestNodes();
+    const out = try rewriteWikiLinksOpts(gpa, "Go to [[guides/intro]].", &nodes, "getting-started.html", null, .{
+        .base_url = null,
+    });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("Go to [Intro](guides/intro.html).", out);
+}
+
+test "rewriteWikiLinks emits absolute canonical urls under a base url" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteUrlTestNodes();
+    const out = try rewriteWikiLinksOpts(gpa, "Go to [[guides/intro]].", &nodes, "getting-started.html", null, .{
+        .base_url = "https://example.com/docs",
+    });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("Go to [Intro](https://example.com/docs/guides/intro.html).", out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "docs//") == null);
+}
+
+test "absolute wiki links keep validated heading fragments" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteUrlTestNodes();
+    var idx: HeadingIndex = .{};
+    defer idx.deinit(gpa);
+    try idx.putOwned(gpa, "guides/intro", &.{"usage"});
+
+    const out = try rewriteWikiLinksOpts(gpa, "See [[guides/intro#usage]].", &nodes, "getting-started.html", null, .{
+        .heading_index = &idx,
+        .base_url = "https://example.com/docs",
+    });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("See [Intro](https://example.com/docs/guides/intro.html#usage).", out);
 }

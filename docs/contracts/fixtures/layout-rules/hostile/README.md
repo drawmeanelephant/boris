@@ -6,7 +6,6 @@ Focused adversarial coverage for PR #50 page layout selection
 Normative contracts:
 
 - `docs/contracts/templating-and-themes.md` §4
-- `docs/designs/page-layout-selection-rfc.md`
 - `docs/contracts/multi-target-isolated-output.md`
 
 Happy-path acceptance remains under the parent
@@ -33,7 +32,7 @@ zig build test-layout-hostile   # focused step
 zig build test                  # includes this suite
 ```
 
-Source: `src/layout_select_hostile_test.zig` (Zig-only; links Apex like other
+Source: `src/layout_select_hostile_test.zig` (Zig-only; links the Oliver render seam like other
 HTML integration tests). Product modules under test are **not** patched by this
 suite — failures are reported, not silently “fixed.”
 

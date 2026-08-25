@@ -120,8 +120,7 @@ fn writeSection(io: Io, section: usize) !void {
         .{ generated_root, section },
     );
     var body_buffer: [512]u8 = undefined;
-    const body = try std.fmt.bufPrint(
-        &body_buffer,
+    const body = try std.fmt.bufPrint(&body_buffer,
         \\---
         \\id: sections/section-{d:0>4}
         \\title: Scale Section {d}
@@ -145,8 +144,7 @@ fn writeSatellite(io: Io, page: usize, section: usize) !void {
         .{ generated_root, page },
     );
     var body_buffer: [640]u8 = undefined;
-    const body = try std.fmt.bufPrint(
-        &body_buffer,
+    const body = try std.fmt.bufPrint(&body_buffer,
         \\---
         \\id: articles/article-{d:0>6}
         \\title: Scale Article {d}
@@ -314,4 +312,3 @@ test "writeSection and writeSatellite generate correct double-braced include str
     const sat_single = std.mem.indexOf(u8, satellite_content, "{include");
     try std.testing.expectEqual(sat_double.? + 1, sat_single.?);
 }
-

@@ -44,13 +44,14 @@ behavior is in [scanner.md](scanner.md). Summary:
 | `.md`  | **yes** (case-sensitive) |
 | `.mdx` | **yes** (case-sensitive) |
 | `.textile` | **only in explicit `--textile` mode** (case-sensitive) |
+| `.cook` | **only in explicit `--cooklang` mode** (case-sensitive) |
 | `.MD`, `.Md`, `.MDX`, `.Mdx`, … | **no** |
 | other  | **no** |
 
 **Case behavior is case-sensitive for extensions.** Lowercase `.md` and `.mdx`
 are the default page sources; lowercase `.textile` is selected only by
-`--textile`. Implementations must **not** case-fold extensions or mix page
-families in one compile.
+`--textile`, and lowercase `.cook` only by `--cooklang`. Implementations must
+**not** case-fold extensions or mix page families in one compile.
 
 Exactly one trailing extension is stripped for ID derivation
 (`my.notes.md` → id `my.notes`; intermediate dots stay). Prefer matching
@@ -70,7 +71,8 @@ After discovery, each file has a **source path** string `sourcePath` such that:
 6. Preserves the path’s Unicode and letter case exactly as stored on disk
    (after separator normalization). Comparison is **case-sensitive**.
 7. Ends with a case-sensitive extension in the selected page family (`.md` /
-   `.mdx`, or `.textile` in explicit Textile mode).
+   `.mdx`, `.textile` in explicit Textile mode, or `.cook` in explicit
+   Cooklang mode).
 
 **Invalid** examples (must not appear as `sourcePath`; emit
 [`EINVALIDPATH`](diagnostics.md)):
@@ -108,12 +110,17 @@ Letter case is **preserved**. Platform separators must not leak into graph keys.
 | `nested/deep/page.md` | `nested/deep/page` |
 | `a\b\c.md` (pre-normalize) | `a/b/c` |
 | `guides/intro.textile` (Textile mode) | `guides/intro` |
+| `recipes/carbonara.cook` (Cooklang mode) | `recipes/carbonara` |
 
 ### Rules
 
 1. Single shared derivation function for all pages (`canonicalEntityId` only).
 2. Entity ids **never** start with `/`, **never** contain `\`, and **never**
-   contain empty, `.`, or `..` segments.
+   contain empty, `.`, or `..` segments. URL-significant `#`, `?`, and `%`
+   characters are also rejected so ids cannot change path/query/fragment
+   interpretation when used in public hrefs. Whitespace is rejected on the
+   same footing, so a page path — including a `.cook` path in Cooklang
+   mode — must not contain a space.
 3. Entity id length ≤ 255 UTF-8 bytes.
 4. Empty ID is forbidden (e.g. a file named only `.md` is invalid).
 5. ID uniqueness across the content root is **byte-exact** →

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="cards">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Cards</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/cards.css}}">
+  {{head}}
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="topbar">
+    <p class="brand" aria-label="Cards">
+      <span class="brand__mark" aria-hidden="true">K</span>
+      <span>Cards</span>
+    </p>
+    {{breadcrumb}}
+  </header>
+  <div class="shell">
+    <aside class="rail rail--nav">
+      <p class="eyebrow">Browse</p>
+      {{nav}}
+    </aside>
+    <main id="content" class="article-card" data-boris-search-root>
+      {{metadata}}
+      <article class="prose">{{content}}</article>
+      <section class="children-card" aria-labelledby="children-heading">
+        <h2 id="children-heading">In this section</h2>
+        {{children}}
+      </section>
+    </main>
+    <aside class="rail rail--toc" aria-label="On this page" data-boris-search-exclude>
+      <p class="eyebrow">On this page</p>
+      {{toc}}
+    </aside>
+  </div>
+  <footer class="footer">{{footer}}</footer>
+</body>
+</html>

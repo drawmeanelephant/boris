@@ -21,6 +21,7 @@
 
 const std = @import("std");
 const identity = @import("identity.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
 
 pub const max_entity_id_bytes = identity.max_entity_id_bytes;
 pub const ContentKind = identity.ContentKind;
@@ -31,6 +32,12 @@ pub const ContentKind = identity.ContentKind;
 
 /// Max UTF-8 **bytes** for a frontmatter `title` value.
 pub const max_title_bytes: usize = 512;
+
+/// Max UTF-8 bytes for a frontmatter RSS summary.
+pub const max_summary_bytes: usize = 1024;
+
+/// Max UTF-8 bytes for a frontmatter `servings` / `serves` / `yield` value.
+pub const max_servings_bytes: usize = 64;
 
 /// Max UTF-8 **bytes** for one tag token (after quote strip).
 pub const max_tag_bytes: usize = 64;
@@ -48,7 +55,15 @@ pub const max_frontmatter_bytes: usize = 64 * 1024;
 pub const max_frontmatter_fields: usize = 32;
 
 /// Maximum semantic relations on one page in the IR 0.3 grammar.
-pub const max_relation_count: usize = 16;
+///
+/// This is deliberately a compile-time bound rather than a project setting:
+/// it leaves relation storage predictable while accommodating real evidence
+/// pages with substantially more than a handful of typed links.
+pub const max_relation_count: usize = 128;
+
+/// Maximum bytes for a semantic relation kind token. Kinds are ASCII tokens
+/// today; the bound keeps parsing and durable storage predictable.
+pub const max_relation_kind_bytes: usize = 64;
 
 /// Closed `status` vocabulary (exact spellings only).
 pub const Status = enum {
@@ -68,22 +83,30 @@ pub const Status = enum {
     }
 };
 
-pub const RelationKind = enum {
-    relates_to,
-    implements,
-    depends_on,
-    supersedes,
+/// Constrained open semantic relation kind. The token grammar is
+/// `[a-z][a-z0-9_]{0,63}`; Boris preserves the token but does not assign it
+/// domain meaning. The original four names are therefore still valid without
+/// being a closed registry.
+pub const RelationKind = struct {
+    value: []const u8,
 
     pub fn parse(s: []const u8) ?RelationKind {
-        if (std.mem.eql(u8, s, "relates_to")) return .relates_to;
-        if (std.mem.eql(u8, s, "implements")) return .implements;
-        if (std.mem.eql(u8, s, "depends_on")) return .depends_on;
-        if (std.mem.eql(u8, s, "supersedes")) return .supersedes;
-        return null;
+        if (s.len == 0 or s.len > max_relation_kind_bytes) return null;
+        if (s[0] < 'a' or s[0] > 'z') return null;
+        for (s[1..]) |c| {
+            const ok = (c >= 'a' and c <= 'z') or
+                (c >= '0' and c <= '9') or c == '_';
+            if (!ok) return null;
+        }
+        return .{ .value = s };
     }
 
     pub fn name(self: RelationKind) []const u8 {
-        return @tagName(self);
+        return self.value;
+    }
+
+    pub fn eql(a: RelationKind, b: RelationKind) bool {
+        return std.mem.eql(u8, a.value, b.value);
     }
 };
 
@@ -91,6 +114,36 @@ pub const SemanticRelation = struct {
     kind: RelationKind,
     target: []const u8,
 };
+
+/// Parsed Cooklang-convention serving count.
+///
+/// Author keys `servings`, `serves`, and `yield` collapse to this one field.
+/// `count` is the leading positive integer; `authored` is the raw value
+/// (so `15 cups worth` keeps its units text).
+pub const Servings = struct {
+    count: u32,
+    authored: []const u8,
+};
+
+/// True for the closed Cooklang serving-count aliases. Every other Cooklang
+/// metadata name (`source`, `author`, `course`, …) stays an unknown key.
+pub fn isServingsKey(key: []const u8) bool {
+    return std.mem.eql(u8, key, "servings") or
+        std.mem.eql(u8, key, "serves") or
+        std.mem.eql(u8, key, "yield");
+}
+
+/// Leading positive integer, optionally a space/tab and units (`2`,
+/// `15 cups worth`). Rejects `0`, leading zeros, fractions, and decimals.
+pub fn parseServingsValue(value: []const u8) error{BadServings}!u32 {
+    if (value.len == 0 or value[0] < '1' or value[0] > '9') return error.BadServings;
+    var end: usize = 1;
+    while (end < value.len and value[end] >= '0' and value[end] <= '9') end += 1;
+    const count = std.fmt.parseInt(u32, value[0..end], 10) catch return error.BadServings;
+    if (count == 0) return error.BadServings;
+    if (end < value.len and value[end] != ' ' and value[end] != '\t') return error.BadServings;
+    return count;
+}
 
 /// Parsed frontmatter fields as **views into the source buffer**.
 ///
@@ -104,6 +157,12 @@ pub const FrontmatterView = struct {
     title: ?[]const u8 = null,
     parent: ?[]const u8 = null,
     status: ?Status = null,
+    /// Optional strict UTC publication timestamp, retained verbatim for RSS.
+    published_at: ?[]const u8 = null,
+    /// Optional short plain-text description for future projections and RSS.
+    summary: ?[]const u8 = null,
+    /// Optional serving count from `servings` / `serves` / `yield`.
+    servings: ?Servings = null,
     /// Tag token slices into source; only `tags[0..tag_count]` is defined.
     tags: [max_tag_count][]const u8 = undefined,
     tag_count: usize = 0,
@@ -208,15 +267,30 @@ pub const Role = enum {
 pub const DurablePage = struct {
     /// Final entity id (path-derived or frontmatter `id:` override).
     entity_id: []const u8,
+    /// Whether `entity_id` came from a frontmatter `id:` override rather than
+    /// path derivation. Recorded at promotion because only the caller knows
+    /// which branch of the id resolution was taken; consumers needing
+    /// rename-stable external identity cannot re-derive it afterwards.
+    id_explicit: bool = false,
     title: ?[]const u8 = null,
     parent: ?[]const u8 = null,
     source_path: []const u8,
     output_path: []const u8,
     status: ?Status = null,
+    published_at: ?[]const u8 = null,
+    summary: ?[]const u8 = null,
+    /// Cooklang convention count; not written into graph.json.
+    servings: ?Servings = null,
     /// Retain-owned tag strings (may be empty slice).
     tags: []const []const u8 = &.{},
     /// Retain-owned semantic relation targets (IR 0.3 when emitted).
     relations: []const SemanticRelation = &.{},
+    /// Structured recipe extracted from a `.cook` page (IR 0.4 when emitted).
+    ///
+    /// Retain-owned like every other field here: the Cooklang adapter is handed
+    /// the retain allocator so its strings outlive the per-page scratch arena.
+    /// Empty for every other input format.
+    recipe: cooklang_seam.Recipe = .{},
     kind: ContentKind = .md,
     /// Byte offset of body start in the source file (not a live buffer).
     body_offset: usize = 0,
@@ -292,8 +366,13 @@ pub const PageDb = struct {
         discovery: Page,
         /// Final entity id (after optional frontmatter override).
         entity_id: []const u8,
+        /// True when `entity_id` came from `meta.id`; the caller owns the
+        /// resolution decision, so it is passed rather than re-derived here.
+        id_explicit: bool,
         meta: FrontmatterView,
         body_offset: usize,
+        /// Already retain-owned; empty for every format but Cooklang.
+        recipe: cooklang_seam.Recipe,
     ) !void {
         const tags_src = meta.tagsSlice();
         var tags_owned: []const []const u8 = &.{};
@@ -310,7 +389,10 @@ pub const PageDb = struct {
         if (relations_src.len > 0) {
             const buf = try self.retain.alloc(SemanticRelation, relations_src.len);
             for (relations_src, 0..) |relation, i| {
-                buf[i] = .{ .kind = relation.kind, .target = try self.retain.dupe(u8, relation.target) };
+                buf[i] = .{
+                    .kind = .{ .value = try self.retain.dupe(u8, relation.kind.name()) },
+                    .target = try self.retain.dupe(u8, relation.target),
+                };
             }
             relations_owned = buf;
         }
@@ -323,13 +405,21 @@ pub const PageDb = struct {
 
         try self.append(.{
             .entity_id = try self.retain.dupe(u8, entity_id),
+            .id_explicit = id_explicit,
             .title = try self.dupeOpt(meta.title),
             .parent = try self.dupeOpt(meta.parent),
             .source_path = try self.retain.dupe(u8, discovery.source_path),
             .output_path = output_path,
             .status = meta.status,
+            .published_at = try self.dupeOpt(meta.published_at),
+            .summary = try self.dupeOpt(meta.summary),
+            .servings = if (meta.servings) |s| .{
+                .count = s.count,
+                .authored = try self.retain.dupe(u8, s.authored),
+            } else null,
             .tags = tags_owned,
             .relations = relations_owned,
+            .recipe = recipe,
             .kind = discovery.kind,
             .body_offset = body_offset,
             .role = if (meta.parent != null) .satellite else .trunk,
@@ -373,6 +463,17 @@ test "Status.parse closed vocabulary" {
     try std.testing.expect(Status.parse("") == null);
 }
 
+test "RelationKind accepts bounded lowercase domain tokens" {
+    try std.testing.expectEqualStrings("relates_to", RelationKind.parse("relates_to").?.name());
+    try std.testing.expectEqualStrings("verified_by2", RelationKind.parse("verified_by2").?.name());
+    try std.testing.expect(RelationKind.parse("Unknown") == null);
+    try std.testing.expect(RelationKind.parse("unknown-kind") == null);
+    try std.testing.expect(RelationKind.parse("1kind") == null);
+    var too_long: [max_relation_kind_bytes + 1]u8 = undefined;
+    @memset(&too_long, 'a');
+    try std.testing.expect(RelationKind.parse(&too_long) == null);
+}
+
 test "PageDb.promote owns strings after source buffer free" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
@@ -394,10 +495,10 @@ test "PageDb.promote owns strings after source buffer free" {
         \\body
     );
     // Parse views into source (manual view to avoid depending on parser here).
-    const title_view = source[std.mem.indexOf(u8, source, "Durable Title").? ..][0.."Durable Title".len];
-    const parent_view = source[std.mem.indexOf(u8, source, "home").? ..][0.."home".len];
+    const title_view = source[std.mem.indexOf(u8, source, "Durable Title").?..][0.."Durable Title".len];
+    const parent_view = source[std.mem.indexOf(u8, source, "home").?..][0.."home".len];
     const tag_a = source[std.mem.indexOf(u8, source, "[a, b]").? + 1 ..][0..1];
-    const tag_b = source[std.mem.indexOf(u8, source, "b]").? ..][0..1];
+    const tag_b = source[std.mem.indexOf(u8, source, "b]").?..][0..1];
 
     var meta: FrontmatterView = .{
         .title = title_view,
@@ -415,7 +516,7 @@ test "PageDb.promote owns strings after source buffer free" {
         .kind = .md,
     };
 
-    try db.promote(discovery, "child", meta, 64);
+    try db.promote(discovery, "child", false, meta, 64, .{});
 
     // Free the temporary source — promoted strings must remain valid.
     gpa.free(source);
@@ -431,4 +532,32 @@ test "PageDb.promote owns strings after source buffer free" {
     try std.testing.expectEqualStrings("a", p.tags[0]);
     try std.testing.expectEqualStrings("b", p.tags[1]);
     try std.testing.expect(p.role == .satellite);
+}
+
+test "PageDb.promote records frontmatter id override provenance" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    var db = PageDb.init(gpa, retain);
+    defer db.deinit();
+
+    const derived: Page = .{
+        .source_path = "notes/child.md",
+        .entity_id = "notes-child",
+        .output_path = "notes-child.html",
+        .kind = .md,
+    };
+    const no_id: FrontmatterView = .{};
+    try db.promote(derived, derived.entity_id, false, no_id, 0, .{});
+
+    // Same discovery, but the author pinned `id: pinned` in frontmatter.
+    const overridden: FrontmatterView = .{ .id = "pinned" };
+    try db.promote(derived, overridden.id.?, true, overridden, 0, .{});
+
+    try std.testing.expect(!db.items()[0].id_explicit);
+    try std.testing.expectEqualStrings("notes-child", db.items()[0].entity_id);
+    try std.testing.expect(db.items()[1].id_explicit);
+    try std.testing.expectEqualStrings("pinned", db.items()[1].entity_id);
 }

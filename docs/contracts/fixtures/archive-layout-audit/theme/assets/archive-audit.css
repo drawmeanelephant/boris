@@ -1,0 +1,14 @@
+:root { color: #202020; background: #faf7f1; font-family: system-ui, sans-serif; }
+* { box-sizing: border-box; }
+body { width: min(100% - 2rem, 78rem); margin: 0 auto; line-height: 1.55; }
+.masthead { margin: 2rem 0 1rem; font-size: clamp(1.4rem, 4vw, 2.8rem); overflow-wrap: anywhere; }
+.site-nav, .crumbs { margin: 1rem 0; overflow-wrap: anywhere; }
+.page-children ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; padding: 0; list-style: none; }
+.page-children li { border: 1px solid #b8afa0; padding: .9rem; overflow-wrap: anywhere; }
+.page-children a { color: #083f6b; }
+article { max-width: 72ch; overflow-x: auto; }
+pre, table { display: block; max-width: 100%; overflow-x: auto; }
+table { min-width: 32rem; border-collapse: collapse; }
+th, td { border: 1px solid #b8afa0; padding: .4rem; }
+img { max-width: 100%; height: auto; }
+@media (max-width: 42rem) { .page-children ul { grid-template-columns: 1fr; } body { width: min(100% - 1rem, 78rem); } }

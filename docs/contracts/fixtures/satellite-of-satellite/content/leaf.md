@@ -5,4 +5,4 @@ parent: mid
 
 # Leaf
 
-Satellite-of-satellite → `EPARENTNOTTRUNK`.
+Third-level Satellite; nested parent chains are valid when acyclic.

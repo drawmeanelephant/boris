@@ -12,7 +12,7 @@ Authoring paths for teams moving content into Boris. Every page below is a
 | Guide | Topic |
 |-------|--------|
 | [[guides/getting-started|Getting started]] | Build and first HTML site |
-| [[guides/installation|Installation]] | Zig + CMake host tools |
+| [[guides/installation|Installation]] | Zig + pinned Oliver renderer |
 | [[guides/authoring-frontmatter|Authoring frontmatter]] | Closed keys only |
 | [[guides/wiki-links|Wiki links]] | Entity ids and labels |
 | [[guides/includes|Includes]] | Shared fragments |

@@ -5,6 +5,8 @@
 
 const std = @import("std");
 const Io = std.Io;
+const semantics = @import("migration_semantics.zig");
+const publication = @import("publication.zig");
 
 pub const format_id = "boris-astro-migration-lab";
 pub const schema_version: u32 = 1;
@@ -37,7 +39,7 @@ const skip_file_names = [_][]const u8{
 };
 
 /// Boris closed frontmatter keys (author grammar). Others are migration hazards.
-const boris_keys = [_][]const u8{ "id", "title", "parent", "status", "tags" };
+const boris_keys = semantics.boris_frontmatter_keys;
 
 pub const FileKind = enum {
     content_page,
@@ -118,6 +120,7 @@ pub const ProposedId = struct {
     source_path: []const u8,
     proposed_entity_id: []const u8,
     basis: []const u8,
+    kind: semantics.ProposedEntityKind = .source_record,
 };
 
 pub const ParentChild = struct {
@@ -126,6 +129,17 @@ pub const ParentChild = struct {
     candidate_parent_id: []const u8,
     reason: []const u8,
     confidence: []const u8,
+    decision: semantics.ParentDecision = .review,
+    resolved_target: ?[]const u8 = null,
+    target_kind: []const u8 = "entity_id_candidate",
+    ep_parent_not_trunk_risk: bool = false,
+};
+
+pub const MdxComponent = struct {
+    source_path: []const u8,
+    tag: []const u8,
+    classification: semantics.MdxComponentClass,
+    deterministic_transform: bool,
 };
 
 pub const BrokenLink = struct {
@@ -164,6 +178,8 @@ pub const Report = struct {
     inventory: []InventoryEntry,
     stitches: []Stitch,
     proposed_ids: []ProposedId,
+    proposed_entity_kind_counts: []usize = &.{},
+    proposed_entity_accounting_valid: bool = true,
     parent_child_candidates: []ParentChild,
     links: []LinkRef,
     broken_links: []BrokenLink,
@@ -172,6 +188,7 @@ pub const Report = struct {
     missing_assets: []MissingAsset,
     hazards: []Hazard,
     human_review: []HumanReview,
+    mdx_components: []MdxComponent = &.{},
 };
 
 // ---------------------------------------------------------------------------
@@ -1090,6 +1107,43 @@ fn resolveLayoutPath(
     return null;
 }
 
+fn classifyMdxTag(tag: []const u8) semantics.MdxComponentClass {
+    if (std.mem.eql(u8, tag, "Broside") or std.mem.eql(u8, tag, "Limerick")) return .known_card_wrapper;
+    if (std.mem.eql(u8, tag, "CollectionRegister")) return .dynamic_query_component;
+    return .manual_review;
+}
+
+test "archaeology: known MDX components have bounded classifications" {
+    try std.testing.expect(classifyMdxTag("Broside") == .known_card_wrapper);
+    try std.testing.expect(classifyMdxTag("Limerick") == .known_card_wrapper);
+    try std.testing.expect(classifyMdxTag("CollectionRegister") == .dynamic_query_component);
+    try std.testing.expect(classifyMdxTag("UnknownCard") == .manual_review);
+}
+
+fn collectMdxComponents(a: std.mem.Allocator, source_path: []const u8, body: []const u8, out: *std.ArrayList(MdxComponent)) !void {
+    var i: usize = 0;
+    while (i + 1 < body.len) : (i += 1) {
+        if (body[i] != '<' or body[i + 1] < 'A' or body[i + 1] > 'Z') continue;
+        const start = i + 1;
+        var end = start;
+        while (end < body.len and ((body[end] >= 'A' and body[end] <= 'Z') or (body[end] >= 'a' and body[end] <= 'z'))) : (end += 1) {}
+        if (end == start) continue;
+        const tag = body[start..end];
+        var duplicate = false;
+        for (out.items) |existing| {
+            if (std.mem.eql(u8, existing.source_path, source_path) and std.mem.eql(u8, existing.tag, tag)) duplicate = true;
+        }
+        if (duplicate) continue;
+        const classification = classifyMdxTag(tag);
+        try out.append(a, .{
+            .source_path = source_path,
+            .tag = tag,
+            .classification = classification,
+            .deterministic_transform = classification == .known_card_wrapper,
+        });
+    }
+}
+
 pub fn analyze(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1114,6 +1168,8 @@ pub fn analyze(
 
     var asset_entries: std.ArrayList(AssetEntry) = .empty;
     errdefer asset_entries.deinit(gpa);
+    var mdx_components: std.ArrayList(MdxComponent) = .empty;
+    errdefer mdx_components.deinit(gpa);
 
     // Index of all paths for resolution
     var path_index: std.ArrayList([]const u8) = .empty;
@@ -1184,6 +1240,7 @@ pub fn analyze(
             .source_path = p.source_path,
             .proposed_entity_id = p.entity_id,
             .basis = "path_under_content_root_strip_ext",
+            .kind = .source_record,
         });
     }
     for (page_routes.items) |rp| {
@@ -1193,6 +1250,7 @@ pub fn analyze(
             .source_path = rp,
             .proposed_entity_id = try retain.dupe(u8, proposeEntityId(rp)),
             .basis = "path_under_src_pages_strip_ext",
+            .kind = .custom_route,
         });
     }
     std.mem.sort(ProposedId, proposed.items, {}, struct {
@@ -1304,6 +1362,10 @@ pub fn analyze(
                 .candidate_parent_id = par,
                 .reason = "frontmatter_parent",
                 .confidence = "high",
+                .decision = .parent,
+                .resolved_target = if (pathSetContains(entity_set.items, par)) par else null,
+                .target_kind = "entity_id",
+                .ep_parent_not_trunk_risk = !pathSetContains(entity_set.items, par),
             });
             continue;
         }
@@ -1314,6 +1376,10 @@ pub fn analyze(
                 .candidate_parent_id = par,
                 .reason = "frontmatter_parentEntry_legacy",
                 .confidence = "medium",
+                .decision = .relation,
+                .resolved_target = if (pathSetContains(entity_set.items, par)) par else null,
+                .target_kind = "legacy_entity_id",
+                .ep_parent_not_trunk_risk = true,
             });
             continue;
         }
@@ -1338,6 +1404,10 @@ pub fn analyze(
                         .candidate_parent_id = try retain.dupe(u8, eid),
                         .reason = "directory_hierarchy",
                         .confidence = "medium",
+                        .decision = .review,
+                        .resolved_target = eid,
+                        .target_kind = "directory_candidate",
+                        .ep_parent_not_trunk_risk = true,
                     });
                     found = true;
                     break;
@@ -1350,6 +1420,10 @@ pub fn analyze(
                     .candidate_parent_id = try retain.dupe(u8, candidate),
                     .reason = "directory_hierarchy_unverified",
                     .confidence = "low",
+                    .decision = .review,
+                    .resolved_target = null,
+                    .target_kind = "directory_candidate",
+                    .ep_parent_not_trunk_risk = true,
                 });
             }
         }
@@ -1395,6 +1469,7 @@ pub fn analyze(
 
         const page_hazards = try collectHazards(retain, p.source_path, p.source, p.fm);
         for (page_hazards) |h| try hazards.append(gpa, h);
+        try collectMdxComponents(gpa, p.source_path, p.body, &mdx_components);
     }
 
     // Also scan standalone .astro routes for href/src (simple)
@@ -1445,6 +1520,19 @@ pub fn analyze(
             return std.mem.order(u8, a.source_path, b.source_path) == .lt;
         }
     }.less);
+    std.mem.sort(MdxComponent, mdx_components.items, {}, struct {
+        fn less(_: void, a: MdxComponent, b: MdxComponent) bool {
+            const sp = std.mem.order(u8, a.source_path, b.source_path);
+            if (sp != .eq) return sp == .lt;
+            return std.mem.order(u8, a.tag, b.tag) == .lt;
+        }
+    }.less);
+
+    var entity_kind_counts: [5]usize = .{ 0, 0, 0, 0, 0 };
+    for (proposed.items) |p| entity_kind_counts[@intFromEnum(p.kind)] += 1;
+    var explained_entities: usize = 0;
+    for (entity_kind_counts) |count| explained_entities += count;
+    if (explained_entities != proposed.items.len) return error.EntityAccountingMismatch;
 
     // Slug conflicts: same collection-relative slug from different paths
     var conflicts: std.ArrayList(SlugConflict) = .empty;
@@ -1646,6 +1734,8 @@ pub fn analyze(
         .inventory = try inventory.toOwnedSlice(gpa),
         .stitches = try stitches.toOwnedSlice(gpa),
         .proposed_ids = try proposed.toOwnedSlice(gpa),
+        .proposed_entity_kind_counts = try retain.dupe(usize, entity_kind_counts[0..]),
+        .proposed_entity_accounting_valid = true,
         .parent_child_candidates = try parents.toOwnedSlice(gpa),
         .links = try links.toOwnedSlice(gpa),
         .broken_links = try broken.toOwnedSlice(gpa),
@@ -1654,6 +1744,7 @@ pub fn analyze(
         .missing_assets = try missing_assets.toOwnedSlice(gpa),
         .hazards = try hazards.toOwnedSlice(gpa),
         .human_review = try review.toOwnedSlice(gpa),
+        .mdx_components = try mdx_components.toOwnedSlice(gpa),
     };
 }
 
@@ -1747,6 +1838,18 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
         report.human_review.len,
     });
     try buf.appendSlice(gpa, "  },\n");
+    try buf.appendSlice(gpa, "  \"proposed_entity_kind_counts\": {\n");
+    for ([_]semantics.ProposedEntityKind{ .source_record, .generated_trunk, .generated_index, .custom_route, .alias }, 0..) |kind, i| {
+        try buf.appendSlice(gpa, "    \"");
+        try buf.appendSlice(gpa, kind.name());
+        try buf.appendSlice(gpa, "\": ");
+        try buf.print(gpa, "{d}", .{if (i < report.proposed_entity_kind_counts.len) report.proposed_entity_kind_counts[i] else 0});
+        if (i < 4) try buf.append(gpa, ',');
+        try buf.append(gpa, '\n');
+    }
+    try buf.appendSlice(gpa, "  },\n");
+    try buf.appendSlice(gpa, "  \"proposed_entity_accounting_valid\": ");
+    try buf.appendSlice(gpa, if (report.proposed_entity_accounting_valid) "true,\n" else "false,\n");
 
     // inventory
     try buf.appendSlice(gpa, "  \"inventory\": [\n");
@@ -1792,6 +1895,8 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
         try appendJsonString(&buf, gpa, p.proposed_entity_id);
         try buf.appendSlice(gpa, ", \"basis\": ");
         try appendJsonString(&buf, gpa, p.basis);
+        try buf.appendSlice(gpa, ", \"kind\": ");
+        try appendJsonString(&buf, gpa, p.kind.name());
         try buf.append(gpa, '}');
         if (idx + 1 < report.proposed_ids.len) try buf.append(gpa, ',');
         try buf.append(gpa, '\n');
@@ -1811,6 +1916,13 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
         try appendJsonString(&buf, gpa, p.reason);
         try buf.appendSlice(gpa, ", \"confidence\": ");
         try appendJsonString(&buf, gpa, p.confidence);
+        try buf.appendSlice(gpa, ", \"decision\": ");
+        try appendJsonString(&buf, gpa, p.decision.name());
+        try buf.appendSlice(gpa, ", \"resolved_target\": ");
+        try appendJsonStringOpt(&buf, gpa, p.resolved_target);
+        try buf.appendSlice(gpa, ", \"target_kind\": ");
+        try appendJsonString(&buf, gpa, p.target_kind);
+        try buf.appendSlice(gpa, if (p.ep_parent_not_trunk_risk) ", \"EPARENTNOTTRUNK_risk\": true" else ", \"EPARENTNOTTRUNK_risk\": false");
         try buf.append(gpa, '}');
         if (idx + 1 < report.parent_child_candidates.len) try buf.append(gpa, ',');
         try buf.append(gpa, '\n');
@@ -1891,6 +2003,20 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
     }
     try buf.appendSlice(gpa, "  ],\n");
 
+    try buf.appendSlice(gpa, "  \"mdx_components\": [\n");
+    for (report.mdx_components, 0..) |component, idx| {
+        try buf.appendSlice(gpa, "    {\"source_path\": ");
+        try appendJsonString(&buf, gpa, component.source_path);
+        try buf.appendSlice(gpa, ", \"tag\": ");
+        try appendJsonString(&buf, gpa, component.tag);
+        try buf.appendSlice(gpa, ", \"classification\": ");
+        try appendJsonString(&buf, gpa, component.classification.name());
+        try buf.appendSlice(gpa, if (component.deterministic_transform) ", \"deterministic_transform\": true}" else ", \"deterministic_transform\": false}");
+        if (idx + 1 < report.mdx_components.len) try buf.append(gpa, ',');
+        try buf.append(gpa, '\n');
+    }
+    try buf.appendSlice(gpa, "  ],\n");
+
     // hazards
     try buf.appendSlice(gpa, "  \"hazards\": [\n");
     for (report.hazards, 0..) |h, idx| {
@@ -1962,6 +2088,7 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
     try buf.print(gpa, "| Stitches | {d} |\n", .{report.stitches.len});
     try buf.print(gpa, "| Complete stitches | {d} |\n", .{countCompleteStitches(report.stitches)});
     try buf.print(gpa, "| Proposed entity ids | {d} |\n", .{report.proposed_ids.len});
+    try buf.print(gpa, "| Explained entity kinds | {d} |\n", .{report.proposed_ids.len});
     try buf.print(gpa, "| Parent/child candidates | {d} |\n", .{report.parent_child_candidates.len});
     try buf.print(gpa, "| Internal links | {d} |\n", .{report.links.len});
     try buf.print(gpa, "| Broken links | {d} |\n", .{report.broken_links.len});
@@ -1994,21 +2121,24 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
     try buf.appendSlice(gpa, "\n");
 
     try buf.appendSlice(gpa, "## Proposed Boris entity ids\n\n");
-    try buf.appendSlice(gpa, "| source_path | proposed_entity_id | basis |\n|---|---|---|\n");
+    try buf.appendSlice(gpa, "| source_path | proposed_entity_id | kind | basis |\n|---|---|---|---|\n");
     for (report.proposed_ids) |p| {
-        try buf.print(gpa, "| `{s}` | `{s}` | {s} |\n", .{ p.source_path, p.proposed_entity_id, p.basis });
+        try buf.print(gpa, "| `{s}` | `{s}` | `{s}` | {s} |\n", .{ p.source_path, p.proposed_entity_id, p.kind.name(), p.basis });
     }
     try buf.appendSlice(gpa, "\n");
 
     try buf.appendSlice(gpa, "## Parent / child candidates\n\n");
-    try buf.appendSlice(gpa, "| child_source_path | child_id | parent_id | reason | confidence |\n|---|---|---|---|---|\n");
+    try buf.appendSlice(gpa, "| child_source_path | child_id | parent_id | decision | resolved_target | target_kind | confidence | EPARENTNOTTRUNK risk |\n|---|---|---|---|---|---|---|---|\n");
     for (report.parent_child_candidates) |p| {
-        try buf.print(gpa, "| `{s}` | `{s}` | `{s}` | {s} | {s} |\n", .{
+        try buf.print(gpa, "| `{s}` | `{s}` | `{s}` | {s} | `{s}` | {s} | {s} | {s} |\n", .{
             p.child_source_path,
             p.child_entity_id,
             p.candidate_parent_id,
-            p.reason,
+            p.decision.name(),
+            p.resolved_target orelse "—",
+            p.target_kind,
             p.confidence,
+            if (p.ep_parent_not_trunk_risk) "yes" else "no",
         });
     }
     try buf.appendSlice(gpa, "\n");
@@ -2060,6 +2190,17 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
         try buf.appendSlice(gpa, "\n");
     }
 
+    try buf.appendSlice(gpa, "## MDX component classifications\n\n");
+    if (report.mdx_components.len == 0) {
+        try buf.appendSlice(gpa, "_None._\n\n");
+    } else {
+        try buf.appendSlice(gpa, "| source_path | tag | classification | deterministic transform |\n|---|---|---|---|\n");
+        for (report.mdx_components) |component| {
+            try buf.print(gpa, "| `{s}` | `{s}` | `{s}` | {s} |\n", .{ component.source_path, component.tag, component.classification.name(), if (component.deterministic_transform) "yes" else "no" });
+        }
+        try buf.appendSlice(gpa, "\n");
+    }
+
     try buf.appendSlice(gpa, "## Frontmatter / content hazards\n\n");
     if (report.hazards.len == 0) {
         try buf.appendSlice(gpa, "_None._\n\n");
@@ -2104,6 +2245,7 @@ fn freeReport(gpa: std.mem.Allocator, report: *Report) void {
     gpa.free(report.missing_assets);
     gpa.free(report.hazards);
     gpa.free(report.human_review);
+    gpa.free(report.mdx_components);
 }
 
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
@@ -2125,12 +2267,26 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     const md = try emitMarkdown(gpa, report);
     defer gpa.free(md);
 
-    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
-    var out = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
+    // Write into a validated, owned stage and only then replace the output, so
+    // a reused or nested --out cannot silently clobber unrelated files.
+    var output_publication = try publication.Publication.begin(
+        io,
+        gpa,
+        opts.out_dir,
+        &.{opts.root_dir},
+        format_id,
+    );
+    defer {
+        output_publication.abandon(io, gpa);
+        output_publication.deinit(gpa);
+    }
+    var out = try Io.Dir.cwd().openDir(io, output_publication.stage_path, .{});
     defer out.close(io);
 
     try writeBytes(io, out, "report.json", json);
     try writeBytes(io, out, "REPORT.md", md);
+
+    try output_publication.commit(io, gpa);
 
     if (!opts.quiet) {
         std.debug.print("migration-lab: wrote {s}/report.json and {s}/REPORT.md\n", .{ opts.out_dir, opts.out_dir });

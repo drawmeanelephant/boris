@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "boris-testdata-profile/1",
+  "name": "preserved-edge-v1",
+  "description": "Boundary cases that should remain literal without turning into compiler failures",
+  "style": "compact",
+  "includeAssets": false,
+  "barbs": ["unsafe_markdown_link"]
+}

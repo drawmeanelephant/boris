@@ -1,0 +1,3 @@
+### Docs
+
+- Slim [`CHANGELOG.md`](/CHANGELOG.md) to `[Unreleased]` + `[0.8.0]` (83 lines) per [#691](https://github.com/drawmeanelephant/boris/issues/691): archive pre-0.8.0 history (≈1243 lines, 0.7.0–0.1.0) to [`docs/archived/CHANGELOG-pre-0.8.md`](/docs/archived/CHANGELOG-pre-0.8.md) and update [`AGENTS.md`](/AGENTS.md) standing context to bound future growth, plus pointer updates in [`docs/STATUS.md`](/docs/STATUS.md), [`docs/SOURCE-MAP.md`](/docs/SOURCE-MAP.md), [`docs/contracts/README.md`](/docs/contracts/README.md), [`docs/AGENT-PLAYBOOK.md`](/docs/AGENT-PLAYBOOK.md), and [`README.md`](/README.md). Links: [`CHANGELOG.md`](/CHANGELOG.md), [`docs/archived/CHANGELOG-pre-0.8.md`](/docs/archived/CHANGELOG-pre-0.8.md), [`AGENTS.md`](/AGENTS.md).

@@ -1,0 +1,6 @@
+{
+  "labels": ["run-trex"],
+  "skipReview": "AUTOMATIC",
+  "triggerOnUpdates": false,
+  "triggerOnDrafts": false
+}

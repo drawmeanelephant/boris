@@ -241,7 +241,6 @@ test "hardening: IR and RAG match graph diagnostic categories" {
         .{ .root = "docs/contracts/fixtures/missing-parent/content", .code = .EPARENTMISSING },
         .{ .root = "docs/contracts/fixtures/self-parent/content", .code = .EPARENTSELF },
         .{ .root = "docs/contracts/fixtures/cycles/content", .code = .EPARENTCYCLE },
-        .{ .root = "docs/contracts/fixtures/satellite-of-satellite/content", .code = .EPARENTNOTTRUNK },
         .{ .root = "docs/contracts/fixtures/longer-cycle/content", .code = .EPARENTCYCLE },
     };
 
@@ -377,8 +376,7 @@ test "hardening: invalid component fails IR with ECOMPONENT" {
     var work = try WorkDir.create(gpa, io, "bad-comp");
     defer work.cleanup();
 
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Bad
         \\---
@@ -403,14 +401,13 @@ test "hardening: invalid component fails IR with ECOMPONENT" {
     try std.testing.expect(saw);
 }
 
-test "hardening: valid Aside passes IR and RAG :::kind export" {
+test "hardening: valid Aside passes IR and RAG with authoring fidelity" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var work = try WorkDir.create(gpa, io, "aside-ok");
     defer work.cleanup();
 
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---
@@ -435,16 +432,17 @@ test "hardening: valid Aside passes IR and RAG :::kind export" {
         try std.testing.expect(r.ok);
     }
     {
-        var r = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .quiet = true });
+        var r = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .complete = true, .quiet = true });
         defer r.deinit();
         try std.testing.expect(r.compile.ok);
     }
 
+    // Complete-corpus content pages preserve the authoring representation.
     const page = try work.readFile("rag/content/pages/index.md", gpa);
     defer gpa.free(page);
-    try std.testing.expect(std.mem.indexOf(u8, page, ":::tip{id=\"t1\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "<Aside kind=\"tip\" id=\"t1\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, page, "Drink water.") != null);
-    try std.testing.expect(std.mem.indexOf(u8, page, "<Aside") == null);
+    try std.testing.expect(std.mem.indexOf(u8, page, ":::") == null);
 }
 
 test "hardening: Details include preserves IR and projects to HTML and RAG" {
@@ -453,8 +451,7 @@ test "hardening: Details include preserves IR and projects to HTML and RAG" {
     var work = try WorkDir.create(gpa, io, "details-ok");
     defer work.cleanup();
 
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---
@@ -498,7 +495,7 @@ test "hardening: Details include preserves IR and projects to HTML and RAG" {
         defer gpa.free(artifact);
         try std.testing.expect(std.mem.indexOf(u8, artifact, "Details") == null);
     }
-    var rr = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .quiet = true });
+    var rr = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .complete = true, .quiet = true });
     defer rr.deinit();
     try std.testing.expect(rr.compile.ok);
     _ = try compile.compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true });
@@ -512,10 +509,11 @@ test "hardening: Details include preserves IR and projects to HTML and RAG" {
     try std.testing.expect(std.mem.indexOf(u8, html, "<summary>Read &lt;this&gt; &amp; that</summary>") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "<strong>details</strong>") != null);
 
+    // Complete-corpus content pages keep the authoring representation.
     const rag_page = try work.readFile("rag/content/pages/index.md", gpa);
     defer gpa.free(rag_page);
-    try std.testing.expect(std.mem.indexOf(u8, rag_page, ":::details{summary=\"RAG details\" id=\"rag-1\"}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, rag_page, "<Details") == null);
+    try std.testing.expect(std.mem.indexOf(u8, rag_page, "<Details summary=\"RAG details\" id=\"rag-1\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rag_page, ":::") == null);
 }
 
 test "hardening: Details HTML is stable across jobs and incremental builds" {
@@ -524,8 +522,7 @@ test "hardening: Details HTML is stable across jobs and incremental builds" {
     var work = try WorkDir.create(gpa, io, "details-determinism");
     defer work.cleanup();
     try work.writeFile("layouts/main.html", "<html><body>{{content}}</body></html>\n");
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---
@@ -659,4 +656,170 @@ test "hardening: aside API smoke" {
     , arena.allocator());
     try std.testing.expect(!r.hasErrors());
     try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+}
+
+// ---------------------------------------------------------------------------
+// H-05: Direct IR export safety validation
+// ---------------------------------------------------------------------------
+
+test "hardening: H-05 direct IR export safety constraints" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var work = try WorkDir.create(gpa, io, "ir-export-safety");
+    defer work.cleanup();
+
+    try work.writeFile("content/index.md",
+        \\---
+        \\title: Safety Test Page
+        \\---
+        \\
+        \\Safety test body content.
+        \\
+    );
+
+    const content_dir = try work.join("content");
+    defer gpa.free(content_dir);
+
+    // 1. Reject output equal to content root
+    {
+        const err = pipeline.run(io, gpa, .{
+            .content_root = content_dir,
+            .out_dir = content_dir,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TargetOutputCollision, err);
+
+        // Verify content file still exists and was not corrupted
+        const index_data = try work.readFile("content/index.md", gpa);
+        defer gpa.free(index_data);
+        try std.testing.expect(std.mem.indexOf(u8, index_data, "Safety test body content") != null);
+    }
+
+    // 2. Reject output nested under content root
+    {
+        const nested_out = try work.join("content/nested_ir");
+        defer gpa.free(nested_out);
+
+        const err = pipeline.run(io, gpa, .{
+            .content_root = content_dir,
+            .out_dir = nested_out,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TargetOutputCollision, err);
+
+        // Verify nested directory was not created or populated
+        var nested_dir = Io.Dir.cwd().openDir(io, nested_out, .{});
+        if (nested_dir) |*d| {
+            d.close(io);
+            return error.TestUnexpectedResult;
+        } else |_| {}
+    }
+
+    // 3. Reject workspace escape
+    {
+        const err = pipeline.run(io, gpa, .{
+            .content_root = content_dir,
+            .out_dir = "../outside-ir-target",
+            .quiet = true,
+        });
+        try std.testing.expectError(error.WorkspaceEscape, err);
+    }
+
+    // 4. Reject output symlink along path
+    {
+        const target_dir = try work.join("real_target");
+        defer gpa.free(target_dir);
+        try Io.Dir.cwd().createDirPath(io, target_dir);
+
+        const symlink_out = try work.join("symlink_ir");
+        defer gpa.free(symlink_out);
+
+        // Create symlink pointing to real_target
+        Io.Dir.cwd().symLink(io, "real_target", symlink_out, .{}) catch |sym_err| {
+            // Skip symlink test if OS/platform disallows symlinks in test env
+            if (sym_err != error.AccessDenied and sym_err != error.PermissionDenied) {
+                try std.testing.expectError(error.TargetOutputSymlink, pipeline.run(io, gpa, .{
+                    .content_root = content_dir,
+                    .out_dir = symlink_out,
+                    .quiet = true,
+                }));
+            }
+        };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// H-03: Prevent HTML publication from following symlinks below output root
+// ---------------------------------------------------------------------------
+
+test "hardening: H-03 prevent HTML publication from following symlinks below output root" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var work = try WorkDir.create(gpa, io, "h03-symlink-publish");
+    defer work.cleanup();
+
+    // 1. Create content directory with a page that outputs to guides/page.html
+    try work.writeFile("content/guides/page.md",
+        \\---
+        \\title: Symlink Target Page
+        \\---
+        \\
+        \\This page should fail to publish.
+        \\
+    );
+
+    // 2. Create outside directory with a sentinel file
+    const outside_dir = try work.join("outside_target");
+    defer gpa.free(outside_dir);
+    try Io.Dir.cwd().createDirPath(io, outside_dir);
+
+    const sentinel_path = try std.fmt.allocPrint(gpa, "{s}/sentinel.txt", .{outside_dir});
+    defer gpa.free(sentinel_path);
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = sentinel_path, .data = "ORIGINAL_SENTINEL_CONTENT" });
+
+    // 3. Create dist output root and dist/guides as a symlink to outside_dir
+    const dist_path = try work.join("dist");
+    defer gpa.free(dist_path);
+    try Io.Dir.cwd().createDirPath(io, dist_path);
+
+    const symlink_path = try std.fmt.allocPrint(gpa, "{s}/guides", .{dist_path});
+    defer gpa.free(symlink_path);
+
+    // Symlink creation: if unsupported / denied, explicitly skip test
+    Io.Dir.cwd().symLink(io, outside_dir, symlink_path, .{}) catch |sym_err| switch (sym_err) {
+        error.AccessDenied, error.PermissionDenied => return error.SkipZigTest,
+        else => return sym_err,
+    };
+
+    const content_dir = try work.join("content");
+    defer gpa.free(content_dir);
+
+    try work.writeFile("layouts/main.html", "<main>{{content}}</main>");
+    const layout_path = try work.join("layouts/main.html");
+    defer gpa.free(layout_path);
+
+    // 4. Attempt to run HTML site compilation, which publishes guides/page.html
+    const err = compile.compileHtmlSite(io, gpa, .{
+        .content_root = content_dir,
+        .dist_dir = dist_path,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+
+    // 5. Assert publication fails with TargetOutputSymlink
+    try std.testing.expectError(error.TargetOutputSymlink, err);
+
+    // 6. Assert the outside sentinel and directory remain unchanged
+    const sentinel_bytes = try Io.Dir.cwd().readFileAlloc(io, sentinel_path, gpa, .unlimited);
+    defer gpa.free(sentinel_bytes);
+    try std.testing.expectEqualStrings("ORIGINAL_SENTINEL_CONTENT", sentinel_bytes);
+
+    // Assert page.html was NOT written to outside_dir
+    const page_in_outside = try std.fmt.allocPrint(gpa, "{s}/page.html", .{outside_dir});
+    defer gpa.free(page_in_outside);
+    var f = Io.Dir.cwd().openFile(io, page_in_outside, .{});
+    if (f) |*file| {
+        file.close(io);
+        return error.TestUnexpectedResult;
+    } else |_| {}
 }

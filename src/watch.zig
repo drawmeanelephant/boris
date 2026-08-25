@@ -5,7 +5,12 @@ const builtin = @import("builtin");
 const Io = std.Io;
 const compile = @import("compile.zig");
 const cli = @import("cli.zig");
+const diag = @import("diag.zig");
+const pipeline = @import("pipeline.zig");
 const target_mod = @import("target.zig");
+const preview_server = @import("preview_server.zig");
+const html_report = @import("html_report.zig");
+const watch_json = @import("watch_json.zig");
 
 /// Debounce window after the first change is observed (ms).
 pub const debounce_ms: i64 = 100;
@@ -87,13 +92,13 @@ pub const FakeWatcher = struct {
     const VTABLE = Watcher.VTable{
         .deinit = struct {
             fn deinit(ptr: *anyopaque) void {
-                const self: *FakeWatcher = @alignCast(@ptrCast(ptr));
+                const self: *FakeWatcher = @ptrCast(@alignCast(ptr));
                 self.deinit();
             }
         }.deinit,
         .poll = struct {
             fn poll(ptr: *anyopaque, events: *std.ArrayList(Event)) anyerror!void {
-                const self: *FakeWatcher = @alignCast(@ptrCast(ptr));
+                const self: *FakeWatcher = @ptrCast(@alignCast(ptr));
                 for (self.queued_events.items) |e| {
                     const dup = try self.allocator.dupe(u8, e.path);
                     try events.append(self.allocator, .{ .path = dup, .kind = e.kind });
@@ -152,13 +157,13 @@ pub const PollingWatcher = struct {
     const VTABLE = Watcher.VTable{
         .deinit = struct {
             fn deinit(ptr: *anyopaque) void {
-                const self: *PollingWatcher = @alignCast(@ptrCast(ptr));
+                const self: *PollingWatcher = @ptrCast(@alignCast(ptr));
                 self.deinit();
             }
         }.deinit,
         .poll = struct {
             fn poll(ptr: *anyopaque, events: *std.ArrayList(Event)) anyerror!void {
-                const self: *PollingWatcher = @alignCast(@ptrCast(ptr));
+                const self: *PollingWatcher = @ptrCast(@alignCast(ptr));
 
                 var new_map = std.StringHashMap(FileStamp).init(self.allocator);
                 errdefer {
@@ -502,17 +507,46 @@ fn handleSigInt(sig: std.posix.SIG) callconv(.c) void {
 }
 
 /// Content/layout failures that keep the watcher running for author recovery.
+/// The set is the compile path's canonical content-failure classifier, so the
+/// single-target watch path (`compileHtmlSite`) recovers from exactly the same
+/// author-correctable failures the multi-target path folds into
+/// `MultiTargetCompilationFailed` (docs/contracts/watch-mode.md §5). Hard
+/// filesystem/system failures (missing content roots, access errors, watcher
+/// backend errors) are deliberately excluded and terminate the process, as are
+/// usage-class layout-rule failures (exit 2).
 fn isRecoverableBuildError(err: anyerror) bool {
-    return switch (err) {
-        error.ParseFailed,
-        error.ComponentFailed,
-        error.TextileFailed,
-        error.InputFormatMismatch,
-        error.LayoutMissingMarker,
-        error.LayoutDuplicateMarker,
-        => true,
-        else => false,
-    };
+    return compile.isContentCompileFailure(err);
+}
+
+/// Prose label for a failed watch cycle: `"rebuild"` (HTML publish) or
+/// `"validation rebuild"` (`validate --watch`).
+fn rebuildLabel(action: Action) []const u8 {
+    return if (action == .validate) "validation rebuild" else "rebuild";
+}
+
+/// Prose label for the initial cycle: `"build"` (HTML publish) or
+/// `"validation"` (`validate --watch`).
+fn initialLabel(action: Action) []const u8 {
+    return if (action == .validate) "validation" else "build";
+}
+
+/// Prose label for a succeeded rebuild: `"rebuild succeeded"` or
+/// `"validation rebuild succeeded"`.
+fn rebuildSucceededLabel(action: Action) []const u8 {
+    return if (action == .validate) "validation rebuild succeeded" else "rebuild succeeded";
+}
+
+/// Append one EIO diagnostic for a bare compile error that escaped the
+/// collector, so the report still explains a failed cycle. Mirrors the
+/// one-shot `validate` behavior in main.zig (content failures already carry
+/// their own structured diagnostics in the collector).
+fn appendValidateEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror) void {
+    if (collector) |c| c.append(.{
+        .severity = .error_,
+        .code = .EIO,
+        .message = @errorName(err),
+        .remediation = "See the stderr diagnostic for the full explanation",
+    });
 }
 
 /// Native helper using std.Io Clock.Duration to sleep portably.
@@ -525,21 +559,36 @@ fn sleepMs(io: Io, ms: i64) !void {
 }
 
 /// Default layout path used by watch rebuilds (shared global layout for this slice).
-pub const default_watch_layout: []const u8 = "layouts/main.html";
+pub const default_watch_layout: []const u8 = "themes/boris/layouts/main.html";
+
+/// What one watch cycle does: publish HTML (the historical `watch` command) or
+/// run the zero-write HTML-source/config preflight (`validate --watch`, #647).
+pub const Action = enum { html, validate };
+
+fn actionOf(options: cli.Options) Action {
+    return if (options.command == .validate) .validate else .html;
+}
 
 /// Coordinator running the debounced watch and serialized rebuild cycles.
 pub const WatchCoordinator = struct {
     gpa: std.mem.Allocator,
     io: Io,
     options: cli.Options,
+    action: Action,
     watcher: Watcher,
     pending_changes: std.StringHashMap(void),
     /// Normalized forward-slash output roots, computed once at init.
     ignored_output_roots: []const []const u8,
+    /// Loopback preview server (`watch --serve`); bound at init so port
+    /// errors fail fast, started after the initial build in `run`.
+    serve: ?preview_server.Server = null,
 
     /// Build the ignore-root list once for the coordinator lifetime
     /// (final outs + sibling `.boris-stage` trees).
     fn buildIgnoredOutputRoots(gpa: std.mem.Allocator, options: cli.Options) ![]const []const u8 {
+        // `validate --watch` writes nothing, so there are no output roots to
+        // exclude: self-trigger protection is trivially satisfied (#647).
+        if (actionOf(options) == .validate) return try gpa.alloc([]const u8, 0);
         var roots: std.ArrayList([]const u8) = .empty;
         errdefer {
             for (roots.items) |r| gpa.free(r);
@@ -570,17 +619,33 @@ pub const WatchCoordinator = struct {
             for (ignored) |r| gpa.free(r);
             gpa.free(ignored);
         }
+        var serve: ?preview_server.Server = null;
+        if (options.serve) {
+            // HTML mode always synthesizes at least the "default" target, so
+            // targets.items[0] is the served root (canonical order).
+            // The errdefer above owns `ignored`; a bind error just propagates.
+            const root = options.targets.items[0].output_dir;
+            serve = try preview_server.Server.init(
+                gpa,
+                io,
+                root,
+                options.serve_port orelse preview_server.default_port,
+            );
+        }
         return .{
             .gpa = gpa,
             .io = io,
             .options = options,
+            .action = actionOf(options),
             .watcher = watcher,
             .pending_changes = std.StringHashMap(void).init(gpa),
             .ignored_output_roots = ignored,
+            .serve = serve,
         };
     }
 
     pub fn deinit(self: *WatchCoordinator) void {
+        if (self.serve) |*s| s.deinit();
         var it = self.pending_changes.iterator();
         while (it.next()) |entry| {
             self.gpa.free(entry.key_ptr.*);
@@ -632,6 +697,212 @@ pub const WatchCoordinator = struct {
         }
     }
 
+    /// True when `err` keeps the watch loop alive: author-correctable content/
+    /// layout failures and the multi-target aggregate wrap of them.
+    fn isRecoverableFailure(err: anyerror) bool {
+        return isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed;
+    }
+
+    /// Wall time of one compile in milliseconds (monotonic `awake` clock).
+    fn elapsedMs(io: Io, start: Io.Timestamp) u64 {
+        const elapsed = Io.Timestamp.durationTo(start, Io.Timestamp.now(io, .awake));
+        if (elapsed.nanoseconds <= 0) return 0;
+        return @intCast(@divTrunc(elapsed.nanoseconds, std.time.ns_per_ms));
+    }
+
+    const BuildOutcome = struct {
+        ok: bool = false,
+        stats: compile.CompileStats = .{ .pages_written = 0, .peak_whiteboard_capacity = 0 },
+        err: ?anyerror = null,
+        duration_ms: u64 = 0,
+    };
+
+    /// Run one HTML compile (initial or rebuild) and capture stats, error, and
+    /// wall duration. `subset` selects the rebuilt targets: null runs the raw
+    /// single-target path (`compileHtmlSite`); non-null runs the multi-target
+    /// path over exactly that subset. Structured diagnostics flow into
+    /// `collector` (set by the `--watch-json` mode) and the prose form is
+    /// suppressed while the compile runs.
+    fn runCompile(self: *WatchCoordinator, subset: ?[]const target_mod.TargetSpec, collector: ?*diag.Collector) BuildOutcome {
+        const start = Io.Timestamp.now(self.io, .awake);
+        var outcome: BuildOutcome = .{ .duration_ms = 0 };
+        const layout_default = self.options.html_layout;
+        if (self.action == .validate) {
+            // `validate --watch` runs exactly the one-shot validate preflight
+            // (validateHtmlSiteMulti) and writes nothing. Output flags are
+            // rejected at parse, so the single synthesized "default" target is
+            // always selected and `subset` (HTML fan-out) is ignored.
+            if (compile.validateHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
+                .content_root = self.options.input_dir,
+                .layout_path = layout_default,
+                .quiet = self.options.quiet or self.options.watch_json,
+                .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
+                .allow_markdown_literals = self.options.allow_markdown_links,
+                .diagnostics = collector,
+            })) {
+                outcome.ok = true;
+            } else |err| {
+                outcome.err = err;
+            }
+            outcome.duration_ms = elapsedMs(self.io, start);
+            return outcome;
+        }
+        if (subset) |targets| {
+            if (compile.compileHtmlSiteMulti(self.io, self.gpa, targets, .{
+                .content_root = self.options.input_dir,
+                .layout_path = layout_default,
+                .incremental = self.options.incremental,
+                .refresh_evidence = self.options.refresh_evidence,
+                // `--watch-json` implies quiet: the stderr stream is the
+                // machine-readable event channel, not prose progress.
+                .quiet = self.options.quiet or self.options.watch_json,
+                .jobs = self.options.jobs,
+                .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
+                .diagnostics = collector,
+            })) |stats| {
+                outcome.ok = true;
+                outcome.stats = stats;
+            } else |err| {
+                outcome.err = err;
+            }
+        } else {
+            if (compile.compileHtmlSite(self.io, self.gpa, .{
+                .content_root = self.options.input_dir,
+                .dist_dir = self.options.html_dir orelse "dist",
+                .layout_path = layout_default,
+                .incremental = self.options.incremental,
+                .refresh_evidence = self.options.refresh_evidence,
+                // `--watch-json` implies quiet: the stderr stream is the
+                // machine-readable event channel, not prose progress.
+                .quiet = self.options.quiet or self.options.watch_json,
+                .jobs = self.options.jobs,
+                .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
+                .diagnostics = collector,
+            })) |stats| {
+                outcome.ok = true;
+                outcome.stats = stats;
+            } else |err| {
+                outcome.err = err;
+            }
+        }
+        outcome.duration_ms = elapsedMs(self.io, start);
+        return outcome;
+    }
+
+    /// Target names for NDJSON events: the subset actually rebuilt (for
+    /// selective rebuilds), never the full configured set. The empty-targets
+    /// single-target path reports the synthetic `default` target, matching the
+    /// CLI's canonical HTML configuration.
+    fn targetNamesOf(gpa: std.mem.Allocator, targets: []const target_mod.TargetSpec) ![][]const u8 {
+        if (targets.len == 0) return gpa.dupe([]const u8, &.{"default"});
+        var names = try gpa.alloc([]const u8, targets.len);
+        for (targets, 0..) |t, i| {
+            names[i] = t.name;
+        }
+        return names;
+    }
+
+    fn emitLine(self: *WatchCoordinator, line: []const u8) void {
+        _ = self;
+        std.debug.print("{s}", .{line});
+    }
+
+    /// NDJSON `mode` field: `"html"` for the publish daemon, `"validate"` for
+    /// the zero-write validation daemon (#647).
+    fn modeName(self: *WatchCoordinator) []const u8 {
+        return if (self.action == .validate) "validate" else "html";
+    }
+
+    fn emitHello(self: *WatchCoordinator) void {
+        const line = watch_json.renderHello(self.gpa, pipeline.compiler_id) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitBuildStarted(self: *WatchCoordinator, phase: []const u8, targets: []const []const u8, changed: ?[]const []const u8) void {
+        const line = watch_json.renderBuildStarted(self.gpa, phase, self.modeName(), targets, changed) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitBuildSucceeded(self: *WatchCoordinator, phase: []const u8, targets: []const []const u8, changed: ?[]const []const u8, outcome: BuildOutcome) void {
+        // Validate writes nothing, so it never reports pages_written (#647).
+        const pages: ?usize = if (self.action == .validate) null else outcome.stats.pages_written;
+        const line = watch_json.renderBuildSucceeded(self.gpa, phase, self.modeName(), targets, changed, pages, outcome.duration_ms) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitBuildFailed(self: *WatchCoordinator, phase: []const u8, targets: []const []const u8, changed: ?[]const []const u8, outcome: BuildOutcome, collector: ?*diag.Collector) void {
+        var diagnostics: []diag.Diagnostic = &.{};
+        if (collector) |c| {
+            diag.sortDiagnostics(c.list.items);
+            diagnostics = c.list.items;
+        }
+        const errors = diag.countErrors(diagnostics);
+        const recoverable = isRecoverableFailure(outcome.err orelse error.Unknown);
+        const line = watch_json.renderBuildFailed(self.gpa, phase, self.modeName(), targets, changed, errors, diagnostics, recoverable, outcome.duration_ms) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitWatcherStarted(self: *WatchCoordinator, targets: []const []const u8) void {
+        const line = watch_json.renderWatcherStarted(self.gpa, self.modeName(), targets) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitServeStarted(self: *WatchCoordinator, port: u16) void {
+        const url = std.fmt.allocPrint(self.gpa, "http://127.0.0.1:{d}/", .{port}) catch return;
+        defer self.gpa.free(url);
+        const helper = std.fmt.allocPrint(self.gpa, "http://127.0.0.1:{d}/__boris/", .{port}) catch return;
+        defer self.gpa.free(helper);
+        const line = watch_json.renderServeStarted(self.gpa, url, helper, port) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitWatchError(self: *WatchCoordinator, message: []const u8) void {
+        const line = watch_json.renderWatchError(self.gpa, message, true) catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    fn emitWatchStopped(self: *WatchCoordinator) void {
+        const line = watch_json.renderWatchStopped(self.gpa, "signal") catch return;
+        defer self.gpa.free(line);
+        self.emitLine(line);
+    }
+
+    /// `validate --watch --report PATH` rewrites the report file on every
+    /// cycle (replacement, never append), so a consumer reading the file sees
+    /// the current cycle and stale failure state cannot linger (#647).
+    fn maybeWriteValidateReport(self: *WatchCoordinator, collector: ?*diag.Collector, ok: bool) void {
+        if (self.action != .validate) return;
+        const path = self.options.report_path orelse return;
+        const c = collector orelse return;
+        diag.sortDiagnostics(c.list.items);
+        const rendered = html_report.renderHtmlReport(self.gpa, pipeline.compiler_id, .{
+            .ok = ok,
+            .content_root = self.options.input_dir,
+            .out_dir = self.options.html_dir orelse "dist",
+            .diagnostics = c.list.items,
+        }) catch return;
+        defer self.gpa.free(rendered);
+        Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = rendered }) catch |err| {
+            std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+        };
+    }
+
     /// Drain pending paths (sorted for deterministic logging), then rebuild.
     /// Recoverable content/layout errors keep the watch loop alive; other errors propagate.
     pub fn triggerRebuild(self: *WatchCoordinator) !void {
@@ -655,141 +926,165 @@ pub const WatchCoordinator = struct {
             }
         }.less);
 
-        if (!self.options.quiet) {
+        const json = self.options.watch_json;
+        // Layout-only changes fan out to affected targets only. The subset is
+        // computed before any event so NDJSON `targets` names the subset
+        // actually rebuilt, not the full configured set.
+        const layout_default = self.options.html_layout;
+        var subset: ?[]const target_mod.TargetSpec = null;
+        var owned_subset: ?[]const target_mod.TargetSpec = null;
+        // Validate mode has no target fan-out: the single synthesized
+        // "default" target is always rebuilt, so no layout subsetting.
+        if (self.action == .html and self.options.targets.items.len > 0) {
+            owned_subset = try selectTargetsForRebuild(self.gpa, paths.items, self.options.targets.items, layout_default);
+            subset = owned_subset;
+        }
+        defer if (owned_subset) |s| self.gpa.free(s);
+
+        if (json) {
+            const targets = try targetNamesOf(self.gpa, subset orelse self.options.targets.items);
+            defer self.gpa.free(targets);
+            self.emitBuildStarted("rebuild", targets, paths.items);
+        } else if (!self.options.quiet) {
             std.debug.print("watch: changed paths detected:\n", .{});
             for (paths.items) |p| {
                 std.debug.print("  - {s}\n", .{p});
             }
-            std.debug.print("watch: triggering incremental rebuild...\n", .{});
+            std.debug.print("watch: triggering incremental {s}...\n", .{if (self.action == .validate) "validation" else "rebuild"});
+            if (subset) |s| {
+                if (s.len < self.options.targets.items.len) {
+                    std.debug.print("watch: selective rebuild of {d}/{d} target(s)\n", .{
+                        s.len,
+                        self.options.targets.items.len,
+                    });
+                }
+            }
         }
+
+        // Under `--watch-json` the prose diagnostic form is suppressed for the
+        // duration of the compile; the same data flows into the collector and
+        // then into the build-failed NDJSON event. Validate mode also collects
+        // when `--report` is set so the report file is rewritten every cycle.
+        const prior_text_suppressed = diag.text_suppressed.load(.unordered);
+        if (json) diag.text_suppressed.store(true, .unordered);
+        defer if (json) diag.text_suppressed.store(prior_text_suppressed, .unordered);
+
+        const need_collector = json or (self.action == .validate and self.options.report_path != null);
+        var collector: ?diag.Collector = null;
+        if (need_collector) collector = diag.Collector.init(self.gpa, self.io);
+        defer if (collector) |*c| c.deinit();
+        const collector_ptr: ?*diag.Collector = if (collector) |*c| c else null;
 
         // Full rediscovery + content-addressed incremental render (event paths
         // trigger the rebuild; dirty-set comes from fingerprints inside compile).
-        // Layout-only changes fan out to affected targets only.
-        const layout_default = self.options.html_layout;
-        if (self.options.targets.items.len > 0) {
-            const subset = try selectTargetsForRebuild(
-                self.gpa,
-                paths.items,
-                self.options.targets.items,
-                layout_default,
-            );
-            defer self.gpa.free(subset);
-
-            if (!self.options.quiet and subset.len < self.options.targets.items.len) {
-                std.debug.print("watch: selective rebuild of {d}/{d} target(s)\n", .{
-                    subset.len,
-                    self.options.targets.items.len,
-                });
+        const outcome = self.runCompile(subset, collector_ptr);
+        if (!outcome.ok) {
+            const err = outcome.err.?;
+            if (self.action == .validate and !isRecoverableFailure(err)) {
+                appendValidateEscapedDiagnostic(collector_ptr, err);
             }
-
-            compile.compileHtmlSiteMulti(self.io, self.gpa, subset, .{
-                .content_root = self.options.input_dir,
-                .layout_path = layout_default,
-                .incremental = self.options.incremental,
-                .quiet = self.options.quiet,
-                .jobs = self.options.jobs,
-                .input_format = self.options.input_format,
-            }) catch |err| {
-                if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
-                    }
-                    return;
+            if (json) {
+                const targets = try targetNamesOf(self.gpa, subset orelse self.options.targets.items);
+                defer self.gpa.free(targets);
+                self.emitBuildFailed("rebuild", targets, paths.items, outcome, collector_ptr);
+            } else if (isRecoverableFailure(err)) {
+                if (!diag.text_suppressed.load(.unordered)) {
+                    std.debug.print("error: {s} failed: {s}. Waiting for correction...\n", .{ rebuildLabel(self.action), @errorName(err) });
                 }
-                if (!self.options.quiet) {
-                    std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                }
-                return err;
-            };
-        } else {
-            _ = compile.compileHtmlSite(self.io, self.gpa, .{
-                .content_root = self.options.input_dir,
-                .dist_dir = self.options.html_dir orelse "dist",
-                .layout_path = layout_default,
-                .incremental = self.options.incremental,
-                .quiet = self.options.quiet,
-                .jobs = self.options.jobs,
-                .input_format = self.options.input_format,
-            }) catch |err| {
-                if (isRecoverableBuildError(err)) {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
-                    }
-                    return;
-                }
-                if (!self.options.quiet) {
-                    std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                }
-                return err;
-            };
+            } else if (!diag.text_suppressed.load(.unordered)) {
+                std.debug.print("error: {s} failed with unrecoverable I/O error: {s}\n", .{ rebuildLabel(self.action), @errorName(err) });
+            }
+            if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, false);
+            if (isRecoverableFailure(err)) return;
+            return err;
         }
 
-        if (!self.options.quiet) {
-            std.debug.print("watch: rebuild succeeded.\n", .{});
+        if (json) {
+            const targets = try targetNamesOf(self.gpa, subset orelse self.options.targets.items);
+            defer self.gpa.free(targets);
+            self.emitBuildSucceeded("rebuild", targets, paths.items, outcome);
+        } else if (!self.options.quiet) {
+            std.debug.print("watch: {s}.\n", .{rebuildSucceededLabel(self.action)});
         }
+        if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, true);
+        if (self.serve) |*s| s.notifyRebuild();
     }
 
     /// Perform initial build, set up signal handlers, and execute the watch poll loop.
     pub fn run(self: *WatchCoordinator) !void {
-        // Initial build
-        if (!self.options.quiet) {
-            std.debug.print("watch: performing initial build...\n", .{});
+        const json = self.options.watch_json;
+        if (json) {
+            self.emitHello();
+            const targets = try targetNamesOf(self.gpa, self.options.targets.items);
+            defer self.gpa.free(targets);
+            self.emitBuildStarted("initial", targets, null);
+        } else if (!self.options.quiet) {
+            std.debug.print("watch: performing initial {s}...\n", .{if (self.action == .validate) "validation" else "build"});
         }
 
-        var initial_success = true;
-        var stats: compile.CompileStats = .{ .pages_written = 0, .peak_whiteboard_capacity = 0 };
-        const layout_default = self.options.html_layout;
-        if (self.options.targets.items.len > 0) {
-            compile.compileHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
-                .content_root = self.options.input_dir,
-                .layout_path = layout_default,
-                .incremental = self.options.incremental,
-                .quiet = self.options.quiet,
-                .jobs = self.options.jobs,
-                .input_format = self.options.input_format,
-            }) catch |err| {
-                initial_success = false;
-                if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
-                    }
+        // Under `--watch-json` the prose diagnostic form is suppressed for the
+        // duration of the compile; the same data flows into the collector and
+        // then into the build-failed NDJSON event. Validate mode also collects
+        // when `--report` is set so the report file is rewritten every cycle.
+        const prior_text_suppressed = diag.text_suppressed.load(.unordered);
+        if (json) diag.text_suppressed.store(true, .unordered);
+        defer if (json) diag.text_suppressed.store(prior_text_suppressed, .unordered);
+
+        const need_collector = json or (self.action == .validate and self.options.report_path != null);
+        var collector: ?diag.Collector = null;
+        if (need_collector) collector = diag.Collector.init(self.gpa, self.io);
+        defer if (collector) |*c| c.deinit();
+        const collector_ptr: ?*diag.Collector = if (collector) |*c| c else null;
+
+        // Initial build: every configured target (multi) or the single default
+        // (raw single-target path).
+        const subset: ?[]const target_mod.TargetSpec = if (self.options.targets.items.len > 0) self.options.targets.items else null;
+        const outcome = self.runCompile(subset, collector_ptr);
+        const initial_success = outcome.ok;
+
+        var targets: []const []const u8 = &.{};
+        if (json) {
+            targets = try targetNamesOf(self.gpa, self.options.targets.items);
+        }
+        // The defer must live in run()'s scope, not the `if` block: freeing
+        // inside the block would run before the emit calls below read it.
+        defer if (json) self.gpa.free(targets);
+
+        if (initial_success) {
+            if (json) {
+                self.emitBuildSucceeded("initial", targets, null, outcome);
+            } else if (!self.options.quiet) {
+                if (self.action == .validate) {
+                    std.debug.print("watch: initial validation succeeded. Starting watcher...\n", .{});
                 } else {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                    }
-                    return err;
-                }
-            };
-        } else {
-            if (compile.compileHtmlSite(self.io, self.gpa, .{
-                .content_root = self.options.input_dir,
-                .dist_dir = self.options.html_dir orelse "dist",
-                .layout_path = layout_default,
-                .incremental = self.options.incremental,
-                .quiet = self.options.quiet,
-                .jobs = self.options.jobs,
-                .input_format = self.options.input_format,
-            })) |st| {
-                stats = st;
-            } else |err| {
-                initial_success = false;
-                if (isRecoverableBuildError(err)) {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
-                    }
-                } else {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                    }
-                    return err;
+                    std.debug.print("watch: initial build succeeded ({d} pages written). Starting watcher...\n", .{outcome.stats.pages_written});
                 }
             }
+            if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, true);
+        } else {
+            const err = outcome.err.?;
+            if (self.action == .validate and !isRecoverableFailure(err)) {
+                appendValidateEscapedDiagnostic(collector_ptr, err);
+            }
+            if (isRecoverableFailure(err)) {
+                if (json) {
+                    self.emitBuildFailed("initial", targets, null, outcome, collector_ptr);
+                } else if (!self.options.quiet) {
+                    std.debug.print("error: initial {s} failed: {s}. Continuing to watch...\n", .{ initialLabel(self.action), @errorName(err) });
+                }
+            } else {
+                if (json) {
+                    self.emitBuildFailed("initial", targets, null, outcome, collector_ptr);
+                } else if (!self.options.quiet) {
+                    std.debug.print("error: initial {s} failed with unrecoverable I/O error: {s}\n", .{ initialLabel(self.action), @errorName(err) });
+                }
+                if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, false);
+                return err;
+            }
+            if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, false);
         }
 
-        if (initial_success and !self.options.quiet) {
-            std.debug.print("watch: initial build succeeded ({d} pages written). Starting watcher...\n", .{stats.pages_written});
-        }
+        if (json) self.emitWatcherStarted(targets);
 
         // Register POSIX signal handlers
         if (comptime builtin.os.tag != .windows) {
@@ -804,10 +1099,25 @@ pub const WatchCoordinator = struct {
 
         should_shutdown_global.store(false, .unordered);
 
+        // Start the loopback preview server after the initial build so the
+        // first served tree is the freshest complete output (or the partial
+        // tree after a recoverable failure, which the author can still view).
+        if (self.serve) |*s| {
+            try s.start();
+            const port = s.boundPort();
+            if (json) {
+                self.emitServeStarted(port);
+            } else if (!self.options.quiet) {
+                std.debug.print("preview: http://127.0.0.1:{d}/  (auto-reload helper: http://127.0.0.1:{d}/__boris/)\n", .{ port, port });
+            }
+        }
+
         while (!should_shutdown_global.load(.unordered)) {
             self.processEvents() catch |err| {
                 // Transient poll failures must not kill the session (#15).
-                if (!self.options.quiet) {
+                if (json) {
+                    self.emitWatchError(@errorName(err));
+                } else if (!self.options.quiet) {
                     std.debug.print("watch: poll error ({s}); retrying...\n", .{@errorName(err)});
                 }
                 try sleepMs(self.io, idle_poll_ms);
@@ -833,7 +1143,9 @@ pub const WatchCoordinator = struct {
             }
         }
 
-        if (!self.options.quiet) {
+        if (json) {
+            self.emitWatchStopped();
+        } else if (!self.options.quiet) {
             std.debug.print("watch: received shutdown signal, cleaning resources...\n", .{});
         }
     }
@@ -1304,11 +1616,200 @@ test "watch recovery: pending drains and follow-up events still queue" {
 
 test "isRecoverableBuildError classification stays content-only" {
     // Mirrors WatchCoordinator recovery policy: content/layout errors continue;
-    // hard I/O does not. Keep this aligned with isRecoverableBuildError.
+    // hard I/O does not. Keep this aligned with compile.isContentCompileFailure.
     try std.testing.expect(isRecoverableBuildError(error.ParseFailed));
     try std.testing.expect(isRecoverableBuildError(error.ComponentFailed));
     try std.testing.expect(isRecoverableBuildError(error.LayoutMissingMarker));
     try std.testing.expect(isRecoverableBuildError(error.LayoutDuplicateMarker));
+    try std.testing.expect(isRecoverableBuildError(error.SitemapUrlLimitExceeded));
+    // Missing include is an author-correctable content failure: recoverable.
+    try std.testing.expect(isRecoverableBuildError(error.IncludeFailed));
+    // Unsafe SVG is an author-correctable content-validation failure: recoverable
+    // in both single-target and multi-target watch paths (same session, no restart).
+    try std.testing.expect(isRecoverableBuildError(error.AssetUnsafeSvg));
+    // Reference and link-audit failures are author-correctable content, not I/O:
+    // a bad wiki-link or markdown href must keep the watcher alive (single-target
+    // path surfaces these raw, unlike the multi-target wrapper).
+    try std.testing.expect(isRecoverableBuildError(error.ReferenceFailed));
+    try std.testing.expect(isRecoverableBuildError(error.LinkAuditFailed));
+    try std.testing.expect(isRecoverableBuildError(error.GraphValidationFailed));
+    // Usage-class layout-rule failures are exit 2, not recoverable watch errors.
+    try std.testing.expect(!isRecoverableBuildError(error.LayoutSelectionFailed));
+    try std.testing.expect(!isRecoverableBuildError(error.MixedThemeRoots));
+    // Hard filesystem/system failures must still terminate the watcher.
     try std.testing.expect(!isRecoverableBuildError(error.FileNotFound));
     try std.testing.expect(!isRecoverableBuildError(error.AccessDenied));
+}
+
+test "validate --watch cycles run the zero-write preflight and write nothing (#647)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/watch-validate", .{tmp.sub_path});
+    defer gpa.free(work);
+
+    try writeWatchTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\Hello.
+        \\
+    );
+    try writeWatchTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var options = cli.Options{
+        .command = .validate,
+        .mode = .html,
+        .input_dir = content,
+        .html_layout = layout,
+        .quiet = true,
+        .watch = true,
+    };
+    try options.targets.append(gpa, .{ .name = "default", .output_dir = dist });
+    defer options.targets.deinit(gpa);
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher());
+    defer coord.deinit();
+
+    // Validate mode has no output roots to ignore: nothing is written, so
+    // self-trigger protection is trivially satisfied.
+    try std.testing.expectEqual(@as(usize, 0), coord.ignored_output_roots.len);
+
+    // A valid tree validates; no output tree is published.
+    try coord.triggerRebuild();
+    try std.testing.expectError(error.FileNotFound, cwd.openFile(io, dist, .{}));
+
+    // An author-correctable failure keeps the same session alive (recoverable).
+    try writeWatchTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\See [[missing-page]].
+        \\
+    );
+    try coord.triggerRebuild();
+    try std.testing.expectError(error.FileNotFound, cwd.openFile(io, dist, .{}));
+
+    // The author's correction validates again in the same session, still
+    // writing nothing.
+    try writeWatchTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\Hello again.
+        \\
+    );
+    try coord.triggerRebuild();
+    try std.testing.expectError(error.FileNotFound, cwd.openFile(io, dist, .{}));
+}
+
+test "single-target watch: unsafe SVG rebuild recovers in-session without restart" {
+    // Drives the raw single-target watch rebuild path (empty targets →
+    // compileHtmlSite): an author replacing an inert SVG with an active
+    // construct must fail recoverably (EASSET content class, not I/O), keep
+    // this coordinator session alive, preserve the prior published HTML and
+    // SVG byte-for-byte, and publish the corrected asset after the author
+    // restores a different inert SVG — all without restarting the watcher.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/watch-svg-recover", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeWatchTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\![logo](index.assets/logo.svg)
+        \\
+    );
+    try writeWatchTreeFile(io, work, "content/index.assets/logo.svg", "<svg id=\"v1\"/>");
+    try writeWatchTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+    var coord = try WatchCoordinator.init(gpa, io, .{
+        .mode = .html,
+        .input_dir = content,
+        .html_dir = dist,
+        .html_layout = layout,
+        .quiet = true,
+        .watch = true,
+        // targets left empty: raw single-target rebuild path (compileHtmlSite)
+    }, fake.watcher());
+    defer coord.deinit();
+
+    // Initial build with the valid inert SVG publishes the page and asset.
+    try coord.triggerRebuild();
+    const html_v1 = try readWatchTreeFile(io, gpa, dist, "index.html");
+    defer gpa.free(html_v1);
+    const svg_v1 = try readWatchTreeFile(io, gpa, dist, "index.assets/logo.svg");
+    defer gpa.free(svg_v1);
+
+    // Author replaces the inert SVG with an active construct. The rebuild must
+    // fail recoverably: triggerRebuild must not propagate the error, the prior
+    // valid output must stay byte-identical, and the same coordinator session
+    // must publish the corrected asset after the author restores a different
+    // inert SVG (no restart).
+    try writeWatchTreeFile(io, work, "content/index.assets/logo.svg", "<svg><script>alert(1)</script></svg>");
+    try coord.triggerRebuild();
+
+    const html_v2 = try readWatchTreeFile(io, gpa, dist, "index.html");
+    defer gpa.free(html_v2);
+    try std.testing.expectEqualStrings(html_v1, html_v2);
+    const svg_v2 = try readWatchTreeFile(io, gpa, dist, "index.assets/logo.svg");
+    defer gpa.free(svg_v2);
+    try std.testing.expectEqualStrings(svg_v1, svg_v2);
+
+    // Restore a different inert SVG; the same session publishes it.
+    try writeWatchTreeFile(io, work, "content/index.assets/logo.svg", "<svg id=\"v2\"/>");
+    try coord.triggerRebuild();
+    const svg_v3 = try readWatchTreeFile(io, gpa, dist, "index.assets/logo.svg");
+    defer gpa.free(svg_v3);
+    try std.testing.expectEqualStrings("<svg id=\"v2\"/>", svg_v3);
+}
+
+fn writeWatchTreeFile(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8) !void {
+    const cwd = Io.Dir.cwd();
+    const full = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ root_rel, rel });
+    defer std.testing.allocator.free(full);
+    if (std.fs.path.dirname(full)) |parent| {
+        try cwd.createDirPath(io, parent);
+    }
+    try cwd.writeFile(io, .{ .sub_path = full, .data = data });
+}
+
+fn readWatchTreeFile(io: Io, gpa: std.mem.Allocator, root_rel: []const u8, rel: []const u8) ![]u8 {
+    const cwd = Io.Dir.cwd();
+    const full = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ root_rel, rel });
+    defer gpa.free(full);
+    var file = try cwd.openFile(io, full, .{});
+    defer file.close(io);
+    var reader = file.reader(io, &.{});
+    return try reader.interface.allocRemaining(gpa, .unlimited);
 }

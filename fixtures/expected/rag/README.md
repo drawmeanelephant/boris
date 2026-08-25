@@ -1,31 +1,21 @@
-# Expected RAG artifacts (milestone 7)
+# Golden fixture: complete-corpus RAG export
 
-Golden samples produced by:
+Regenerate with:
 
 ```bash
-zig build run -- --input fixtures/content/valid --rag-dir fixtures/expected/rag
+boris --rag --complete --input fixtures/content/valid --rag-dir fixtures/expected/rag
 ```
 
-## What is here
+This directory pins the **complete-corpus** RAG export (`--rag --complete`):
 
-| Path | Role |
-|------|------|
-| `catalog_meta.json` | Fixed machine meta (`format`, `schema_version`, `boris_version`) |
-| `catalog.jsonl` | One JSON object per retrieval document; field order fixed |
-| `INDEX.md` / `UPLOAD-GUIDE.md` | Meta retrieval docs |
-| `content/pages/**` | Path-mirrored page segments (metadata-owned H1) |
-| `graph/**` | Entity catalog + relations |
-| `system/**` | Copy of seeds from `docs/rag/system/` at generation time |
+- `system/**` — Boris system seeds (documented, not for upload in normal site work)
+- `content/pages/**` — complete, verbatim authoring documents (H1s and `<Aside>`/`<Details>` syntax preserved)
+- `graph/**` — entity catalog and relation reports
+- `INDEX.md`, `UPLOAD-GUIDE.md`, `catalog.jsonl`, `catalog_meta.json` — corpus envelope
 
-## Stability notes
+The **default** `--rag` export (working-context packs) is intentionally different:
+a small set of `working-N.md` packs plus a `manifest.json` sidecar. See
+`docs/contracts/rag-export.md`.
 
-- Primary determinism gate is the dual-export byte-compare test in `src/rag.zig`
-  (two distinct dirs, full tree `diff`).
-- Regenerating this tree also re-copies `docs/rag/system/`. Narrative seed edits
-  change golden system files and INDEX/catalog rows that list them.
-- Paths inside artifacts are relative with `/` separators only.
-- No timestamps, hostnames, or absolute paths in corpus files.
-
-## Contract
-
-See [`docs/contracts/rag-export.md`](../../../docs/contracts/rag-export.md).
+Determinism: regenerating must be byte-identical. The release gate compares
+`catalog_meta.json` schema version and the complete-corpus shape.

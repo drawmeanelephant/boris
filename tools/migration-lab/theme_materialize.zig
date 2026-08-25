@@ -7,6 +7,7 @@
 const std = @import("std");
 const Io = std.Io;
 const archaeology = @import("theme_archaeology.zig");
+const publication = @import("publication.zig");
 
 pub const format_id = "boris-theme-materialize-lab";
 pub const schema_version: u32 = 1;
@@ -239,8 +240,7 @@ fn emitProvenance(a: std.mem.Allocator, root: []const u8, actions: []const Actio
 }
 
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
-    try archaeology.refuseOutputInsideSource(opts.root_dir, opts.out_dir);
-    if (!isSafeRelativePath(opts.ledger_path) and opts.ledger_path[0] != '/') return error.UnsafePath;
+    if (opts.ledger_path.len == 0 or (!isSafeRelativePath(opts.ledger_path) and opts.ledger_path[0] != '/')) return error.UnsafePath;
 
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -255,9 +255,20 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     const entries = parsed.value.object.get("entries") orelse return error.InvalidLedger;
     if (entries != .array) return error.InvalidLedger;
 
-    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
-    var output = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
-    defer output.close(io);
+    var output_publication = try publication.Publication.begin(
+        io,
+        gpa,
+        opts.out_dir,
+        &.{ opts.root_dir, opts.ledger_path },
+        format_id,
+    );
+    defer {
+        output_publication.abandon(io, gpa);
+        output_publication.deinit(gpa);
+    }
+    var output = try Io.Dir.cwd().openDir(io, output_publication.stage_path, .{});
+    var output_open = true;
+    errdefer if (output_open) output.close(io);
     try output.createDirPath(io, "theme/assets");
     try output.createDirPath(io, "theme/layouts");
 
@@ -398,6 +409,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     try writeBytes(io, output, "PROVENANCE.md", try emitProvenance(a, opts.root_dir, actions.items));
 
     if (!opts.quiet) std.debug.print("theme-materialize-lab: wrote {s}/theme and reports ({d} ledger rows)\n", .{ opts.out_dir, actions.items.len });
+    output.close(io);
+    output_open = false;
+    try output_publication.commit(io, gpa);
 }
 
 test "theme materialize mini fixture is deterministic and source preserving" {

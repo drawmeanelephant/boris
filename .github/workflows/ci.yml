@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, afterparty]
   pull_request:
-    branches: [main]
+    branches: [main, afterparty, 'codex/editor-*']
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       migration_lab: ${{ steps.filter.outputs.migration_lab }}
+      standalone_tools: ${{ steps.filter.outputs.standalone_tools }}
+      testdata_generator: ${{ steps.filter.outputs.testdata_generator }}
+      job_runner: ${{ steps.filter.outputs.job_runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,6 +41,17 @@ jobs:
           filters: |
             migration_lab:
               - 'tools/migration-lab/**'
+            standalone_tools:
+              - 'tools/search-index/**'
+              - 'tools/docs-maintenance/**'
+              - 'src/search_index.zig'
+            testdata_generator:
+              - 'tools/testdata-generator/**'
+            job_runner:
+              - 'src/job_runner.zig'
+              - 'examples/cloudflare-container/**'
+              - 'docs/contracts/cloudflare-container-runner.md'
+              - 'scripts/test-job-runner-image.sh'
 
   build-and-test:
     name: build-and-test (${{ matrix.os }})
@@ -50,61 +65,123 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # setup-zig redirects all Zig caches into one cross-run-cached
+      # directory; a run cancelled mid-build once persisted a partial cache
+      # entry (manifest without payload) that then failed every later macOS
+      # install deterministically (#735 CI incident). Fresh builds are the
+      # honest baseline for the release gate.
       - name: Install Zig
         uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
+          use-cache: false
 
-      # Feature 1: CMake is a compile-time host tool for static ApexMarkdown.
-      # Not a runtime dependency; zig build remains the user entrypoint.
-      - name: Install CMake (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake
+      - name: Format check
+        run: zig fmt --check build.zig build.zig.zon src tools test fixtures
 
-      - name: Install CMake (macOS)
-        if: runner.os == 'macOS'
-        run: brew install cmake
-
-      - name: Verify Apex cmark-gfm CMake modules present
-        run: |
-          test -f vendor/apex-markdown/vendor/cmark-gfm/FindAsan.cmake
-          test -f vendor/apex-markdown/vendor/cmark-gfm/CheckFileOffsetBits.cmake
-
+      # Markdown rendering is Oliver, a pure-Zig library pinned by content
+      # hash in build.zig.zon: no CMake, no host tools, nothing to install.
       - name: Build
         run: zig build
 
       - name: Test
         run: zig build test
 
-      - name: Apex hostile ABI tests
-        run: zig build test-apex-hostile
+      - name: Oliver rendering seam tests
+        run: zig build test-render
 
-      - name: ApexMarkdown static libs present
+      # Seeded publication-checks fixture harness is wired into `zig build
+      # test` (build.zig) now that the fixture generator runs green on a
+      # pristine clone.
+      - name: Publication conformance
+        run: zig build test-publication-conformance
+
+      # The standalone GitHub Pages observer has its own build graph; run its
+      # fixture tests here so the redirect-policy regression (resolveRedirect)
+      # is guarded on every push, not only when the observer is built.
+      - name: GitHub Pages observer tests
+        run: zig build --build-file tools/github-pages-audit/build.zig test
+
+  # The key-hint conformance lint is a zero-dependency Node script; it runs as
+  # its own lane so a hint/handler drift fails within seconds instead of after
+  # the multi-minute editor-test lane. The same lint also runs inside
+  # `npm run check` in editor-test, keeping the local developer path covered.
+  key-hint-lint:
+    name: key-hint lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run the key-hint conformance lint
+        run: node editor/ui/scripts/check-key-hints.mjs
+
+  editor-test:
+    name: editor-test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editor/ui/package-lock.json
+
+      - name: Install editor UI dependencies
+        run: npm --prefix editor/ui ci
+
+      - name: Install browser
+        run: npm exec --prefix editor/ui -- playwright install --with-deps chromium
+
+      - name: Editor format
+        run: zig fmt --check editor/build.zig editor/build.zig.zon editor/src
+
+      - name: Editor host tests
+        run: zig build --build-file editor/build.zig test
+
+      - name: Build Boris and editor host
         run: |
-          test -f vendor/apex-markdown/build/libapex.a
-          test -f vendor/apex-markdown/build/vendor/cmark-gfm/src/libcmark-gfm.a
-          # Host still stub until Chat 3; version string proves product link path.
-          zig build run -- --help >/dev/null
-          nm zig-out/bin/boris 2>/dev/null | grep -q apex_version_string || \
-            nm zig-out/bin/boris 2>/dev/null | grep -q _apex_version_string || \
-            echo "note: nm symbol check skipped or stripped; libapex.a presence is required"
+          zig build
+          zig build --build-file editor/build.zig
 
-      # ASan+UBSan smoke: required on Linux (reproducible CI green), opt-in on
-      # macOS (Apple Silicon sanitizer/zig-cc variance). Local default still
-      # skips cleanly when unavailable; BORIS_REQUIRE_SANITIZE=1 fails the skip.
-      - name: Apex sanitizer smoke (Linux required)
-        if: runner.os == 'Linux'
-        env:
-          BORIS_REQUIRE_SANITIZE: "1"
-        run: zig build test-apex-sanitize
-
-      - name: Document sanitizer policy (macOS)
-        if: runner.os == 'macOS'
+      - name: Editor UI checks
         run: |
-          echo "C sanitizers required on Linux CI via BORIS_REQUIRE_SANITIZE=1."
-          echo "macOS: opt-in local zig build test-apex-sanitize (may skip)."
+          npm --prefix editor/ui run check
+          npm --prefix editor/ui run build
+          npm --prefix editor/ui run test:e2e
+
+      - name: Compiler contract fixture
+        run: ./editor/scripts/test-contract-fixture.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor-contract-probe
+
+      - name: Loopback host integration
+        run: ./editor/scripts/test-host.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+
+      - name: Boris diagnostics integration
+        run: ./editor/scripts/test-diagnostics.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+
+      - name: Validation daemon integration
+        run: ./editor/scripts/test-validation-daemon.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+
+      - name: Live preview integration
+        run: ./editor/scripts/test-preview.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+
+      - name: Publication plan integration
+        run: ./editor/scripts/test-publication.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
 
   migration-lab-test:
     name: migration-lab-test (Linux)
@@ -124,18 +201,200 @@ jobs:
       - name: Migration-lab aggregate tests
         run: zig build --build-file tools/migration-lab/build.zig test
 
+  standalone_tools_test:
+    name: standalone-tools-test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.standalone_tools == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Rendered-search CLI tests
+        run: zig build --build-file tools/search-index/build.zig test
+
+      - name: Documentation-maintenance tests
+        run: zig build --build-file tools/docs-maintenance/build.zig test
+
+  testdata_generator_test:
+    name: testdata-generator-test (Linux)
+    needs: changes
+    if: needs.changes.outputs.testdata_generator == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bounded companion tests
+        run: zig build --build-file tools/testdata-generator/build.zig test
+
+  job-runner-image:
+    name: job-runner smoke (Linux)
+    needs: changes
+    if: needs.changes.outputs.job_runner == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Native --once smoke
+        run: bash scripts/test-job-runner-image.sh
+
+  # Optional, manual-only parity lane: builds the example container image and
+  # byte-diffs its artifacts against a native --once run. Deliberately NOT in
+  # the required `ci` aggregate: Docker-in-CI proved flaky on this branch, and
+  # this is an operator-parity check, not a release gate. The native smoke
+  # above stays the required check. Run it with:
+  #   gh workflow run ci.yml --ref <branch>
+  job-runner-image-parity:
+    name: job-runner image parity (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build image and diff artifacts vs native
+        run: bash scripts/test-job-runner-image-parity.sh
+
+  # Dedicated content-audit lane covering tools/content-audit/** and the root
+  # build.zig content-audit wiring. Unlike the path-gated tool lanes above,
+  # this one runs unconditionally on both OSes: the audit parser is a
+  # standalone conformance surface of its own and its lane must never degrade
+  # into an unobserved skip (see the strict `ci` aggregate check below, which
+  # requires this lane to succeed rather than merely not-fail).
+  content-audit-test:
+    name: content-audit-test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Content-audit build
+        run: zig build --build-file tools/content-audit/build.zig
+
+      - name: Content-audit tests
+        run: zig build --build-file tools/content-audit/build.zig test
+
+  # The only lane that builds a release binary and then publishes real content.
+  # Debug cannot substitute for it: every unit test allocates through
+  # std.testing.allocator, a DebugAllocator, which tolerates an invalid free
+  # that a release allocator turns into a fatal signal — the process dies after
+  # rendering but before the staging tree is committed, so the output directory
+  # is left empty with no diagnostic and a nonzero exit is the only symptom.
+  release-html-smoke:
+    name: release-html-smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      # Markdown rendering is Oliver, a pure-Zig library pinned by content
+      # hash in build.zig.zon: no CMake, no host tools, nothing to install.
+      - name: Build ReleaseSafe
+        run: zig build -Doptimize=ReleaseSafe
+
+      # Publishes a three-page site through the documented
+      # `<main data-boris-search-root>{{content}}</main>` layout, where every
+      # search root opens with a heading, then asserts a zero exit and that the
+      # pages and the search index were actually written.
+      - name: ReleaseSafe HTML publication smoke
+        run: zig build -Doptimize=ReleaseSafe test-release-html-smoke
+
   # Single required status check for branch protection / rulesets.
   ci:
     name: ci
-    needs: [build-and-test, migration-lab-test]
+    needs:
+      - build-and-test
+      - editor-test
+      - key-hint-lint
+      - migration-lab-test
+      - standalone_tools_test
+      - testdata_generator_test
+      - job-runner-image
+      - content-audit-test
+      - release-html-smoke
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Require matrix success
         run: |
           build_and_test="${{ needs.build-and-test.result }}"
+          editor_test="${{ needs.editor-test.result }}"
+          key_hint_lint="${{ needs.key-hint-lint.result }}"
           migration_lab_test="${{ needs.migration-lab-test.result }}"
+          standalone_tools_test="${{ needs.standalone_tools_test.result }}"
+          testdata_generator_test="${{ needs.testdata_generator_test.result }}"
+          job_runner_image="${{ needs.job-runner-image.result }}"
+          content_audit_test="${{ needs.content-audit-test.result }}"
+          release_html_smoke="${{ needs.release-html-smoke.result }}"
           echo "build-and-test result: ${build_and_test}"
+          echo "editor-test result: ${editor_test}"
+          echo "key-hint lint result: ${key_hint_lint}"
           echo "migration-lab-test result: ${migration_lab_test}"
+          echo "standalone-tools-test result: ${standalone_tools_test}"
+          echo "testdata-generator-test result: ${testdata_generator_test}"
+          echo "job-runner-image result: ${job_runner_image}"
+          echo "content-audit-test result: ${content_audit_test}"
+          echo "release-html-smoke result: ${release_html_smoke}"
           test "${build_and_test}" = "success"
+          test "${editor_test}" = "success"
+          # The lint lane must actually succeed: a skip must never read as green.
+          test "${key_hint_lint}" = "success"
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
+          test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
+          test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"
+          test "${job_runner_image}" = "success" || test "${job_runner_image}" = "skipped"
+          # Content-audit must actually succeed: no skipped/unobserved escape.
+          test "${content_audit_test}" = "success"
+          # Same for the release smoke: it is the only guard against a release-only
+          # crash, so a skip must never read as green.
+          test "${release_html_smoke}" = "success"

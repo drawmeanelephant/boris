@@ -7,8 +7,8 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 ///
 /// Bumped only when fingerprint inputs or manifest discriminator semantics
 /// change. Layout-rule selection records the effective selected layout per
-/// page (`boris-cache-v2-layout-rules`); older manifests force a cold rebuild.
-pub const CACHE_FORMAT_VERSION = "boris-cache-v2-layout-rules";
+/// page (`boris-cache-v3-nav-digest`); older manifests force a cold rebuild.
+pub const CACHE_FORMAT_VERSION = "boris-cache-v3-nav-digest";
 
 /// Hash a u64 length prefix in fixed little-endian (host-independent).
 fn updateLen(hasher: *Sha256, len: u64) void {
@@ -57,7 +57,7 @@ pub fn computePageFingerprint(
     source_bytes: []const u8,
     include_deps: []const []const u8,
     layout_bytes: []const u8,
-    site_nav_material: []const u8,
+    site_nav_digest: []const u8,
 ) [32]u8 {
     return computePageFingerprintTheme(
         target_name,
@@ -66,7 +66,7 @@ pub fn computePageFingerprint(
         source_bytes,
         include_deps,
         layout_bytes,
-        site_nav_material,
+        site_nav_digest,
         "",
     );
 }
@@ -81,7 +81,7 @@ pub fn computePageFingerprintTheme(
     source_bytes: []const u8,
     include_deps: []const []const u8,
     layout_bytes: []const u8,
-    site_nav_material: []const u8,
+    site_nav_digest: []const u8,
     theme_material: []const u8,
 ) [32]u8 {
     return computePageFingerprintThemeInput(
@@ -91,7 +91,7 @@ pub fn computePageFingerprintTheme(
         source_bytes,
         include_deps,
         layout_bytes,
-        site_nav_material,
+        site_nav_digest,
         theme_material,
         "",
     );
@@ -106,58 +106,103 @@ pub fn computePageFingerprintThemeInput(
     source_bytes: []const u8,
     include_deps: []const []const u8,
     layout_bytes: []const u8,
-    site_nav_material: []const u8,
+    site_nav_digest: []const u8,
     theme_material: []const u8,
     input_material: []const u8,
 ) [32]u8 {
-    var hasher = Sha256.init(.{});
+    return computePageFingerprintThemeInputCounted(
+        target_name,
+        layout_path,
+        entity_id,
+        source_bytes,
+        include_deps,
+        layout_bytes,
+        site_nav_digest,
+        theme_material,
+        input_material,
+        null,
+    );
+}
 
-    // 1. Format version
+/// `computePageFingerprintThemeInput`, and when `hashed_bytes` is non-null it
+/// also reports the exact byte count fed to the hasher — every framed field's
+/// 8-byte length prefix and the Textile input-adapter marker included — so
+/// callers can account `hash_bytes` truthfully. Kept in lockstep with the
+/// hasher so the counter can never drift from the digest inputs.
+pub fn computePageFingerprintThemeInputCounted(
+    target_name: []const u8,
+    layout_path: []const u8,
+    entity_id: []const u8,
+    source_bytes: []const u8,
+    include_deps: []const []const u8,
+    layout_bytes: []const u8,
+    site_nav_digest: []const u8,
+    theme_material: []const u8,
+    input_material: []const u8,
+    hashed_bytes: ?*u64,
+) [32]u8 {
+    var hasher = Sha256.init(.{});
+    var total: u64 = 0;
+
+    // 1. Format version (no length prefix)
     hasher.update(CACHE_FORMAT_VERSION);
+    total += CACHE_FORMAT_VERSION.len;
 
     // 1.5. Target configuration identity
     updateLen(&hasher, target_name.len);
     hasher.update(target_name);
+    total += target_name.len + 8;
 
     updateLen(&hasher, layout_path.len);
     hasher.update(layout_path);
+    total += layout_path.len + 8;
 
     // 2. Normalized page identity (entity_id)
     updateLen(&hasher, entity_id.len);
     hasher.update(entity_id);
+    total += entity_id.len + 8;
 
     // 3. Source bytes
     updateLen(&hasher, source_bytes.len);
     hasher.update(source_bytes);
+    total += source_bytes.len + 8;
 
     // 4. Resolved includes in stable dependency order
     for (include_deps) |inc_bytes| {
         updateLen(&hasher, inc_bytes.len);
         hasher.update(inc_bytes);
+        total += inc_bytes.len + 8;
     }
 
     // 5. Layout bytes
     updateLen(&hasher, layout_bytes.len);
     hasher.update(layout_bytes);
+    total += layout_bytes.len + 8;
 
-    // 6. Site nav material (Feature 6) — only when non-empty so content-only
-    // layouts keep prior fingerprint inputs.
-    if (site_nav_material.len > 0) {
-        updateLen(&hasher, site_nav_material.len);
-        hasher.update(site_nav_material);
+    // 6. Site nav digest — the fixed-size SHA-256 of the raw site nav
+    // material, computed once per build (#727). Only when non-empty so
+    // content-only layouts keep prior fingerprint inputs.
+    if (site_nav_digest.len > 0) {
+        updateLen(&hasher, site_nav_digest.len);
+        hasher.update(site_nav_digest);
+        total += site_nav_digest.len + 8;
     }
 
     // 7. Theme material (F9.1) — footer + referenced assets; empty keeps legacy digests.
     if (theme_material.len > 0) {
         updateLen(&hasher, theme_material.len);
         hasher.update(theme_material);
+        total += theme_material.len + 8;
     }
 
     if (input_material.len > 0) {
         hasher.update("boris-input-adapter\x00");
         updateLen(&hasher, input_material.len);
         hasher.update(input_material);
+        total += "boris-input-adapter\x00".len + input_material.len + 8;
     }
+
+    if (hashed_bytes) |hb| hb.* = total;
 
     var digest: [32]u8 = undefined;
     hasher.final(&digest);
@@ -171,10 +216,62 @@ pub fn computePageFingerprintThemeInput(
 ///   - return sorted entity IDs with duplicates removed
 ///
 /// The returned slice is owned by the caller and allocated using the provided allocator.
+/// Entity-id / source-path → owning node id, built once and reused across many
+/// `getAffectedPagesIndexed` calls.
+///
+/// The reverse walk needs to answer "is this key a page, and which one?" for
+/// every endpoint it pops. Doing that with a linear scan over `nodes` makes an
+/// incremental build quadratic in page count, because the walk runs once per
+/// dirty page. Resolution order matches the original scan exactly: nodes are
+/// visited in order, and within a node `id` is registered before `sourcePath`,
+/// so the first node matching a key still wins.
+pub const NodeLookup = struct {
+    map: std.StringHashMapUnmanaged([]const u8) = .{},
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !NodeLookup {
+        var self: NodeLookup = .{ .allocator = allocator };
+        errdefer self.deinit();
+        try self.map.ensureTotalCapacity(allocator, @intCast(nodes.len * 2));
+        for (nodes) |node| {
+            // Keys are borrowed from `nodes`; the lookup must not outlive them.
+            if (!self.map.contains(node.id)) {
+                self.map.putAssumeCapacity(node.id, node.id);
+            }
+            if (!self.map.contains(node.source_path)) {
+                self.map.putAssumeCapacity(node.source_path, node.id);
+            }
+        }
+        return self;
+    }
+
+    pub fn deinit(self: *NodeLookup) void {
+        self.map.deinit(self.allocator);
+    }
+
+    /// Owning node id when `key` names a page by entity id or source path.
+    pub fn pageId(self: *const NodeLookup, key: []const u8) ?[]const u8 {
+        return self.map.get(key);
+    }
+};
+
 pub fn getAffectedPages(
     allocator: std.mem.Allocator,
     changed_path: []const u8,
     nodes: []const graph_mod.Node,
+    dep_index: *const dependency.DependencyIndex,
+) ![]const []const u8 {
+    var lookup = try NodeLookup.init(allocator, nodes);
+    defer lookup.deinit();
+    return getAffectedPagesIndexed(allocator, changed_path, &lookup, dep_index);
+}
+
+/// `getAffectedPages` with a caller-owned `NodeLookup`, so a caller running the
+/// walk once per dirty page builds the index once instead of per call.
+pub fn getAffectedPagesIndexed(
+    allocator: std.mem.Allocator,
+    changed_path: []const u8,
+    lookup: *const NodeLookup,
     dep_index: *const dependency.DependencyIndex,
 ) ![]const []const u8 {
     var affected_ids: std.StringHashMapUnmanaged(void) = .{};
@@ -193,15 +290,9 @@ pub fn getAffectedPages(
         if (visited.contains(curr)) continue;
         try visited.put(allocator, curr, {});
 
-        var is_page = false;
-        var page_id: []const u8 = "";
-        for (nodes) |node| {
-            if (std.mem.eql(u8, node.id, curr) or std.mem.eql(u8, node.source_path, curr)) {
-                is_page = true;
-                page_id = node.id;
-                break;
-            }
-        }
+        const resolved = lookup.pageId(curr);
+        const is_page = resolved != null;
+        const page_id: []const u8 = resolved orelse "";
 
         if (is_page) {
             try affected_ids.put(allocator, page_id, {});

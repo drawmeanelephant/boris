@@ -1,59 +1,121 @@
 ---
-title: Content Model Overview
+title: Content Model & Pipeline
+parent: guides
 status: published
-tags: [guides, architecture]
+tags: [guides, architecture, pipeline]
 ---
 
-# Content Model & Pipeline
+<p class="eyebrow">Pipeline</p>
 
-Boris treats your docs as a **validated graph**, not a flat file dump. Pages are
-**Trunks** (roots) or **Satellites** (children of a trunk). Frontmatter is a
-**closed key grammar** — not full YAML.
+# Content Model & Pipeline {#content-model}
 
-## Pipeline: Load → Roll → Ignite → Reset
+{{include includes/identity.md}}
 
-1. **Load** — Discover case-sensitive `.md` / `.mdx` under `content/`. The
-   content-root directory `includes/` is **not** scanned as pages.
-2. **Roll** — Parse closed frontmatter; tokenize Aside components; resolve roles
-   and parents; validate the Trunk/Satellite graph.
-3. **Ignite** — On the HTML path: expand includes, rewrite wiki-links by entity
-   id, then render with ApexMarkdown Unified and assemble layout markers
-   (`{{content}}`, optional `{{nav}}` / `{{breadcrumb}}` / `{{title}}` /
-   `{{toc}}`). Or emit IR / RAG when those modes are selected.
-4. **Reset** — Free per-page scratch (HTML path) so the next page stays lean.
+Boris treats documentation as a validated graph rather than an unrelated pile
+of Markdown files. You declare page identity and hierarchy in frontmatter;
+Boris resolves that structure before it publishes HTML, a hosted target, or a
+machine projection.
 
-## Graph-aware HTML chrome
+<Aside kind="info">
 
-When the layout includes `{{nav}}`, the site forest comes from the **same**
-frozen graph used for IR/RAG. Invalid parents fail the **HTML** build too
-(exit 1). In-page `{{toc}}` is built from rendered heading ids (`h1`–`h3`).
+The useful mental model is: **source pages become a frozen graph, then a
+selected output is produced from that graph**. `validate`, `check`, `build`,
+and the export modes share the compiler's authorities but answer different
+questions. See the [[reference/commands|command reference]] for the exact
+routing.
 
-## Includes and wiki-links
+</Aside>
 
-Authors can share fragments and link by entity id. Both run **before** Apex on
-the HTML path; nothing expands inside fenced code.
+## Pages, Trunks, and Satellites
+
+Every discovered `.md` or `.mdx` page gets an entity id from its
+content-root-relative path unless frontmatter supplies an `id`. A page without `parent` is
+a **Trunk**. A page with `parent: <entity-id>` is a **Satellite** of that direct
+parent.
+
+Satellites may have their own Satellites, so a hierarchy can be arbitrarily
+deep as long as every parent exists and the complete graph is acyclic.
 
 ```markdown
-{{include includes/authoring-note.md}}
-
-Read [[guides/trunk-satellite]] or [[reference/frontmatter|closed frontmatter]].
+---
+title: A nested guide
+parent: guides/overview
+status: published
+tags: [guides]
+---
 ```
 
-{{include includes/authoring-note.md}}
+The HTML layout derives navigation and breadcrumbs from this frozen hierarchy.
+The graph rules and dependency edge vocabulary are normative in the
+[[reference/relationships|relationships reference]] and the repository's
+[IR contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/ir-schema.md).
 
-Live links (entity ids, optional labels, optional section targets): see
-[[guides/trunk-satellite|Trunk vs Satellite]],
-[[guides/trunk-satellite#satellites|Satellites section]],
-[[guides/asides|Asides]], and [[reference/frontmatter]].
+## References and reusable fragments
 
-## Guides in this section
+Use a Boris wiki-link when you want a graph-checked link to another page:
 
-| Guide | Topic |
-|-------|--------|
-| [[guides/trunk-satellite|Trunk and Satellite]] | Roles, `parent`, validation rules |
-| [[guides/asides|Asides]] | Constrained callouts in document order |
-| [[guides/apex-markdown|Apex Markdown]] | Unified gallery (tables, math, footnotes, callouts, …) |
-| [[guides/cli-and-modes|CLI and modes]] | HTML / IR / RAG (parent: Getting Started) |
-| [[guides/rag-export|RAG export]] | `boris --rag` corpus shape |
+```markdown
+See [[guides/building-pages|Building Pages]] for authoring details.
+```
 
-Author keys cheat-sheet: [[reference/frontmatter|Frontmatter reference]].
+The HTML path also accepts heading fragments such as
+`[[reference/commands#exit-codes|exit codes]]`; the fragment must match an id
+from the target page's rendered headings. Ordinary external Markdown links are
+left as links and are not a complete site-wide checker.
+
+Reusable source fragments live under `content/includes/`:
+
+```markdown
+{{include includes/shared-tip.md}}
+```
+
+The include expands in place before Markdown rendering. The `includes/` tree is
+not discovered as a page tree; missing targets and cycles fail loudly. Syntax
+inside fenced code remains literal.
+
+## What the compiler does
+
+The shared authority sequence is easier to understand as four responsibilities:
+
+1. **Discover and parse.** Find the selected input family, parse the closed
+   frontmatter grammar, and promote page metadata.
+2. **Validate and freeze.** Resolve ids, parent chains, semantic relations,
+   components, and include/wiki dependencies into a valid graph.
+3. **Prepare the selected output.** For HTML, load layouts and assets, harvest
+   headings, render with Oliver, and prepare navigation/chrome. Other commands
+   select IR, RAG, Context, `llms.txt`, RSS, or sitemap rules.
+4. **Act on the command.** `validate` discards prepared bytes; `build` stages
+   and commits its publication; analysis commands report graph facts; export
+   commands stage their own projection.
+
+This is why a successful `validate` proves source/configuration prepublication
+validity but does not prove a later output write, deployment, accessibility, or
+prose-quality result. The exact boundary is in the
+[validation contract](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/validation.md).
+
+<Details summary="HTML is the default target, not the whole pipeline">
+
+The same freeze feeds GitHub Pages, Standard.site, IR, RAG, Context,
+`llms.txt`, RSS, and sitemap. Pick the exit. Do not assume one command
+wrote all of them.
+
+</Details>
+
+## Same source, separate projections
+
+HTML, JSON IR, RAG, Context, `llms.txt`, RSS, and HTML sitemap output are not one
+opaque multi-writer artifact. Run the desired commands against the same source
+revision when you need aligned outputs. Hosted targets — GitHub Pages and
+Standard.site — consume that same frozen graph through the publication
+registry. [[guides/publishing|Publishing Targets]] names them;
+[[guides/rag-export|AI & Machine Outputs]] covers the machine projections;
+[[guides/search-and-ui|Search & Browser UI]] covers the compiler-owned
+rendered-search artifact.
+
+## Next steps
+
+- [[guides/building-pages|Building Pages]] — create and link pages.
+- [[guides/trunk-satellite|Trunk & Satellite]] — inspect hierarchy rules.
+- [[guides/publishing|Publishing Targets]] — local `dist/`, Pages, Standard.site.
+- [[guides/themes-and-layouts|Themes & Layouts]] — select layouts and assets.
+- [[reference/diagnostics|Diagnostics]] — understand failure categories.

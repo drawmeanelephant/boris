@@ -1,0 +1,68 @@
+{
+  "format": "boris-nostr-signed-bundle",
+  "schema_version": 1,
+  "protocol": {
+    "nips_revision": "656cecc7c0a815b6a2b218d3b5d6f078b3f4dbab",
+    "research_date": "2026-08-14",
+    "kind": 30023
+  },
+  "plan": {
+    "format": "boris-nostr-publication-plan",
+    "schema_version": 1,
+    "digest": "fd3dbdfd937744670316647acf88c1ee0198aac9d67346a83d1e3a242d2c13ec"
+  },
+  "signer": {
+    "pubkey": "dff1d77f2a671c5f36183726db2341be58feae1da2deced843240f7b502ba659",
+    "created_at_policy": "signing-time"
+  },
+  "articles": [
+    {
+      "entity_id": "articles/vec",
+      "d": "articles/vec",
+      "intention_digest": "52d9d153d14dbd22c7530da30ea3a6ad82d82339984fa9ccd1ecb68b5b35d9ab",
+      "disposition": "signed",
+      "created_at": 1705762000,
+      "published_at_unix": 1705761000,
+      "event_id": "266eeee304aa1044b6c415609446b914a39b24492e7ee5c07aab395332570068",
+      "signature": "c80d6e53c2f704bd3b1ac5005af44534c5a4782c51529cbd58b9e5129c50db2396acbf22778eef24820eb1884fa9bb9653ef3abb58213f17b3846de5659e0836",
+      "signature_verified": true,
+      "event": {
+        "id": "266eeee304aa1044b6c415609446b914a39b24492e7ee5c07aab395332570068",
+        "pubkey": "dff1d77f2a671c5f36183726db2341be58feae1da2deced843240f7b502ba659",
+        "created_at": 1705762000,
+        "kind": 30023,
+        "tags": [
+          ["d", "articles/vec"],
+          ["published_at", "1705761000"],
+          ["title", "Vector"],
+          ["r", "https://example.com/a.html"]
+        ],
+        "content": "Line one\nLine \"two\" with \\ backslash\ttab and ünïcode. \u0008\u000c\r",
+        "sig": "c80d6e53c2f704bd3b1ac5005af44534c5a4782c51529cbd58b9e5129c50db2396acbf22778eef24820eb1884fa9bb9653ef3abb58213f17b3846de5659e0836"
+      }
+    },
+    {
+      "entity_id": "articles/simple",
+      "d": "articles/simple",
+      "intention_digest": "63f70c8f1af54cf7acf947df76a73714b257dc22e870d635ed78ff6225501535",
+      "disposition": "signed",
+      "created_at": 1705762000,
+      "published_at_unix": 1705761000,
+      "event_id": "a86f75dab0a35a1a15afeb446857f6bdeb4a531b1de92f6aed99853d1d5042f7",
+      "signature": "3487dd35b1af5077e3eab8633ec8457f9857449e58dedd1833ab6084e9fe0f09c116389883f58df0e2b1acfc4792e7fcac70d4c10f4b1df2cc2bdeba97e41ea5",
+      "signature_verified": true,
+      "event": {
+        "id": "a86f75dab0a35a1a15afeb446857f6bdeb4a531b1de92f6aed99853d1d5042f7",
+        "pubkey": "dff1d77f2a671c5f36183726db2341be58feae1da2deced843240f7b502ba659",
+        "created_at": 1705762000,
+        "kind": 30023,
+        "tags": [
+          ["d", "articles/simple"],
+          ["published_at", "1705761000"]
+        ],
+        "content": "# Simple\n",
+        "sig": "3487dd35b1af5077e3eab8633ec8457f9857449e58dedd1833ab6084e9fe0f09c116389883f58df0e2b1acfc4792e7fcac70d4c10f4b1df2cc2bdeba97e41ea5"
+      }
+    }
+  ]
+}

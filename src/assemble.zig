@@ -3,7 +3,8 @@
 //! Layout is loaded once at **startup** (before content compile) and split into
 //! a reusable closed plan of ordered static / slot / asset-url segments.
 //! Required marker: `{{content}}`. Optional slots: `{{nav}}`, `{{breadcrumb}}`,
-//! `{{title}}`, `{{toc}}`, `{{children}}`, `{{metadata}}`, `{{footer}}`. Optional helper:
+//! `{{title}}`, `{{toc}}`, `{{children}}`, `{{metadata}}`, `{{relations}}`,
+//! `{{backlinks}}`, `{{footer}}`. Optional helper:
 //! `{{asset-url <theme-relative path>}}` (validated path grammar only).
 //! Final HTML is streamed with sequential writes — no full-page mega-string.
 //!
@@ -43,12 +44,21 @@ const Io = std.Io;
 
 pub const content_marker = "{{content}}";
 pub const nav_marker = "{{nav}}";
+/// Prefix of the depth-bounded nav form; the argument follows one space and
+/// must be exactly `depth=<digits>` with a value ≥ 1.
+pub const nav_depth_prefix = "{{nav ";
 pub const breadcrumb_marker = "{{breadcrumb}}";
 pub const title_marker = "{{title}}";
 pub const toc_marker = "{{toc}}";
 pub const children_marker = "{{children}}";
 pub const metadata_marker = "{{metadata}}";
+pub const relations_marker = "{{relations}}";
+pub const backlinks_marker = "{{backlinks}}";
 pub const footer_marker = "{{footer}}";
+/// Compiler-owned, closed head slot for validated head-only output (e.g.
+/// Standard.site verification link tags). Layouts opt in explicitly; absence
+/// must never silently claim document verification.
+pub const head_marker = "{{head}}";
 /// Prefix of the argument-bearing helper (path follows a single space).
 pub const asset_url_prefix = "{{asset-url ";
 
@@ -69,6 +79,8 @@ pub const LayoutError = error{
     TooManyLayoutSegments,
     InvalidAssetUrl,
     TooManyAssetUrls,
+    /// A `{{nav …}}` token whose argument is not exactly `depth=N` with N ≥ 1.
+    InvalidNavMarker,
     /// Layout bytes are not valid UTF-8 (validated at split / load boundary).
     InvalidUtf8,
 };
@@ -81,7 +93,10 @@ pub const Slot = enum {
     toc,
     children,
     metadata,
+    relations,
+    backlinks,
     footer,
+    head,
 };
 
 pub const Segment = union(enum) {
@@ -101,7 +116,12 @@ pub const SlotValues = struct {
     toc: []const u8 = "",
     children: []const u8 = "",
     metadata: []const u8 = "",
+    relations: []const u8 = "",
+    backlinks: []const u8 = "",
     footer: []const u8 = "",
+    /// Compiler-owned head-only output; empty when the layout has no `{{head}}`
+    /// or the page has nothing to emit into it.
+    head: []const u8 = "",
     /// Page-relative hrefs for each `asset_url` segment, in layout order.
     asset_hrefs: []const []const u8 = &.{},
 
@@ -114,7 +134,10 @@ pub const SlotValues = struct {
             .toc => self.toc,
             .children => self.children,
             .metadata => self.metadata,
+            .relations => self.relations,
+            .backlinks => self.backlinks,
             .footer => self.footer,
+            .head => self.head,
         };
     }
 };
@@ -149,6 +172,21 @@ pub fn validateAssetUrlPath(path: []const u8) LayoutError!void {
     }
 }
 
+/// Parse the inner text of a `{{nav …}}` argument: exactly `depth=` followed
+/// by one or more ASCII digits forming a value ≥ 1. No internal whitespace.
+fn parseNavDepth(inner: []const u8) ?u32 {
+    const prefix = "depth=";
+    if (!std.mem.startsWith(u8, inner, prefix)) return null;
+    const digits = inner[prefix.len..];
+    if (digits.len == 0) return null;
+    for (digits) |c| {
+        if (c < '0' or c > '9') return null;
+    }
+    const value = std.fmt.parseInt(u32, digits, 10) catch return null;
+    if (value == 0) return null;
+    return value;
+}
+
 /// Immutable multi-slot closed plan of a layout template (e.g. `layouts/main.html`).
 ///
 /// Segment slices are views into `raw`. Keep the `Layout` (and the allocator
@@ -162,12 +200,18 @@ pub const Layout = struct {
     asset_paths: [max_asset_urls][]const u8 = undefined,
     asset_path_count: usize = 0,
     has_nav: bool = false,
+    /// Rendered-level cap for `{{nav depth=N}}` (level 1 = root Trunks).
+    /// `null` (plain `{{nav}}`) keeps the unbounded whole-forest render.
+    nav_depth: ?u32 = null,
     has_breadcrumb: bool = false,
     has_title: bool = false,
     has_toc: bool = false,
     has_children: bool = false,
     has_metadata: bool = false,
+    has_relations: bool = false,
+    has_backlinks: bool = false,
     has_footer: bool = false,
+    has_head: bool = false,
     has_asset_url: bool = false,
 
     /// Content-only convenience: bytes before the single `{{content}}`.
@@ -193,7 +237,10 @@ pub const Layout = struct {
         var seen_toc = false;
         var seen_children = false;
         var seen_metadata = false;
+        var seen_relations = false;
+        var seen_backlinks = false;
         var seen_footer = false;
+        var seen_head = false;
 
         var pos: usize = 0;
         while (pos < raw.len) {
@@ -222,6 +269,15 @@ pub const Layout = struct {
                 seen_nav = true;
                 layout.has_nav = true;
                 try layout.appendSlot(.nav);
+            } else if (std.mem.startsWith(u8, token, nav_depth_prefix)) {
+                // `{{nav depth=N}}` — bounded forest; same once-per-layout slot.
+                const inner = token[nav_depth_prefix.len .. token.len - 2];
+                const depth = parseNavDepth(inner) orelse return error.InvalidNavMarker;
+                if (seen_nav) return error.DuplicateLayoutMarker;
+                seen_nav = true;
+                layout.has_nav = true;
+                layout.nav_depth = depth;
+                try layout.appendSlot(.nav);
             } else if (std.mem.eql(u8, token, breadcrumb_marker)) {
                 if (seen_breadcrumb) return error.DuplicateLayoutMarker;
                 seen_breadcrumb = true;
@@ -247,11 +303,26 @@ pub const Layout = struct {
                 seen_metadata = true;
                 layout.has_metadata = true;
                 try layout.appendSlot(.metadata);
+            } else if (std.mem.eql(u8, token, relations_marker)) {
+                if (seen_relations) return error.DuplicateLayoutMarker;
+                seen_relations = true;
+                layout.has_relations = true;
+                try layout.appendSlot(.relations);
+            } else if (std.mem.eql(u8, token, backlinks_marker)) {
+                if (seen_backlinks) return error.DuplicateLayoutMarker;
+                seen_backlinks = true;
+                layout.has_backlinks = true;
+                try layout.appendSlot(.backlinks);
             } else if (std.mem.eql(u8, token, footer_marker)) {
                 if (seen_footer) return error.DuplicateLayoutMarker;
                 seen_footer = true;
                 layout.has_footer = true;
                 try layout.appendSlot(.footer);
+            } else if (std.mem.eql(u8, token, head_marker)) {
+                if (seen_head) return error.DuplicateLayoutMarker;
+                seen_head = true;
+                layout.has_head = true;
+                try layout.appendSlot(.head);
             } else if (std.mem.startsWith(u8, token, asset_url_prefix) and std.mem.endsWith(u8, token, "}}")) {
                 // `{{asset-url PATH}}` — single space after the helper name.
                 const inner = token[asset_url_prefix.len .. token.len - 2];
@@ -270,7 +341,7 @@ pub const Layout = struct {
 
         // Content-only convenience prefix/suffix for legacy three-write tests.
         if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title and !layout.has_toc and !layout.has_children and
-            !layout.has_metadata and !layout.has_footer and !layout.has_asset_url)
+            !layout.has_metadata and !layout.has_relations and !layout.has_backlinks and !layout.has_footer and !layout.has_head and !layout.has_asset_url)
         {
             if (layout.segment_count == 3 and
                 layout.segments[0] == .static and
@@ -342,6 +413,11 @@ pub fn loadLayout(io: Io, dir: Io.Dir, path: []const u8, arena: std.mem.Allocato
 
     var reader = file.reader(io, &.{});
     const raw = try reader.interface.allocRemaining(arena, .unlimited);
+    return loadLayoutFromBytes(raw);
+}
+
+/// Split already-loaded layout bytes. Used by the in-memory embed path.
+pub fn loadLayoutFromBytes(raw: []const u8) !Layout {
     return Layout.split(raw);
 }
 
@@ -469,6 +545,29 @@ pub fn writePageWithSlotsOpts(
     try atomic_file.replace(io);
 }
 
+/// Render the same slot splice into an owned buffer (embed / memory sink).
+pub fn renderPageAlloc(
+    gpa: std.mem.Allocator,
+    layout: Layout,
+    slots: SlotValues,
+) ![]u8 {
+    var aw = std.Io.Writer.Allocating.init(gpa);
+    errdefer aw.deinit();
+    var asset_i: usize = 0;
+    for (layout.segmentsSlice()) |seg| {
+        switch (seg) {
+            .static => |s| try aw.writer.writeAll(s),
+            .slot => |slot| try aw.writer.writeAll(slots.forSlot(slot)),
+            .asset_url => {
+                if (asset_i >= slots.asset_hrefs.len) return error.InvalidAssetUrl;
+                try aw.writer.writeAll(slots.asset_hrefs[asset_i]);
+                asset_i += 1;
+            },
+        }
+    }
+    return try aw.toOwnedSlice();
+}
+
 // ---------------------------------------------------------------------------
 // Hold-until-flush sink (tests prove flush-before-reset, not kernel buffering)
 // ---------------------------------------------------------------------------
@@ -591,33 +690,24 @@ fn countHexTempNames(io: Io, dir: Io.Dir) !usize {
     return n;
 }
 
-/// Best-effort recursive scrub of orphan atomic temps and `*.tmp` files under `dist_dir`.
-/// Safe after interrupted builds (SIGKILL) where `Atomic.deinit` never ran.
+/// Best-effort scrub of orphan atomic temps under `.boris-cache/` namespace.
+/// Confined strictly to `.boris-cache/` when present; never performs recursive
+/// or heuristic deletion over the live published output tree.
 /// Never fails the compile: all errors are swallowed.
-///
-/// `dist_dir` should be opened with `.iterate = true` when possible; if not
-/// iterable, this is a no-op.
 pub fn scrubStaleAtomicTemps(io: Io, dist_dir: Io.Dir, gpa: std.mem.Allocator) void {
-    scrubStaleAtomicTempsRec(io, dist_dir, gpa) catch {};
-}
+    _ = gpa;
+    var cache_dir = dist_dir.openDir(io, ".boris-cache", .{ .iterate = true }) catch return;
+    defer cache_dir.close(io);
 
-fn scrubStaleAtomicTempsRec(io: Io, dir: Io.Dir, gpa: std.mem.Allocator) !void {
-    var walker = try dir.walkSelectively(gpa);
-    defer walker.deinit();
-
-    while (try walker.next(io)) |entry| {
-        if (entry.kind == .directory) {
-            try walker.enter(io, entry);
-            continue;
-        }
+    var it = cache_dir.iterate();
+    while (it.next(io) catch null) |entry| {
         if (entry.kind != .file) continue;
-
-        const name = entry.basename;
+        const name = entry.name;
         const is_tmp_suffix = std.mem.endsWith(u8, name, ".tmp") or
             std.mem.containsAtLeast(u8, name, 1, ".tmp.");
-        if (!isAtomicTempName(name) and !is_tmp_suffix) continue;
-
-        entry.dir.deleteFile(io, name) catch {};
+        if (isAtomicTempName(name) or is_tmp_suffix) {
+            cache_dir.deleteFile(io, name) catch {};
+        }
     }
 }
 
@@ -634,42 +724,55 @@ test "isAtomicTempName" {
     try std.testing.expect(!isAtomicTempName("g123456789abcdef")); // non-hex
 }
 
-test "scrubStaleAtomicTemps removes orphan hex and .tmp files" {
+test "scrubStaleAtomicTemps preserves legitimate user assets and cleans boris-cache" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    // Unique tmp path: fixed zig-cache/* dirs race across parallel test executables.
+
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-scrub-temps", .{tmp.sub_path});
     defer gpa.free(work);
     try cwd.createDirPath(io, work);
 
-    const orphan = try std.fmt.allocPrint(gpa, "{s}/0123456789abcdef", .{work});
-    defer gpa.free(orphan);
-    const page_tmp = try std.fmt.allocPrint(gpa, "{s}/page.html.tmp", .{work});
-    defer gpa.free(page_tmp);
-    const keep = try std.fmt.allocPrint(gpa, "{s}/keep.html", .{work});
-    defer gpa.free(keep);
-    const nested = try std.fmt.allocPrint(gpa, "{s}/nested", .{work});
-    defer gpa.free(nested);
-    const nested_orphan = try std.fmt.allocPrint(gpa, "{s}/nested/fedcba9876543210", .{work});
-    defer gpa.free(nested_orphan);
+    const asset_hex = try std.fmt.allocPrint(gpa, "{s}/assets/0123456789abcdef", .{work});
+    defer gpa.free(asset_hex);
+    const asset_tmp = try std.fmt.allocPrint(gpa, "{s}/assets/worker.tmp", .{work});
+    defer gpa.free(asset_tmp);
 
-    try cwd.writeFile(io, .{ .sub_path = orphan, .data = "orphan" });
-    try cwd.writeFile(io, .{ .sub_path = page_tmp, .data = "tmp" });
-    try cwd.writeFile(io, .{ .sub_path = keep, .data = "keep" });
-    try cwd.createDirPath(io, nested);
-    try cwd.writeFile(io, .{ .sub_path = nested_orphan, .data = "nested-orphan" });
+    const cache_dir_path = try std.fmt.allocPrint(gpa, "{s}/.boris-cache", .{work});
+    defer gpa.free(cache_dir_path);
+    const cache_orphan_hex = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/0123456789abcdef", .{work});
+    defer gpa.free(cache_orphan_hex);
+    const cache_orphan_tmp = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/manifest.json.tmp", .{work});
+    defer gpa.free(cache_orphan_tmp);
+    const cache_keep = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/manifest.json", .{work});
+    defer gpa.free(cache_keep);
+
+    const assets_dir_path = try std.fmt.allocPrint(gpa, "{s}/assets", .{work});
+    defer gpa.free(assets_dir_path);
+
+    try cwd.createDirPath(io, assets_dir_path);
+    try cwd.createDirPath(io, cache_dir_path);
+
+    try cwd.writeFile(io, .{ .sub_path = asset_hex, .data = "asset-hex" });
+    try cwd.writeFile(io, .{ .sub_path = asset_tmp, .data = "asset-tmp" });
+    try cwd.writeFile(io, .{ .sub_path = cache_orphan_hex, .data = "orphan" });
+    try cwd.writeFile(io, .{ .sub_path = cache_orphan_tmp, .data = "tmp" });
+    try cwd.writeFile(io, .{ .sub_path = cache_keep, .data = "keep" });
 
     var dir = try cwd.openDir(io, work, .{ .iterate = true });
     defer dir.close(io);
     scrubStaleAtomicTemps(io, dir, gpa);
 
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, orphan, .{}));
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, page_tmp, .{}));
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, nested_orphan, .{}));
-    try cwd.access(io, keep, .{});
+    // Live assets in subdirectories like assets/ are preserved.
+    try cwd.access(io, asset_hex, .{});
+    try cwd.access(io, asset_tmp, .{});
+
+    // Boris-cache orphan files are scrubbed; valid cache files remain.
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, cache_orphan_hex, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, cache_orphan_tmp, .{}));
+    try cwd.access(io, cache_keep, .{});
 }
 
 test "layout split is zero-copy into raw" {
@@ -719,7 +822,71 @@ test "layout multi-slot nav breadcrumb title toc" {
     try std.testing.expect(children_only.has_children);
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{children}}{{children}}{{content}}"));
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav}}{{content}}"));
+    const relation_slots = try Layout.split("{{relations}}{{backlinks}}{{content}}");
+    try std.testing.expect(relation_slots.has_relations);
+    try std.testing.expect(relation_slots.has_backlinks);
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{relations}}{{relations}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{backlinks}}{{backlinks}}{{content}}"));
     try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{nope}}{{content}}"));
+}
+
+test "layout nav depth forms parse bounded and reject malformed arguments" {
+    // Bounded form: same slot, explicit cap.
+    const bounded = try Layout.split("<body>{{nav depth=3}}{{content}}</body>");
+    try std.testing.expect(bounded.has_nav);
+    try std.testing.expectEqual(@as(?u32, 3), bounded.nav_depth);
+
+    const one = try Layout.split("{{nav depth=1}}{{content}}");
+    try std.testing.expectEqual(@as(?u32, 1), one.nav_depth);
+
+    // Plain form stays unbounded.
+    const plain = try Layout.split("{{nav}}{{content}}");
+    try std.testing.expect(plain.has_nav);
+    try std.testing.expectEqual(@as(?u32, null), plain.nav_depth);
+
+    // Any two nav-form tokens are still the duplicate-slot error.
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav depth=2}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav depth=2}}{{nav depth=3}}{{content}}"));
+
+    // Malformed arguments fail loud at load (never silently unbounded).
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=0}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=x}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth= 2}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=2 3}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav levels=2}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav }}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=99999999999}}{{content}}"));
+    // A token that merely starts with "nav" but is not the helper is unknown.
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{navish}}{{content}}"));
+}
+
+test "layout asset-url and segment bounds are hard errors" {
+    // 17 asset-url occurrences exceeds max_asset_urls (16): the helper is
+    // repeatable but bounded (contract templating-and-themes.md §3).
+    var many_urls: std.ArrayList(u8) = .empty;
+    defer many_urls.deinit(std.testing.allocator);
+    try many_urls.appendSlice(std.testing.allocator, "<main>{{content}}</main>");
+    for (0..max_asset_urls + 1) |_| try many_urls.appendSlice(std.testing.allocator, "{{asset-url assets/a.css}}");
+    try std.testing.expectError(error.TooManyAssetUrls, Layout.split(many_urls.items));
+
+    // The segment bound (32, static + slots + asset-urls) is independent of
+    // the asset-url count: interleaved static text hits TooManyLayoutSegments
+    // first.
+    var many_segments: std.ArrayList(u8) = .empty;
+    defer many_segments.deinit(std.testing.allocator);
+    try many_segments.appendSlice(std.testing.allocator, "<main>{{content}}</main>");
+    for (0..max_segments) |_| try many_segments.appendSlice(std.testing.allocator, " x {{asset-url assets/a.css}}");
+    try std.testing.expectError(error.TooManyLayoutSegments, Layout.split(many_segments.items));
+
+    // The bound is not an off-by-one: max_asset_urls occurrences load fine.
+    var at_limit: std.ArrayList(u8) = .empty;
+    defer at_limit.deinit(std.testing.allocator);
+    try at_limit.appendSlice(std.testing.allocator, "{{content}}");
+    for (0..max_asset_urls) |_| try at_limit.appendSlice(std.testing.allocator, "{{asset-url assets/a.css}}");
+    _ = try Layout.split(at_limit.items);
 }
 
 test "layout metadata footer and asset-url plan" {

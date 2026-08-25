@@ -1,16 +1,16 @@
-# Release gate — Boris v0.8.0
+# Release gate — Boris v0.8.1 candidate
 
 Mechanical checklist before tagging a release or claiming a milestone complete.
-This documents the verified **v0.8.0** release gate. Prior tags remain at their
-certified merge commits; do not re-tag prior releases.
+This documents the gate for the **v0.8.1 candidate**. The historical v0.8.0
+tag remains preserved as erroneous evidence; do not re-tag prior releases.
 
 Run locally:
 
 ```bash
 zig build
 zig build test
-zig build test-apex-hostile
-zig build test-apex-sanitize   # optional; record PASS or an explicit host/tool skip
+zig build test-validation
+zig build test-render
 zig build run -- --input fixtures/content/valid --out .tmp/boris-ir
 zig build run -- --input fixtures/content/valid --rag-dir .tmp/boris-rag
 zig build run -- --input test/fixtures/html/content --html-dir .tmp/boris-dist
@@ -28,20 +28,18 @@ skip cleanliness there. The approved/generated path policy is unchanged.
 worktree and asserts the Git-native predicate still enables the check.
 
 CI (`.github/workflows/ci.yml`) pins **Zig 0.16.0** and runs `zig build`,
-`zig build test`, and `zig build test-apex-hostile` on `ubuntu-latest` and
-`macos-latest`. The root aggregate deliberately excludes the standalone
-migration laboratory; changes under `tools/migration-lab/` additionally run its
-Linux-only targeted gate: `zig build --build-file tools/migration-lab/build.zig test`.
-Sanitizer remains optional and must not be claimed if it only skipped.
+`zig build test`, and `zig build test-render` on `ubuntu-latest` and
+`macos-latest`. The root aggregate deliberately excludes standalone tools;
+changes under `tools/migration-lab/` additionally run its Linux-only targeted
+gate, while changes under `tools/search-index/`, `tools/docs-maintenance/`, or
+the shared `src/search_index.zig` run both standalone tool gates on Ubuntu and
+macOS:
 
-### Sanitizer evidence
-
-The sanitizer command is an optional host-qualified check, not an automatic
-pass. A release record must say either `PASS` with the host and toolchain that
-actually ran ASan/UBSan, or `SKIP` with the host and the concrete reason the
-instrumented run was unavailable. A successful ordinary test run, an empty
-sanitizer log, or a green wrapper command does not count as sanitizer evidence.
-
+```bash
+zig build --build-file tools/migration-lab/build.zig test
+zig build --build-file tools/search-index/build.zig test
+zig build --build-file tools/docs-maintenance/build.zig test
+```
 ## Checklist
 
 Items stay unchecked until the corresponding work is implemented **and**
@@ -55,6 +53,11 @@ verified. Do not check an item because a design doc exists.
 - [x] **Graph tests** — Trunk / Satellite parent validation (missing parent,
       cycles, duplicates, role rules) covered by tests (`src/graph.zig` +
       pipeline integration fixtures)
+- [x] **Authoritative no-publication validation** — `boris validate` reuses the
+      HTML compiler's source/graph/dependency/render preflight, preserves
+      canonical diagnostics, and leaves new and existing targets untouched
+      (`zig build test-validation`; contract
+      [`validation.md`](contracts/validation.md))
 - [x] **Deterministic IR test** — JSON IR emit is byte-stable across dual runs
       on the same host (pipeline dual-export diff of `manifest.json` /
       `graph.json`); the F8 fixture pins typed parent/include/reference edges
@@ -64,17 +67,16 @@ verified. Do not check an item because a design doc exists.
       `pipeline.compile` / `graph.validate` with IR for invalid fixtures
 - [x] **Explicit Textile compatibility** — `--textile` accepts only a
       `.textile` tree, adapts the contracted body subset through existing
-      IR/RAG/Apex paths, compares sequential/parallel HTML, and rejects mixed
+      IR/RAG/render paths, compares sequential/parallel HTML, and rejects mixed
       or malformed input with `ETEXTILE`; contract
       [`textile-compatibility.md`](contracts/textile-compatibility.md)
-- [x] **Apex ABI tests** — in-process Apex C ABI integration covered:
-      - real `@cImport` unit tests in `src/apex.zig` (part of `zig build test`)
-      - hostile C double via `zig build test-apex-hostile`
-      - optional ASan+UBSan smoke via `zig build test-apex-sanitize`
-        (document skip when unavailable; do not pretend it ran)
-      - contract: [`docs/contracts/apex-abi.md`](contracts/apex-abi.md)
-      - **Note:** vendor engine is **ApexMarkdown Unified** (Feature 1); hostile
-        tests cover the ABI boundary; structural fidelity via U1–U17
+- [x] **Oliver rendering seam tests** — Markdown → HTML through the pinned
+      Oliver library (`zig build test-render`; part of `zig build test`):
+      - byte-exact heading-id output, footnote/definition-list/table shapes,
+        and dual-render determinism pinned in `src/render.zig`
+      - contract: [`docs/contracts/oliver-renderer.md`](contracts/oliver-renderer.md)
+      - **Note:** Oliver is a pure-Zig dependency pinned by content hash in
+        `build.zig.zon` (no C engine, no CMake, no sanitizer surface)
 - [x] **HTML assemble / Whiteboard tests** — arena / whiteboard lifetime contracts
       on the HTML path (default CLI + `--html` / `--html-dir` / `--target`):
       - per-page `reset(.free_all)` after flush + publish (`src/compile.zig`)
@@ -98,21 +100,21 @@ verified. Do not check an item because a design doc exists.
       commit; selective watch fan-out;
       contract [`multi-target-isolated-output.md`](contracts/multi-target-isolated-output.md)
 - [x] **CI coverage** — continuous integration exercises release-critical
-      steps (`zig build` + `zig build test` + `test-apex-hostile` on Linux + macOS)
+      steps (`zig build` + `zig build test` + `test-render` on Linux + macOS)
 
 ## Current phase notes
 
 **Default CLI is HTML** under `dist/` (Feature 2). IR remains available via
 `--out` / `--no-rag`. **P2 and P3 scale-out on the HTML path are complete.**
-**Features 1–7** (Apex Unified, HTML default, jobs/watch/target, nav/toc,
+**Features 1–7** (native rendering, HTML default, jobs/watch/target, nav/toc,
 includes + wiki) and **F8.1–F8.3** graph-native dependencies are Done — see
-[`docs/STATUS.md`](STATUS.md). Product **v0.8.0** / base IR
+[`docs/STATUS.md`](STATUS.md). Product **v0.8.1 candidate** / base IR
 **0.2.0**. Semantic relations retain their conditional IR **0.3.0** artifacts;
 relation-free output remains IR 0.2. Incremental HTML uses the shared direct-edge
 resolver and reverse affected-set semantics.
 
-**Compile-time host tool:** CMake is required for static ApexMarkdown
-(`scripts/build-apex-markdown.sh` / `zig build build-apex`).
+The renderer is Oliver, a pure-Zig dependency pinned by content hash in
+`build.zig.zon` — no compile-time host tool is required beyond Zig itself.
 
 Platform-qualified (do not overclaim):
 
@@ -121,7 +123,7 @@ Platform-qualified (do not overclaim):
 - Cross-OS bit-identical trees beyond dual-run tests on each CI host
 - Watch backends: portable polling is the portable path; host-native FS events
   are not universally claimed
-- Sanitizer smoke: host-dependent; skip is not a pass
+
 
 ## Historical milestones (pointer only)
 
@@ -130,7 +132,7 @@ Historical campaign notes formerly under `archive/` were removed from the tree;
 living contracts + STATUS are authoritative.
 
 **Still deferred:** mmap, child-process markdown (forbidden), embedded HTTP
-dev server. Sanitizer remains opt-in (`zig build test-apex-sanitize`).
+dev server.
 
 ## Failure policy
 
@@ -138,5 +140,4 @@ Any checked item that fails verification → **do not ship** that claim. Prefer
 fixing code or deliberately amending contracts in the same change set over
 documenting “works” without evidence.
 
-For optional sanitizer: a documented “not available on this host” skip is
-acceptable; a green log line without a successful run is not.
+

@@ -1,0 +1,2 @@
+error: RSS mode requires --site-url, --rss-title, and --rss-description (try --help)
+usage: boris <command> [options] (run boris --help for the full option list)

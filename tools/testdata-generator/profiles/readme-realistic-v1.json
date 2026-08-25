@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "boris-testdata-profile/1",
+  "name": "readme-realistic-v1",
+  "description": "README-shaped pages with a rooted guide/article forest and common Markdown constructs",
+  "style": "readme",
+  "includeAssets": true,
+  "barbs": []
+}

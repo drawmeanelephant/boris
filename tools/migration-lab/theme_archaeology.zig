@@ -17,6 +17,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const publication = @import("publication.zig");
 
 pub const format_id = "boris-theme-archaeology-lab";
 pub const schema_version: u32 = 1;
@@ -118,9 +119,9 @@ pub const LedgerEntry = struct {
 // ---------------------------------------------------------------------------
 
 const skip_dir_names = [_][]const u8{
-    ".git",  ".hg",     ".svn",     "node_modules", ".astro",
-    "dist",  ".vercel", ".netlify", ".output",      "zig-out",
-    ".zig-cache", "zig-cache", ".boris", "migration-report",
+    ".git",       ".hg",       ".svn",     "node_modules",     ".astro",
+    "dist",       ".vercel",   ".netlify", ".output",          "zig-out",
+    ".zig-cache", "zig-cache", ".boris",   "migration-report",
 };
 
 const skip_file_names = [_][]const u8{ ".DS_Store", "Thumbs.db" };
@@ -1542,8 +1543,6 @@ fn emitBoundaryReport(a: std.mem.Allocator, entries: []const LedgerEntry) ![]u8 
 // ---------------------------------------------------------------------------
 
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
-    try refuseOutputInsideSource(opts.root_dir, opts.out_dir);
-
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -1579,9 +1578,14 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
 
     sortLedger(ledger.items);
 
-    Io.Dir.cwd().createDirPath(io, opts.out_dir) catch return error.IoFailure;
-    var out_root = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
-    defer out_root.close(io);
+    var output_publication = try publication.Publication.begin(io, gpa, opts.out_dir, &.{opts.root_dir}, format_id);
+    defer {
+        output_publication.abandon(io, gpa);
+        output_publication.deinit(gpa);
+    }
+    var out_root = try Io.Dir.cwd().openDir(io, output_publication.stage_path, .{});
+    var out_open = true;
+    errdefer if (out_open) out_root.close(io);
 
     const ledger_json = try emitLedgerJson(a, opts.root_dir, ledger.items);
     try writeBytes(io, out_root, "adaptation_ledger.json", ledger_json);
@@ -1598,6 +1602,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
             .{ opts.out_dir, files.items.len, ledger.items.len },
         );
     }
+    out_root.close(io);
+    out_open = false;
+    try output_publication.commit(io, gpa);
 }
 
 // ---------------------------------------------------------------------------

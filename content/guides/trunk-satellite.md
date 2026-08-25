@@ -1,61 +1,97 @@
 ---
-title: Trunk and Satellite Pages
+title: Trunk & Satellite — Content Hierarchy
 parent: guides/overview
 status: published
-tags: [graph, content]
+tags: [guides, graph, hierarchy]
 ---
 
-# Trunk and Satellite Pages
+<p class="eyebrow">Graph</p>
 
-The content graph has two roles.
+# Trunk & Satellite — Content Hierarchy {#trunk-satellite}
 
-## Trunks
+The `parent` field gives Boris an explicit site hierarchy. It is a graph edge,
+not a display label or a directory convention. Hosted targets and machine
+projections consume the same frozen hierarchy — see
+[[guides/publishing|Publishing Targets]].
 
-A **Trunk** is a top-level node.
+<Aside kind="note">
 
-- Omit `parent` in frontmatter.
-- Example: this site’s `guides/overview` page is a trunk.
+Directory layout is a convenience for humans. Navigation is not inferred
+from folders. If you wanted implicit hierarchy, you wanted a different
+compiler.
 
-## Satellites
+</Aside>
 
-A **Satellite** is a direct child of a trunk.
+## The two roles
 
-- Set `parent: <trunk-entity-id>`.
-- Entity ids default to the path without extension (`guides/overview.md` →
-  `guides/overview`). Prefer path-derived ids unless you override with `id:`.
+Trunk
+: A page with no `parent`. It is a root of the validated hierarchy.
 
-### Example satellite frontmatter
+Satellite
+: A page with one direct `parent` entity id. Its parent may be a Trunk or
+  another Satellite.
 
-```yaml
+For example, `content/guides/building-pages.md` normally has entity id
+`guides/building-pages`, while `content/getting-started.md` has entity id
+`getting-started`.
+
+## Declare a parent
+
+```markdown
 ---
-title: My Satellite Page
-parent: guides/overview
+title: Advanced Configuration
+parent: getting-started
 status: published
 ---
 ```
 
-## Validation (hard errors)
+Boris checks that the parent exists, rejects self-parenting and cycles, and
+freezes the complete finite chain before output publication. There is no
+one-level nesting limit.
 
-The compiler fails the build (exit **1**) when:
+```text
+index (Trunk)
+  guides (Satellite)
+    guides/overview (Satellite)
+      guides/building-pages (Satellite)
+```
 
-| Rule | Meaning |
-|------|---------|
-| Missing parent | `parent` id does not exist |
-| Self-parent | page parents itself |
-| Satellite-of-satellite | parent is not a trunk |
-| Cycles | parent chain loops |
-| Duplicate ids | two pages share an entity id |
+The default HTML layout uses the graph for its navigation tree and breadcrumbs.
+Asides and Details stay in page order; they are not graph nodes.
 
-Do **not** put intentionally broken pages under `content/` — use
-`fixtures/content/invalid/` or contract fixtures for negative cases.
+## Validation and analysis are different
 
-## How nav uses the graph
+Use the compiler's no-publication HTML preflight when you need an authoritative
+validity answer:
 
-Site `{{nav}}` and `{{breadcrumb}}` are derived from the frozen Trunk/Satellite
-forest. Changing a title or parent dirties pages that embed the forest when
-incremental builds include nav material in fingerprints.
+```bash
+./zig-out/bin/boris validate --quiet
+```
 
-Wiki-links use the same entity-id space as `parent`. A bare link to
-[[guides/overview]] resolves to this section’s trunk. See
-[[reference/frontmatter|frontmatter reference]] and the
-[[guides/overview|content model overview]].
+Use Documentation Intelligence when you want graph-health facts or impact:
+
+```bash
+./zig-out/bin/boris check --format json --report health.json
+./zig-out/bin/boris impact guides/overview
+```
+
+`check` and `impact` consume a valid frozen graph and analyze parent/include/
+reference dependencies. They do not validate layouts, themes, assets, or the
+complete HTML render path, and semantic `relations` are a separate metadata
+surface.
+
+## Repairing hierarchy changes
+
+When moving a page, update the `parent` value and any wiki-links that should
+follow it, then run `validate` and a normal build. `impact ID` is useful before a
+large rename because it lists transitive dependents without rewriting source.
+
+<Details summary="What is not a graph node">
+
+`&lt;Aside&gt;` and `&lt;Details&gt;` stay in document order. They do not
+get entity ids, parents, or nav entries. A callout is not a page.
+
+</Details>
+
+See [[reference/relationships|Relationships]] for parent edges, wiki-links,
+includes, and semantic relations as separate concepts.

@@ -1,0 +1,210 @@
+# `boris-testdata`
+
+`boris-testdata` is a Zig companion binary that makes fixtures for Boris to
+consume. It is a fixture generator, not a second compiler and not a test
+runner framework. The useful output is a deterministic project tree that can
+feed many later tests, scale runs, migration probes, and theme comparisons.
+
+Build it from this directory with Zig 0.16:
+
+```bash
+zig build
+zig build test
+```
+
+Generate, inspect, validate, and run a fixture:
+
+```bash
+zig build run -- generate \
+  --pages 24 \
+  --seed 20260801 \
+  --profile readme-realistic-v1 \
+  --output /private/tmp/boris-case
+
+zig build run -- validate --fixture /private/tmp/boris-case
+zig build run -- inspect --input /private/tmp/boris-case --format json
+zig build run -- run --fixture /private/tmp/boris-case --boris /path/to/boris
+zig build run -- republish-clean --fixture /private/tmp/boris-case --boris /path/to/boris
+zig build run -- run --fixture /private/tmp/boris-case --boris /path/to/boris --jobs 4
+```
+
+`run` and `republish-clean` accept `--jobs N` (default `1`, valid range
+`1..64` matching Boris; both `--jobs N` and `--jobs=N` forms are accepted).
+`--jobs` is a requested upper bound passed to Boris as `--jobs N`; it is
+never inferred from the page count and does not measure actual thread
+creation. `generate`, `validate`, and `inspect` reject `--jobs` as a usage
+error. Zero, values above 64, empty values, malformed integers, duplicate
+flags, and missing values are all rejected deterministically.
+
+`generate` refuses to overwrite an existing directory unless `--force` is
+present. It only deletes the exact output directory named by the user.
+
+## Fixture contract
+
+Every generated fixture has this shape:
+
+```text
+fixture/
+  content/                    # Markdown pages and includes/
+  optional-assets/            # sidecar assets for fixture cases
+  optional-theme/             # copied or built-in Boris theme
+  manifest.json               # boris-testdata/2
+  files.jsonl                 # one deterministic inventory row per input file
+  expected.json               # run expectation and barb assignments
+  results/                    # Boris output, harness snapshots, and run evidence
+    boris-output/             # baseline output, optionally poisoned after publish
+    output-snapshot.jsonl     # full-tree harness snapshot; non-normative
+    output-snapshot.json      # snapshot summary; not an ownership declaration
+    run.json                  # subprocess and output evidence
+    republish-clean-output/   # clean comparison publication from valid source
+    republish-clean.json     # clean-comparison evidence
+```
+
+`manifest.json` key order is fixed. Its `files` entry records the JSONL count,
+byte total, and SHA-256. `expected.json` records the expected Boris exit code,
+the profile seed, and each barb's target page index. `files.jsonl` is emitted as
+pages are written; it is never built as one corpus-sized in-memory string.
+
+The input-file inventory deliberately excludes `manifest.json`,
+`expected.json`, and `files.jsonl` themselves to avoid a circular hash. It
+includes pages, include fragments, content-local assets, and theme files.
+After a successful Boris run, `_boris/proof/artifacts.json` is the authoritative
+Boris-owned artifact inventory. The runner reads and hashes that clean
+publication inventory before applying any post-publication barb, preflights each
+selected artifact's clean bytes, and retains the selected path, kind, byte count,
+and SHA-256 as baseline facts. Byte mutations run before artifact deletions, so
+barbs sharing a publication surface do not invalidate one another's clean
+baseline. The canonical inventory is never mutated or replaced.
+`results/output-snapshot.jsonl` is a full-tree harness snapshot of the resulting
+poisoned output; it is explicitly non-normative and does not declare ownership.
+`deployment_owned_extra` is therefore absent from `artifacts.json` while still
+appearing in the snapshot.
+
+`republish-clean` publishes the same valid source into a clean comparison tree.
+Each `run` starts by clearing only its owned `results/boris-output` tree, so a
+previous poisoned deployment extra cannot become the next clean baseline.
+`republish-clean` uses a separate `results/republish-clean-output` tree and does
+not edit or automatically repair the poisoned output tree.
+
+## Profiles, themes, and templates
+
+Built-in profiles are:
+
+| Profile | Purpose |
+|---|---|
+| `readme-realistic-v1` | README-shaped valid pages with Trunk/Satellite graph edges, links, includes, headings, tables, code fences, and an asset. |
+| `bounded-nav-v1` | The same valid grammar with the generated theme's navigation bounded to breadcrumb plus direct children (`"nav": "children"`), so per-page anchors stay flat and scale runs measure compiler throughput rather than whole-graph nav rendering. |
+| `nightmare-v1` | The same valid grammar with named failure barbs applied at deterministic loci. |
+| `preserved-edge-v1` | Traversal-like Markdown links that Boris should preserve literally. |
+| `mild-poison-v1` | Mostly valid output with one precise post-publish barb per selected case. |
+
+Profiles are JSON references under `profiles/` and can also be supplied by
+path. The closed profile shape is:
+
+```json
+{
+  "schemaVersion": "boris-testdata-profile/1",
+  "name": "my-profile",
+  "description": "...",
+  "style": "readme | reference | compact",
+  "includeAssets": true,
+  "barbs": ["duplicate_id"],
+  "nav": "full | children"
+}
+```
+
+`nav` (optional, default `full`) selects which navigation slots the generated
+built-in theme requests: `full` asks Boris for the recursive whole-graph
+`{{nav}}` on every page (per-page anchors grow with the corpus), while
+`children` requests `{{breadcrumb}} {{children}}`, bounding per-page navigation
+regardless of corpus size (#729). Existing profiles default to `full` and keep
+byte-identical output.
+
+`--theme PATH` recursively copies a regular-file theme into
+`optional-theme/`, sorting paths bytewise and rejecting symlinks. This is the
+same command surface for the checked-in ideal/terminal themes and an external
+source theme. Without the flag, the generator emits the built-in ideal theme.
+
+`--template PATH` loads one external Markdown source template (bounded to 1 MiB),
+expands only `{{id}}`, `{{title}}`, `{{parent}}`, `{{related}}`, `{{include}}`,
+`{{index}}`, and `{{seed}}`, then parses the result into the same typed AST as
+synthetic pages. Unknown tokens remain literal.
+
+## Determinism and memory
+
+The seed strategy is a SplitMix-style 64-bit mixer:
+
+```text
+pageSeed = mix(seed, pageIndex)
+barbTarget = mix(seed, barbOrdinal + 1) mod pageCount
+```
+
+Graph identity is derived from page index and topology, not from filesystem
+enumeration. Page paths, IDs, parent indices, JSON key order, inventory order,
+and hashes are stable for the same options and source bytes. `run.json` contains
+structured evidence only; it does not add benchmark timing.
+
+The generator retains only a compact `PagePlan` array (`kind`, guide/article
+ordinals, parent index, and seed). It creates one page AST and one page byte
+buffer at a time, streams each inventory row immediately, and releases the
+page arena before continuing. `--pages` is an exact workload parameter; it is
+not part of a named workload identity. Positive `usize` page counts are accepted;
+checked planning and ordinary allocator/filesystem errors report workload limits
+honestly instead of imposing a named corpus ceiling.
+
+## Barb taxonomy
+
+Barbs mutate a valid baseline at a precise locus. Pass `--barb NAME` more than
+once to override a profile's list.
+
+| Barb | Expected behavior |
+|---|---|
+| `duplicate_id`, `self_parent`, `missing_parent`, `parent_cycle` | Boris content/graph failure |
+| `unknown_frontmatter`, `legacy_parent_key`, `malformed_frontmatter`, `duplicate_frontmatter_key` | Boris frontmatter failure |
+| `broken_wikilink`, `missing_include`, `include_cycle`, `missing_heading_fragment` | Boris dependency failure |
+| `invalid_utf8` | Boris encoding failure |
+| `unsafe_markdown_link` | Preserved literal; expected successful build |
+| `invalid_theme` | Theme/layout failure |
+| `html_missing_local_route` | Post-publish `HTML_LOCAL_ROUTE_MISSING` finding |
+| `html_missing_fragment` | Post-publish `HTML_FRAGMENT_MISSING` finding |
+| `html_duplicate_id` | Post-publish `HTML_DUPLICATE_ID` finding |
+| `html_unclosed_structure` | Post-publish `HTML_MALFORMED` finding |
+| `artifact_missing` | Deletes one canonical inventoried output artifact after baseline |
+| `artifact_digest_mismatch` | Changes one canonical artifact byte without updating `artifacts.json` |
+| `search_stale_title` | Changes one search title without regenerating search |
+| `deployment_owned_extra` | Adds an unrecorded deployment file; expected no finding |
+
+These names are not random fuzz labels: they are the stable join key between
+the fixture, `expected.json`, the canonical artifact inventory, and future result
+comparison tooling. Each assignment also records its expected finding code,
+coverage state, and clean comparison publication. Post-publish barbs are applied by `run`
+only after Boris has successfully emitted the output tree, so they do not
+masquerade as source or compiler failures.
+
+## Boris evidence
+
+`run` invokes the supplied Boris binary as a subprocess only because it is an
+evidence collector; it never uses a subprocess to generate Markdown. The
+`boris-testdata-run/5` record at `results/run.json` includes:
+
+- the requested worker upper bound as `execution.requestedJobs` (the value
+  passed to Boris via `--jobs N`; never a measured thread count);
+- expected and actual exit codes plus a pass/fail comparison;
+- the Boris binary SHA-256;
+- deterministic baseline and poisoned output-tree SHA-256 values over sorted relative paths and bytes;
+- the clean baseline artifact-inventory path, SHA-256, and `artifactCount` of committed records;
+- selected baseline artifact indexes and path/kind/byte/digest facts;
+- the ordered list of applied post-publication mutations and a canonical-inventory-unchanged assertion;
+- the non-normative full-tree poisoned output-snapshot path, hash, and file count;
+- output file count, stdout, and stderr.
+
+Version 5 records the inventory and snapshot facts once in the structured
+`baselineArtifactInventory` and `poisonedOutputSnapshot` objects; the legacy
+flat `artifactInventorySha256`/`artifactInventoryFileCount` and
+`outputSnapshotSha256`/`outputSnapshotFileCount` fields of version 4 are not
+repeated. The emitted JSON above is the exact record shape.
+
+`republish-clean` writes the `boris-testdata-republish-clean/2` record at
+`results/republish-clean.json`, including `execution.requestedJobs` alongside
+the expected/actual exit codes, pass/fail comparison, clean output-tree hash
+and file count, stdout, and stderr.

@@ -97,6 +97,42 @@ fn stripScalarQuotes(value: []const u8) []const u8 {
     return value;
 }
 
+fn isPlainSourceKey(key: []const u8) bool {
+    if (key.len == 0 or key.len > 128) return false;
+    for (key, 0..) |c, i| {
+        const valid = (c >= 'a' and c <= 'z') or
+            (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or
+            c == '_' or c == '-';
+        if (!valid or (i == 0 and c >= '0' and c <= '9')) return false;
+    }
+    return true;
+}
+
+fn parseMappedTitle(raw: []const u8) ![]const u8 {
+    const value = trim(raw);
+    if (value.len == 0) return error.EmptyTitleValue;
+    if (value[0] == '|' or value[0] == '>' or value[0] == '[' or value[0] == '{' or
+        value[0] == '&' or value[0] == '*') return error.UnsupportedTitleValue;
+    if (std.mem.indexOfScalar(u8, value, '\r') != null or std.mem.indexOfScalar(u8, value, '\n') != null) {
+        return error.UnsupportedTitleValue;
+    }
+
+    const parsed = if (value[0] == '"') blk: {
+        if (value.len < 2 or value[value.len - 1] != '"') return error.UnsupportedTitleValue;
+        const inner = value[1 .. value.len - 1];
+        if (std.mem.indexOfScalar(u8, inner, '"') != null or std.mem.indexOfScalar(u8, inner, '\\') != null or inner.len == 0) {
+            return error.UnsupportedTitleValue;
+        }
+        break :blk inner;
+    } else blk: {
+        if (value[0] == '\'' or std.mem.indexOfScalar(u8, value, '"') != null) return error.UnsupportedTitleValue;
+        break :blk value;
+    };
+    if (parsed.len > 512) return error.TitleTooLong;
+    return parsed;
+}
+
 /// Local mirror of Boris entity-id shape rules (no product import).
 /// Parent values must be plain entity ids, never paths with `..` or spaces.
 pub fn isSafeParentId(id: []const u8) bool {
@@ -237,8 +273,16 @@ const ParsedSource = struct {
     parent_norm: ParentNormalization,
 };
 
+fn lineWithoutCr(line: []const u8) []const u8 {
+    return if (line.len > 0 and line[line.len - 1] == '\r') line[0 .. line.len - 1] else line;
+}
+
 fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []const u8) !ParsedSource {
-    if (!std.mem.startsWith(u8, raw, "---\n")) {
+    // The lab must not turn encoding or fence failures into plausible pages.
+    if (!std.unicode.utf8ValidateSlice(raw)) return error.InvalidUtf8;
+    if (std.mem.startsWith(u8, raw, "\xef\xbb\xbf")) return error.UnexpectedBom;
+    const opening_len: usize = if (std.mem.startsWith(u8, raw, "---\r\n")) 5 else if (std.mem.startsWith(u8, raw, "---\n")) 4 else 0;
+    if (opening_len == 0) {
         return .{
             .title = fallback_title,
             .frontmatter = "",
@@ -247,34 +291,56 @@ fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []
             .parent_norm = .{ .status = .missing },
         };
     }
-    const end_start = std.mem.indexOfPos(u8, raw, 4, "\n---\n") orelse {
-        return .{
-            .title = fallback_title,
-            .frontmatter = raw,
-            .body = "",
-            .unmapped_fields = &.{},
-            .parent_norm = .{ .status = .missing },
-        };
-    };
-    const frontmatter = raw[4..end_start];
+    var end_start: ?usize = null;
+    var body_start: usize = raw.len;
+    var scan_pos = opening_len;
+    while (scan_pos <= raw.len) {
+        const line_end = std.mem.indexOfScalarPos(u8, raw, scan_pos, '\n') orelse raw.len;
+        if (std.mem.eql(u8, lineWithoutCr(raw[scan_pos..line_end]), "---")) {
+            end_start = scan_pos;
+            body_start = if (line_end < raw.len) line_end + 1 else raw.len;
+            break;
+        }
+        if (line_end == raw.len) break;
+        scan_pos = line_end + 1;
+    }
+    const closing_start = end_start orelse return error.UnterminatedFrontmatter;
+    const frontmatter = raw[opening_len..closing_start];
     var title: []const u8 = fallback_title;
     var unmapped: std.ArrayList([]const u8) = .empty;
+    var seen_keys: std.ArrayList([]const u8) = .empty;
+    errdefer seen_keys.deinit(allocator);
+    var pending_sequence_key: ?[]const u8 = null;
     var pos: usize = 0;
     while (pos < frontmatter.len) {
         const line_end = std.mem.indexOfScalarPos(u8, frontmatter, pos, '\n') orelse frontmatter.len;
-        const line = frontmatter[pos..line_end];
-        if (line.len > 0 and line[0] != ' ' and line[0] != '\t') {
+        const line = lineWithoutCr(frontmatter[pos..line_end]);
+        const trimmed_line = trim(line);
+        if (trimmed_line.len == 0 or trimmed_line[0] == '#') {
+            // Comments are source evidence, not fields.
+        } else if (pending_sequence_key != null and std.mem.startsWith(u8, trimmed_line, "- ")) {
+            // Do not interpret YAML sequences. The owning field is already
+            // unmapped, and every continuation remains review-only.
+            if (std.mem.eql(u8, pending_sequence_key.?, "title")) return error.UnsupportedTitleValue;
+        } else if (line.len > 0 and line[0] != ' ' and line[0] != '\t') {
+            pending_sequence_key = null;
             if (std.mem.indexOfScalar(u8, line, ':')) |colon| {
                 const key = trim(line[0..colon]);
-                var value = trim(line[colon + 1 ..]);
+                const value = trim(line[colon + 1 ..]);
+                if (!isPlainSourceKey(key)) return error.MalformedSourceKey;
+                for (seen_keys.items) |seen| if (std.mem.eql(u8, seen, key)) return error.DuplicateFrontmatterKey;
+                try seen_keys.append(allocator, key);
+                if (value.len == 0) pending_sequence_key = key;
                 // title is mapped; parent* keys are handled by normalizeParentKeys.
                 // All other keys remain visible as review/unmapped items.
                 if (std.mem.eql(u8, key, "title")) {
-                    value = stripScalarQuotes(value);
-                    if (value.len > 0) title = try allocator.dupe(u8, value);
+                    title = try allocator.dupe(u8, try parseMappedTitle(value));
+                    pending_sequence_key = null;
                 } else if (!isParentKey(key)) {
                     try unmapped.append(allocator, try allocator.dupe(u8, key));
                 }
+            } else {
+                return error.MalformedFrontmatter;
             }
         }
         pos = if (line_end == frontmatter.len) frontmatter.len else line_end + 1;
@@ -284,7 +350,7 @@ fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []
     return .{
         .title = title,
         .frontmatter = frontmatter,
-        .body = raw[end_start + "\n---\n".len ..],
+        .body = raw[body_start..],
         .unmapped_fields = try unmapped.toOwnedSlice(allocator),
         .parent_norm = parent_norm,
     };
@@ -383,7 +449,10 @@ fn appendJson(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !voi
         '\n' => try buf.appendSlice(a, "\\n"),
         '\r' => try buf.appendSlice(a, "\\r"),
         '\t' => try buf.appendSlice(a, "\\t"),
-        else => try buf.append(a, c),
+        else => if (c < 0x20) {
+            var esc: [6]u8 = undefined;
+            try buf.appendSlice(a, try std.fmt.bufPrint(&esc, "\\u{x:0>4}", .{c}));
+        } else try buf.append(a, c),
     };
     try buf.append(a, '"');
 }
@@ -405,8 +474,40 @@ fn decidedParent(r: Record) ?[]const u8 {
     };
 }
 
+/// Quote a closed-Boris frontmatter scalar when it contains YAML-significant or
+/// control characters; otherwise return it verbatim. Embedded double quotes are
+/// replaced with a single quote (Boris closed FM has no backslash escapes) and
+/// control characters are dropped, so hostile source titles cannot inject keys
+/// or emit invalid YAML downstream.
+fn escapeFmValue(a: std.mem.Allocator, value: []const u8) ![]u8 {
+    var needs_quote = false;
+    for (value) |c| {
+        if (c == ':' or c == '#' or c == '"' or c == '\'' or c == '[' or c == ']' or
+            c == ',' or c == '&' or c == '<' or c == '>' or c == '{' or c == '}' or
+            c == '\\' or c == '`' or c == '!' or c == '@' or c == '$' or c == '%' or c == '^' or
+            c == '*' or c == '(' or c == ')' or c == '=' or c == '+' or c == ';' or c == '?' or
+            c == '/' or c < 0x20 or c == 0x7f)
+        {
+            needs_quote = true;
+            break;
+        }
+    }
+    if (!needs_quote and value.len > 0 and (value[0] == ' ' or value[value.len - 1] == ' ')) needs_quote = true;
+    if (!needs_quote) return try a.dupe(u8, value);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    try out.append(a, '"');
+    for (value) |c| {
+        if (c == '"') try out.appendSlice(a, "'") else if (c >= 0x20 and c != 0x7f) try out.append(a, c);
+    }
+    try out.append(a, '"');
+    return try out.toOwnedSlice(a);
+}
+
 fn emitPage(a: std.mem.Allocator, r: Record) ![]u8 {
     const parent = decidedParent(r);
+    const title_e = try escapeFmValue(a, r.title);
+    defer a.free(title_e);
     if (parent) |p| {
         return try std.fmt.allocPrint(a,
             \\---
@@ -423,7 +524,7 @@ fn emitPage(a: std.mem.Allocator, r: Record) ![]u8 {
             \\  parent_normalization: {s}
             \\-->
             \\{s}
-        , .{ r.id, r.title, p, collectionName(r.collection), format_id, r.source_path, tool_version, statusName(r.parent_norm.status), r.body });
+        , .{ r.id, title_e, p, collectionName(r.collection), format_id, r.source_path, tool_version, statusName(r.parent_norm.status), r.body });
     }
     return try std.fmt.allocPrint(a,
         \\---
@@ -439,7 +540,7 @@ fn emitPage(a: std.mem.Allocator, r: Record) ![]u8 {
         \\  parent_normalization: {s}
         \\-->
         \\{s}
-    , .{ r.id, r.title, collectionName(r.collection), format_id, r.source_path, tool_version, statusName(r.parent_norm.status), r.body });
+    , .{ r.id, title_e, collectionName(r.collection), format_id, r.source_path, tool_version, statusName(r.parent_norm.status), r.body });
 }
 
 fn emitIndex(a: std.mem.Allocator, collection: Collection) ![]u8 {
@@ -737,6 +838,34 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 // Unit tests — pure parent normalization
 // ---------------------------------------------------------------------------
 
+test "filed: escapeFmValue quotes YAML-significant titles" {
+    const a = std.testing.allocator;
+
+    const e1 = try escapeFmValue(a, "WordPress: A Guide");
+    defer a.free(e1);
+    try std.testing.expectEqualStrings("\"WordPress: A Guide\"", e1);
+
+    const e2 = try escapeFmValue(a, "leading [ bracket");
+    defer a.free(e2);
+    try std.testing.expectEqualStrings("\"leading [ bracket\"", e2);
+
+    const e3 = try escapeFmValue(a, "embedded\"quote");
+    defer a.free(e3);
+    try std.testing.expectEqualStrings("\"embedded'quote\"", e3);
+
+    const e4 = try escapeFmValue(a, "plain");
+    defer a.free(e4);
+    try std.testing.expectEqualStrings("plain", e4);
+}
+
+test "filed: appendJson escapes control characters and quotes" {
+    const a = std.testing.allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(a);
+    try appendJson(&buf, a, "a\"b\\c\x01");
+    try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\u0001\"", buf.items);
+}
+
 test "parent normalize: parentEntry only" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -747,6 +876,47 @@ test "parent normalize: parentEntry only" {
     try std.testing.expectEqual(@as(usize, 1), n.original_keys.len);
     try std.testing.expectEqualStrings("parentEntry", n.original_keys[0].key);
     try std.testing.expectEqual(@as(usize, 3), n.original_keys[0].line);
+}
+
+test "parse source: accepts CRLF and preserves body bytes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parsed = try parseSource(arena.allocator(), "---\r\ntitle: CRLF\r\n---\r\nbody\r\n", "fallback");
+    try std.testing.expectEqualStrings("CRLF", parsed.title);
+    try std.testing.expectEqualStrings("body\r\n", parsed.body);
+}
+
+test "parse source: accepts comments and inventories indentationless sequences" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parsed = try parseSource(arena.allocator(), "---\n# retained migration note\ntitle: Filing Report\ntags:\n- one\n- two\nassetMeta:\n  width: 800\n---\nbody\n", "fallback");
+    try std.testing.expectEqualStrings("Filing Report", parsed.title);
+    try std.testing.expectEqual(@as(usize, 2), parsed.unmapped_fields.len);
+    try std.testing.expectEqualStrings("tags", parsed.unmapped_fields[0]);
+    try std.testing.expectEqualStrings("assetMeta", parsed.unmapped_fields[1]);
+}
+
+test "parse source: rejects malformed keys and unsafe mapped titles" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectError(error.MalformedSourceKey, parseSource(a, "---\n- broken: value\n---\n", "fallback"));
+    try std.testing.expectError(error.UnsupportedTitleValue, parseSource(a, "---\ntitle: |\n  many\n---\n", "fallback"));
+    var long_title: [513]u8 = undefined;
+    @memset(&long_title, 'a');
+    const source = try std.fmt.allocPrint(a, "---\ntitle: {s}\n---\n", .{long_title[0..]});
+    try std.testing.expectError(error.TitleTooLong, parseSource(a, source, "fallback"));
+}
+
+test "parse source: rejects encoding and fence failures" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectError(error.InvalidUtf8, parseSource(a, &[_]u8{ 0xff, 0xfe }, "fallback"));
+    try std.testing.expectError(error.UnexpectedBom, parseSource(a, "\xef\xbb\xbf---\n---\n", "fallback"));
+    try std.testing.expectError(error.UnterminatedFrontmatter, parseSource(a, "---\ntitle: Missing close\n", "fallback"));
+    try std.testing.expectError(error.MalformedFrontmatter, parseSource(a, "---\ntitle Missing colon\n---\n", "fallback"));
+    try std.testing.expectError(error.DuplicateFrontmatterKey, parseSource(a, "---\ntitle: One\ntitle: Two\n---\n", "fallback"));
 }
 
 test "parent normalize: parent_entry only" {

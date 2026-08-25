@@ -2,31 +2,27 @@
 //!
 //! Scans a content tree (Markdown / MDX files with a Boris-style
 //! `--- … ---` fence) and collects every frontmatter key that is NOT in
-//! the Boris closed grammar {id, title, parent, status, tags}.  Each
-//! occurrence is classified by source file so that a migration author can
-//! decide how to dispose of the data (map to tags, move to body, drop).
+//! Boris's eight-key closed grammar. Each occurrence receives a deterministic
+//! migration disposition and the report reconciles occurrences with affected
+//! files.
 //!
 //! Outputs (written to --out-dir):
 //!   frontmatter_review.json   machine-readable, schema_version 1
 //!   FRONTMATTER_REVIEW.md     deterministic human-readable summary
 //!
-//! Boris core (src/frontmatter.zig) is intentionally NOT imported here.
+//! Boris core (src/parser.zig) is intentionally NOT imported here.
 //! No source file is ever modified.
 
 const std = @import("std");
 const Io = std.Io;
+const semantics = @import("migration_semantics.zig");
 
 pub const format_id = "boris-frontmatter-review-lab";
-pub const schema_version: u32 = 1;
+pub const schema_version: u32 = 2;
 pub const tool_version = "0.1.0";
 
-/// Keys in the Boris closed grammar.  Anything else is unknown / unsupported.
-const boris_keys = [_][]const u8{ "id", "title", "parent", "status", "tags" };
-
-fn isBorisKey(key: []const u8) bool {
-    for (boris_keys) |k| if (std.mem.eql(u8, key, k)) return true;
-    return false;
-}
+/// Canonical Boris key vocabulary is shared with the other migration scanners.
+pub const boris_frontmatter_keys = semantics.boris_frontmatter_keys;
 
 fn trim(s: []const u8) []const u8 {
     return std.mem.trim(u8, s, " \t\r");
@@ -48,7 +44,7 @@ fn escapeMdCell(a: std.mem.Allocator, s: []const u8) ![]u8 {
     return buf.toOwnedSlice(a);
 }
 
-/// One unknown-key occurrence inside a single source file.
+/// One foreign-key occurrence inside a single source file.
 pub const KeyOccurrence = struct {
     /// Exact key bytes as found in source (no normalisation).
     key: []const u8,
@@ -56,13 +52,21 @@ pub const KeyOccurrence = struct {
     line: usize,
     /// Raw value bytes (trimmed, quotes kept).  May be empty.
     value: []const u8,
+    disposition: semantics.FieldDisposition = .manual_review,
+};
+
+pub const FieldSummary = struct {
+    key: []const u8,
+    disposition: semantics.FieldDisposition,
+    occurrence_count: usize,
+    affected_file_count: usize,
 };
 
 /// Per-file review record.
 pub const FileReview = struct {
     /// Repo-root-relative path of the source file.
     source_path: []const u8,
-    /// Unknown keys found in this file.
+    /// Foreign keys found in this file.
     unknown_keys: []const KeyOccurrence,
     /// True when the frontmatter fence was not properly closed.
     incompatible_fence: bool,
@@ -74,10 +78,11 @@ pub const ScanResult = struct {
     /// One entry per file that had at least one unknown key OR an
     /// incompatible fence.  Files with no frontmatter at all are omitted.
     files: []const FileReview,
-    /// Total count of distinct unknown key *names* across all files.
+    /// Total count of distinct foreign key *names* across all files.
     total_unknown_keys: usize,
     /// Total count of individual key occurrences.
     total_occurrences: usize,
+    field_summaries: []const FieldSummary = &.{},
 };
 
 // ---------------------------------------------------------------------------
@@ -131,11 +136,12 @@ pub fn scanFile(a: std.mem.Allocator, source: []const u8) !struct { occurrences:
             if (std.mem.indexOfScalar(u8, raw, ':')) |colon| {
                 const key = trim(raw[0..colon]);
                 const val = trim(raw[colon + 1 ..]);
-                if (key.len > 0 and !isBorisKey(key)) {
+                if (key.len > 0 and !semantics.isBorisKey(key)) {
                     try list.append(a, .{
                         .key = try a.dupe(u8, key),
                         .line = line_no,
                         .value = try a.dupe(u8, val),
+                        .disposition = semantics.dispositionForKey(key),
                     });
                 }
             }
@@ -151,8 +157,8 @@ pub fn scanFile(a: std.mem.Allocator, source: []const u8) !struct { occurrences:
 // ---------------------------------------------------------------------------
 
 const skip_dir_names = [_][]const u8{
-    ".git", ".hg", "node_modules", "dist", "zig-out", "zig-cache",
-    ".zig-cache", ".boris", ".output", ".vercel", ".netlify",
+    ".git",       ".hg",    "node_modules", "dist",    "zig-out",  "zig-cache",
+    ".zig-cache", ".boris", ".output",      ".vercel", ".netlify",
 };
 
 fn shouldSkipDir(name: []const u8) bool {
@@ -227,7 +233,9 @@ pub fn emitJson(a: std.mem.Allocator, result: ScanResult) ![]u8 {
     errdefer buf.deinit(a);
     try buf.appendSlice(a, "{\n  \"format\": ");
     try appendJson(&buf, a, format_id);
-    try buf.appendSlice(a, ",\n  \"schema_version\": 1,\n  \"tool_version\": ");
+    try buf.appendSlice(a, ",\n  \"schema_version\": ");
+    try appendUsize(&buf, a, schema_version);
+    try buf.appendSlice(a, ",\n  \"tool_version\": ");
     try appendJson(&buf, a, tool_version);
     try buf.appendSlice(a, ",\n  \"source_root\": ");
     try appendJson(&buf, a, result.source_root);
@@ -235,7 +243,21 @@ pub fn emitJson(a: std.mem.Allocator, result: ScanResult) ![]u8 {
     try appendUsize(&buf, a, result.total_unknown_keys);
     try buf.appendSlice(a, ",\n  \"total_occurrences\": ");
     try appendUsize(&buf, a, result.total_occurrences);
-    try buf.appendSlice(a, ",\n  \"files\": [\n");
+    try buf.appendSlice(a, ",\n  \"field_summaries\": [\n");
+    for (result.field_summaries, 0..) |summary, si| {
+        try buf.appendSlice(a, "    {\"key\": ");
+        try appendJson(&buf, a, summary.key);
+        try buf.appendSlice(a, ", \"disposition\": ");
+        try appendJson(&buf, a, summary.disposition.name());
+        try buf.appendSlice(a, ", \"occurrence_count\": ");
+        try appendUsize(&buf, a, summary.occurrence_count);
+        try buf.appendSlice(a, ", \"affected_file_count\": ");
+        try appendUsize(&buf, a, summary.affected_file_count);
+        try buf.appendSlice(a, "}");
+        if (si + 1 < result.field_summaries.len) try buf.append(a, ',');
+        try buf.append(a, '\n');
+    }
+    try buf.appendSlice(a, "  ],\n  \"files\": [\n");
     for (result.files, 0..) |file, fi| {
         try buf.appendSlice(a, "    {\n      \"source_path\": ");
         try appendJson(&buf, a, file.source_path);
@@ -250,6 +272,8 @@ pub fn emitJson(a: std.mem.Allocator, result: ScanResult) ![]u8 {
             try appendUsize(&buf, a, occ.line);
             try buf.appendSlice(a, ", \"value\": ");
             try appendJson(&buf, a, occ.value);
+            try buf.appendSlice(a, ", \"disposition\": ");
+            try appendJson(&buf, a, occ.disposition.name());
             try buf.appendSlice(a, " }");
         }
         try buf.appendSlice(a, "]\n    }");
@@ -279,7 +303,12 @@ pub fn emitMd(a: std.mem.Allocator, result: ScanResult) ![]u8 {
     try appendUsize(&buf, a, result.total_occurrences);
     try buf.appendSlice(a, "  \n**Files with unsupported keys:** ");
     try appendUsize(&buf, a, result.files.len);
-    try buf.appendSlice(a, "\n\n---\n\n## Per-file classification\n\n");
+    try buf.appendSlice(a, "\n\n---\n\n## Field dispositions\n\n");
+    try buf.appendSlice(a, "| Key | Disposition | Occurrences | Affected files |\n|---|---|---:|---:|\n");
+    for (result.field_summaries) |summary| {
+        try buf.print(a, "| `{s}` | `{s}` | {d} | {d} |\n", .{ summary.key, summary.disposition.name(), summary.occurrence_count, summary.affected_file_count });
+    }
+    try buf.appendSlice(a, "\n---\n\n## Per-file classification\n\n");
     if (result.files.len == 0) {
         try buf.appendSlice(a, "None — all files use only supported Boris frontmatter keys.\n");
     } else {
@@ -333,6 +362,50 @@ pub const RunOptions = struct {
     quiet: bool = false,
 };
 
+fn buildFieldSummaries(a: std.mem.Allocator, files: []const FileReview) ![]const FieldSummary {
+    var summaries: std.ArrayList(FieldSummary) = .empty;
+    for (files) |file| {
+        for (file.unknown_keys, 0..) |occ, occurrence_index| {
+            var found: ?*FieldSummary = null;
+            for (summaries.items) |*summary| {
+                if (summary.disposition == occ.disposition and std.mem.eql(u8, summary.key, occ.key)) {
+                    found = summary;
+                    break;
+                }
+            }
+            if (found) |summary| {
+                summary.occurrence_count += 1;
+                var seen_in_file = false;
+                // FileReview contains each source occurrence in source order;
+                // count a file once per field/disposition bucket.
+                for (file.unknown_keys, 0..) |prior, prior_index| {
+                    if (prior_index >= occurrence_index) break;
+                    if (prior.disposition == occ.disposition and std.mem.eql(u8, prior.key, occ.key)) {
+                        seen_in_file = true;
+                        break;
+                    }
+                }
+                if (!seen_in_file) summary.affected_file_count += 1;
+            } else {
+                try summaries.append(a, .{
+                    .key = occ.key,
+                    .disposition = occ.disposition,
+                    .occurrence_count = 1,
+                    .affected_file_count = 1,
+                });
+            }
+        }
+    }
+    std.mem.sort(FieldSummary, summaries.items, {}, struct {
+        fn less(_: void, x: FieldSummary, y: FieldSummary) bool {
+            const key_order = std.mem.order(u8, x.key, y.key);
+            if (key_order != .eq) return key_order == .lt;
+            return std.mem.order(u8, x.disposition.name(), y.disposition.name()) == .lt;
+        }
+    }.less);
+    return summaries.toOwnedSlice(a);
+}
+
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     // Guard against writing into the source tree.
     if (std.mem.eql(u8, opts.source_root, opts.out_dir) or
@@ -373,7 +446,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         total_occurrences += scanned.occurrences.len;
         for (scanned.occurrences) |occ| {
             var found = false;
-            for (all_key_names.items) |k| if (std.mem.eql(u8, k, occ.key)) { found = true; break; };
+            for (all_key_names.items) |k| if (std.mem.eql(u8, k, occ.key)) {
+                found = true;
+                break;
+            };
             if (!found) try all_key_names.append(a, occ.key);
         }
         try reviews.append(a, .{
@@ -388,6 +464,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         .files = reviews.items,
         .total_unknown_keys = all_key_names.items.len,
         .total_occurrences = total_occurrences,
+        .field_summaries = try buildFieldSummaries(a, reviews.items),
     };
 
     try Io.Dir.cwd().createDirPath(io, opts.out_dir);
@@ -421,6 +498,9 @@ test "scanFile: all Boris keys are not flagged" {
         \\parent: guides
         \\status: draft
         \\tags: a, b
+        \\relations: [relates_to:guide]
+        \\published_at: 2026-07-30T00:00:00Z
+        \\summary: A summary
         \\---
         \\Body text.
     ;
@@ -452,6 +532,25 @@ test "scanFile: unknown keys are captured with line numbers" {
     try std.testing.expectEqualStrings("slug", r.occurrences[1].key);
     try std.testing.expectEqualStrings("updatedAt", r.occurrences[2].key);
     try std.testing.expectEqualStrings("2026-07-01", r.occurrences[2].value);
+    try std.testing.expect(r.occurrences[0].disposition == .identity_source);
+    try std.testing.expect(r.occurrences[2].disposition == .sidecar_only);
+}
+
+test "field summaries reconcile occurrences and affected files" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const first = try scanFile(a, "---\ncaseNumber: A\nupdatedAt: one\n---\n");
+    const second = try scanFile(a, "---\ncaseNumber: B\ncaseNumber: C\n---\n");
+    const summaries = try buildFieldSummaries(a, &.{
+        .{ .source_path = "a.md", .unknown_keys = first.occurrences, .incompatible_fence = false },
+        .{ .source_path = "b.md", .unknown_keys = second.occurrences, .incompatible_fence = false },
+    });
+    try std.testing.expectEqual(@as(usize, 2), summaries.len);
+    try std.testing.expectEqualStrings("caseNumber", summaries[0].key);
+    try std.testing.expectEqual(@as(usize, 3), summaries[0].occurrence_count);
+    try std.testing.expectEqual(@as(usize, 2), summaries[0].affected_file_count);
+    try std.testing.expectEqualStrings("updatedAt", summaries[1].key);
 }
 
 test "scanFile: no frontmatter returns empty" {
@@ -539,7 +638,7 @@ test "emitJson: unknown_keys array present and ordered" {
     };
     const json = try emitJson(a, result);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"format\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema_version\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"schema_version\": 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"caseNumber\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"slug\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"incompatible_fence\": false") != null);
@@ -573,6 +672,11 @@ test "emitMd: section headers and table present" {
     try std.testing.expect(std.mem.indexOf(u8, md, "pages/beta.md") != null);
     try std.testing.expect(std.mem.indexOf(u8, md, "mascotId") != null);
     try std.testing.expect(std.mem.indexOf(u8, md, "| Line |") != null);
+    const field_header = std.mem.indexOf(u8, md, "## Field dispositions").?;
+    const file_header = std.mem.indexOf(u8, md, "## Per-file classification").?;
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, md, "## Field dispositions"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, md, "## Per-file classification"));
+    try std.testing.expect(field_header < file_header);
 }
 
 test "emitMd: pipe in value is escaped in table cell" {

@@ -1,0 +1,3 @@
+### Fixed
+
+- The Proof Pack `index.html` print rules now target the `details::details-content` pseudo-element with `content-visibility: visible !important` and `display: block !important`, making closed-state HTML print reliably across browser engines that hide the disclosure content container through the UA `content-visibility` default. The existing `details > :not(summary)` rule is retained; the new rule ensures every `<details>` interior renders on paper without JavaScript or DOM modification, per the [publication proof pack contract](/docs/contracts/publication-proof-pack.md).

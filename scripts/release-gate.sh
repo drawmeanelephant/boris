@@ -3,7 +3,7 @@
 # See docs/RELEASE-GATE.md.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 GATE_DIR=".release-gate"
@@ -12,6 +12,7 @@ VALID_EXPECTED="docs/contracts/fixtures/valid/expected"
 IR_OUT="${GATE_DIR}/ir-valid"
 RAG_A="${GATE_DIR}/rag-a"
 RAG_B="${GATE_DIR}/rag-b"
+RAG_COMPLETE="${GATE_DIR}/rag-complete"
 FAIL=0
 
 note() { printf '==> %s\n' "$*"; }
@@ -79,6 +80,22 @@ note "2. zig build test"
 zig build test
 pass "test suite succeeded"
 
+# --- 2a. CLI process contract ---------------------------------------------
+note "2a. CLI process contract"
+if test/cli-contract.sh "${BORIS}"; then
+  pass "CLI process contract succeeded"
+else
+  fail "CLI process contract failed"
+fi
+
+# --- 2b. Authoritative no-publication validation --------------------------
+note "2b. authoritative no-publication validation"
+if test/validate-contract.sh "${BORIS}"; then
+  pass "validation contract succeeded"
+else
+  fail "validation contract failed"
+fi
+
 # --- 3. RAG dual export determinism --------------------------------------
 note "3. RAG generation twice + byte-for-byte comparison"
 rm -rf "${RAG_A}" "${RAG_B}"
@@ -103,14 +120,45 @@ else
 fi
 
 # --- 6. catalog_meta.json + catalog.jsonl schema -------------------------
-note "6. catalog_meta.json and catalog.jsonl schema checks"
-META="${RAG_A}/catalog_meta.json"
-JSONL="${RAG_A}/catalog.jsonl"
-if [[ ! -f "${META}" ]]; then
-  fail "missing catalog_meta.json"
+note "6. catalog_meta.json, catalog.jsonl, and working-pack checks"
+# Working mode: bounded upload files + manifest sidecar only — no
+# catalog_meta.json, no system seeds, no hashes in pack envelopes.
+if compgen -G "${RAG_A}/working-*.md" >/dev/null; then
+  pass "working pack files present"
 else
-  # Fixed compact shape (schema v1)
-  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":1,\"boris_version\":\"${PRODUCT_VERSION}\"}"
+  fail "missing working-*.md packs"
+fi
+if [[ -f "${RAG_A}/manifest.json" ]] && grep -q '"mode":"working"' "${RAG_A}/manifest.json" && grep -q '"sidecar_files"' "${RAG_A}/manifest.json"; then
+  pass "manifest.json sidecar present with mode + sidecar_files"
+else
+  fail "manifest.json sidecar missing or malformed"
+fi
+if [[ -f "${RAG_A}/catalog_meta.json" ]]; then
+  fail "working mode must not emit catalog_meta.json (manifest.json records format/schema/version)"
+else
+  pass "working mode emits no catalog_meta.json"
+fi
+if [[ -d "${RAG_A}/system" ]] || compgen -G "${RAG_A}/system/**" >/dev/null 2>&1; then
+  fail "working mode must not seed system/** documents"
+else
+  pass "working mode contains no system seeds"
+fi
+# Document bodies are verbatim and may legitimately discuss hashes in prose;
+# the contract violation would be an integrity record inside an envelope.
+if grep -rE 'boris-rag-doc:.*(sha256|hash|bytes)' "${RAG_A}"/working-*.md; then
+  fail "working pack envelopes must not carry integrity fields (sidecar only)"
+else
+  pass "working pack envelopes carry no per-document integrity fields"
+fi
+# Complete-corpus tree carries catalog.jsonl + catalog_meta.json.
+rm -rf "${RAG_COMPLETE}"
+"${BORIS}" --rag --complete --rag-dir="${RAG_COMPLETE}" --input="${RAG_INPUT}" --quiet
+META="${RAG_COMPLETE}/catalog_meta.json"
+if [[ ! -f "${META}" ]]; then
+  fail "missing catalog_meta.json (complete corpus)"
+else
+  # Fixed compact shape (schema v2)
+  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":2,\"boris_version\":\"${PRODUCT_VERSION}\"}"
   GOT_META="$(tr -d '\n' < "${META}" | sed 's/[[:space:]]//g')"
   # Allow trailing newline already stripped; tolerate pretty vs compact by
   # requiring keys and values rather than exact whitespace.
@@ -124,8 +172,19 @@ else
     pass "catalog_meta.json exact compact form"
   fi
 fi
+# Complete mode rejects --scope: complete means the entire validated corpus.
+set +e
+COMPLETE_SCOPE_ERR="$("${BORIS}" --rag --complete --scope=home --rag-dir="${GATE_DIR}/rag-complete-scope" --input="${RAG_INPUT}" 2>&1)"
+COMPLETE_SCOPE_EC=$?
+set -e
+if [[ "${COMPLETE_SCOPE_EC}" -eq 2 ]] && [[ ! -d "${GATE_DIR}/rag-complete-scope" ]]; then
+  pass "--complete with --scope is a usage error (exit 2, no export)"
+else
+  fail "--complete with --scope expected exit 2 with no export (got ${COMPLETE_SCOPE_EC})"
+fi
+JSONL="${RAG_COMPLETE}/catalog.jsonl"
 if [[ ! -f "${JSONL}" ]]; then
-  fail "missing catalog.jsonl"
+  fail "missing catalog.jsonl (complete corpus)"
 else
   # First object keys must start with pinned order
   FIRST="$(head -1 "${JSONL}")"
@@ -167,7 +226,7 @@ fi
 note "4. Valid fixture produces expected IR artifacts"
 rm -rf "${IR_OUT}"
 "${BORIS}" --input="${VALID_CONTENT}" --out="${IR_OUT}" --quiet
-for f in manifest.json graph.json build-report.json; do
+for f in manifest.json graph.json completion.json build-report.json; do
   [[ -f "${IR_OUT}/${f}" ]] || fail "missing ${f}"
 done
 if diff -u "${VALID_EXPECTED}/manifest.json" "${IR_OUT}/manifest.json"; then
@@ -179,6 +238,11 @@ if diff -u "${VALID_EXPECTED}/graph.json" "${IR_OUT}/graph.json"; then
   pass "graph.json matches golden"
 else
   fail "graph.json golden mismatch"
+fi
+if diff -u "${VALID_EXPECTED}/completion.json" "${IR_OUT}/completion.json"; then
+  pass "completion.json matches golden"
+else
+  fail "completion.json golden mismatch"
 fi
 if diff -u "${VALID_EXPECTED}/build-report.json" "${IR_OUT}/build-report.json"; then
   pass "build-report.json matches golden"
@@ -253,7 +317,7 @@ if [[ -f "${CONTEXT_A}/bundle.md" && -f "${CONTEXT_A}/graph.json" \
   && grep -q '"format": "boris-context"' "${CONTEXT_A}/manifest.json" \
   && grep -q 'source_sha256' "${CONTEXT_A}/pages/guides/cache-v2.md" \
   && grep -q '^````markdown$' "${CONTEXT_A}/pages/guides/cache-v2.md" \
-  && grep -q '"relation_count": 4' "${CONTEXT_A}/manifest.json"; then
+  && grep -q '"relation_count": 5' "${CONTEXT_A}/manifest.json"; then
   pass "context bundle has manifest, graph, page provenance, and relation count"
 else
   fail "context bundle provenance artifacts missing"
@@ -303,8 +367,8 @@ else
 fi
 # IR remains opt-in via --out (already exercised above)
 pass "IR: explicit --out path remains contract surface"
-# RAG artifacts already produced in step 3
-pass "RAG: catalog_meta + catalog.jsonl present from step 3"
+# RAG artifacts already produced in steps 3/6
+pass "RAG: working packs + manifest sidecar (step 3) and complete-corpus catalog (step 6)"
 
 # --- 4c. Feature 9 heading-fragment wiki (HTML) --------------------------
 note "4c. Feature 9 heading-fragment wiki links (HTML)"
@@ -400,11 +464,11 @@ if "${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
   --layout-rule default role:trunk "${LR_THEME}/layouts/section.html" \
   --html-dir="${LR_OUT_INC}" --incremental --quiet; then
   if [[ -f "${LR_OUT_INC}/.boris-cache/manifest.json" ]] \
-    && grep -q 'boris-cache-v2-layout-rules' "${LR_OUT_INC}/.boris-cache/manifest.json" \
+    && grep -q 'boris-cache-v3-nav-digest' "${LR_OUT_INC}/.boris-cache/manifest.json" \
     && grep -q 'selected_layout' "${LR_OUT_INC}/.boris-cache/manifest.json"; then
-    pass "layout-rules: incremental cache v2 + selected_layout"
+    pass "layout-rules: incremental cache v3 + selected_layout"
   else
-    fail "layout-rules: cache manifest missing v2/selected_layout"
+    fail "layout-rules: cache manifest missing v3 discriminator or selected_layout"
   fi
 else
   fail "layout-rules: incremental compile failed"
@@ -514,10 +578,34 @@ set +e
 "${BORIS}" check --input="${DI_CONTENT}" --format=json --report="${DI_CHECK_JSON}" --quiet
 DI_CHECK_EC=$?
 set -e
-if [[ "${DI_CHECK_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.json" "${DI_CHECK_JSON}" >/dev/null; then
-  pass "check JSON golden + CI finding exit 1"
+if [[ "${DI_CHECK_EC}" -eq 0 ]] && diff -u "${DI_EXPECTED}/check.json" "${DI_CHECK_JSON}" >/dev/null; then
+  pass "check JSON golden + informational finding exit 0"
 else
   fail "check JSON golden or exit code mismatch (got ${DI_CHECK_EC})"
+fi
+DI_STRICT_CHECK_JSON="${DI_PROBE}/di-check-strict.json"
+set +e
+"${BORIS}" check --input="${DI_CONTENT}" --format=json --report="${DI_STRICT_CHECK_JSON}" --fail-on-unreferenced --quiet
+DI_STRICT_CHECK_JSON_EC=$?
+set -e
+if [[ "${DI_STRICT_CHECK_JSON_EC}" -eq 1 ]] && diff -u "${DI_CHECK_JSON}" "${DI_STRICT_CHECK_JSON}" >/dev/null; then
+  pass "check JSON strict unreferenced policy returns exit 1 with identical report"
+else
+  fail "check JSON strict unreferenced policy mismatch (got ${DI_STRICT_CHECK_JSON_EC})"
+fi
+
+# Explicit command spellings are part of the public CLI contract.  Keep the
+# watch smoke non-blocking by exercising its help route; a live watch session
+# is covered by the dedicated watch-mode contract and tests.
+CLI_CONTRACT_IR="${DI_PROBE}/explicit-build-ir"
+if "${BORIS}" build --input="${DI_CONTENT}" --out="${CLI_CONTRACT_IR}" --quiet \
+  && [[ -f "${CLI_CONTRACT_IR}/manifest.json" ]] \
+  && [[ -f "${CLI_CONTRACT_IR}/graph.json" ]] \
+  && [[ -f "${CLI_CONTRACT_IR}/build-report.json" ]] \
+  && "${BORIS}" watch --help >/dev/null 2>&1; then
+  pass "explicit build/watch command routing"
+else
+  fail "explicit build/watch command routing"
 fi
 if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=json --report="${DI_IMPACT_JSON}" --quiet \
   && diff -u "${DI_EXPECTED}/impact.json" "${DI_IMPACT_JSON}" >/dev/null; then
@@ -529,10 +617,20 @@ set +e
 "${BORIS}" check --input="${DI_CONTENT}" --format=human --report="${DI_CHECK_HUMAN}" --quiet
 DI_HUMAN_EC=$?
 set -e
-if [[ "${DI_HUMAN_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.txt" "${DI_CHECK_HUMAN}" >/dev/null; then
+if [[ "${DI_HUMAN_EC}" -eq 0 ]] && diff -u "${DI_EXPECTED}/check.txt" "${DI_CHECK_HUMAN}" >/dev/null; then
   pass "check human golden"
 else
   fail "check human golden or exit code mismatch (got ${DI_HUMAN_EC})"
+fi
+DI_STRICT_CHECK_HUMAN="${DI_PROBE}/di-check-strict.txt"
+set +e
+"${BORIS}" check --input="${DI_CONTENT}" --format=human --report="${DI_STRICT_CHECK_HUMAN}" --fail-on-unreferenced --quiet
+DI_STRICT_HUMAN_EC=$?
+set -e
+if [[ "${DI_STRICT_HUMAN_EC}" -eq 1 ]] && diff -u "${DI_CHECK_HUMAN}" "${DI_STRICT_CHECK_HUMAN}" >/dev/null; then
+  pass "check strict unreferenced policy returns exit 1 with identical report"
+else
+  fail "check strict unreferenced policy mismatch (got ${DI_STRICT_HUMAN_EC})"
 fi
 if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=human --report="${DI_IMPACT_HUMAN}" --quiet \
   && diff -u "${DI_EXPECTED}/impact.txt" "${DI_IMPACT_HUMAN}" >/dev/null; then
@@ -599,10 +697,20 @@ set +e
 "${BORIS}" check --input="docs/contracts/fixtures/documentation-intelligence/edge-cases/single/content" --format=json --report="${DI_SINGLE_REPORT}" --quiet
 DI_SINGLE_EC=$?
 set -e
-if [[ "${DI_SINGLE_EC}" -eq 1 && -f "${DI_SINGLE_REPORT}" ]] && grep -q '"pages": 1' "${DI_SINGLE_REPORT}"; then
-  pass "single-page analysis tree reports its page and CI finding"
+if [[ "${DI_SINGLE_EC}" -eq 0 && -f "${DI_SINGLE_REPORT}" ]] && grep -q '"pages": 1' "${DI_SINGLE_REPORT}"; then
+  pass "single-page analysis tree reports its page without failing by default"
 else
   fail "single-page analysis tree behavior mismatch (got ${DI_SINGLE_EC})"
+fi
+DI_SINGLE_STRICT_REPORT="${DI_PROBE}/single-strict.json"
+set +e
+"${BORIS}" check --input="docs/contracts/fixtures/documentation-intelligence/edge-cases/single/content" --format=json --report="${DI_SINGLE_STRICT_REPORT}" --fail-on-unreferenced --quiet
+DI_SINGLE_STRICT_EC=$?
+set -e
+if [[ "${DI_SINGLE_STRICT_EC}" -eq 1 ]] && diff -u "${DI_SINGLE_REPORT}" "${DI_SINGLE_STRICT_REPORT}" >/dev/null; then
+  pass "single-page strict policy returns exit 1 with identical report"
+else
+  fail "single-page strict policy mismatch (got ${DI_SINGLE_STRICT_EC})"
 fi
 if [[ ! -d "${GATE_DIR}/di-probe/dist" && ! -d "${GATE_DIR}/di-probe/rag" && ! -d "${GATE_DIR}/di-probe/.boris-cache" ]]; then
   pass "analysis produced no HTML, RAG, or cache artifacts"
@@ -637,12 +745,12 @@ fi
 if grep -q '<strong>strong</strong>' "${TEXTILE_HTML_A}/index.html" \
   && grep -q '<ins>inserted</ins>' "${TEXTILE_HTML_A}/index.html" \
   && grep -q '<ol>' "${TEXTILE_HTML_A}/index.html"; then
-  pass "Textile subset reaches the existing Apex HTML renderer"
+  pass "Textile subset reaches the existing Oliver HTML renderer"
 else
   fail "Textile HTML is missing contracted rendered forms"
 fi
 
-"${BORIS}" --textile --rag --input="${TEXTILE_ROOT}/content" --rag-dir="${TEXTILE_RAG}" --quiet
+"${BORIS}" --textile --rag --complete --input="${TEXTILE_ROOT}/content" --rag-dir="${TEXTILE_RAG}" --quiet
 if grep -q '^# Textile Tribute' "${TEXTILE_RAG}/content/pages/index.md" \
   && ! grep -q '^h1\. Textile Tribute' "${TEXTILE_RAG}/content/pages/index.md"; then
   pass "Textile RAG page contains adapted Markdown rather than raw Textile"
@@ -671,8 +779,8 @@ else
   fail "mixed input family did not fail closed in both modes"
 fi
 
-# --- 5. Invalid fixtures: exit codes + diagnostic codes ------------------
-note "5. Invalid fixtures produce expected exit codes and diagnostic codes"
+# --- 5. Graph fixtures: valid freeze + invalid diagnostics ----------------
+note "5. Graph fixtures produce expected valid freezes and invalid diagnostics"
 run_bad() {
   local name="$1"
   local code="$2"
@@ -701,11 +809,24 @@ run_bad() {
   fi
 }
 
+run_good() {
+  local name="$1"
+  local path="docs/contracts/fixtures/${name}/content"
+  local out="${GATE_DIR}/ir-${name}"
+  rm -rf "${out}"
+  if "${BORIS}" --input="${path}" --out="${out}" --quiet \
+    && grep -q '"frozen": true' "${out}/graph.json"; then
+    pass "${name}: valid graph fixture freezes successfully"
+  else
+    fail "${name}: expected valid graph fixture to freeze"
+  fi
+}
+
 run_bad missing-parent EPARENTMISSING
 run_bad self-parent EPARENTSELF
 run_bad cycles EPARENTCYCLE
 run_bad longer-cycle EPARENTCYCLE
-run_bad satellite-of-satellite EPARENTNOTTRUNK
+run_good satellite-of-satellite
 run_bad duplicate-ids EDUPLICATEID
 run_bad malformed-frontmatter EFRONTMATTER
 run_bad duplicate-key EFRONTMATTER
@@ -731,6 +852,9 @@ else
   is_generated_path() {
     case "$1" in
       dist|dist/*|packages|packages/*|rag|rag/*|rag1|rag1/*|rag2|rag2/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*) return 0 ;;
+      # Nested build output from standalone tools (tools/<name>/zig-out/...).
+      # Without these the root-anchored patterns above miss a tool's binaries.
+      */zig-out|*/zig-out/*|*/.zig-cache|*/.zig-cache/*) return 0 ;;
       *) return 1 ;;
     esac
   }
@@ -738,6 +862,9 @@ else
     # Approved to exist as local/untracked (and normally gitignored).
     case "$1" in
       dist|dist/*|packages|packages/*|rag|rag/*|rag1|rag1/*|rag2|rag2/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*) return 0 ;;
+      # Nested build output from standalone tools (tools/<name>/zig-out/...).
+      # Without these the root-anchored patterns above miss a tool's binaries.
+      */zig-out|*/zig-out/*|*/.zig-cache|*/.zig-cache/*) return 0 ;;
       *) return 1 ;;
     esac
   }

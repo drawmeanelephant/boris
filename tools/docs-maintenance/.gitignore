@@ -1,0 +1,8 @@
+# Standalone Zig tool build output and local report scratch.
+.zig-cache/
+zig-cache/
+zig-out/
+
+# Editor and atomic-report temporary noise.
+.DS_Store
+*.tmp

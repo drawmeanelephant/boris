@@ -8,8 +8,13 @@ const Io = std.Io;
 const cache = @import("cache.zig");
 const graph_mod = @import("graph.zig");
 const json_out = @import("json_out.zig");
+const encode = @import("encode.zig");
 const pipeline = @import("pipeline.zig");
 const identity = @import("identity.zig");
+const export_scope = @import("export_scope.zig");
+const target_mod = @import("target.zig");
+const source_io = @import("source_io.zig");
+const timings = @import("timings.zig");
 
 pub const format = "boris-context";
 pub const schema_version: u32 = 1;
@@ -19,11 +24,20 @@ pub const ContextOptions = struct {
     out_dir: []const u8 = "context",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    scope: ?[]const u8 = null,
+    split_size: ?usize = null,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
 };
 
 pub const ContextResult = struct {
     compile: pipeline.Result,
     published: bool = false,
+    selected_pages: usize = 0,
+    graph_pages: usize = 0,
+    relation_count: usize = 0,
+    part_count: usize = 0,
+    chunk_count: usize = 0,
 
     pub fn deinit(self: *ContextResult) void {
         self.compile.deinit();
@@ -39,6 +53,25 @@ const PageArtifact = struct {
     source_hash: [64]u8,
     page_hash: [64]u8,
     page_doc: []const u8,
+};
+
+const ContextChunk = struct {
+    page: graph_mod.Node,
+    doc: []const u8,
+    number: usize,
+    count: usize,
+    source_sha256: [64]u8,
+};
+
+const ContextPart = struct {
+    doc: []const u8,
+    first_chunk: usize,
+    last_chunk: usize,
+};
+
+const ContextChunkInfo = struct {
+    number: usize,
+    count: usize,
 };
 
 fn log(opts: ContextOptions, comptime fmt: []const u8, args: anytype) void {
@@ -77,10 +110,19 @@ fn appendQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, value: []const 
     try buf.append(gpa, '"');
 }
 
+/// YAML double-quoted scalar. Identical to the JSON form above for every value
+/// without a Unicode line terminator — but `json_out` has no reason to know
+/// about U+2028/U+2029/U+0085, and YAML treats them as line breaks. A raw one
+/// inside a quoted title is read as a newline by anything that splits on them,
+/// which puts `role: system` on a line of its own.
+fn appendYamlQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, value: []const u8) !void {
+    try encode.escapeAppend(buf, gpa, .yaml_quoted_scalar, value);
+}
+
 fn appendYamlString(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, key: []const u8, value: []const u8) !void {
     try buf.appendSlice(gpa, key);
     try buf.appendSlice(gpa, ": ");
-    try appendQuoted(buf, gpa, value);
+    try appendYamlQuoted(buf, gpa, value);
     try buf.append(gpa, '\n');
 }
 
@@ -105,8 +147,18 @@ fn appendFence(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, source: []const 
 }
 
 fn relationCount(result: *const pipeline.Result) usize {
+    return relationCountPages(result.pages.items);
+}
+
+fn relationCountPages(pages: []const graph_mod.Node) usize {
     var count: usize = 0;
-    for (result.pages.items) |page| count += page.semantic_relations.len;
+    for (pages) |page| count += page.semantic_relations.len;
+    return count;
+}
+
+fn relationCountArtifacts(artifacts: []const PageArtifact) usize {
+    var count: usize = 0;
+    for (artifacts) |artifact| count += artifact.page.semantic_relations.len;
     return count;
 }
 
@@ -122,11 +174,12 @@ fn pageTitle(page: graph_mod.Node) []const u8 {
     return page.title orelse page.id;
 }
 
-fn renderPageDoc(
+fn renderPageDocWithChunk(
     gpa: std.mem.Allocator,
     page: graph_mod.Node,
     source: []const u8,
     source_hash: []const u8,
+    chunk: ?ContextChunkInfo,
 ) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
@@ -138,16 +191,28 @@ fn renderPageDoc(
     try appendYamlString(&buf, gpa, "role", page.role.name());
     try appendYamlString(&buf, gpa, "title", pageTitle(page));
     try appendYamlString(&buf, gpa, "parent", page.parent orelse "");
+    if (chunk) |info| {
+        try buf.appendSlice(gpa, "part: ");
+        try json_out.writeUsize(&buf, gpa, info.number);
+        try buf.appendSlice(gpa, "\npart_count: ");
+        try json_out.writeUsize(&buf, gpa, info.count);
+        try buf.appendSlice(gpa, "\ncontinuation: ");
+        try appendYamlQuoted(&buf, gpa, if (info.count == 1) "single" else if (info.number == 1) "continues" else if (info.number == info.count) "continued" else "continues");
+        try buf.append(gpa, '\n');
+    }
     try buf.appendSlice(gpa, "relations:\n");
     for (page.semantic_relations) |relation| {
         try buf.appendSlice(gpa, "  - kind: ");
-        try appendQuoted(&buf, gpa, relation.kind.name());
+        try appendYamlQuoted(&buf, gpa, relation.kind.name());
         try buf.appendSlice(gpa, "\n    target: ");
-        try appendQuoted(&buf, gpa, relation.target);
+        try appendYamlQuoted(&buf, gpa, relation.target);
         try buf.append(gpa, '\n');
     }
     try buf.appendSlice(gpa, "---\n\n# ");
-    try buf.appendSlice(gpa, pageTitle(page));
+    // A title can carry U+2028/U+2029, which the line-scoped frontmatter parser
+    // cannot block the way it blocks an ASCII newline. Raw in an H1 it reads as
+    // two lines to anything that splits on line terminators.
+    try encode.escapeAppend(&buf, gpa, .md_heading, pageTitle(page));
     try buf.appendSlice(gpa, "\n\n## Source\n");
     try appendFence(&buf, gpa, source);
     try buf.appendSlice(gpa, "markdown\n");
@@ -156,6 +221,15 @@ fn renderPageDoc(
     try appendFence(&buf, gpa, source);
     try buf.append(gpa, '\n');
     return try buf.toOwnedSlice(gpa);
+}
+
+fn renderPageDoc(
+    gpa: std.mem.Allocator,
+    page: graph_mod.Node,
+    source: []const u8,
+    source_hash: []const u8,
+) ![]u8 {
+    return renderPageDocWithChunk(gpa, page, source, source_hash, null);
 }
 
 fn renderBundle(
@@ -171,7 +245,7 @@ fn renderBundle(
     try buf.appendSlice(gpa, "page_count: ");
     try json_out.writeUsize(&buf, gpa, artifacts.len);
     try buf.appendSlice(gpa, "\nrelation_count: ");
-    try json_out.writeUsize(&buf, gpa, relationCount(result));
+    try json_out.writeUsize(&buf, gpa, relationCountArtifacts(artifacts));
     try buf.appendSlice(gpa, "\n---\n\n# Boris AI context bundle\n\n");
     try buf.appendSlice(gpa, "This bundle contains validated Boris pages in canonical entity-id order.\n");
     try buf.appendSlice(gpa, "Use each source hash and relative source path as provenance.\n\n## Contents\n\n");
@@ -179,7 +253,7 @@ fn renderBundle(
         try buf.appendSlice(gpa, "- `");
         try buf.appendSlice(gpa, artifact.page.id);
         try buf.appendSlice(gpa, "` — ");
-        try buf.appendSlice(gpa, pageTitle(artifact.page));
+        try encode.escapeAppend(&buf, gpa, .md_block_text, pageTitle(artifact.page));
         try buf.appendSlice(gpa, " (`");
         try buf.appendSlice(gpa, artifact.page.source_path);
         try buf.appendSlice(gpa, "`)\n");
@@ -192,12 +266,52 @@ fn renderBundle(
     return try buf.toOwnedSlice(gpa);
 }
 
+fn renderParts(gpa: std.mem.Allocator, chunks: []const ContextChunk, split_size: ?usize) ![]const ContextPart {
+    if (split_size == null) return try gpa.alloc(ContextPart, 0);
+    const cap = split_size.?;
+    const prefix = "# Boris AI context bundle part\n\n";
+    var parts: std.ArrayList(ContextPart) = .empty;
+    errdefer {
+        for (parts.items) |part| gpa.free(part.doc);
+        parts.deinit(gpa);
+    }
+    var current: std.ArrayList(u8) = .empty;
+    defer current.deinit(gpa);
+    try current.appendSlice(gpa, prefix);
+    var first_chunk: usize = 0;
+    for (chunks, 0..) |chunk, i| {
+        if (prefix.len + chunk.doc.len > cap) return error.OversizedBlock;
+        if (current.items.len > prefix.len and current.items.len + chunk.doc.len > cap) {
+            try parts.append(gpa, .{
+                .doc = try current.toOwnedSlice(gpa),
+                .first_chunk = first_chunk,
+                .last_chunk = i,
+            });
+            current = .empty;
+            try current.appendSlice(gpa, prefix);
+            first_chunk = i;
+        }
+        try current.appendSlice(gpa, chunk.doc);
+    }
+    if (current.items.len > prefix.len) {
+        try parts.append(gpa, .{
+            .doc = try current.toOwnedSlice(gpa),
+            .first_chunk = first_chunk,
+            .last_chunk = chunks.len,
+        });
+    }
+    return try parts.toOwnedSlice(gpa);
+}
+
 fn renderManifest(
     gpa: std.mem.Allocator,
     result: *const pipeline.Result,
     artifacts: []const PageArtifact,
     bundle: []const u8,
     graph: []const u8,
+    opts: ContextOptions,
+    chunks: []const ContextChunk,
+    parts: []const ContextPart,
 ) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
@@ -211,10 +325,47 @@ fn renderManifest(
     try appendQuoted(&buf, gpa, irSchemaVersion(result));
     try buf.appendSlice(gpa, ",\n  \"content_root\": ");
     try appendQuoted(&buf, gpa, result.content_root);
+    try buf.appendSlice(gpa, ",\n  \"scope\": ");
+    try appendQuoted(&buf, gpa, opts.scope orelse "");
+    try buf.appendSlice(gpa, ",\n  \"scope_closure\": \"parents+semantic-relations\"");
+    try buf.appendSlice(gpa, ",\n  \"graph_scope\": \"full\"");
+    try buf.appendSlice(gpa, ",\n  \"graph_page_count\": ");
+    try json_out.writeUsize(&buf, gpa, result.pages.items.len);
     try buf.appendSlice(gpa, ",\n  \"page_count\": ");
     try json_out.writeUsize(&buf, gpa, artifacts.len);
-    try buf.appendSlice(gpa, ",\n  \"relation_count\": ");
+    try buf.appendSlice(gpa, ",\n  \"selected_page_count\": ");
+    try json_out.writeUsize(&buf, gpa, artifacts.len);
+    try buf.appendSlice(gpa, ",\n  \"graph_relation_count\": ");
     try json_out.writeUsize(&buf, gpa, relationCount(result));
+    try buf.appendSlice(gpa, ",\n  \"selected_relation_count\": ");
+    try json_out.writeUsize(&buf, gpa, relationCountArtifacts(artifacts));
+    try buf.appendSlice(gpa, ",\n  \"relation_count\": ");
+    try json_out.writeUsize(&buf, gpa, relationCountArtifacts(artifacts));
+    try buf.appendSlice(gpa, ",\n  \"split_size\": ");
+    if (opts.split_size) |size| try json_out.writeUsize(&buf, gpa, size) else try json_out.writeNull(&buf, gpa);
+    try buf.appendSlice(gpa, ",\n  \"part_count\": ");
+    try json_out.writeUsize(&buf, gpa, parts.len);
+    try buf.appendSlice(gpa, ",\n  \"chunk_count\": ");
+    try json_out.writeUsize(&buf, gpa, chunks.len);
+    try buf.appendSlice(gpa, ",\n  \"parts\": [");
+    for (parts, 0..) |part, i| {
+        if (i > 0) try buf.append(gpa, ',');
+        try buf.print(gpa, "{{\"path\":\"parts/part-{d}.md\",\"bytes\":{d},\"chunks\":[", .{ i + 1, part.doc.len });
+        for (chunks[part.first_chunk..part.last_chunk], 0..) |chunk, j| {
+            if (j > 0) try buf.append(gpa, ',');
+            try buf.print(gpa, "{{\"entity_id\":", .{});
+            try appendQuoted(&buf, gpa, chunk.page.id);
+            try buf.appendSlice(gpa, ",\"source_path\":");
+            try appendQuoted(&buf, gpa, chunk.page.source_path);
+            try buf.appendSlice(gpa, ",\"source_sha256\":");
+            try appendQuoted(&buf, gpa, &chunk.source_sha256);
+            try buf.print(gpa, ",\"part\":{d},\"part_count\":{d},\"continuation\":", .{ chunk.number, chunk.count });
+            try appendQuoted(&buf, gpa, if (chunk.count == 1) "single" else if (chunk.number == 1) "continues" else if (chunk.number == chunk.count) "continued" else "continues");
+            try buf.append(gpa, '}');
+        }
+        try buf.appendSlice(gpa, "]}");
+    }
+    try buf.append(gpa, ']');
     try buf.appendSlice(gpa, ",\n  \"artifacts\": [\n");
 
     const bundle_hash = hexDigest(bundle);
@@ -262,14 +413,49 @@ fn publish(io: Io, gpa: std.mem.Allocator, stage: []const u8, out: []const u8) !
     return error.ContextPublishFailed;
 }
 
+fn renderContextChunks(
+    gpa: std.mem.Allocator,
+    page: graph_mod.Node,
+    body: []const u8,
+    source_hash: []const u8,
+    cap: usize,
+) ![]const ContextChunk {
+    const max_number = body.len + 1;
+    const probe = try renderPageDocWithChunk(gpa, page, "", source_hash, .{ .number = max_number, .count = max_number });
+    defer gpa.free(probe);
+    if (probe.len > cap) return error.OversizedBlock;
+    const body_budget = cap - probe.len;
+    const pieces = try export_scope.partitionMarkdown(gpa, body, body_budget);
+    defer gpa.free(pieces);
+
+    var chunks: std.ArrayList(ContextChunk) = .empty;
+    errdefer {
+        for (chunks.items) |chunk| gpa.free(chunk.doc);
+        chunks.deinit(gpa);
+    }
+    for (pieces, 0..) |piece, i| {
+        const doc = try renderPageDocWithChunk(gpa, page, piece, source_hash, .{ .number = i + 1, .count = pieces.len });
+        if (doc.len > cap) {
+            gpa.free(doc);
+            return error.OversizedBlock;
+        }
+        var digest: [64]u8 = undefined;
+        @memcpy(&digest, source_hash[0..64]);
+        try chunks.append(gpa, .{ .page = page, .doc = doc, .number = i + 1, .count = pieces.len, .source_sha256 = digest });
+    }
+    return try chunks.toOwnedSlice(gpa);
+}
+
 /// Compile and publish a complete deterministic context bundle.
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult {
     if (std.fs.path.isAbsolute(opts.content_root)) return error.AbsoluteContentRoot;
+    try target_mod.validateExportPath(io, gpa, opts.content_root, opts.out_dir);
 
     var result = ContextResult{ .compile = try pipeline.compile(io, gpa, .{
         .content_root = opts.content_root,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = opts.timings,
     }) };
     errdefer result.deinit();
     if (!result.compile.ok) return result;
@@ -284,19 +470,42 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
     defer {
         for (artifacts.items) |artifact| gpa.free(artifact.page_doc);
     }
-    for (result.compile.pages.items) |page| {
-        const source = try readFileAlloc(io, content_dir, page.source_path, arena);
+    var chunks: std.ArrayList(ContextChunk) = .empty;
+    defer chunks.deinit(gpa);
+    defer {
+        for (chunks.items) |chunk| gpa.free(chunk.doc);
+    }
+    const selected = try export_scope.selectPages(gpa, result.compile.pages.items, opts.scope, null);
+    defer gpa.free(selected);
+    result.graph_pages = result.compile.pages.items.len;
+    result.selected_pages = selected.len;
+    result.relation_count = relationCountPages(selected);
+    for (selected) |page| {
+        const source = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
         const digest = cache.hexDigest(cache.hashBytes(source));
         const page_doc = try renderPageDoc(gpa, page, source, &digest);
         const page_hash = hexDigest(page_doc);
         try artifacts.append(gpa, .{ .page = page, .source_hash = digest, .page_hash = page_hash, .page_doc = page_doc });
+        if (opts.split_size) |cap| {
+            const body = if (page.body_offset <= source.len) source[page.body_offset..] else return error.InvalidBodyOffset;
+            const page_chunks = try renderContextChunks(gpa, page, body, &digest, cap);
+            defer gpa.free(page_chunks);
+            try chunks.appendSlice(gpa, page_chunks);
+        }
     }
 
     const graph = try pipeline.renderGraph(gpa, &result.compile);
     defer gpa.free(graph);
     const bundle = try renderBundle(gpa, &result.compile, artifacts.items);
     defer gpa.free(bundle);
-    const manifest = try renderManifest(gpa, &result.compile, artifacts.items, bundle, graph);
+    const parts = try renderParts(gpa, chunks.items, opts.split_size);
+    defer {
+        for (parts) |part| gpa.free(part.doc);
+        gpa.free(parts);
+    }
+    result.part_count = parts.len;
+    result.chunk_count = chunks.items.len;
+    const manifest = try renderManifest(gpa, &result.compile, artifacts.items, bundle, graph, opts, chunks.items, parts);
     defer gpa.free(manifest);
 
     const stage = try std.fmt.allocPrint(gpa, "{s}.boris-context-stage", .{opts.out_dir});
@@ -311,6 +520,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
         var stage_dir = try cwd.openDir(io, stage, .{});
         defer stage_dir.close(io);
         try stage_dir.createDirPath(io, "pages");
+        if (parts.len > 0) try stage_dir.createDirPath(io, "parts");
         try writeBytes(io, stage_dir, "bundle.md", bundle);
         try writeBytes(io, stage_dir, "graph.json", graph);
         try writeBytes(io, stage_dir, "manifest.json", manifest);
@@ -322,9 +532,76 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
             try path_buf.appendSlice(gpa, ".md");
             try writeBytes(io, stage_dir, path_buf.items, artifact.page_doc);
         }
+        for (parts, 0..) |part, i| {
+            const path = try std.fmt.allocPrint(gpa, "parts/part-{d}.md", .{i + 1});
+            defer gpa.free(path);
+            try writeBytes(io, stage_dir, path, part.doc);
+        }
     }
     try publish(io, gpa, stage, opts.out_dir);
     result.published = true;
-    log(opts, "context export complete: {s} ({d} page(s))\n", .{ opts.out_dir, artifacts.items.len });
+    // The artifact count is the selected page set actually written under
+    // pages/ — with `--scope` this is smaller than the full graph count
+    // reported by the CLI wrapper, so label it explicitly (#406).
+    log(opts, "context export complete: {s} ({d} selected page(s))\n", .{ opts.out_dir, artifacts.items.len });
     return result;
+}
+
+test "context chunks preserve provenance and fenced source boundaries" {
+    var source_hash: [64]u8 = undefined;
+    @memset(&source_hash, 'a');
+    const page = graph_mod.Node{
+        .id = "guides/chunks",
+        .source_path = "guides/chunks.md",
+        .title = "Chunks",
+        .role = .trunk,
+    };
+    const body = "# First\n\nA paragraph that can end safely.\n\n```zig\nconst answer = 42;\n```\n\n# Second\n\nAnother paragraph.\n";
+    const chunks = try renderContextChunks(std.testing.allocator, page, body, &source_hash, 430);
+    defer {
+        for (chunks) |chunk| std.testing.allocator.free(chunk.doc);
+        std.testing.allocator.free(chunks);
+    }
+    try std.testing.expect(chunks.len > 1);
+    for (chunks, 0..) |chunk, i| {
+        try std.testing.expect(chunk.doc.len <= 430);
+        try std.testing.expect(std.mem.indexOf(u8, chunk.doc, "entity_id: \"guides/chunks\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, chunk.doc, "source_sha256: \"aaaaaaaa") != null);
+        try std.testing.expect(std.mem.indexOf(u8, chunk.doc, "part_count:") != null);
+        try std.testing.expectEqual(i + 1, chunk.number);
+    }
+}
+
+test "scoped context explicitly marks its graph as full" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const base = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(base);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{base});
+    defer gpa.free(content);
+    const out = try std.fmt.allocPrint(gpa, "{s}/context", .{base});
+    defer gpa.free(out);
+    try Io.Dir.cwd().createDirPath(io, content);
+    var content_dir = try Io.Dir.cwd().openDir(io, content, .{});
+    defer content_dir.close(io);
+    try content_dir.writeFile(io, .{ .sub_path = "page.md", .data = "# Page\n\nBody.\n" });
+
+    var result = try run(io, gpa, .{
+        .content_root = content,
+        .out_dir = out,
+        .scope = "page",
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok());
+
+    var out_dir = try Io.Dir.cwd().openDir(io, out, .{});
+    defer out_dir.close(io);
+    const manifest = try readFileAlloc(io, out_dir, "manifest.json", gpa);
+    defer gpa.free(manifest);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"graph_scope\": \"full\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"selected_page_count\": 1") != null);
 }

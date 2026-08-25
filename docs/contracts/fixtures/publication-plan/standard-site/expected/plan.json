@@ -1,0 +1,46 @@
+{
+  "format": "boris-publication-plan",
+  "schema_version": 1,
+  "input": "content",
+  "input_format": "markdown",
+  "site": {
+    "url": "https://docs.example.com",
+    "title": "Boris Docs",
+    "description": "Deterministic documentation, published to the Atmosphere."
+  },
+  "publication": {
+    "target": "standard-site",
+    "base_url": "https://docs.example.com",
+    "origin": "https://docs.example.com",
+    "base_path": "",
+    "did": "did:plc:ewvi7nxzyoun6zhxrhs64oiz",
+    "pds_origin": "https://pds.example.com",
+    "name": "Boris Docs (Standard.site)",
+    "description": "The canonical Boris documentation, indexable in the Atmosphere.",
+    "show_in_discover": true,
+    "include": ["guides/*","reference/*"],
+    "exclude": ["guides/private*"],
+    "prune": false
+  },
+  "targets": [
+    {
+      "name": "public",
+      "output": "dist",
+      "public": true,
+      "theme": "themes/boris",
+      "layout": null,
+      "layout_rules": [],
+      "projections": {
+        "html": true,
+        "sitemap": {"path": "sitemap.xml"},
+        "rss": null,
+        "llms": null
+      }
+    }
+  ],
+  "editions": {
+    "ir": null,
+    "rag": null,
+    "context": null
+  }
+}

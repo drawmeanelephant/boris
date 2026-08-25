@@ -1,0 +1,2 @@
+error: EFRONTMATTER: t.textile:3:1: unsupported frontmatter key [Fix the frontmatter or encoding for this file]
+error: content or layout failure: ParseFailed

@@ -1,0 +1,81 @@
+{
+  "format": "boris-nostr-publication-plan",
+  "schema_version": 1,
+  "protocol": {
+    "nips_revision": "656cecc7c0a815b6a2b218d3b5d6f078b3f4dbab",
+    "research_date": "2026-08-14",
+    "kind": 30023
+  },
+  "site": {
+    "base_url": "https://example.github.io/docs",
+    "origin": "https://example.github.io",
+    "base_path": "/docs"
+  },
+  "author": {
+    "expected_pubkey": "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919",
+    "npub": "npub1562lddspr8v4yxf556gnglvl0r58wz6kmgttkf27u2rdm70a4yvsq6spxc"
+  },
+  "delivery": {
+    "relays": [
+      "wss://a.relay.example.com",
+      "wss://relay.example.com"
+    ],
+    "timeout_ms": 10000,
+    "retries": 0,
+    "config_digest": "d6fc6ecbdaef2116c8358fbbf71d7c01f16dfb2880c93bb88c4623df27bfe109"
+  },
+  "articles": [
+    {
+      "entity_id": "articles/first",
+      "source_path": "articles/first.md",
+      "canonical_url": "https://example.github.io/docs/articles/first.html",
+      "kind": 30023,
+      "published_at": "2024-01-20T14:30:00Z",
+      "tags": [
+        ["d", "articles/first"],
+        ["title", "First article"],
+        ["summary", "The first fixture article."],
+        ["published_at", "1705761000"],
+        ["t", "long-form"],
+        ["t", "fixtures"],
+        ["r", "https://example.github.io/docs/articles/first.html"],
+        ["i", "https://example.github.io/docs/articles/first.html"],
+        ["k", "web"]
+      ],
+      "content": "\n# First article\n\nOne paragraph on one line, with *emphasis* and a [link](https://example.com/elsewhere).\n",
+      "content_digest": "a4b85f69a3e41ed27c1c302b51523b4921cc86611bd0514335b1596540993102",
+      "intention_digest": "5c4b308b4d0d8cbe4b10afea806d010b0cc626ee2275a49aaad59195a2588da0",
+      "created_at": null,
+      "created_at_policy": "signing-time",
+      "event_id": null,
+      "signature": null,
+      "naddr": "naddr1qq8xzun5d93kcetn9anxjunnwspzpf5476mqzxwe2gvnff53x37e778gwu94dkskhvj4ac5xmhulm2geqvzqqqr4guq3jamnwvaz7tmp9eex2mrp0yhx27rpd4cxcefwvdhk6qghwaehxw309aex2mrp0yhx27rpd4cxcefwvdhk6358sku",
+      "naddr_uri": "nostr:naddr1qq8xzun5d93kcetn9anxjunnwspzpf5476mqzxwe2gvnff53x37e778gwu94dkskhvj4ac5xmhulm2geqvzqqqr4guq3jamnwvaz7tmp9eex2mrp0yhx27rpd4cxcefwvdhk6qghwaehxw309aex2mrp0yhx27rpd4cxcefwvdhk6358sku"
+    },
+    {
+      "entity_id": "articles/second",
+      "source_path": "articles/second.md",
+      "canonical_url": "https://example.github.io/docs/articles/second.html",
+      "kind": 30023,
+      "published_at": "2023-02-06T00:17:15Z",
+      "tags": [
+        ["d", "articles/second"],
+        ["title", "Second article"],
+        ["summary", "An archived article stays eligible."],
+        ["published_at", "1675642635"],
+        ["r", "https://example.github.io/docs/articles/second.html"],
+        ["i", "https://example.github.io/docs/articles/second.html"],
+        ["k", "web"]
+      ],
+      "content": "\n# Second article\n\nArchived is still published; only a draft is refused.\n",
+      "content_digest": "ecb22accca5049afe115993405eb68e0bf3ccbca1ebb9e0c6f18f2af92c975f5",
+      "intention_digest": "39fd8891486a4ac9f8b630003fa8e5d2f8165676108a6a39fec2bf49e61a9967",
+      "created_at": null,
+      "created_at_policy": "signing-time",
+      "event_id": null,
+      "signature": null,
+      "naddr": "naddr1qq8kzun5d93kcetn9aek2cm0dejqyg9xjhmtvqgem9fpjd9xjy68m8mcapmsk4k6z6aj2hhzsmwlnldfrypsgqqqw4rszxthwden5te0vyh8yetvv9ujuetcv9khqmr99e3k7mgpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgp8tm3s",
+      "naddr_uri": "nostr:naddr1qq8kzun5d93kcetn9aek2cm0dejqyg9xjhmtvqgem9fpjd9xjy68m8mcapmsk4k6z6aj2hhzsmwlnldfrypsgqqqw4rszxthwden5te0vyh8yetvv9ujuetcv9khqmr99e3k7mgpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgp8tm3s"
+    }
+  ]
+}

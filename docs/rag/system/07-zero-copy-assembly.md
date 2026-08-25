@@ -6,7 +6,7 @@ tags: [assembly, layout, zero-copy, html, dist]
 related:
   - system/01-architecture-pipeline.md
   - system/05-memory-whiteboard.md
-  - system/06-apex-native-engine.md
+  - system/06-oliver-renderer.md
   - system/08-build-cli-and-layout.md
   - system/10-name-and-metaphor.md
 ---

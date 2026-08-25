@@ -1,0 +1,324 @@
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      audit_deployment:
+        description: "Run the bounded post-deploy HTTP audit and retain separate evidence"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify the Pages artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      # Markdown rendering is Oliver, a pure-Zig library pinned by content
+      # hash in build.zig.zon: no CMake, no host tools. jq is used below for
+      # the publication-plan and evidence JSON.
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Build Boris
+        run: zig build -Doptimize=ReleaseSafe
+
+      # configure-pages is authoritative for the repository's Pages location.
+      # The profile parser independently cross-checks the same values offline.
+      - name: Resolve GitHub Pages location
+        id: pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+
+      - name: Create and validate the publication plan
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          test -n "$PAGES_BASE_URL"
+          test -n "$PAGES_ORIGIN"
+          mkdir -p evidence
+          jq -n \
+            --arg base_url "$PAGES_BASE_URL" \
+            --arg origin "$PAGES_ORIGIN" \
+            --arg base_path "$PAGES_BASE_PATH" \
+            '{
+              format: "boris-publication-profile",
+              schema_version: 1,
+              input: "content",
+              site: {url: $base_url},
+              publication: {
+                target: "github-pages",
+                base_url: $base_url,
+                origin: $origin,
+                base_path: $base_path
+              },
+              targets: [{
+                name: "public",
+                output: "dist",
+                public: true,
+                theme: "themes/boris",
+                sitemap: {path: "sitemap.xml"}
+              }]
+            }' > .boris-pages-profile.json
+          ./zig-out/bin/boris plan --profile .boris-pages-profile.json > evidence/publication-plan.json
+
+      - name: Compile the public HTML target
+        run: |
+          # Build from the normalized plan, not a second unbound URL source.
+          PAGES_BASE_URL="$(jq -r '.publication.base_url' evidence/publication-plan.json)"
+          PAGES_ORIGIN="$(jq -r '.publication.origin' evidence/publication-plan.json)"
+          PAGES_BASE_PATH="$(jq -r '.publication.base_path' evidence/publication-plan.json)"
+          test "$PAGES_BASE_URL" != "null"
+          test "$PAGES_ORIGIN" != "null"
+          test "$PAGES_BASE_PATH" != "null"
+          ./zig-out/bin/boris \
+            --target public=dist \
+            --target-layout public=themes/boris/layouts/main.html \
+            --sitemap \
+            --pages-base-url "$PAGES_BASE_URL" \
+            --pages-origin "$PAGES_ORIGIN" \
+            --pages-base-path "$PAGES_BASE_PATH" \
+            --site-url "$PAGES_BASE_URL" \
+            --quiet
+
+      # The Pages upload contains only exact committed inventory records.
+      # _boris/proof is copied into the retained evidence artifact below.
+      - name: Prepare the public Pages tree
+        run: |
+          scripts/prepare-github-pages-artifact.sh \
+            dist \
+            public-site \
+            dist/_boris/proof/artifacts.json \
+            public \
+            evidence/public-artifact-verification.json
+
+      - name: Bind retained evidence to this publication
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          mkdir -p evidence/proof
+          cp -R dist/_boris/proof/. evidence/proof/
+          BORIS_VERSION="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
+          OLIVER_REV="$(sed -n 's|.*oliver/archive/\([0-9a-f]\{1,\}\)\.tar\.gz.*|\1|p' build.zig.zon | head -1)"
+          OLIVER_REV="${OLIVER_REV:-unknown}"
+          INVENTORY_SHA256="$(jq -r '.inventory_sha256' evidence/public-artifact-verification.json)"
+          PUBLIC_MANIFEST_SHA256="$(jq -r '.public_manifest_sha256' evidence/public-artifact-verification.json)"
+          PUBLIC_FILES="$(jq -r '.files' evidence/public-artifact-verification.json)"
+          PUBLIC_BYTES="$(jq -r '.bytes' evidence/public-artifact-verification.json)"
+          CHECK_FINDINGS="$(jq '.findings | length' dist/_boris/proof/checks.json)"
+          jq -n \
+            --arg base_url "$PAGES_BASE_URL" \
+            --arg origin "$PAGES_ORIGIN" \
+            --arg base_path "$PAGES_BASE_PATH" \
+            --arg source_commit "$GITHUB_SHA" \
+            --arg boris_version "$BORIS_VERSION" \
+            --arg oliver_revision "$OLIVER_REV" \
+            --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
+            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --arg inventory_sha256 "$INVENTORY_SHA256" \
+            --arg public_manifest_sha256 "$PUBLIC_MANIFEST_SHA256" \
+            --argjson public_files "$PUBLIC_FILES" \
+            --argjson public_bytes "$PUBLIC_BYTES" \
+            --argjson check_findings "$CHECK_FINDINGS" \
+            '{
+              format: "boris-github-pages-evidence",
+              schema_version: 1,
+              publication: {
+                target: "github-pages",
+                base_url: $base_url,
+                origin: $origin,
+                base_path: $base_path
+              },
+              source: {commit: $source_commit},
+              toolchain: {
+                boris_version: $boris_version,
+                oliver_revision: $oliver_revision,
+                workflow_ref: $workflow_ref,
+                workflow_sha: $workflow_sha
+              },
+              public_artifact: {
+                inventory_path: "dist/_boris/proof/artifacts.json",
+                inventory_sha256: $inventory_sha256,
+                public_manifest_sha256: $public_manifest_sha256,
+                files: $public_files,
+                bytes: $public_bytes,
+                proof_paths_excluded: true
+              },
+              compiler_evidence: {
+                proof_root: "dist/_boris/proof",
+                checks_findings: $check_findings,
+                deployment_verification: "not-verified"
+              }
+            }' > evidence/github-pages-evidence.json
+          rm -f .boris-pages-profile.json
+
+      - name: Write the build summary
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          {
+            echo "## GitHub Pages publication"
+            echo ""
+            echo "- Target: github-pages / public"
+            echo "- Base URL: $PAGES_BASE_URL"
+            echo "- Base path: $PAGES_BASE_PATH"
+            echo "- Public files: $(jq -r '.files' evidence/public-artifact-verification.json)"
+            echo "- Public bytes: $(jq -r '.bytes' evidence/public-artifact-verification.json)"
+            echo "- Inventory binding: $(jq -r '.inventory_sha256' evidence/public-artifact-verification.json)"
+            echo "- Compiler checks findings: $(jq -r '.compiler_evidence.checks_findings' evidence/github-pages-evidence.json)"
+            echo "- Deployment verification: not-verified (the deploy job publishes the artifact; post-deploy HTTP audit is a separate scope)"
+            echo ""
+            echo "The Pages artifact contains only verified inventory payloads. Boris proof reports are retained in the evidence artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the public Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          name: github-pages
+          path: public-site
+
+      - name: Upload retained evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: boris-github-pages-evidence-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+      # This is an optional, separate observer. It consumes the exact plan and
+      # target-local inventory retained by build; it never mutates the public
+      # Pages artifact or rewrites target-local evidence.
+      - name: Checkout observer source
+        if: ${{ inputs.audit_deployment == true }}
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Install Zig for deployment observer
+        if: ${{ inputs.audit_deployment == true }}
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Download target-local evidence
+        if: ${{ inputs.audit_deployment == true }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: boris-github-pages-evidence-${{ github.run_id }}
+          path: deployment-input
+
+      - name: Build deployment observer
+        if: ${{ inputs.audit_deployment == true }}
+        run: |
+          mkdir -p deployment-evidence
+          zig build --build-file tools/github-pages-audit/build.zig -Doptimize=ReleaseSafe
+
+      - name: Observe deployed Pages
+        id: deployment_audit
+        if: ${{ inputs.audit_deployment == true }}
+        continue-on-error: true
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          test -n "$PAGE_URL"
+          test -f deployment-input/publication-plan.json
+          test -f deployment-input/proof/artifacts.json
+          mkdir -p deployment-evidence
+          AUDITED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          tools/github-pages-audit/zig-out/bin/boris-github-pages-audit \
+            --plan deployment-input/publication-plan.json \
+            --inventory deployment-input/proof/artifacts.json \
+            --page-url "$PAGE_URL" \
+            --audited-at "$AUDITED_AT" \
+            --out deployment-evidence/github-pages-deployment-evidence.json \
+            --target public \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$GITHUB_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --workflow-sha "$GITHUB_WORKFLOW_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --public-artifact-name github-pages
+
+      - name: Upload deployment evidence
+        if: ${{ always() && inputs.audit_deployment == true }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: boris-github-pages-deployment-evidence-${{ github.run_id }}
+          path: deployment-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Write deployment audit summary
+        if: ${{ always() && inputs.audit_deployment == true }}
+        run: |
+          {
+            echo "## GitHub Pages post-deploy audit"
+            echo ""
+            echo '- Deployment status: succeeded (deploy-pages completed)'
+            if test -f deployment-evidence/github-pages-deployment-evidence.json; then
+              echo "- Audit result: $(jq -r '.audit.result' deployment-evidence/github-pages-deployment-evidence.json)"
+              echo "- Requests: $(jq -r '.audit.requests' deployment-evidence/github-pages-deployment-evidence.json)"
+              echo "- Completed observations: $(jq -r '.audit.observations | length' deployment-evidence/github-pages-deployment-evidence.json)"
+              echo "- Separate evidence: boris-github-pages-deployment-evidence-${GITHUB_RUN_ID}"
+            else
+              echo "- Audit evidence was not produced; inspect the observer setup/build logs."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write the deployment summary
+        run: |
+          {
+            echo "## GitHub Pages deployment"
+            echo ""
+            echo '- Deployment status: succeeded (deploy-pages completed)'
+            echo "- Published URL: ${{ steps.deployment.outputs.page_url }}"
+            echo "- Deployment artifact: github-pages"
+            echo "- Post-deploy HTTP audit: optional; enable audit_deployment on manual dispatch"
+          } >> "$GITHUB_STEP_SUMMARY"

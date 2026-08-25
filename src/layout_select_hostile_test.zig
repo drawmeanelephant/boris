@@ -24,7 +24,7 @@ const layout_ref = theme_alpha ++ "/layouts/reference.html";
 const layout_section = theme_alpha ++ "/layouts/section.html";
 const layout_alt = theme_alpha ++ "/layouts/alt.html";
 const layout_beta_main = theme_beta ++ "/layouts/main.html";
-const product_default_layout = "layouts/main.html";
+const product_default_layout = "themes/boris/layouts/main.html";
 
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
@@ -394,9 +394,12 @@ test "H4 fallback: target-layout beats global html-layout beats product default"
     {
         var o = try cli.parseOptions(std.testing.allocator, &.{
             "boris",
-            "--input", content_root,
-            "--theme", theme_alpha,
-            "--html-dir", "dist-theme",
+            "--input",
+            content_root,
+            "--theme",
+            theme_alpha,
+            "--html-dir",
+            "dist-theme",
         });
         defer o.deinit(std.testing.allocator);
         try expectEqualStrings(layout_main, o.html_layout);
@@ -413,11 +416,18 @@ test "H4 fallback: target-layout beats global html-layout beats product default"
     {
         var o = try cli.parseOptions(std.testing.allocator, &.{
             "boris",
-            "--input", content_root,
-            "--theme", theme_alpha,
-            "--target", "docs=dist-docs",
-            "--target-layout", "docs=" ++ layout_section,
-            "--layout-rule", "docs", "id:index", layout_home,
+            "--input",
+            content_root,
+            "--theme",
+            theme_alpha,
+            "--target",
+            "docs=dist-docs",
+            "--target-layout",
+            "docs=" ++ layout_section,
+            "--layout-rule",
+            "docs",
+            "id:index",
+            layout_home,
         });
         defer o.deinit(std.testing.allocator);
         try expectEqual(@as(usize, 1), o.targets.items.len);
@@ -445,8 +455,7 @@ test "H4 fallback: target-layout beats global html-layout beats product default"
     const dist = try work.join("dist");
     defer gpa.free(dist);
     // Tiny one-page content under workdir for product default layout.
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Default Fallback
         \\---
@@ -526,9 +535,12 @@ test "H5 traversal / cross-theme via .. is InvalidLayoutPath at every surface" {
     // CLI: usage error before discovery.
     try expectError(error.InvalidValue, cli.parseOptions(std.testing.allocator, &.{
         "boris",
-        "--layout-rule", "default", "id:index",
+        "--layout-rule",
+        "default",
+        "id:index",
         theme_alpha ++ "/layouts/../../themes/beta/layouts/main.html",
-        "--html-dir", "d",
+        "--html-dir",
+        "d",
     }));
     try expectError(error.InvalidValue, cli.parseOptions(std.testing.allocator, &.{
         "boris", "--html-layout", "../layouts/main.html", "--html-dir", "d",
@@ -583,14 +595,25 @@ test "H5 invalid selectors and duplicate selectors are usage errors at parse" {
     }));
     try expectError(error.DuplicateFlag, cli.parseOptions(gpa, &.{
         "boris",
-        "--layout-rule", "default", "id:index", layout_home,
-        "--layout-rule", "default", "id:index", layout_section,
-        "--html-dir", "d",
+        "--layout-rule",
+        "default",
+        "id:index",
+        layout_home,
+        "--layout-rule",
+        "default",
+        "id:index",
+        layout_section,
+        "--html-dir",
+        "d",
     }));
     try expectError(error.ConflictingFlags, cli.parseOptions(gpa, &.{
         "boris",
-        "--layout-rule", "default", "id:index", layout_home,
-        "--out", ".boris",
+        "--layout-rule",
+        "default",
+        "id:index",
+        layout_home,
+        "--out",
+        ".boris",
     }));
 }
 
@@ -632,7 +655,7 @@ test "H6 multi-target: isolated rules, markers, and cache namespaces" {
     };
 
     // Full build for markers; then incremental for per-target cache namespaces.
-    try compile.compileHtmlSiteMulti(io, gpa, &targets, .{
+    _ = try compile.compileHtmlSiteMulti(io, gpa, &targets, .{
         .content_root = content_root,
         .layout_path = layout_main,
         .quiet = true,
@@ -655,7 +678,7 @@ test "H6 multi-target: isolated rules, markers, and cache namespaces" {
     try expectMarker(b_guides, "section");
 
     // Cache manifests are written only in incremental mode and stay target-local.
-    try compile.compileHtmlSiteMulti(io, gpa, &targets, .{
+    _ = try compile.compileHtmlSiteMulti(io, gpa, &targets, .{
         .content_root = content_root,
         .layout_path = layout_main,
         .incremental = true,
@@ -667,8 +690,8 @@ test "H6 multi-target: isolated rules, markers, and cache namespaces" {
     defer gpa.free(man_a);
     const man_b = try work.readFile("site-b/.boris-cache/manifest.json", gpa);
     defer gpa.free(man_b);
-    try expect(std.mem.indexOf(u8, man_a, "boris-cache-v2-layout-rules") != null);
-    try expect(std.mem.indexOf(u8, man_b, "boris-cache-v2-layout-rules") != null);
+    try expect(std.mem.indexOf(u8, man_a, "boris-cache-v3-nav-digest") != null);
+    try expect(std.mem.indexOf(u8, man_b, "boris-cache-v3-nav-digest") != null);
     try expect(std.mem.indexOf(u8, man_a, "selected_layout") != null);
     // Distinct selected layouts for index → manifests must differ.
     try expect(!std.mem.eql(u8, man_a, man_b));
@@ -725,8 +748,7 @@ test "H8 stale cleanup: removed page HTML dropped; layout-rule change updates li
     defer work.cleanup();
 
     // Local content tree so we can delete a page between builds.
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---
@@ -734,8 +756,7 @@ test "H8 stale cleanup: removed page HTML dropped; layout-rule change updates li
         \\# Home
         \\
     );
-    try work.writeFile(
-        "content/extra.md",
+    try work.writeFile("content/extra.md",
         \\---
         \\title: Extra
         \\---
@@ -873,7 +894,7 @@ test "H10 cache manifest stable across no-op incremental runs" {
     const m2 = try work.readFile("dist/.boris-cache/manifest.json", gpa);
     defer gpa.free(m2);
     try expectEqualStrings(m1, m2);
-    try expect(std.mem.indexOf(u8, m1, "boris-cache-v2-layout-rules") != null);
+    try expect(std.mem.indexOf(u8, m1, "boris-cache-v3-nav-digest") != null);
     try expect(std.mem.indexOf(u8, m1, "selected_layout") != null);
 }
 
