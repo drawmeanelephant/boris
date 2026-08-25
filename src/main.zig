@@ -86,8 +86,8 @@ const ProdRunner = struct {
         stdout_writer.interface.flush() catch {};
     }
 
-    pub fn reportUsage(_: *const @This(), err: cli.ParseError, bad_arg: ?[]const u8) void {
-        cli.printParseError(err, bad_arg);
+    pub fn reportUsage(_: *const @This(), err: cli.ParseError, bad_arg: ?[]const u8, detail: *const cli.ParseErrorDetail) void {
+        cli.printParseErrorDetail(err, bad_arg, detail);
         switch (err) {
             error.MissingStandardSiteSubcommand,
             error.UnknownStandardSiteSubcommand,
@@ -2919,10 +2919,11 @@ const SilentRunner = struct {
         _ = self;
     }
 
-    pub fn reportUsage(self: *@This(), err: cli.ParseError, bad_arg: ?[]const u8) void {
+    pub fn reportUsage(self: *@This(), err: cli.ParseError, bad_arg: ?[]const u8, detail: *const cli.ParseErrorDetail) void {
         _ = self;
         _ = @errorName(err);
         _ = bad_arg;
+        _ = detail;
     }
 
     pub fn run(self: *@This(), opts: Options) ExitCode {

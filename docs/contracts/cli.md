@@ -110,6 +110,20 @@ content or writing artifacts. `--version` / `-V` exit `0` printing the compiler
 id (`pipeline.compiler_id`, e.g. `boris/0.8.1`) to stdout without reading
 content or writing artifacts.
 
+Usage diagnostics on the exit-2 path are self-attributing (issues #761 and
+#764). When a value rejection has a parser-known flag — the layout/theme path
+grammar shared by `--theme` and `--html-layout` — the diagnostic names that
+flag with the grammar rule, never a different flag guessed by scanning argv.
+When a conflicting-options rejection has one unambiguous offending pair, both
+tokens are named as typed, e.g. `error: check conflicts with --theme`;
+ambiguous multi-cause conflicts keep the generic `conflicting options (try
+--help)` form. The `--help` conflict matrix lists the analyzer×HTML-selector
+family and the HTML-selector×explicit-`--out` family alongside the rest.
+Exit codes, exit-code classes, and accepted argv are unchanged by attribution;
+the frontmatter `status:` enum semantics (draft renders but is excluded from
+nav, search, sitemap, RSS, and publication projections) are stated in `--help`
+and remain normative in [frontmatter.md](frontmatter.md).
+
 ## stdout machine surface
 
 stdout is a real machine surface, not a void. A closed set of commands and
