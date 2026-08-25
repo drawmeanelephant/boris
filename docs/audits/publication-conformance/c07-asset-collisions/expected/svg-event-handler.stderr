@@ -1,2 +1,2 @@
-error: EASSET: guides/intro.assets/t.svg:1:1: content-local SVG contains active content: SVG on* event-handler attribute [Remove the named active construct or publish an inert SVG; Boris does not sanitize assets]
+error: EASSET: guides/intro.assets/t.svg:1:1: content-local SVG contains active content: SVG on* event-handler attribute (file not referenced by any page) [Remove the named active construct or publish an inert SVG; Boris does not sanitize assets]
 error: target 'default' compilation failed: AssetUnsafeSvg

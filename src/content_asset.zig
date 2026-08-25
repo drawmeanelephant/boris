@@ -323,7 +323,16 @@ pub fn loadPageAssets(
         errdefer gpa.free(bytes);
         if (isSvgPath(within_buf) and svg_policy.default_policy == .refuse_active_content) {
             if (svg_policy.firstViolation(bytes)) |violation| {
-                setAssetFail(fail_out, source_rel, violation.description());
+                var detail_buf: [320]u8 = undefined;
+                setAssetFail(fail_out, source_rel, svgViolationDetail(
+                    io,
+                    gpa,
+                    content_dir,
+                    source_path,
+                    within_buf,
+                    violation.description(),
+                    &detail_buf,
+                ));
                 return error.AssetUnsafeSvg;
             }
         }
@@ -383,6 +392,27 @@ fn isSvgPath(path: []const u8) bool {
 
 fn setAssetFail(fail_out: ?*FailInfo, source_rel: []const u8, detail: []const u8) void {
     if (fail_out) |fail| fail.set(1, 1, detail, source_rel);
+}
+
+/// Enrich an unsafe-SVG EASSET detail when the owning page's source never
+/// mentions the offending within-tree path. Any valid Markdown image
+/// destination into the sibling tree must contain that path as a substring,
+/// so absence proves the file is unreferenced; presence stays silent because
+/// a mention is not proof of a reference. An unreadable page source also
+/// stays silent (fail-safe direction).
+fn svgViolationDetail(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    source_path: []const u8,
+    within_tree: []const u8,
+    base: []const u8,
+    buf: []u8,
+) []const u8 {
+    const text = readFileAlloc(io, content_dir, source_path, gpa) catch return base;
+    defer gpa.free(text);
+    if (std.mem.indexOf(u8, text, within_tree) != null) return base;
+    return std.fmt.bufPrint(buf, "{s} (file not referenced by any page)", .{base}) catch base;
 }
 
 /// Fail when a content-local asset path collides with a page HTML path or theme asset.
@@ -1061,6 +1091,54 @@ test "rewriteImageLinks rejects traversal absolute backslash and outside tree" {
     try std.testing.expectError(error.AssetMissing, rewriteImageLinks(gpa, "![x](intro.assets/missing.svg)\n", &bundle, "guides/intro.html", null, null));
 }
 
+test "unsafe svg diagnostic notes unreferenced file" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-unref", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "![c](intro.assets/clean.png)\n");
+    try writeTreeFile(io, work, "content/guides/intro.assets/clean.png", "p");
+    try writeTreeFile(io, work, "content/guides/intro.assets/evil.svg", "<svg><script>alert(1)</script></svg>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.AssetUnsafeSvg, loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", &fail));
+    try std.testing.expect(std.mem.indexOf(u8, fail.detail(), "(file not referenced by any page)") != null);
+}
+
+test "unsafe svg diagnostic stays silent when page mentions the path" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-ref", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "![x](intro.assets/bad.svg)\n");
+    try writeTreeFile(io, work, "content/guides/intro.assets/bad.svg", "<svg><script>alert(1)</script></svg>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.AssetUnsafeSvg, loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", &fail));
+    try std.testing.expect(std.mem.indexOf(u8, fail.detail(), "(file not referenced by any page)") == null);
+    try std.testing.expect(std.mem.indexOf(u8, fail.detail(), "active SVG <script> element") != null);
+}
+
 test "rewrite skips fenced image-looking text" {
     const gpa = std.testing.allocator;
     var bundle: PageAssetBundle = .{ .gpa = gpa, .source_path = "guides/intro.md", .entity_id = "guides/intro" };
@@ -1304,7 +1382,7 @@ test "loadPageAssets rejects active SVG and records the asset construct" {
     var fail: FailInfo = .{};
     try std.testing.expectError(error.AssetUnsafeSvg, loadPageAssets(io, gpa, content_dir, "index.md", "index", &fail));
     try std.testing.expectEqualStrings("index.assets/logo.SVG", fail.locus());
-    try std.testing.expectEqualStrings("active SVG <script> element", fail.detail());
+    try std.testing.expectEqualStrings("active SVG <script> element (file not referenced by any page)", fail.detail());
 }
 
 test "rewriteImageLinks emits absolute asset URLs under base_url" {
