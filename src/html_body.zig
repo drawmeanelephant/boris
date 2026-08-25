@@ -43,6 +43,10 @@ pub const Options = struct {
     output_profile: render.OutputProfile = .html,
     /// When set, include expansion reads through this provider instead of `content_dir`.
     sources: ?source_provider.Provider = null,
+    /// Build-scoped include expansion memo (#760). Callers rendering many
+    /// pages in one build supply one shared cache; each unique fragment is
+    /// then read and expanded once instead of once per consuming page.
+    include_cache: ?*include_mod.IncludeCache = null,
 };
 
 fn readIncludeFromProvider(ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) include_mod.IncludeError![]u8 {
@@ -312,16 +316,29 @@ fn prepareBody(
         .ptr = @ptrCast(p),
         .readFn = readIncludeFromProvider,
     } else null;
-    const expanded = include_mod.expandIncludesWithReader(
-        io,
-        content_dir,
-        include_reader,
-        gpa,
-        arena,
-        with_doc_links,
-        source_path,
-        &include_fail,
-    ) catch |err| {
+    const expanded = (if (options.include_cache) |cache|
+        include_mod.expandIncludesWithCache(
+            io,
+            content_dir,
+            include_reader,
+            gpa,
+            arena,
+            with_doc_links,
+            source_path,
+            &include_fail,
+            cache,
+        )
+    else
+        include_mod.expandIncludesWithReader(
+            io,
+            content_dir,
+            include_reader,
+            gpa,
+            arena,
+            with_doc_links,
+            source_path,
+            &include_fail,
+        )) catch |err| {
         include_mod.printDiagnostic(gpa, err, source_path, include_fail, options.diagnostics);
         return error.IncludeFailed;
     };

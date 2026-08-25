@@ -20,7 +20,8 @@
 //! Counter semantics:
 //! - `page_reads`: number of page source file reads (load, shared state,
 //!   heading harvest, render).
-//! - `include_reads`: number of transitive include file reads.
+//! - `include_reads`: number of transitive include file reads; memoization
+//!   (#760) counts each unique fragment once per build, not per consumer page.
 //! - `hash_bytes`: payload bytes fed into page fingerprints.
 //! - `link_resolutions`: local references resolved by the output link audit.
 //! - `fast_path_hits`: heading-harvest cache-key hits, incremental cached-page

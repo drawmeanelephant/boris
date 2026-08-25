@@ -191,6 +191,7 @@ pub fn buildSiteHeadingIndex(
     prior_harvest: ?*const ParsedHeadingHarvest,
     recorder: ?*timings.Recorder,
     sink: ?*diag.Collector,
+    include_cache: ?*include_mod.IncludeCache,
 ) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
     var index: wikilink.HeadingIndex = .{};
     errdefer index.deinit(gpa);
@@ -294,6 +295,7 @@ pub fn buildSiteHeadingIndex(
             .shared_doclink_map = if (shared_doclink_map) |*m| m else null,
             // Do not validate fragments while building the index they depend on.
             .diagnostics = sink,
+            .include_cache = include_cache,
         });
 
         var ids: std.ArrayList([]const u8) = .empty;
