@@ -2390,9 +2390,14 @@ fn publishEvidenceReports(
         .test_fail_write = options.test_fail_publication_checks_write,
         .outcomes_out = &check_outcomes,
     }) catch |err| {
-        const stderr = std.debug.lockStderr(&.{});
-        defer std.debug.unlockStderr();
-        writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        // Prose suppression is active under --watch-json and in unit-test
+        // binaries (#768): the same failure still fails the compile and
+        // reaches collectors/writer-injected assertions.
+        if (!diag.text_suppressed.load(.unordered)) {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
         return error.PublicationChecksFailed;
     };
     if (options.timings) |t| t.stop(.checks);
@@ -2400,9 +2405,11 @@ fn publishEvidenceReports(
     // A failed check never fails the committed target by design
     // (docs/contracts/publication-checks.md), but it must not be invisible:
     // surface every non-passing verdict even under --quiet, with the pointer
-    // to its per-finding evidence (#740, #741).
+    // to its per-finding evidence (#740, #741). The prose form is skipped
+    // where text diagnostics are suppressed (--watch-json, unit tests).
     for (check_outcomes.items) |outcome| {
         if (outcome.status == .passed or outcome.status == .not_applicable) continue;
+        if (diag.text_suppressed.load(.unordered)) continue;
         const stderr = std.debug.lockStderr(&.{});
         defer std.debug.unlockStderr();
         stderr.file_writer.interface.print(
@@ -2422,7 +2429,7 @@ fn publishEvidenceReports(
     }) catch |err| {
         if (options.publication_claims_failure_writer) |writer| {
             writePublicationClaimsFailure(writer, options.target_name, err) catch {};
-        } else {
+        } else if (!diag.text_suppressed.load(.unordered)) {
             const stderr = std.debug.lockStderr(&.{});
             defer std.debug.unlockStderr();
             writePublicationClaimsFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
@@ -2443,7 +2450,7 @@ fn publishEvidenceReports(
     }) catch |err| {
         if (options.publication_touches_failure_writer) |writer| {
             writePublicationTouchesFailure(writer, options.target_name, err) catch {};
-        } else {
+        } else if (!diag.text_suppressed.load(.unordered)) {
             const stderr = std.debug.lockStderr(&.{});
             defer std.debug.unlockStderr();
             writePublicationTouchesFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
@@ -2471,7 +2478,7 @@ fn publishEvidenceReports(
     }) catch |err| {
         if (options.publication_proof_pack_failure_writer) |writer| {
             writePublicationProofPackFailure(writer, options.target_name, err) catch {};
-        } else {
+        } else if (!diag.text_suppressed.load(.unordered)) {
             const stderr = std.debug.lockStderr(&.{});
             defer std.debug.unlockStderr();
             writePublicationProofPackFailure(&stderr.file_writer.interface, options.target_name, err) catch {};

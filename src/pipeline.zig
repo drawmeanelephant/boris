@@ -1112,8 +1112,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
 ///
 /// `quiet` (`--quiet`) drops warnings and info, which are chatter. Errors are
 /// always printed: a nonzero exit must explain itself even when the caller
-/// asked for silence.
+/// asked for silence. Suppressed entirely where diagnostic text is suppressed
+/// (`--watch-json`, unit-test binaries; see `diag.text_suppressed`).
 pub fn printDiagnostics(gpa: std.mem.Allocator, diags: []const diag.Diagnostic, quiet: bool) !void {
+    if (diag.text_suppressed.load(.unordered)) return;
     for (diags) |d| {
         if (quiet and d.severity != .error_) continue;
         const line = try diag.formatText(d, gpa);

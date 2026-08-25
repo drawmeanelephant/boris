@@ -720,6 +720,22 @@ pub fn build(b: *std.Build) void {
     );
     test_version_pin_step.dependOn(&version_pin_run.step);
 
+    // Phantom-failure guard (#768): a passing unit-test step must not echo
+    // captured stderr as a `failed command:` block. The nested build reuses
+    // the cached embed-wasm test binary, so the guard is cheap after a warm
+    // build and exercises the exact runner path that produced #768.
+    const quiet_pass_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-quiet-pass.sh",
+    });
+    quiet_pass_run.setCwd(b.path("."));
+    quiet_pass_run.has_side_effects = true;
+    const test_quiet_pass_step = b.step(
+        "test-quiet-pass",
+        "Run the green-run phantom-failure output guard",
+    );
+    test_quiet_pass_step.dependOn(&quiet_pass_run.step);
+
     // Teaching-layer link guard (#394): every relative markdown link in
     // README.md and docs/authoring-spine.md must resolve to a real file or
     // directory, and heading anchors must match GitHub-style slugs, so the
@@ -1843,6 +1859,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&init_run.step);
     test_step.dependOn(&reference_theme_run.step);
     test_step.dependOn(&version_pin_run.step);
+    test_step.dependOn(&quiet_pass_run.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_embed_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);

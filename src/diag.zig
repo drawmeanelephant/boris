@@ -207,11 +207,21 @@ pub fn sortDiagnostics(diags: []Diagnostic) void {
 /// When true, `printText` emits nothing. `boris watch --watch-json` replaces
 /// the prose diagnostic form with NDJSON events; structured collection via
 /// `Collector` is unaffected. The watch coordinator sets this for the
-/// duration of a `--watch-json` compile. Off everywhere else, so `--quiet`
-/// semantics ("never suppress the explanation for a nonzero exit") are
-/// untouched: this flag suppresses error text only when the same data is
-/// carried by the machine-readable stream.
-pub var text_suppressed: std.atomic.Value(bool) = .init(false);
+/// duration of a `--watch-json` compile. Off for the CLI outside that mode,
+/// so `--quiet` semantics ("never suppress the explanation for a nonzero
+/// exit") are untouched: this flag suppresses error text only when the same
+/// data is carried by the machine-readable stream.
+///
+/// Unit-test binaries are the one other default-on context: they compile with
+/// `builtin.is_test`, so expected negative-path prose (validation failures,
+/// publication-evidence failures) stays off stderr during green runs. The
+/// Zig 0.16 build runner captures a test binary's stderr and re-prints it on
+/// the step even when every test passes, appending a red `failed command:`
+/// line — indistinguishable from a real failure (#768). Test evidence flows
+/// through returned diagnostics, `Collector`s, and writer-injected buffers,
+/// not through this prose channel; a test binary run directly still fails
+/// loudly on unexpected errors via its own assertions and crash output.
+pub var text_suppressed: std.atomic.Value(bool) = .init(@import("builtin").is_test);
 
 /// Format `d` and print it to stderr, unless watch-json text suppression is
 /// active. This is the single choke point for formatted diagnostic text, so

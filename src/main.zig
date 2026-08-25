@@ -60,6 +60,16 @@ pub const Options = cli.Options;
 pub const Mode = cli.Mode;
 pub const parseOptions = cli.parseOptions;
 
+/// Error-path prose printer. Identical to `std.debug.print` in the CLI, but
+/// silent when diagnostic text is suppressed (`--watch-json`, unit-test
+/// binaries). Exit-code mapping tests assert on returned codes and
+/// collector/report data, not on this channel; suppressing it keeps expected
+/// negative-path prose off the build runner's captured stderr (#768).
+fn errPrint(comptime fmt: []const u8, args: anytype) void {
+    if (diag.text_suppressed.load(.unordered)) return;
+    std.debug.print(fmt, args);
+}
+
 const default_out = ".boris";
 const default_rag = "rag";
 const default_html = "dist";
@@ -114,7 +124,7 @@ fn mapPathError(err: anyerror) ?ExitCode {
         error.TargetOutputSymlink,
         error.WorkspaceEscape,
         => {
-            std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            errPrint("error: invalid target configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
         else => return null,
@@ -296,7 +306,7 @@ fn runPipelineIr(io: Io, gpa: std.mem.Allocator, opts: Options, recorder_ptr: ?*
         .timings = recorder_ptr,
     }) catch |err| {
         if (mapPathError(err)) |code| return code;
-        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
@@ -352,7 +362,7 @@ pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .quiet = true,
         .input_format = opts.input_format,
     }) catch |err| {
-        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
@@ -366,7 +376,7 @@ pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     }
 
     const page = findRecipeScalePage(&result, page_id) orelse {
-        std.debug.print("error: recipe page not found: {s}\n", .{page_id});
+        errPrint("error: recipe page not found: {s}\n", .{page_id});
         return .content_error;
     };
 
@@ -383,15 +393,15 @@ pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
     const bytes = recipe_scale_view.renderFromCompile(gpa, &result, page_id, factor, servings_view) catch |err| switch (err) {
         error.PageNotFound => {
-            std.debug.print("error: recipe page not found: {s}\n", .{page_id});
+            errPrint("error: recipe page not found: {s}\n", .{page_id});
             return .content_error;
         },
         error.AmountOverflow => {
-            std.debug.print("error: scaled amount overflow for {s}\n", .{page_id});
+            errPrint("error: scaled amount overflow for {s}\n", .{page_id});
             return .content_error;
         },
         else => {
-            std.debug.print("error: unable to render scaled view: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to render scaled view: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
@@ -399,7 +409,7 @@ pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
     if (opts.recipe_scale_out) |path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = bytes }) catch |err| {
-            std.debug.print("error: failed to write scaled view {s}: {s}\n", .{ path, @errorName(err) });
+            errPrint("error: failed to write scaled view {s}: {s}\n", .{ path, @errorName(err) });
             return .io_error;
         };
     }
@@ -407,11 +417,11 @@ pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     stdout_writer.interface.writeAll(bytes) catch |err| {
-        std.debug.print("error: unable to write scaled view: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to write scaled view: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     stdout_writer.interface.flush() catch |err| {
-        std.debug.print("error: unable to flush scaled view: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to flush scaled view: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     return .success;
@@ -443,7 +453,7 @@ pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorde
     defer request.deinit(gpa);
 
     const bytes = publication_plan.render(gpa, &request.plan) catch |err| {
-        std.debug.print("error: unable to render publication plan: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to render publication plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(bytes);
@@ -451,11 +461,11 @@ pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorde
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     stdout_writer.interface.writeAll(bytes) catch |err| {
-        std.debug.print("error: unable to write publication plan: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to write publication plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     stdout_writer.interface.flush() catch |err| {
-        std.debug.print("error: unable to flush publication plan: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to flush publication plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     return .success;
@@ -484,17 +494,17 @@ pub fn runNostrPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*t
     defer request.deinit(gpa);
 
     const config = request.plan.nostr orelse {
-        std.debug.print("error: profile declares no nostr section\n", .{});
+        errPrint("error: profile declares no nostr section\n", .{});
         return .usage;
     };
     if (!config.enabled) {
-        std.debug.print("error: nostr publication is disabled in this profile (set nostr.enabled)\n", .{});
+        errPrint("error: nostr publication is disabled in this profile (set nostr.enabled)\n", .{});
         return .usage;
     }
     const publication = request.plan.publication orelse {
         // validatePlan already refuses this pairing; keep the runner honest
         // rather than unwrapping a null on a future profile path.
-        std.debug.print("error: nostr publication requires a publication location\n", .{});
+        errPrint("error: nostr publication requires a publication location\n", .{});
         return .usage;
     };
 
@@ -515,12 +525,12 @@ pub fn runNostrPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*t
         .timings = recorder,
     }) catch |err| switch (err) {
         error.InvalidPubkey, error.InvalidNostrConfig, error.AbsolutePath => {
-            std.debug.print("error: invalid nostr configuration: {s}\n", .{@errorName(err)});
+            errPrint("error: invalid nostr configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
         else => {
             if (mapPathError(err)) |code| return code;
-            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+            errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
@@ -537,11 +547,11 @@ pub fn runNostrPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*t
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     stdout_writer.interface.writeAll(bytes) catch |err| {
-        std.debug.print("error: unable to write nostr publication plan: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to write nostr publication plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     stdout_writer.interface.flush() catch |err| {
-        std.debug.print("error: unable to flush nostr publication plan: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to flush nostr publication plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     return .success;
@@ -625,7 +635,7 @@ fn reportPublishError(err: anyerror) ExitCode {
             else => @errorName(err),
         },
     };
-    std.debug.print("error: standard-site publish: {s}\n", .{message});
+    errPrint("error: standard-site publish: {s}\n", .{message});
     return code;
 }
 
@@ -645,7 +655,7 @@ fn reportSessionError(err: anyerror) ExitCode {
         error.StoreLocked => "the session store is locked by another process",
         else => @errorName(err),
     };
-    std.debug.print("error: standard-site session: {s}\n", .{message});
+    errPrint("error: standard-site session: {s}\n", .{message});
     return .session;
 }
 
@@ -718,13 +728,13 @@ pub fn runStandardSiteLogin(io: Io, gpa: std.mem.Allocator, opts: Options, envir
     const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
     defer gpa.free(root);
     const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
-        std.debug.print("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer transport_std.destroy();
 
     const account = atproto_identity.discover(gpa, transport_std.client(), did_text) catch |err| {
-        std.debug.print("error: unable to resolve identity {s}: {s}\n", .{ did_text, @errorName(err) });
+        errPrint("error: unable to resolve identity {s}: {s}\n", .{ did_text, @errorName(err) });
         return .io_error;
     };
     var session = atproto_interactive_std.authorize(gpa, io, transport_std.client(), account) catch |err| {
@@ -758,7 +768,7 @@ const max_app_password_bytes = 1024;
 /// never appear in diagnostics, logs, evidence, or the human summary.
 pub fn runStandardSiteLoginAppPassword(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
     const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
-        std.debug.print("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer transport_std.destroy();
@@ -941,7 +951,7 @@ fn reportAppPasswordLoginError(err: anyerror) ExitCode {
             else => @errorName(err),
         },
     };
-    std.debug.print("error: standard-site login --app-password: {s}\n", .{message});
+    errPrint("error: standard-site login --app-password: {s}\n", .{message});
     return code;
 }
 
@@ -984,12 +994,12 @@ pub fn runStandardSiteLogout(io: Io, gpa: std.mem.Allocator, opts: Options, envi
     defer if (owned_did) |bytes| gpa.free(bytes);
     const did_text = if (opts.session_did) |text| text else blk: {
         const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
-            std.debug.print("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         defer transport_std.destroy();
         const resolved = resolveConfiguredDid(gpa, io, opts, transport_std.client()) catch |err| {
-            std.debug.print("error: standard-site logout: unable to resolve handle: {s}\n", .{@errorName(err)});
+            errPrint("error: standard-site logout: unable to resolve handle: {s}\n", .{@errorName(err)});
             return .usage;
         };
         owned_did = resolved;
@@ -1044,12 +1054,12 @@ pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, envir
     const session_root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
     defer gpa.free(session_root);
     const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
-        std.debug.print("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer transport_std.destroy();
     const did_owned = resolveConfiguredDid(gpa, io, opts, transport_std.client()) catch |err| {
-        std.debug.print("error: standard-site smoke: unable to resolve identity: {s}\n", .{@errorName(err)});
+        errPrint("error: standard-site smoke: unable to resolve identity: {s}\n", .{@errorName(err)});
         return .usage;
     };
     defer gpa.free(did_owned);
@@ -1059,9 +1069,9 @@ pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, envir
     const stored = sessions.hasDocument(did_text) catch |err| return reportSessionError(err);
     if (!stored) {
         if (opts.session_handle) |handle| {
-            std.debug.print("error: standard-site smoke: no stored session — run `boris standard-site login --app-password --handle {s}` first\n", .{handle});
+            errPrint("error: standard-site smoke: no stored session — run `boris standard-site login --app-password --handle {s}` first\n", .{handle});
         } else {
-            std.debug.print("error: standard-site smoke: no stored session — run `boris standard-site login --app-password --did {s}` first\n", .{did_text});
+            errPrint("error: standard-site smoke: no stored session — run `boris standard-site login --app-password --did {s}` first\n", .{did_text});
         }
         return .session;
     }
@@ -1089,38 +1099,38 @@ pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, envir
 
     var result = standard_site_smoke.smoke(gpa, &runtime, &config) catch |err| {
         const code = classifySmokeError(err);
-        std.debug.print("error: standard-site smoke: {s}\n", .{@errorName(err)});
+        errPrint("error: standard-site smoke: {s}\n", .{@errorName(err)});
         return code;
     };
     defer result.deinit(gpa);
 
     const rendered = standard_site_smoke.renderResult(gpa, &result) catch |err| {
-        std.debug.print("error: unable to render the smoke result: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to render the smoke result: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(rendered);
 
     if (opts.smoke_out) |out_path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = rendered }) catch |err| {
-            std.debug.print("error: unable to write the smoke result: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the smoke result: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     } else {
         var stdout_buffer: [4096]u8 = undefined;
         var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
         stdout_writer.interface.writeAll(rendered) catch |err| {
-            std.debug.print("error: unable to write the smoke result: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the smoke result: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         stdout_writer.interface.flush() catch |err| {
-            std.debug.print("error: unable to flush the smoke result: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to flush the smoke result: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     }
 
     if (!opts.quiet) {
         const summary = standard_site_smoke.renderHumanSummary(gpa, &result) catch |err| {
-            std.debug.print("error: unable to render the smoke summary: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to render the smoke summary: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         defer gpa.free(summary);
@@ -1156,7 +1166,7 @@ fn buildStandardSiteSurfaces(
     out: *standard_site.VerificationSurfaces,
 ) ExitCode {
     out.* = standard_site.verificationSurfaces(gpa, target_config, projection) catch |err| {
-        std.debug.print("error: unable to compute verification surfaces: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to compute verification surfaces: {s}\n", .{@errorName(err)});
         return .content_error;
     };
     return .success;
@@ -1304,7 +1314,7 @@ fn buildStandardSiteProjection(io: Io, gpa: std.mem.Allocator, opts: Options, ou
     const target_config = switch (request.plan.publication orelse return reportPublicationPlanConfigError(error.InvalidPublication)) {
         .standard_site => |*config| config,
         .github_pages => {
-            std.debug.print("error: profile targets github-pages; standard-site commands require a standard-site profile\n", .{});
+            errPrint("error: profile targets github-pages; standard-site commands require a standard-site profile\n", .{});
             return .usage;
         },
     };
@@ -1312,7 +1322,7 @@ fn buildStandardSiteProjection(io: Io, gpa: std.mem.Allocator, opts: Options, ou
     // Resolve the profile-relative content root and compile the page set with
     // full validation (duplicate ids, topology, encoding) before any output.
     const content_root = std.fs.path.resolve(gpa, &.{ request.workspace.root, request.plan.input }) catch |err| {
-        std.debug.print("error: unable to resolve content root: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to resolve content root: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(content_root);
@@ -1327,7 +1337,7 @@ fn buildStandardSiteProjection(io: Io, gpa: std.mem.Allocator, opts: Options, ou
         .quiet = opts.quiet,
         .input_format = input_format,
     }) catch |err| {
-        std.debug.print("error: unable to compile content: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to compile content: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
@@ -1349,7 +1359,7 @@ fn buildStandardSiteProjection(io: Io, gpa: std.mem.Allocator, opts: Options, ou
     defer input_arena.deinit();
     const arena = input_arena.allocator();
     var content_dir = Io.Dir.cwd().openDir(io, content_root, .{}) catch |err| {
-        std.debug.print("error: unable to open the content root for the plain-text projection: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to open the content root for the plain-text projection: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer content_dir.close(io);
@@ -1357,7 +1367,7 @@ fn buildStandardSiteProjection(io: Io, gpa: std.mem.Allocator, opts: Options, ou
     defer page_inputs.deinit(gpa);
     for (result.pages.items) |node| {
         const output_path = identity.safeOutputRelativePath(arena, node.id) catch |err| {
-            std.debug.print("error: unable to derive page output path: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to derive page output path: {s}\n", .{@errorName(err)});
             return .content_error;
         };
         // Deterministic semantic plain-text projection (#480). Populate the
@@ -1384,7 +1394,7 @@ fn buildStandardSiteProjection(io: Io, gpa: std.mem.Allocator, opts: Options, ou
             .tags = node.tags,
             .text_content = text_content,
         }) catch |err| {
-            std.debug.print("error: unable to build page projection: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to build page projection: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     }
@@ -1394,7 +1404,7 @@ fn buildStandardSiteProjection(io: Io, gpa: std.mem.Allocator, opts: Options, ou
         .site_title = if (request.plan.site) |site| site.title else null,
         .pages = page_inputs.items,
     }) catch |err| {
-        std.debug.print("error: unable to project the Standard.site plan: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to project the Standard.site plan: {s}\n", .{@errorName(err)});
         return .content_error;
     };
     defer if (!transferred) projection.deinit(gpa);
@@ -1426,25 +1436,25 @@ pub fn runStandardSitePlan(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCo
     defer deinitVerificationSurfaces(gpa, &surfaces);
 
     const plan = standard_site.renderPlan(gpa, target_config, projection, &surfaces) catch |err| {
-        std.debug.print("error: unable to render the Standard.site plan: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to render the Standard.site plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(plan);
 
     if (opts.plan_out) |out_path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = plan }) catch |err| {
-            std.debug.print("error: unable to write the Standard.site plan: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the Standard.site plan: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     } else {
         var stdout_buffer: [4096]u8 = undefined;
         var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
         stdout_writer.interface.writeAll(plan) catch |err| {
-            std.debug.print("error: unable to write the Standard.site plan: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the Standard.site plan: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         stdout_writer.interface.flush() catch |err| {
-            std.debug.print("error: unable to flush the Standard.site plan: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to flush the Standard.site plan: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     }
@@ -1466,25 +1476,25 @@ pub fn runStandardSiteRecords(io: Io, gpa: std.mem.Allocator, opts: Options) Exi
     const projection = &proj.projection;
 
     const records = standard_site.renderRecords(gpa, projection) catch |err| {
-        std.debug.print("error: unable to render the Standard.site records: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to render the Standard.site records: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(records);
 
     if (opts.records_out) |out_path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = records }) catch |err| {
-            std.debug.print("error: unable to write the Standard.site records: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the Standard.site records: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     } else {
         var stdout_buffer: [4096]u8 = undefined;
         var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
         stdout_writer.interface.writeAll(records) catch |err| {
-            std.debug.print("error: unable to write the Standard.site records: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the Standard.site records: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         stdout_writer.interface.flush() catch |err| {
-            std.debug.print("error: unable to flush the Standard.site records: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to flush the Standard.site records: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     }
@@ -1513,7 +1523,7 @@ pub fn runStandardSiteVerify(io: Io, gpa: std.mem.Allocator, opts: Options) Exit
     defer deinitVerificationSurfaces(gpa, &surfaces);
 
     var dist_dir = Io.Dir.cwd().openDir(io, opts.verify_dist, .{}) catch |err| {
-        std.debug.print("error: unable to open the built output directory `{s}` for verification: {s}\n", .{ opts.verify_dist, @errorName(err) });
+        errPrint("error: unable to open the built output directory `{s}` for verification: {s}\n", .{ opts.verify_dist, @errorName(err) });
         return .io_error;
     };
     defer dist_dir.close(io);
@@ -1526,7 +1536,7 @@ pub fn runStandardSiteVerify(io: Io, gpa: std.mem.Allocator, opts: Options) Exit
         const actual = dist_dir.readFileAlloc(io, checked_path, gpa, .unlimited) catch |err| switch (err) {
             error.FileNotFound => null,
             else => {
-                std.debug.print("error: unable to read the well-known surface for verification: {s}\n", .{@errorName(err)});
+                errPrint("error: unable to read the well-known surface for verification: {s}\n", .{@errorName(err)});
                 return .io_error;
             },
         };
@@ -1545,7 +1555,7 @@ pub fn runStandardSiteVerify(io: Io, gpa: std.mem.Allocator, opts: Options) Exit
             const html = dist_dir.readFileAlloc(io, output_path, gpa, .unlimited) catch |err| switch (err) {
                 error.FileNotFound => null,
                 else => {
-                    std.debug.print("error: unable to read the built page `{s}` for verification: {s}\n", .{ output_path, @errorName(err) });
+                    errPrint("error: unable to read the built page `{s}` for verification: {s}\n", .{ output_path, @errorName(err) });
                     return .io_error;
                 },
             };
@@ -1558,7 +1568,7 @@ pub fn runStandardSiteVerify(io: Io, gpa: std.mem.Allocator, opts: Options) Exit
             .at_uri = document.at_uri,
             .status = status,
         }) catch |err| {
-            std.debug.print("error: unable to build the verification result: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to build the verification result: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     }
@@ -1568,31 +1578,31 @@ pub fn runStandardSiteVerify(io: Io, gpa: std.mem.Allocator, opts: Options) Exit
         .checked_path = checked_path,
         .required_public_url = w.required_public_url,
     }, doc_results.items) catch |err| {
-        std.debug.print("error: unable to render the verification result: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to render the verification result: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(result_bytes);
 
     if (opts.verify_out) |out_path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = result_bytes }) catch |err| {
-            std.debug.print("error: unable to write the verification result: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the verification result: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     } else {
         var stdout_buffer: [4096]u8 = undefined;
         var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
         stdout_writer.interface.writeAll(result_bytes) catch |err| {
-            std.debug.print("error: unable to write the verification result: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the verification result: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         stdout_writer.interface.flush() catch |err| {
-            std.debug.print("error: unable to flush the verification result: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to flush the verification result: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     }
 
     if (!overall_passed) {
-        std.debug.print("error: standard-site verify: the built output does not match the projection (see the result artifact)\n", .{});
+        errPrint("error: standard-site verify: the built output does not match the projection (see the result artifact)\n", .{});
         return .verification;
     }
     return .success;
@@ -1621,7 +1631,7 @@ pub fn runStandardSitePublish(io: Io, gpa: std.mem.Allocator, opts: Options, env
     defer deinitVerificationSurfaces(gpa, &surfaces);
 
     const rendered_plan = standard_site.renderPlan(gpa, target_config, projection, &surfaces) catch |err| {
-        std.debug.print("error: unable to render the Standard.site plan: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to render the Standard.site plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(rendered_plan);
@@ -1632,12 +1642,12 @@ pub fn runStandardSitePublish(io: Io, gpa: std.mem.Allocator, opts: Options, env
     var plan_digest: [64]u8 = standard_site_reconcile.sha256HexLower(rendered_plan);
     if (opts.plan_path) |plan_path| {
         const committed = Io.Dir.cwd().readFileAlloc(io, plan_path, gpa, .limited(max_standard_site_plan_bytes + 1)) catch |err| {
-            std.debug.print("error: unable to read the committed Standard.site plan: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to read the committed Standard.site plan: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         defer gpa.free(committed);
         standard_site_publish.validatePlanMatches(rendered_plan, committed) catch {
-            std.debug.print("error: standard-site publish: committed plan does not match the freshly rendered plan (PlanDrift); re-render and review before publishing\n", .{});
+            errPrint("error: standard-site publish: committed plan does not match the freshly rendered plan (PlanDrift); re-render and review before publishing\n", .{});
             return .verification;
         };
         plan_bytes = committed;
@@ -1649,7 +1659,7 @@ pub fn runStandardSitePublish(io: Io, gpa: std.mem.Allocator, opts: Options, env
     // reuses a stored session (refreshing when needed) and only opens the
     // browser when no stored session exists.
     const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
-        std.debug.print("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer transport_std.destroy();
@@ -1693,32 +1703,32 @@ pub fn runStandardSitePublish(io: Io, gpa: std.mem.Allocator, opts: Options, env
     defer evidence.deinit(gpa);
 
     const evidence_bytes = standard_site_reconcile.renderEvidence(gpa, &evidence) catch |err| {
-        std.debug.print("error: unable to render publish evidence: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to render publish evidence: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(evidence_bytes);
 
     if (opts.publish_out) |out_path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = evidence_bytes }) catch |err| {
-            std.debug.print("error: unable to write publish evidence: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write publish evidence: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     } else {
         var stdout_buffer: [4096]u8 = undefined;
         var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
         stdout_writer.interface.writeAll(evidence_bytes) catch |err| {
-            std.debug.print("error: unable to write publish evidence: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write publish evidence: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         stdout_writer.interface.flush() catch |err| {
-            std.debug.print("error: unable to flush publish evidence: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to flush publish evidence: {s}\n", .{@errorName(err)});
             return .io_error;
         };
     }
 
     if (!opts.quiet) {
         const summary = standard_site_publish.renderHumanSummary(gpa, &evidence) catch |err| {
-            std.debug.print("error: unable to render the publish summary: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to render the publish summary: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         defer gpa.free(summary);
@@ -1726,7 +1736,7 @@ pub fn runStandardSitePublish(io: Io, gpa: std.mem.Allocator, opts: Options, env
     }
 
     if (!evidence.overall_passed) {
-        std.debug.print("error: standard-site publish: some records failed; the evidence records exactly what landed\n", .{});
+        errPrint("error: standard-site publish: some records failed; the evidence records exactly what landed\n", .{});
         return .partial_publication;
     }
     return .success;
@@ -1757,11 +1767,11 @@ pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .limited(nostr_sign.max_plan_bytes + 1),
     ) catch |err| switch (err) {
         error.StreamTooLong => {
-            std.debug.print("error: plan artifact exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
+            errPrint("error: plan artifact exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
             return .usage;
         },
         else => {
-            std.debug.print("error: unable to read the plan artifact: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to read the plan artifact: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
@@ -1777,11 +1787,11 @@ pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .limited(nostr_sign.max_plan_bytes + 1),
         ) catch |err| switch (err) {
             error.StreamTooLong => {
-                std.debug.print("error: prior signed bundle exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
+                errPrint("error: prior signed bundle exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
                 return .usage;
             },
             else => {
-                std.debug.print("error: unable to read the prior signed bundle: {s}\n", .{@errorName(err)});
+                errPrint("error: unable to read the prior signed bundle: {s}\n", .{@errorName(err)});
                 return .io_error;
             },
         };
@@ -1795,17 +1805,17 @@ pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buffer);
     const raw_key = stdin_reader.interface.takeDelimiter('\n') catch |err| switch (err) {
         error.StreamTooLong => {
-            std.debug.print("error: secret key on stdin exceeds the {d}-byte bound\n", .{nostr_sign.max_secret_bytes});
+            errPrint("error: secret key on stdin exceeds the {d}-byte bound\n", .{nostr_sign.max_secret_bytes});
             return .usage;
         },
         error.ReadFailed => {
-            std.debug.print("error: unable to read the secret key from stdin\n", .{});
+            errPrint("error: unable to read the secret key from stdin\n", .{});
             return .io_error;
         },
     };
     const key = std.mem.trim(u8, raw_key orelse "", " \t\r\n");
     if (key.len == 0) {
-        std.debug.print("error: empty secret key on stdin (pipe hex or nsec; never argv, profile, or environment)\n", .{});
+        errPrint("error: empty secret key on stdin (pipe hex or nsec; never argv, profile, or environment)\n", .{});
         return .usage;
     }
 
@@ -1815,7 +1825,7 @@ pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .created_at = opts.nostr_created_at,
         .prior = prior_owned,
     }) catch |err| {
-        std.debug.print("error: signing failed: {s}\n", .{@errorName(err)});
+        errPrint("error: signing failed: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
@@ -1828,7 +1838,7 @@ pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
     if (opts.nostr_out_path) |out_path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = bundle }) catch |err| {
-            std.debug.print("error: unable to write the signed-event bundle: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the signed-event bundle: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         if (!opts.quiet) {
@@ -1840,11 +1850,11 @@ pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     stdout_writer.interface.writeAll(bundle) catch |err| {
-        std.debug.print("error: unable to write the signed-event bundle: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to write the signed-event bundle: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     stdout_writer.interface.flush() catch |err| {
-        std.debug.print("error: unable to flush the signed-event bundle: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to flush the signed-event bundle: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     if (!opts.quiet) {
@@ -1873,11 +1883,11 @@ pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .limited(nostr_sign.max_plan_bytes + 1),
     ) catch |err| switch (err) {
         error.StreamTooLong => {
-            std.debug.print("error: plan artifact exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
+            errPrint("error: plan artifact exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
             return .usage;
         },
         else => {
-            std.debug.print("error: unable to read the plan artifact: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to read the plan artifact: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
@@ -1890,11 +1900,11 @@ pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .limited(nostr_sign.max_plan_bytes + 1),
     ) catch |err| switch (err) {
         error.StreamTooLong => {
-            std.debug.print("error: signed bundle exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
+            errPrint("error: signed bundle exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
             return .usage;
         },
         else => {
-            std.debug.print("error: unable to read the signed bundle: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to read the signed bundle: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
@@ -1904,7 +1914,7 @@ pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .plan = plan_bytes,
         .bundle = bundle_bytes,
     }) catch |err| {
-        std.debug.print("error: publishing failed: {s}\n", .{@errorName(err)});
+        errPrint("error: publishing failed: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
@@ -1917,7 +1927,7 @@ pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
     if (opts.nostr_out_path) |out_path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = report }) catch |err| {
-            std.debug.print("error: unable to write the publish report: {s}\n", .{@errorName(err)});
+            errPrint("error: unable to write the publish report: {s}\n", .{@errorName(err)});
             return .io_error;
         };
         if (!opts.quiet) {
@@ -1930,11 +1940,11 @@ pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     stdout_writer.interface.writeAll(report) catch |err| {
-        std.debug.print("error: unable to write the publish report: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to write the publish report: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     stdout_writer.interface.flush() catch |err| {
-        std.debug.print("error: unable to flush the publish report: {s}\n", .{@errorName(err)});
+        errPrint("error: unable to flush the publish report: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     if (!opts.quiet) {
@@ -1961,15 +1971,15 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*tim
         error.TargetOutputSymlink,
         error.WorkspaceEscape,
         => {
-            std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            errPrint("error: invalid target configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
         error.InvalidScope, error.OversizedBlock => {
-            std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
+            errPrint("error: export projection failed: {s}\n", .{@errorName(err)});
             return .content_error;
         },
         else => {
-            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+            errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
@@ -2009,7 +2019,7 @@ pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         .timings = recorder,
     }) catch |err| {
         if (mapPathError(err)) |code| return code;
-        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
@@ -2044,19 +2054,19 @@ pub fn runRss(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings
         if (mapPathError(err)) |code| return code;
         switch (err) {
             error.InvalidSiteUrl, error.InvalidLimit, error.AbsolutePath => {
-                std.debug.print("error: invalid RSS configuration: {s}\n", .{@errorName(err)});
+                errPrint("error: invalid RSS configuration: {s}\n", .{@errorName(err)});
                 return .usage;
             },
             error.PublicationLocationMismatch => {
-                std.debug.print("error: RSS publication URL does not match the declared Pages location\n", .{});
+                errPrint("error: RSS publication URL does not match the declared Pages location\n", .{});
                 return .content_error;
             },
             error.InvalidXml => {
-                std.debug.print("error: RSS projection validation failed: {s}\n", .{@errorName(err)});
+                errPrint("error: RSS projection validation failed: {s}\n", .{@errorName(err)});
                 return .content_error;
             },
             else => {
-                std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+                errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
                 return .io_error;
             },
         }
@@ -2084,7 +2094,7 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
         .input_format = opts.input_format,
         .timings = recorder,
     }) catch |err| {
-        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
@@ -2141,14 +2151,14 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
             }
         }
         if (!found) {
-            std.debug.print("error: impact target not found: {s}\n", .{id});
+            errPrint("error: impact target not found: {s}\n", .{id});
             return .usage;
         }
         if (requested == null) requested = .{ .type = .source, .value = id };
     }
 
     var report = intelligence.analyze(gpa, pages.items, edges.items, .{ .impact = requested }) catch |err| {
-        std.debug.print("error: analysis failed: {s}\n", .{@errorName(err)});
+        errPrint("error: analysis failed: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer report.deinit();
@@ -2161,7 +2171,7 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
 
     if (opts.analysis_report) |path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = rendered }) catch |err| {
-            std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+            errPrint("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
             return .io_error;
         };
     } else {
@@ -2263,7 +2273,7 @@ fn writeHtmlReport(
     }) catch return;
     defer gpa.free(rendered);
     Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = rendered }) catch |err| {
-        std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+        errPrint("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
     };
 }
 
@@ -2494,15 +2504,15 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings
         error.TargetOutputSymlink,
         error.WorkspaceEscape,
         => {
-            std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            errPrint("error: invalid target configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
         error.InvalidScope, error.OversizedBlock, error.SeparatorCollision => {
-            std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
+            errPrint("error: export projection failed: {s}\n", .{@errorName(err)});
             return .content_error;
         },
         else => {
-            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+            errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
@@ -2792,8 +2802,8 @@ fn mapHtmlError(
         error.SitemapSiteUrlWithoutOutput,
         error.AmbiguousSitemapTargets,
         => {
-            std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
-            if (targets.len > 0) {
+            errPrint("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            if (targets.len > 0 and !diag.text_suppressed.load(.unordered)) {
                 std.debug.print("configured targets (canonical order):\n", .{});
                 target.printTargetConfigLines(targets, global_layout);
             }
@@ -2824,7 +2834,7 @@ fn mapHtmlError(
         error.InputFormatMismatch,
         => return .content_error,
         error.MultiTargetIoFailed => {
-            std.debug.print("error: one or more HTML targets failed due to I/O or a system error\n", .{});
+            errPrint("error: one or more HTML targets failed due to I/O or a system error\n", .{});
             return .io_error;
         },
         // The target commit is already visible when publication checks fail;
@@ -2862,11 +2872,11 @@ fn mapHtmlError(
         error.FooterSymlink,
         error.FooterInvalidUtf8,
         => {
-            std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});
+            errPrint("error: content or layout failure: {s}\n", .{@errorName(err)});
             return .content_error;
         },
         else => {
-            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+            errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     }
@@ -2883,14 +2893,14 @@ pub fn main(init: std.process.Init) u8 {
     const cold = init.arena.allocator();
 
     const args_z = init.minimal.args.toSlice(cold) catch {
-        std.debug.print("error: failed to read process arguments\n", .{});
+        errPrint("error: failed to read process arguments\n", .{});
         return ExitCode.io_error.int();
     };
 
     var args_list: std.ArrayList([]const u8) = .empty;
     defer args_list.deinit(cold);
     args_list.ensureTotalCapacity(cold, args_z.len) catch {
-        std.debug.print("error: out of memory parsing arguments\n", .{});
+        errPrint("error: out of memory parsing arguments\n", .{});
         return ExitCode.io_error.int();
     };
     for (args_z) |a| {
