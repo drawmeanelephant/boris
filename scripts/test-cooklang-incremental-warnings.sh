@@ -13,7 +13,7 @@
 # The generated tree and logs live under the ignored .zig-cache tree.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 BORIS="./zig-out/bin/boris"
@@ -24,7 +24,7 @@ OUT=".zig-cache/cooklang-incremental-warnings"
 rm -rf "$OUT"
 mkdir -p "$OUT/logs"
 # Absolute, so every path below stays correct after `cd "$WORK"`.
-OUT="$(cd "$OUT" && pwd)"
+OUT="$(cd "$OUT" && pwd -P)"
 WORK="$OUT/work"
 
 note() { printf '==> %s\n' "$*"; }

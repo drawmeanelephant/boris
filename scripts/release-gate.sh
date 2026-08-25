@@ -3,7 +3,7 @@
 # See docs/RELEASE-GATE.md.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 GATE_DIR=".release-gate"

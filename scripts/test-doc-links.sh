@@ -19,7 +19,7 @@
 # associative arrays, no bash-4+isms — a vacuous pass would defeat the guard.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 failures=0
