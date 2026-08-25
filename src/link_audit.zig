@@ -293,6 +293,10 @@ fn auditOne(
     /// only when a finding is emitted.
     offset: usize,
     lines: *LineCounter,
+    /// Per-document scratch for common-route resolution, owned by the caller so
+    /// the audit's per-reference hot path performs no stack poisoning or other
+    /// per-reference setup.
+    fast_scratch: []u8,
 ) !void {
     if (isSameDocumentTarget(target) and !has_effective_base) return;
 
@@ -329,8 +333,7 @@ fn auditOne(
     // resolved by the audit — the per-reference hot path (observational only).
     if (opts.resolution_counter) |counter| counter.* += 1;
 
-    var fast_path_buffer: [route_resolver.fast_path_buffer_bytes]u8 = undefined;
-    if (route_resolver.tryResolveFastPath(resolution_source_path, route_target, fast_path_buffer[0..])) |resolved| {
+    if (route_resolver.tryResolveFastPath(resolution_source_path, route_target, fast_scratch)) |resolved| {
         if (opts.fast_path_counter) |counter| counter.* += 1;
         if (!intended.contains(resolved)) {
             if (!(opts.allow_markdown_literals and hasMarkdownExtension(resolved))) {
@@ -367,6 +370,10 @@ pub fn auditDocumentWithOptions(
     var base_source_path: ?[]u8 = null;
     defer if (base_source_path) |path| gpa.free(path);
     var lines: LineCounter = .{ .html = html };
+    // One resolution scratch per document, not per reference: a 4 KiB buffer
+    // re-declared inside `auditOne` is stack-poisoned (memset) on every call,
+    // which dominated large audits.
+    var fast_path_buffer: [route_resolver.fast_path_buffer_bytes]u8 = undefined;
     while (i < html.len) {
         // Vectorized search for the next tag start instead of probing every
         // byte; each byte is still visited at most once across the document.
@@ -434,15 +441,15 @@ pub fn auditDocumentWithOptions(
             }
         }
         if (href) |target| {
-            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "href", opts, findings, i, &lines);
+            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "href", opts, findings, i, &lines, &fast_path_buffer);
         }
         if (src) |target| {
-            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "src", opts, findings, i, &lines);
+            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "src", opts, findings, i, &lines, &fast_path_buffer);
         }
         if (is_meta) {
             if (meta_content) |target| {
                 if (requiresPublicLocation(tag.name, slice, "content")) {
-                    try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "content", opts, findings, i, &lines);
+                    try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "content", opts, findings, i, &lines, &fast_path_buffer);
                 }
             }
         }
