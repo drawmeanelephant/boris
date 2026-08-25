@@ -428,7 +428,9 @@ test "no payload reread: rewriting payload bytes leaves prior touches untouched"
 /// by PR #294 (first Touch Atlas implementation). This change is a pure
 /// ownership cleanup and must not alter a single emitted byte; the golden
 /// captures the full report (36834 bytes) and pins its SHA-256.
-const touches_golden_sha256 = "6e3874eb0bcd5782c537889b18841337f94de68c07ffd902c16e10fe7efc634d";
+/// Re-pinned for #778: code-span word boundaries in `search-index.json`
+/// (an inventoried artifact) shift every downstream evidence digest.
+const touches_golden_sha256 = "ec7119b5fc13de63adb99f1ffa639260b76f6aa91360f4ed6f091223e62e2edb";
 const touches_golden_len = 36835;
 
 test "touches emission remains byte-identical to the PR #294 golden" {

@@ -54,6 +54,30 @@ const recipe_scale = @import("recipe_scale.zig");
 const recipe_scale_view = @import("recipe_scale_view.zig");
 const main_profile_loader = @import("main_profile_loader.zig");
 const main_dispatch = @import("main_dispatch.zig");
+const build_info_options = @import("build_info");
+
+/// Build provenance (#776): the VCS revision this binary was compiled from,
+/// or "" when the build could not detect one. Opaque token; never alters the
+/// compiler id, exit codes, or artifact schemas.
+pub const vcs_revision = build_info_options.vcs_revision;
+
+/// One-line JSON provenance document for `--build-info` (#776). Deterministic
+/// for a given binary: fixed key order, no timestamps or host facts beyond
+/// the baked revision token.
+pub fn renderBuildInfoJson(gpa: std.mem.Allocator) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    try out.appendSlice(gpa, "{\"format\": ");
+    try json_out.writeString(&out, gpa, "boris-build-info");
+    try out.appendSlice(gpa, ", \"schemaVersion\": ");
+    try json_out.writeString(&out, gpa, "1");
+    try out.appendSlice(gpa, ", \"version\": ");
+    try json_out.writeString(&out, gpa, pipeline.compiler_id);
+    try out.appendSlice(gpa, ", \"vcsRevision\": ");
+    try json_out.writeString(&out, gpa, vcs_revision);
+    try out.appendSlice(gpa, "}\n");
+    return out.toOwnedSlice(gpa);
+}
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
@@ -96,7 +120,26 @@ const ProdRunner = struct {
         stdout_writer.interface.flush() catch {};
     }
 
+    /// One-line machine-readable provenance document on stdout (#776). The
+    /// base compiler id is unchanged (`--version` keeps its exact contract);
+    /// this additive query is what distinguishes two builds of the same
+    /// version. Errors are swallowed: informational output never changes the
+    /// exit code.
+    pub fn printBuildInfo(self: *const @This()) void {
+        const bytes = renderBuildInfoJson(self.gpa) catch return;
+        defer self.gpa.free(bytes);
+        var stdout_buffer: [512]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(self.io, &stdout_buffer);
+        stdout_writer.interface.writeAll(bytes) catch return;
+        stdout_writer.interface.flush() catch {};
+    }
+
     pub fn reportUsage(_: *const @This(), err: cli.ParseError, bad_arg: ?[]const u8, detail: *const cli.ParseErrorDetail) void {
+        // The exit-2 path stays short (#777): the self-attributing cause line
+        // (#761/#764) plus one synopsis line. Full option detail is opt-in via
+        // `--help`, so scripts and CI logs keep the cause visible instead of
+        // burying it under ~180 lines of help text. `standard-site` keeps its
+        // contracted subcommand-family list (docs/contracts/cli.md).
         cli.printParseErrorDetail(err, bad_arg, detail);
         switch (err) {
             error.MissingStandardSiteSubcommand,
@@ -105,7 +148,7 @@ const ProdRunner = struct {
             error.MissingStandardSiteIdentity,
             error.ConflictingStandardSiteFlags,
             => cli.printStandardSiteUsage(),
-            else => cli.printUsage(),
+            else => std.debug.print("usage: boris <command> [options] (run boris --help for the full option list)\n", .{}),
         }
     }
 
@@ -2213,7 +2256,7 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*ti
         .timings = recorder,
         .diagnostics = collector_ptr,
     }) catch |err| {
-        const code = mapHtmlError(err, opts.targets.items, layout_path);
+        const code = mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
         appendEscapedDiagnostic(collector_ptr, err, code);
         writeHtmlReport(io, gpa, opts, collector_ptr, false, out_dir, false);
         return code;
@@ -2264,7 +2307,7 @@ fn writeHtmlReport(
     var proof_arena = std.heap.ArenaAllocator.init(gpa);
     defer proof_arena.deinit();
     const proof = if (include_proof) readProofSection(io, proof_arena.allocator(), out_dir) else null;
-    const rendered = html_report.renderHtmlReport(gpa, pipeline.compiler_id, .{
+    const rendered = html_report.renderHtmlReportVcs(gpa, pipeline.compiler_id, vcs_revision, .{
         .ok = ok,
         .content_root = opts.input_dir,
         .out_dir = out_dir,
@@ -2640,16 +2683,16 @@ fn runValidateWatch(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     defer watcher.deinit();
 
     addWatchRoots(gpa, opts, &watcher) catch |err| {
-        return mapHtmlError(err, opts.targets.items, opts.html_layout);
+        return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
     };
 
     var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
-        return mapHtmlError(err, opts.targets.items, opts.html_layout);
+        return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
     };
     defer coord.deinit();
 
     coord.run() catch |err| {
-        return mapHtmlError(err, opts.targets.items, opts.html_layout);
+        return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
     };
     return .success;
 }
@@ -2664,16 +2707,16 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         defer watcher.deinit();
 
         addWatchRoots(gpa, opts, &watcher) catch |err| {
-            return mapHtmlError(err, opts.targets.items, layout_path);
+            return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
         };
 
         var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
-            return mapHtmlError(err, opts.targets.items, layout_path);
+            return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
         };
         defer coord.deinit();
 
         coord.run() catch |err| {
-            return mapHtmlError(err, opts.targets.items, layout_path);
+            return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
         };
 
         return .success;
@@ -2714,7 +2757,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .standard_site_verification = verification,
             .nostr_head = nostr_head,
         }) catch |err| {
-            const code = mapHtmlError(err, opts.targets.items, layout_path);
+            const code = mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
             appendEscapedDiagnostic(collector_ptr, err, code);
             writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir, false);
             return code;
@@ -2744,7 +2787,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .standard_site_verification = verification,
             .nostr_head = nostr_head,
         }) catch |err| {
-            const code = mapHtmlError(err, &.{}, layout_path);
+            const code = mapHtmlError(err, &.{}, layout_path, opts.input_dir);
             appendEscapedDiagnostic(collector_ptr, err, code);
             writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir, false);
             return code;
@@ -2780,6 +2823,7 @@ fn mapHtmlError(
     err: anyerror,
     targets: []const target.TargetSpec,
     global_layout: []const u8,
+    input_root: []const u8,
 ) ExitCode {
     switch (err) {
         // Target configuration / path isolation — usage (exit 2), not I/O.
@@ -2835,6 +2879,14 @@ fn mapHtmlError(
         => return .content_error,
         error.MultiTargetIoFailed => {
             errPrint("error: one or more HTML targets failed due to I/O or a system error\n", .{});
+            return .io_error;
+        },
+        // Missing content root keeps the EIO exit class but names the probed
+        // path, matching the IR pipeline's diagnostic wording, so a wrong-cwd
+        // invocation reads as an invocation problem (#779).
+        error.ContentDirMissing => {
+            errPrint("error: content root \"{s}\" not found or not a directory\n", .{input_root});
+            errPrint("remediation: create the content directory or pass --input=DIR\n", .{});
             return .io_error;
         },
         // The target commit is already visible when publication checks fail;
@@ -2943,6 +2995,21 @@ const SilentRunner = struct {
     }
 };
 
+test "renderBuildInfoJson: closed shape, stable key order, base version" {
+    // #776: the provenance document must never leak into the compiler id and
+    // must keep a fixed key order for downstream consumers.
+    const bytes = try renderBuildInfoJson(std.testing.allocator);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expect(std.mem.startsWith(u8, bytes, "{\"format\": \"boris-build-info\""));
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"version\": \"boris/0.8.1\"") != null);
+    const version_pos = std.mem.indexOf(u8, bytes, "\"version\"").?;
+    const vcs_pos = std.mem.indexOf(u8, bytes, "\"vcsRevision\"").?;
+    try std.testing.expect(version_pos < vcs_pos);
+    // Ends with exactly one newline (one-line stdout document).
+    try std.testing.expect(bytes[bytes.len - 1] == '\n');
+    try std.testing.expect(bytes[bytes.len - 2] != '\n');
+}
+
 test "runArgs: documented exit code mapping" {
     var runner: SilentRunner = .{};
 
@@ -3042,14 +3109,20 @@ test "standardSiteStatus maps the closed vocabulary" {
 }
 
 test "mapHtmlError: multi-target I/O failure exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, &.{}, default_layout, "content"));
+}
+
+test "mapHtmlError: missing content root exits 3 and names the probed path" {
+    // #779: the diagnostic must carry the resolved input root so a wrong-cwd
+    // invocation reads as an invocation problem, not an opaque I/O class.
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.ContentDirMissing, &.{}, default_layout, "content"));
 }
 
 test "mapHtmlError: unsafe SVG content failure exits 1 without a generic wrapper" {
     // AssetUnsafeSvg already emitted the structured EASSET diagnostic from the
     // content-asset path; mapHtmlError must classify it as a content error
     // (exit 1) and must not print either generic wrapper line.
-    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, &.{}, default_layout, "content"));
 }
 
 fn writeTreeFileMain(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8) !void {
@@ -3117,33 +3190,33 @@ test "runHtml threads --refresh-evidence into the compile options (#728)" {
 }
 
 test "mapHtmlError: link-audit content failure exits 1" {
-    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.LinkAuditFailed, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.LinkAuditFailed, &.{}, default_layout, "content"));
 }
 
 test "mapHtmlError: committed publication with stale checks evidence exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationChecksFailed, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationChecksFailed, &.{}, default_layout, "content"));
 }
 
 test "mapHtmlError: committed publication with stale claims evidence exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationClaimsFailed, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationClaimsFailed, &.{}, default_layout, "content"));
 }
 
 test "mapHtmlError: committed publication with unrefreshed Touch Atlas exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationTouchesFailed, &.{}, default_layout));
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationProofPackFailed, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationTouchesFailed, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationProofPackFailed, &.{}, default_layout, "content"));
 }
 
 test "mapHtmlError: target configuration failures exit 2" {
     const specs = [_]target.TargetSpec{
         .{ .name = "prod", .output_dir = "dist/prod" },
     };
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputCollision, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.WorkspaceEscape, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.DuplicateTargetName, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.InvalidTargetName, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputSymlink, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.EmptyTargetDirectory, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.NoTargetsSpecified, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputCollision, &specs, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.WorkspaceEscape, &specs, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.DuplicateTargetName, &specs, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.InvalidTargetName, &specs, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputSymlink, &specs, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.EmptyTargetDirectory, &specs, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.NoTargetsSpecified, &.{}, default_layout, "content"));
 }
 
 test "runPipeline: valid fixture exits 0" {

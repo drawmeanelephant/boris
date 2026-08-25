@@ -55,6 +55,13 @@ pub const Report = struct {
 };
 
 pub fn renderHtmlReport(gpa: std.mem.Allocator, compiler_id: []const u8, report: Report) ![]u8 {
+    return renderHtmlReportVcs(gpa, compiler_id, "", report);
+}
+
+/// `renderHtmlReport` with the build-provenance token (#776): the VCS
+/// revision the producing binary was compiled from, or "" when unknown.
+/// Emitted additively after `compilerId` so key order stays stable.
+pub fn renderHtmlReportVcs(gpa: std.mem.Allocator, compiler_id: []const u8, vcs_revision: []const u8, report: Report) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
 
@@ -66,6 +73,11 @@ pub fn renderHtmlReport(gpa: std.mem.Allocator, compiler_id: []const u8, report:
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"compilerId\": ");
     try json_out.writeString(&buf, gpa, compiler_id);
+    try buf.appendSlice(gpa, ",\n");
+    try json_out.indent(&buf, gpa, 1);
+    // Additive build provenance (#776); "" when the binary carries no token.
+    try buf.appendSlice(gpa, "\"vcsRevision\": ");
+    try json_out.writeString(&buf, gpa, vcs_revision);
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"ok\": ");

@@ -124,6 +124,14 @@ the frontmatter `status:` enum semantics (draft renders but is excluded from
 nav, search, sitemap, RSS, and publication projections) are stated in `--help`
 and remain normative in [frontmatter.md](frontmatter.md).
 
+The exit-2 path stays short (#777): each usage error prints its
+self-attributing cause line plus one synopsis line (`usage: boris <command>
+[options] …`) and nothing else — the full option help appears only on an
+explicit `--help`. The `standard-site` family is the exception: its bare,
+unknown-subcommand, missing-profile/identity, and conflicting-flag errors
+print the subcommand-family list instead of the generic synopsis, as
+specified above.
+
 ## stdout machine surface
 
 stdout is a real machine surface, not a void. A closed set of commands and
@@ -137,6 +145,7 @@ The closed stdout-emitting set, with each entry's default document:
 | Command / flag | stdout document |
 |---|---|
 | `--version` / `-V` | One line: the base compiler id |
+| `--build-info` | One line: the `boris-build-info` provenance document (#776) |
 | `--timings` | `boris-timings` JSON report (appended after the run, including failed runs) |
 | `plan` | Normalized publication declaration JSON |
 | `standard-site plan` | Standard.site plan JSON |
@@ -298,6 +307,29 @@ esac
 
 Treat all ids as opaque `name/version` text: compare them exactly rather than
 substring-matching on the version portion, since suffixes are possible.
+
+### Build info query (`--build-info`)
+
+`boris --version` deliberately stays byte-stable across builds of the same
+release, so it cannot distinguish two binaries compiled from different
+commits (#776). `boris --build-info` is the additive provenance query: it
+joins the `--help`/`--version` short-circuit family (invalid trailing flags
+ignored; first flag seen wins; exits `0`, reads no content, writes no
+artifacts) and prints exactly one JSON line on stdout:
+
+```text
+{"format": "boris-build-info", "schemaVersion": "1", "version": "boris/0.8.1", "vcsRevision": "a8ef247"}
+```
+
+`vcsRevision` is an opaque token baked in at compile time by `build.zig`
+(auto-detected from git, overridable with `-Dvcs-revision=…`; a dirty
+worktree appends `.dirty`; tarball builds without git carry `""`). It never
+alters the compiler id, exit codes, or any artifact schema. The HTML-path
+`--report` document mirrors the same token as its additive `vcsRevision`
+field ([diagnostics.md](diagnostics.md#html-path-machine-readable-report)).
+The IR artifact set records only the base/variant compiler id: its bytes feed
+the committed evidence digest chain, which must stay deterministic for the
+same content regardless of build worktree state.
 
 ## Timing report (`--timings`)
 

@@ -117,7 +117,11 @@ code is stored. ASCII whitespace is collapsed to one U+0020 and trimmed at
 both ends. Table cells (`td`/`th`) and `<br>`/`<hr>` are word separators in
 `text`, so adjacent cells do not concatenate. Other UTF-8 text is preserved;
 there is no case folding, stemming, punctuation removal, or language-specific
-normalization. Code is kept in `code` rather than merged into `text`.
+normalization. Code is kept in `code` rather than merged into `text`. Within
+one section, successive code fragments are joined by a single U+0020 in
+`code`, and prose gains a word boundary at an inline-code span's edges, so
+neither bucket fuses adjacent terms (#778); consumers searching code match
+against whole tokens, not one concatenated blob.
 
 Sections retain document order. Text before the first heading is level zero;
 each `h1`–`h6` begins the next section. An explicit heading `id` is copied as
