@@ -467,6 +467,17 @@ On the OS/filesystem where `zig build test` runs:
 
 During staged file publication (`publishStageTree`), every destination parent path component relative to the output root is validated with no-follow semantics (`statFile` with `follow_symlinks = false`). If any parent component along the destination path is a symlink or a non-directory file, publication immediately fails with `error.TargetOutputSymlink`. Symlinked parent directories below the output root are rejected and never traversed or followed.
 
+### Zero-page sites
+
+A content root that scans to **zero pages** is still a successful publication
+(empty sites are valid; see [rendered-search.md](rendered-search.md)): the
+target commits proof, search, and theme assets and exits 0 without page
+output. That success is easy to misread as a populated build, so the compiler
+prints a stderr warning naming the content root — also under `--quiet`,
+matching the publication-evidence warning policy. A `--timings` report on
+such a run honestly shows every counter at zero (#775): no page was read,
+fingerprinted, rendered, or audited.
+
 ---
 
 ## Testing matrix (release-relevant)

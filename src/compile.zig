@@ -954,6 +954,17 @@ fn writeCacheManifest(allocator: std.mem.Allocator, writer: anytype, manifest: C
 /// Site compile: layout → promote PageDb → graph freeze → whiteboard loop → dist/.
 ///
 /// Single-threaded when `jobs == 1`. Does not mutate IR emit semantics.
+/// A content root that scans to zero pages still publishes a valid target
+/// (proof, search, and theme assets) and exits 0 (#775). That success is easy
+/// to misread as a populated site — most visibly when a `--timings` report
+/// shows every counter at zero — so say it loudly on stderr. Mirrors the
+/// publication-evidence warnings that also print under `--quiet`.
+fn warnZeroPages(content_root: []const u8) void {
+    if (!diag.text_suppressed.load(.unordered)) {
+        std.debug.print("warning: no pages found under '{s}'; published output contains proof/search assets only\n", .{content_root});
+    }
+}
+
 pub fn compileHtmlSite(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1007,6 +1018,7 @@ pub fn compileHtmlSite(
     } else {
         try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.timings);
     }
+    if (db.len() == 0) warnZeroPages(options.content_root);
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
@@ -1276,6 +1288,7 @@ pub fn compileHtmlSiteMulti(
     defer db.deinit();
 
     try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.timings);
+    if (db.len() == 0) warnZeroPages(base_options.content_root);
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
     // material; fingerprint mixes it in only when a layout has `{{nav}}`.
@@ -4372,6 +4385,55 @@ test "--timings include_reads counts each unique fragment once per build (#760)"
         defer gpa.free(page);
         try std.testing.expect(std.mem.indexOf(u8, page, "SHARED_FRAGMENT") != null);
     }
+}
+
+test "--timings zero-page site publishes successfully with honest zero counters (#775)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-zero-pages", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    // Content root exists but holds no page sources: the exact shape that made
+    // #775's reporter read all-zero counters as an instrumentation failure.
+    try writeTreeFile(io, work, "content/notes/readme.txt", "not a page source\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var recorder = timings.Recorder.init(io);
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &recorder,
+    });
+
+    // Empty sites stay successful (rendered-search.md), so every counter is
+    // legitimately zero: no page was read, fingerprinted, rendered, or audited.
+    try std.testing.expectEqual(@as(usize, 0), stats.pages_attempted);
+    inline for (@typeInfo(timings.Counter).@"enum".fields) |field| {
+        try std.testing.expectEqual(
+            @as(u64, 0),
+            recorder.counters[@intFromEnum(@field(timings.Counter, field.name))],
+        );
+    }
+
+    // The target still publishes its non-page artifacts.
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const search_bytes = try readAllFile(io, dist_dir, "_boris/search/search-index.json", gpa);
+    defer gpa.free(search_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, search_bytes, "\"documents\"") != null);
 }
 
 test "render failure: whiteboard resets and no final output published" {
