@@ -288,3 +288,14 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) 
     }
     return @intFromEnum(ExitCode.success);
 }
+
+test "starter layout marks the search extraction root" {
+    const marker = "<main class=\"site-body\" data-boris-search-root>";
+    var count: usize = 0;
+    var idx: usize = 0;
+    while (std.mem.indexOfPos(u8, starter_layout, idx, marker)) |at| {
+        count += 1;
+        idx = at + marker.len;
+    }
+    try std.testing.expectEqual(@as(usize, 1), count);
+}
