@@ -75,7 +75,7 @@ fn isDotSegment(segment: []const u8) bool {
     return std.mem.eql(u8, segment, ".") or std.mem.eql(u8, segment, "..");
 }
 
-/// Return true only for a canonical path made of non-empty, ordinary
+/// True only for a canonical page path made of non-empty, ordinary
 /// slash-separated segments. This intentionally rejects every shape whose
 /// meaning the slow resolver normalizes: percent escapes, backslashes, empty
 /// segments, and `.`/`..` segments.
@@ -95,29 +95,112 @@ fn hasOnlyOrdinarySegments(path: []const u8) bool {
     return final_segment.len > 0 and !isDotSegment(final_segment);
 }
 
-/// Resolve the common route shape into caller-owned storage.
+/// True when every byte of `path` is one the lexical normalizer below can copy
+/// or treat as a separator without changing meaning: no percent escapes (the
+/// slow resolver decodes those, leniently), no backslashes (the slow resolver
+/// normalizes them to slashes). Dot segments, empty segments, and trailing
+/// slashes are handled by the walk itself.
+fn isLexicallyNormalizable(path: []const u8) bool {
+    for (path) |c| {
+        if (c == '%' or c == '\\') return false;
+    }
+    return true;
+}
+
+/// Resolve common route shapes into caller-owned storage.
 ///
 /// A non-null result is borrowed from `scratch` and never needs to be freed.
 /// A null result means that the caller must use `resolve`, which preserves the
-/// allocation-backed behavior for query/fragment, escaped, normalized, and
-/// otherwise non-canonical routes.
+/// allocation-backed behavior for percent escapes, backslash separators, and
+/// targets that climb above the output root.
+///
+/// Coverage is deliberately wide because the audit's per-reference hot path is
+/// dominated by relative targets with `..` segments: the walk below performs
+/// the same lexical normalization as `resolveSlow` (empty-segment collapse,
+/// `.`/`..` removal, directory-target `index.html` suffixing) plus query and
+/// fragment stripping, without allocating. Every accepted shape is pinned
+/// byte-for-byte against `resolveSlow` by tests.
 pub fn tryResolveFastPath(
     source: []const u8,
     target: []const u8,
     scratch: []u8,
 ) ?[]const u8 {
-    if (!hasOnlyOrdinarySegments(source) or !hasOnlyOrdinarySegments(target)) return null;
+    if (!hasOnlyOrdinarySegments(source)) return null;
     if (source[0] == '/' or source[source.len - 1] == '/') return null;
-    if (target[0] == '/' or target[target.len - 1] == '/') return null;
-    if (std.mem.indexOfScalar(u8, target, '?') != null) return null;
-    if (std.mem.indexOfScalar(u8, target, '#') != null) return null;
 
-    const prefix_len = if (std.mem.lastIndexOfScalar(u8, source, '/')) |i| i + 1 else 0;
-    if (prefix_len > scratch.len or target.len > scratch.len - prefix_len) return null;
+    // Query and fragment suffixes never contribute to the resolved route; the
+    // slow resolver strips them before decoding.
+    const path = stripQuery(stripFragment(target));
 
-    @memcpy(scratch[0..prefix_len], source[0..prefix_len]);
-    @memcpy(scratch[prefix_len .. prefix_len + target.len], target);
-    return scratch[0 .. prefix_len + target.len];
+    // A query-only or fragment-only reference addresses the source document.
+    if (path.len == 0) {
+        if (source.len > scratch.len) return null;
+        @memcpy(scratch[0..source.len], source);
+        return scratch[0..source.len];
+    }
+
+    if (!isLexicallyNormalizable(path)) return null;
+
+    // Scratch holds slash-separated segments with no leading or trailing
+    // slash; `pos` is the end of the last written segment.
+    var pos: usize = 0;
+    var absolute = false;
+
+    if (path[0] == '/') {
+        absolute = true;
+    } else {
+        // A relative reference starts from the source document's directory.
+        if (std.mem.lastIndexOfScalar(u8, source, '/')) |i| {
+            if (i >= scratch.len) return null;
+            @memcpy(scratch[0..i], source[0..i]);
+            pos = i;
+        }
+    }
+
+    const index_document = "index.html";
+    const trailing_slash = path[path.len - 1] == '/';
+    var ended_on_dot_segment = false;
+    var i: usize = 0;
+    while (i < path.len) {
+        const segment_start = i;
+        while (i < path.len and path[i] != '/') i += 1;
+        const segment = path[segment_start..i];
+        if (i < path.len) i += 1;
+
+        if (segment.len == 0) continue; // collapse `//`
+        if (isDotSegment(segment)) {
+            ended_on_dot_segment = true;
+            if (segment.len == 1) continue; // `.` keeps the current position
+            // `..` pops one segment; escaping above the output root stays on
+            // the slow path so it is reported as `.escapes_root` there.
+            if (pos == 0) return null;
+            pos = std.mem.lastIndexOfScalar(u8, scratch[0..pos], '/') orelse 0;
+            continue;
+        }
+        ended_on_dot_segment = false;
+        if (pos + 1 + segment.len > scratch.len) return null;
+        if (pos > 0) {
+            scratch[pos] = '/';
+            pos += 1;
+        }
+        @memcpy(scratch[pos .. pos + segment.len], segment);
+        pos += segment.len;
+    }
+
+    // A directory-style or dot-ending route is served by its index document,
+    // and an empty route is the output root's own index document.
+    if (trailing_slash or ended_on_dot_segment or (absolute and pos == 0)) {
+        if (pos + 1 + index_document.len > scratch.len) return null;
+        if (pos > 0) {
+            scratch[pos] = '/';
+            pos += 1;
+        }
+        @memcpy(scratch[pos .. pos + index_document.len], index_document);
+        pos += index_document.len;
+    }
+
+    if (pos == 0) return null;
+    return scratch[0..pos];
 }
 
 fn decode(
@@ -354,25 +437,123 @@ test "common route fast path matches the allocation-backed resolver" {
     }
 }
 
-test "fast route selection excludes normalization and URL complications" {
+test "fast selection lexically normalizes dot segments, suffixes, and root-relative targets" {
+    const gpa = std.testing.allocator;
+    const cases = [_]struct {
+        source: []const u8,
+        target: []const u8,
+        want: []const u8,
+    }{
+        // Dot-segment removal, including pops into the source directory.
+        .{ .source = "guides/start.html", .target = "../index.html", .want = "index.html" },
+        .{ .source = "guides/start.html", .target = "../reference/x.html", .want = "reference/x.html" },
+        .{ .source = "guides/deep/start.html", .target = "../../index.html", .want = "index.html" },
+        .{ .source = "guides/start.html", .target = "./sibling.html", .want = "guides/sibling.html" },
+        .{ .source = "guides/start.html", .target = "a/./b.html", .want = "guides/a/b.html" },
+        .{ .source = "guides/start.html", .target = "a//b.html", .want = "guides/a/b.html" },
+        .{ .source = "guides/start.html", .target = "a/b/../c.html", .want = "guides/a/c.html" },
+        // Directory-style and dot-ending routes are served by their index document.
+        .{ .source = "index.html", .target = "guide/", .want = "guide/index.html" },
+        .{ .source = "guides/start.html", .target = "../", .want = "index.html" },
+        .{ .source = "index.html", .target = ".", .want = "index.html" },
+        .{ .source = "index.html", .target = "a/..", .want = "index.html" },
+        // Query-only and fragment-only references address the source document.
+        .{ .source = "guides/start.html", .target = "?view=all", .want = "guides/start.html" },
+        .{ .source = "guides/start.html", .target = "#top", .want = "guides/start.html" },
+        // Suffix stripping keeps only the path portion.
+        .{ .source = "index.html", .target = "guide.html?v=1#rag", .want = "guide.html" },
+        .{ .source = "guides/start.html", .target = "../reference/outputs.html?q=1#rag", .want = "reference/outputs.html" },
+        // Root-relative targets ignore the source directory entirely.
+        .{ .source = "guides/start.html", .target = "/assets/theme.css", .want = "assets/theme.css" },
+        .{ .source = "guides/start.html", .target = "/", .want = "index.html" },
+        .{ .source = "guides/start.html", .target = "/a/../b/", .want = "b/index.html" },
+    };
+
+    var scratch: [fast_path_buffer_bytes]u8 = undefined;
+    for (cases) |case| {
+        const fast = tryResolveFastPath(case.source, case.target, scratch[0..]) orelse
+            return error.FastPathNotSelected;
+        try std.testing.expectEqualStrings(case.want, fast);
+        const slow = try resolveSlow(gpa, case.source, case.target, .lenient);
+        try std.testing.expect(slow == .path);
+        defer gpa.free(slow.path);
+        try std.testing.expectEqualStrings(slow.path, fast);
+    }
+}
+
+test "fast selection still excludes percent escapes, backslashes, and root escapes" {
     const cases = [_]struct {
         source: []const u8,
         target: []const u8,
     }{
-        .{ .source = "index.html", .target = "../outside.html" },
+        // Percent escapes decode in the slow resolver; the fast walk must not
+        // guess at their meaning.
         .{ .source = "index.html", .target = "%2e%2e/outside.html" },
-        .{ .source = "index.html", .target = "/root.html" },
-        .{ .source = "index.html", .target = "guide/" },
-        .{ .source = "index.html", .target = "guide/./page.html" },
-        .{ .source = "index.html", .target = "guide.html?view=all" },
-        .{ .source = "index.html", .target = "guide.html#top" },
+        .{ .source = "index.html", .target = "nested%2fpage.html" },
+        .{ .source = "index.html", .target = "guide%20name.html" },
+        // Backslash separators normalize to slashes in the slow resolver.
         .{ .source = "index.html", .target = "guide\\page.html" },
-        .{ .source = "index.html", .target = "guide//page.html" },
+        // Targets climbing above the output root must reach the slow
+        // resolver's `.escapes_root` verdict, never a guessed path.
+        .{ .source = "index.html", .target = "../outside.html" },
+        .{ .source = "guides/start.html", .target = "../../etc/passwd" },
+        .{ .source = "index.html", .target = "/.." },
+        // Non-canonical sources stay on the slow path.
+        .{ .source = "guide/", .target = "page.html" },
+        .{ .source = "/abs/page.html", .target = "page.html" },
+        .{ .source = "", .target = "page.html" },
+        .{ .source = "guide//x.html", .target = "page.html" },
     };
 
     var scratch: [fast_path_buffer_bytes]u8 = undefined;
     for (cases) |case| {
         try std.testing.expect(tryResolveFastPath(case.source, case.target, scratch[0..]) == null);
+    }
+}
+
+test "the fast walk agrees with the slow resolver across a mixed-shape corpus" {
+    const gpa = std.testing.allocator;
+    const sources = [_][]const u8{
+        "index.html",
+        "guides/start.html",
+        "guides/deep/nested/page.html",
+    };
+    const targets = [_][]const u8{
+        "guide.html",
+        "guide/",
+        ".",
+        "./guide.html",
+        "../guide.html",
+        "../..",
+        "../../outside.html",
+        "a/./b.html",
+        "a//b.html",
+        "a/b/../../c.html",
+        "a/../b/../",
+        "?q=1",
+        "#frag",
+        "guide.html?v=1#f",
+        "/root.html",
+        "/a/./b/",
+        "/../up.html",
+        "%2e%2e/x.html",
+        "back\\slash.html",
+        "weird/a:b.html",
+        "",
+        "//example.com/x",
+    };
+
+    var scratch: [fast_path_buffer_bytes]u8 = undefined;
+    for (sources) |source| {
+        for (targets) |target| {
+            const slow = try resolveSlow(gpa, source, target, .lenient);
+            defer if (slow == .path) gpa.free(slow.path);
+            const fast = tryResolveFastPath(source, target, scratch[0..]);
+            if (fast) |resolved| {
+                try std.testing.expect(slow == .path);
+                try std.testing.expectEqualStrings(slow.path, resolved);
+            }
+        }
     }
 }
 
