@@ -24,11 +24,16 @@ const Options = struct {
 
 const CliError = error{
     Help,
+    Version,
     MissingValue,
     UnknownFlag,
     MissingRequiredOption,
     InvalidNumber,
 };
+
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this tool does not import `src/`.
+pub const tool_id = "boris-github-pages-audit/0.8.1";
 
 fn usage() void {
     std.debug.print(
@@ -58,7 +63,8 @@ fn usage() void {
             "  --max-redirects N           Redirect hops per URL (default: 3)\n" ++
             "  --timeout-ms N              Per-request timeout (default: 10000)\n" ++
             "  --max-projection-urls N     URLs parsed per projection/HTML page (default: 256)\n" ++
-            "  --help                      Show this help\n",
+            "  --help                      Show this help\n" ++
+            "  --version                   Print the tool id and exit\n",
         .{},
     );
 }
@@ -93,6 +99,9 @@ fn parse(args: []const []const u8) CliError!Options {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             usage();
             return error.Help;
+        }
+        if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+            return error.Version;
         }
         if (std.mem.startsWith(u8, arg, "--plan=") or std.mem.eql(u8, arg, "--plan")) {
             options.plan_path = try optionValue(args, &i, arg, "--plan");
@@ -157,6 +166,13 @@ fn writeFile(io: Io, path: []const u8, bytes: []const u8) !void {
 
 fn run(init: std.process.Init, args: []const []const u8) !u8 {
     const options = parse(args) catch |err| {
+        if (err == error.Version) {
+            var stdout_buffer: [128]u8 = undefined;
+            var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+            stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+            stdout_writer.interface.flush() catch {};
+            return 0;
+        }
         if (err != error.Help) usage();
         return if (err == error.Help) 0 else 2;
     };

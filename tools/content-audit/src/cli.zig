@@ -6,6 +6,10 @@
 const std = @import("std");
 const util = @import("util.zig");
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this tool does not import `src/`.
+pub const tool_id = "boris-content-audit/0.8.1";
+
 pub const Mode = enum {
     poetry,
 
@@ -78,6 +82,7 @@ pub const FailOn = enum {
 
 pub const Options = struct {
     help: bool = false,
+    version: bool = false,
     quiet: bool = false,
     mode: Mode = .poetry,
     root_dir: []const u8 = ".",
@@ -113,6 +118,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         const arg = args[index];
         if (util.eql(arg, "--help") or util.eql(arg, "-h")) {
             options.help = true;
+        } else if (util.eql(arg, "--version") or util.eql(arg, "-V")) {
+            options.version = true;
         } else if (util.eql(arg, "--quiet") or util.eql(arg, "-q")) {
             options.quiet = true;
         } else if (std.mem.startsWith(u8, arg, "--mode=")) {
@@ -239,6 +246,7 @@ pub const help_text =
     \\                                (default structural).
     \\  --revision=STRING             Optional explicit source revision (never host-derived).
     \\  --help                        Show this help.
+    \\  --version                     Print the tool id and exit.
     \\
     \\Exit codes:
     \\  0  audit completed, no selected failure class triggered

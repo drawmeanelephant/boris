@@ -3,6 +3,10 @@ const std = @import("std");
 const Io = std.Io;
 const search = @import("search_index");
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this tool does not import `src/`.
+pub const tool_id = "boris-search-index/0.8.1";
+
 const Options = struct {
     root: []const u8 = "dist",
     out: []const u8 = "dist/_boris/search",
@@ -14,6 +18,7 @@ const Options = struct {
 
 const CliError = error{
     Help,
+    Version,
     MissingValue,
     UnknownFlag,
     InvalidPath,
@@ -41,7 +46,8 @@ fn usage() void {
             "  --require-root-marker   Require data-boris-search-root on every page\n" ++
             "  --check                 Compare against existing search-index.json\n" ++
             "  --quiet, -q             Suppress the success message\n" ++
-            "  --help, -h              Show this help\n",
+            "  --help, -h              Show this help\n" ++
+            "  --version, -V           Print the tool id and exit\n",
         .{},
     );
 }
@@ -66,6 +72,9 @@ fn parse(args: []const []const u8) CliError!Options {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             usage();
             return error.Help;
+        }
+        if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+            return error.Version;
         }
         if (std.mem.eql(u8, arg, "--require-root-marker")) {
             options.require_root_marker = true;
@@ -211,7 +220,7 @@ fn sortAndRejectDuplicates(paths: []const []const u8) CliError!void {
 pub fn main(init: std.process.Init) u8 {
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch return 2;
     run(init.gpa, init.io, args) catch |err| {
-        if (err == error.Help) return 0;
+        if (err == error.Help or err == error.Version) return 0;
         std.debug.print("search-index: {s}\n", .{@errorName(err)});
         return 1;
     };
@@ -220,6 +229,13 @@ pub fn main(init: std.process.Init) u8 {
 
 fn run(allocator: std.mem.Allocator, io: Io, args: []const []const u8) !void {
     const options = parse(args) catch |err| {
+        if (err == error.Version) {
+            var stdout_buffer: [128]u8 = undefined;
+            var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+            stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+            stdout_writer.interface.flush() catch {};
+            return err;
+        }
         if (err != error.Help) usage();
         return err;
     };

@@ -112,8 +112,13 @@ pub const Mode = enum {
     }
 };
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this lab does not import `src/`.
+pub const tool_id = "boris-migration-lab/0.8.1";
+
 pub const Options = struct {
     help: bool = false,
+    version: bool = false,
     quiet: bool = false,
     mode: Mode = .astro,
     /// Astro project/export root to scan (relative to cwd unless absolute).
@@ -173,6 +178,8 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         const arg = args[index];
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             options.help = true;
+        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+            options.version = true;
         } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
             options.quiet = true;
         } else if (std.mem.startsWith(u8, arg, "--mode=")) {
@@ -380,6 +387,7 @@ fn printUsage() void {
         \\
         \\Common options:
         \\  -h, --help         Show this help and exit
+        \\  -V, --version      Print the tool id and exit
         \\  -q, --quiet        Suppress progress lines
         \\  --mode=MODE        astro (default) | astro-import-plan | astro-import-apply | wordpress | wordpress-theme | instagram | obsidian | notion | filed | filed-scan | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
         \\  --out=DIR          Output directory (default: migration-report)
@@ -552,6 +560,14 @@ pub fn main(init: std.process.Init) u8 {
 
     if (opts.help) {
         printUsage();
+        return ExitCode.success.int();
+    }
+
+    if (opts.version) {
+        var stdout_buffer: [128]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+        stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+        stdout_writer.interface.flush() catch {};
         return ExitCode.success.int();
     }
 

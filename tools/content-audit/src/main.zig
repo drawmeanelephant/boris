@@ -102,6 +102,14 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
         return @intFromEnum(ExitCode.success);
     }
 
+    if (options.version) {
+        var stdout_buffer: [128]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+        stdout_writer.interface.writeAll(cli.tool_id ++ "\n") catch {};
+        stdout_writer.interface.flush() catch {};
+        return @intFromEnum(ExitCode.success);
+    }
+
     if (options.out_dir == null) {
         diag("boris-content-audit: --out=DIR is required\n\n{s}", .{cli.help_text});
         return @intFromEnum(ExitCode.usage);
@@ -1807,4 +1815,15 @@ test "unsupported-shape accounting is consistent across every report surface" {
     try std.testing.expect(std.mem.indexOf(u8, align_html, ">malformed_record</th><td>1</td>") != null);
     // The per-status table lists SON-100 as malformed_record.
     try std.testing.expect(std.mem.indexOf(u8, align_html, "sonnets/SON-100") != null);
+}
+
+test "version flag parses and precedes required-argument validation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const options = try cli.parseOptions(arena.allocator(), &.{ "boris-content-audit", "--version" });
+    try std.testing.expect(options.version);
+    try std.testing.expect(!options.help);
+    const short = try cli.parseOptions(arena.allocator(), &.{ "boris-content-audit", "-V", "--quiet" });
+    try std.testing.expect(short.version);
+    try std.testing.expectEqualStrings("boris-content-audit/0.8.1", cli.tool_id);
 }

@@ -26,6 +26,9 @@ pub const package_format = "boris-package";
 /// Integer schema version for the package machine interface.
 pub const package_schema_version: u32 = 1;
 
+/// Tool id printed by `--version`/`-V` (mirrors `pipeline.compiler_id` style).
+pub const tool_id = "boris-package/" ++ pipeline.boris_version;
+
 /// Default packages output directory (relative to process cwd).
 pub const default_packages_dir = "packages";
 
@@ -470,6 +473,7 @@ fn printUsage() void {
         \\  --no-rag              IR artifacts only
         \\  --quiet               Suppress progress logging
         \\  -h, --help            Show this help
+        \\  -V, --version         Print the tool id and exit
         \\
         \\Produces packages/<archive> containing ir/, optional rag/, 
         \\MACHINE-READABLE-VERSION.json, and SHA256SUMS. HTML is never included.
@@ -552,14 +556,16 @@ fn parseCli(args: []const []const u8) ParseError!Options {
 
 const CliParse = union(enum) {
     help,
+    version,
     opts: Options,
     err: ParseError,
 };
 
 fn parseArgs(args: []const []const u8) CliParse {
-    // Help short-circuit
+    // Help/version short-circuit
     for (args[1..]) |a| {
         if (std.mem.eql(u8, a, "-h") or std.mem.eql(u8, a, "--help")) return .help;
+        if (std.mem.eql(u8, a, "-V") or std.mem.eql(u8, a, "--version")) return .version;
     }
     const opts = parseCli(args) catch |e| return .{ .err = e };
     return .{ .opts = opts };
@@ -580,6 +586,13 @@ pub fn main(init: std.process.Init) u8 {
     switch (parseArgs(args_list.items)) {
         .help => {
             printUsage();
+            return ExitCode.success.int();
+        },
+        .version => {
+            var stdout_buffer: [128]u8 = undefined;
+            var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+            stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+            stdout_writer.interface.flush() catch {};
             return ExitCode.success.int();
         },
         .err => |e| {
@@ -612,6 +625,13 @@ pub fn main(init: std.process.Init) u8 {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+test "parseArgs: version short-circuit wins over other flags" {
+    try std.testing.expect(parseArgs(&.{ "boris-package", "--version" }) == .version);
+    try std.testing.expect(parseArgs(&.{ "boris-package", "-V" }) == .version);
+    try std.testing.expect(parseArgs(&.{ "boris-package", "--quiet", "-V" }) == .version);
+    try std.testing.expect(parseArgs(&.{ "boris-package", "--help" }) == .help);
+}
 
 test "renderVersionJson: fixed keys and product constants" {
     const gpa = std.testing.allocator;
