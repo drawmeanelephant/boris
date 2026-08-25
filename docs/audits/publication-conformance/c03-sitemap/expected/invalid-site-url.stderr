@@ -150,6 +150,7 @@ Context artifacts (success; same graph validation as IR/RAG):
 Conflicts (exit 2):
   --rag with --no-rag
   --no-rag with --rag-dir
+  --textile with --cooklang
   --complete without --rag / --rag-dir
   --complete with --scope, --split-size, or --bundles-only
   --context / --context-dir with --rag, --out, or HTML selectors
@@ -157,8 +158,13 @@ Conflicts (exit 2):
   --sitemap / --sitemap-path without --site-url, with non-HTML modes,
   or with multiple targets sharing one ambiguous public URL
   explicit --out with --rag or --rag-dir
-  --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
+  --html / --html-dir / --html-layout / --theme / --target / --target-layout /
+  --target-profile / --layout-rule with --rag, --rag-dir, --context, or explicit --out
   --target with --html-dir
+  --theme with --html-layout (both select the one global layout)
+  check / impact with any HTML selector (--html, --html-dir,
+  --html-layout, --theme, --target, --target-layout, --target-profile,
+  --layout-rule, --sitemap / --sitemap-path)
   --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
   validate with non-HTML exports, --incremental, --jobs, --format, or --out
   validate --watch with --html-dir, --target, --serve/--port, --incremental, --jobs, or --format
@@ -186,3 +192,6 @@ Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JS
       --html / --html-dir / bare CLI map to a single target named "default".
       Equivalent --target / --target-layout / --layout-rule permutations yield the
       same config (targets sorted by name; rules canonicalized). No layout frontmatter.
+      Frontmatter `status:` is exactly draft, published, or archived (unknown
+      values fail validation). A draft renders to its .html files but is
+      excluded from nav, search, sitemap, RSS, and publication projections.
