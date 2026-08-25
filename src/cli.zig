@@ -3739,7 +3739,7 @@ test "parse: help/version short-circuit and do not validate trailing junk" {
 
 test "parse: --build-info joins the short-circuit family" {
     // #776: --build-info is a stdout query surface like --version.
-    var o1 = try parseOptions(std.testing.allocator, &.{"boris", "--build-info"});
+    var o1 = try parseOptions(std.testing.allocator, &.{ "boris", "--build-info" });
     defer o1.deinit(std.testing.allocator);
     try expect(o1.build_info);
     try expect(!o1.help);
