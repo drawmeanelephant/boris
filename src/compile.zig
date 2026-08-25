@@ -747,6 +747,9 @@ pub const RenderOptions = struct {
     verification: ?*const standard_site.VerificationSurfaces = null,
     /// Nostr head config for the same slot. Composed after Standard.site.
     nostr_head: ?*const nostr_emit.HeadConfig = null,
+    /// Build-scoped include expansion memo (#760); shared across pages and
+    /// safe for concurrent workers. Null keeps per-call expansion caching.
+    include_cache: ?*include_mod.IncludeCache = null,
 };
 
 /// Build the per-pass shared node maps (#726): wiki rewrite keys by entity id,
@@ -807,6 +810,7 @@ fn renderPageSlots(
         .diagnostics = options.diagnostics,
         .output_profile = options.output_profile,
         .sources = options.sources,
+        .include_cache = render_opts.include_cache,
     });
 
     var slots: assemble.SlotValues = .{ .content = html };
@@ -1021,22 +1025,28 @@ const SharedCompileState = struct {
     dep_index: dependency.DependencyIndex,
     /// Per-page source bytes (GPA-owned).
     source_bytes: [][]u8,
-    /// Per-page transitive include file contents in stable sorted path order (GPA-owned).
+    /// Per-page transitive include contents in stable sorted path order. The
+    /// byte buffers are **views** into `include_memo` (#760): each unique
+    /// fragment is read once per build and shared across consumer pages.
+    /// Only the outer per-page slices are individually GPA-owned.
     include_bytes: [][][]u8,
     /// Paths parallel to `include_bytes` (GPA-owned strings; same order).
     include_paths: [][][]u8,
+    /// Unique transitive include bytes read once per build (#760); keys live
+    /// on `path_arena`, values are GPA-owned.
+    include_memo: std.StringHashMapUnmanaged([]u8) = .empty,
 
     fn deinit(self: *SharedCompileState) void {
-        for (self.include_bytes) |list| {
-            for (list) |b| self.gpa.free(b);
-            self.gpa.free(list);
-        }
+        for (self.include_bytes) |list| self.gpa.free(list);
         self.gpa.free(self.include_bytes);
         for (self.include_paths) |list| {
             for (list) |p| self.gpa.free(p);
             self.gpa.free(list);
         }
         self.gpa.free(self.include_paths);
+        var memo_it = self.include_memo.iterator();
+        while (memo_it.next()) |entry| self.gpa.free(entry.value_ptr.*);
+        self.include_memo.deinit(self.gpa);
         for (self.source_bytes) |b| self.gpa.free(b);
         self.gpa.free(self.source_bytes);
         self.dep_index.deinit();
@@ -1104,7 +1114,7 @@ const SharedCompileState = struct {
         var includes_filled: usize = 0;
         errdefer {
             for (include_bytes[0..includes_filled]) |list| {
-                for (list) |b| gpa.free(b);
+                // Byte buffers are shared memo views; only the containers are owned here.
                 gpa.free(list);
             }
             gpa.free(include_bytes);
@@ -1113,6 +1123,15 @@ const SharedCompileState = struct {
                 gpa.free(list);
             }
             gpa.free(include_paths);
+        }
+
+        // Memoize unique include reads per build (#760): a fragment consumed
+        // by many pages is read once, and every consumer shares the bytes.
+        var include_memo: std.StringHashMapUnmanaged([]u8) = .empty;
+        errdefer {
+            var memo_it = include_memo.iterator();
+            while (memo_it.next()) |entry| gpa.free(entry.value_ptr.*);
+            include_memo.deinit(gpa);
         }
 
         for (db.items(), 0..) |page, page_idx| {
@@ -1131,15 +1150,24 @@ const SharedCompileState = struct {
             var path_list = try gpa.alloc([]u8, transit_includes.items.len);
             var j: usize = 0;
             errdefer {
-                for (list[0..j]) |b| gpa.free(b);
+                // Byte views are memo-owned; only free the containers.
                 gpa.free(list);
                 for (path_list[0..j]) |p| gpa.free(p);
                 gpa.free(path_list);
             }
             while (j < transit_includes.items.len) : (j += 1) {
-                list[j] = try readFileAlloc(io, content_dir, transit_includes.items[j], gpa);
-                path_list[j] = try gpa.dupe(u8, transit_includes.items[j]);
-                if (recorder) |t| t.bump(.include_reads, 1);
+                const inc_path = transit_includes.items[j];
+                const bytes = blk: {
+                    if (include_memo.get(inc_path)) |hit| break :blk hit;
+                    const fresh = try readFileAlloc(io, content_dir, inc_path, gpa);
+                    errdefer gpa.free(fresh);
+                    const key = try inc_alloc.dupe(u8, inc_path);
+                    try include_memo.put(gpa, key, fresh);
+                    if (recorder) |t| t.bump(.include_reads, 1);
+                    break :blk fresh;
+                };
+                list[j] = bytes;
+                path_list[j] = try gpa.dupe(u8, inc_path);
             }
             include_bytes[page_idx] = list;
             include_paths[page_idx] = path_list;
@@ -1153,6 +1181,7 @@ const SharedCompileState = struct {
             .source_bytes = source_bytes,
             .include_bytes = include_bytes,
             .include_paths = include_paths,
+            .include_memo = include_memo,
         };
     }
 };
@@ -1499,6 +1528,9 @@ const ParallelContext = struct {
     heading_index: ?*const wikilink.HeadingIndex,
     theme: ?*const theme_mod.ThemeBundle,
     content_assets: ?*const content_asset.SiteAssetInventory = null,
+    /// Build-scoped include expansion memo (#760); internally locked, so
+    /// concurrent workers may share it for the whole parallel pass.
+    include_cache: ?*include_mod.IncludeCache = null,
 
     // Thread coordination
     mutex: std.Io.Mutex = std.Io.Mutex.init,
@@ -1553,6 +1585,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                     .heading_index = ctx.heading_index,
                     .theme = ctx.theme,
                     .page_assets = page_assets,
+                    .include_cache = ctx.include_cache,
                 },
             ) catch |err| {
                 ctx.mutex.lockUncancelable(ctx.io);
@@ -1690,8 +1723,9 @@ fn buildSiteHeadingIndex(
     prior_harvest: ?*const ParsedHeadingHarvest,
     recorder: ?*timings.Recorder,
     sink: ?*diag.Collector,
+    include_cache: ?*include_mod.IncludeCache,
 ) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
-    return compile_heading.buildSiteHeadingIndex(io, gpa, content_dir, db.items(), site.nodes, shared.source_bytes, shared.include_bytes, shared.include_paths, input_format, prior_harvest, recorder, sink);
+    return compile_heading.buildSiteHeadingIndex(io, gpa, content_dir, db.items(), site.nodes, shared.source_bytes, shared.include_bytes, shared.include_paths, input_format, prior_harvest, recorder, sink, include_cache);
 }
 
 fn expandDirtySet(
@@ -1844,6 +1878,7 @@ fn validatePrepublicationTarget(
     site: *const FrozenSite,
     theme_bundle: *const theme_mod.ThemeBundle,
     content_assets: *const content_asset.SiteAssetInventory,
+    include_cache: ?*include_mod.IncludeCache,
 ) !CompileStats {
     if (options.timings) |t| t.start(.heading_harvest);
     const heading_built = try buildSiteHeadingIndex(
@@ -1857,6 +1892,7 @@ fn validatePrepublicationTarget(
         null,
         options.timings,
         options.diagnostics,
+        include_cache,
     );
     if (options.timings) |t| t.stop(.heading_harvest);
     var heading_index = heading_built[0];
@@ -1922,6 +1958,7 @@ fn validatePrepublicationTarget(
                 .page_assets = &content_assets.pages[page_index],
                 .verification = if (options.standard_site_verification) |ctx| ctx.surfaces else null,
                 .nostr_head = options.nostr_head,
+                .include_cache = include_cache,
             },
         );
 
@@ -2783,6 +2820,7 @@ fn renderPages(
     heading_index: *wikilink.HeadingIndex,
     theme_bundle: *theme_mod.ThemeBundle,
     content_assets: *content_asset.SiteAssetInventory,
+    include_cache: ?*include_mod.IncludeCache,
 ) !CompileStats {
     var stats: CompileStats = .{};
 
@@ -2809,6 +2847,7 @@ fn renderPages(
             .heading_index = heading_index,
             .theme = theme_bundle,
             .content_assets = content_assets,
+            .include_cache = include_cache,
         };
 
         const num_workers = @min(options.jobs, db.len());
@@ -2887,6 +2926,7 @@ fn renderPages(
                         .heading_index = heading_index,
                         .theme = theme_bundle,
                         .page_assets = &content_assets.pages[page_index],
+                        .include_cache = include_cache,
                     },
                 );
                 stats.pages_written += 1;
@@ -3360,6 +3400,7 @@ fn runHeadingHarvest(
     shared: *const SharedCompileState,
     site: *const FrozenSite,
     parsed_heading_harvest: ?std.json.Parsed(ParsedHeadingHarvest),
+    include_cache: ?*include_mod.IncludeCache,
 ) !HeadingIndexes {
     // Heading id index for wiki `[[entity#heading]]` (Oliver-rendered ids only;
     // only pages that are fragment targets are rendered for the index).
@@ -3377,6 +3418,7 @@ fn runHeadingHarvest(
         prior_harvest,
         options.timings,
         options.diagnostics,
+        include_cache,
     );
     if (options.timings) |t| t.stop(.heading_harvest);
     return .{ .index = heading_built[0], .snapshot = heading_built[1] };
@@ -3425,6 +3467,13 @@ fn compilePagesInner(
         break :blk &(local_shared.?);
     };
 
+    // One include expansion memo per target compile (#760): heading harvest,
+    // validation, and render workers share it so each unique fragment is read
+    // and expanded once. Safe for concurrent workers (internal locking); it
+    // must outlive every page render below.
+    var include_cache = include_mod.IncludeCache.init(gpa);
+    defer include_cache.deinit();
+
     if (options.validation_only) {
         return validatePrepublicationTarget(
             io,
@@ -3437,6 +3486,7 @@ fn compilePagesInner(
             site,
             &theme_bundle,
             &content_assets,
+            &include_cache,
         );
     }
 
@@ -3472,7 +3522,7 @@ fn compilePagesInner(
     var cache_state = loadIncrementalCacheState(io, gpa, dist_dir, options.incremental);
     defer cache_state.deinit(gpa);
 
-    var heading_indexes = try runHeadingHarvest(io, gpa, content_dir, db, options, shared, site, cache_state.parsed_heading_harvest);
+    var heading_indexes = try runHeadingHarvest(io, gpa, content_dir, db, options, shared, site, cache_state.parsed_heading_harvest, &include_cache);
     defer heading_indexes.deinit(gpa);
 
     // Precreate output directories under staging
@@ -3517,6 +3567,7 @@ fn compilePagesInner(
         &heading_indexes.index,
         &theme_bundle,
         &content_assets,
+        &include_cache,
     );
 
     try writeIncrementalCaches(
@@ -4269,6 +4320,51 @@ test "--timings recorder observes HTML publication phases" {
     // One page: load/parse read, shared-state read, render read.
     try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.page_reads)] >= 3);
     try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.hash_bytes)] > 0);
+}
+
+test "--timings include_reads counts each unique fragment once per build (#760)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-include-memo", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/includes/shared.md", "SHARED_FRAGMENT\n");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\n{{include includes/shared.md}}\n");
+    try writeTreeFile(io, work, "content/guides/a.md", "# A\n\n{{include includes/shared.md}}\n");
+    try writeTreeFile(io, work, "content/guides/b.md", "# B\n\n{{include includes/shared.md}}\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var recorder = timings.Recorder.init(io);
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &recorder,
+    });
+
+    // Three consumer pages share one fragment: exactly one read (#760), and
+    // every rendered page still carries the expanded fragment bytes.
+    try std.testing.expectEqual(@as(u64, 1), recorder.counters[@intFromEnum(timings.Counter.include_reads)]);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    for ([_][]const u8{ "index.html", "guides/a.html", "guides/b.html" }) |out| {
+        const page = try readAllFile(io, dist_dir, out, gpa);
+        defer gpa.free(page);
+        try std.testing.expect(std.mem.indexOf(u8, page, "SHARED_FRAGMENT") != null);
+    }
 }
 
 test "render failure: whiteboard resets and no final output published" {
