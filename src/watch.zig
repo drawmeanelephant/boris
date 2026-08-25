@@ -965,8 +965,9 @@ pub const WatchCoordinator = struct {
         // duration of the compile; the same data flows into the collector and
         // then into the build-failed NDJSON event. Validate mode also collects
         // when `--report` is set so the report file is rewritten every cycle.
+        const prior_text_suppressed = diag.text_suppressed.load(.unordered);
         if (json) diag.text_suppressed.store(true, .unordered);
-        defer if (json) diag.text_suppressed.store(false, .unordered);
+        defer if (json) diag.text_suppressed.store(prior_text_suppressed, .unordered);
 
         const need_collector = json or (self.action == .validate and self.options.report_path != null);
         var collector: ?diag.Collector = null;
@@ -987,8 +988,10 @@ pub const WatchCoordinator = struct {
                 defer self.gpa.free(targets);
                 self.emitBuildFailed("rebuild", targets, paths.items, outcome, collector_ptr);
             } else if (isRecoverableFailure(err)) {
-                std.debug.print("error: {s} failed: {s}. Waiting for correction...\n", .{ rebuildLabel(self.action), @errorName(err) });
-            } else {
+                if (!diag.text_suppressed.load(.unordered)) {
+                    std.debug.print("error: {s} failed: {s}. Waiting for correction...\n", .{ rebuildLabel(self.action), @errorName(err) });
+                }
+            } else if (!diag.text_suppressed.load(.unordered)) {
                 std.debug.print("error: {s} failed with unrecoverable I/O error: {s}\n", .{ rebuildLabel(self.action), @errorName(err) });
             }
             if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, false);
@@ -1023,8 +1026,9 @@ pub const WatchCoordinator = struct {
         // duration of the compile; the same data flows into the collector and
         // then into the build-failed NDJSON event. Validate mode also collects
         // when `--report` is set so the report file is rewritten every cycle.
+        const prior_text_suppressed = diag.text_suppressed.load(.unordered);
         if (json) diag.text_suppressed.store(true, .unordered);
-        defer if (json) diag.text_suppressed.store(false, .unordered);
+        defer if (json) diag.text_suppressed.store(prior_text_suppressed, .unordered);
 
         const need_collector = json or (self.action == .validate and self.options.report_path != null);
         var collector: ?diag.Collector = null;
