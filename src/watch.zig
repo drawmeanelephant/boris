@@ -574,6 +574,9 @@ pub const WatchCoordinator = struct {
     gpa: std.mem.Allocator,
     io: Io,
     options: cli.Options,
+    /// #781: baked vcs revision forwarded into each rebuild's compile options
+    /// so watch-refreshed Proof Packs attribute to the same build.
+    vcs_revision: []const u8 = "",
     action: Action,
     watcher: Watcher,
     pending_changes: std.StringHashMap(void),
@@ -613,7 +616,14 @@ pub const WatchCoordinator = struct {
         return try roots.toOwnedSlice(gpa);
     }
 
-    pub fn init(gpa: std.mem.Allocator, io: Io, options: cli.Options, watcher: Watcher) !WatchCoordinator {
+    pub fn init(
+        gpa: std.mem.Allocator,
+        io: Io,
+        options: cli.Options,
+        watcher: Watcher,
+        /// #781: baked vcs revision forwarded to compile → Proof Pack.
+        vcs_revision: []const u8,
+    ) !WatchCoordinator {
         const ignored = try buildIgnoredOutputRoots(gpa, options);
         errdefer {
             for (ignored) |r| gpa.free(r);
@@ -636,6 +646,7 @@ pub const WatchCoordinator = struct {
             .gpa = gpa,
             .io = io,
             .options = options,
+            .vcs_revision = vcs_revision,
             .action = actionOf(options),
             .watcher = watcher,
             .pending_changes = std.StringHashMap(void).init(gpa),
@@ -764,6 +775,7 @@ pub const WatchCoordinator = struct {
                 .sitemap_path = self.options.sitemap_path,
                 .site_url = self.options.site_url,
                 .publication_location = if (self.options.publication_location) |*location| location else null,
+                .vcs_revision = self.vcs_revision,
                 .diagnostics = collector,
             })) |stats| {
                 outcome.ok = true;
@@ -786,6 +798,7 @@ pub const WatchCoordinator = struct {
                 .sitemap_path = self.options.sitemap_path,
                 .site_url = self.options.site_url,
                 .publication_location = if (self.options.publication_location) |*location| location else null,
+                .vcs_revision = self.vcs_revision,
                 .diagnostics = collector,
             })) |stats| {
                 outcome.ok = true;
@@ -1268,7 +1281,7 @@ test "FakeWatcher and Coordinator Event Coalescing" {
         .html_dir = "dist",
         .quiet = true,
         .watch = true,
-    }, fake.watcher());
+    }, fake.watcher(), "");
     defer coord.deinit();
 
     try std.testing.expectEqual(@as(usize, 2), coord.ignored_output_roots.len);
@@ -1300,7 +1313,7 @@ test "processEvents ignores output and staging paths" {
         .html_dir = "./dist",
         .quiet = true,
         .watch = true,
-    }, fake.watcher());
+    }, fake.watcher(), "");
     defer coord.deinit();
 
     try std.testing.expectEqualStrings("dist", coord.ignored_output_roots[0]);
@@ -1332,7 +1345,7 @@ test "processEvents follow-up coalescing after drain" {
         .html_dir = "dist",
         .quiet = true,
         .watch = true,
-    }, fake.watcher());
+    }, fake.watcher(), "");
     defer coord.deinit();
 
     try fake.pushEvent("content/a.md", .modify);
@@ -1373,7 +1386,7 @@ test "processEvents ignores multi-target output paths" {
     try options.targets.append(gpa, .{ .name = "target_b", .output_dir = "dist_b" });
     defer options.targets.deinit(gpa);
 
-    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher());
+    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher(), "");
     defer coord.deinit();
 
     try std.testing.expectEqual(@as(usize, 4), coord.ignored_output_roots.len);
@@ -1467,7 +1480,7 @@ test "processEvents does not ignore legitimate .boris-stage source paths" {
         .html_dir = "dist",
         .quiet = true,
         .watch = true,
-    }, fake.watcher());
+    }, fake.watcher(), "");
     defer coord.deinit();
 
     // Real staging tree is ignored
@@ -1498,7 +1511,7 @@ test "processEvents custom input root maps relative keys" {
         .html_dir = "dist",
         .quiet = true,
         .watch = true,
-    }, fake.watcher());
+    }, fake.watcher(), "");
     defer coord.deinit();
 
     try fake.pushEvent("docs/src/guides/intro.md", .modify);
@@ -1538,7 +1551,7 @@ test "processEvents target-specific layout keys stay outside content strip" {
     });
     defer options.targets.deinit(gpa);
 
-    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher());
+    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher(), "");
     defer coord.deinit();
 
     try fake.pushEvent("content/shared.md", .modify);
@@ -1590,7 +1603,7 @@ test "watch recovery: pending drains and follow-up events still queue" {
         .html_dir = "dist",
         .quiet = true,
         .watch = true,
-    }, fake.watcher());
+    }, fake.watcher(), "");
     defer coord.deinit();
 
     // First burst (e.g. content failure path still clears pending at rebuild start)
@@ -1680,7 +1693,7 @@ test "validate --watch cycles run the zero-write preflight and write nothing (#6
 
     var fake = FakeWatcher.init(gpa);
     defer fake.deinit();
-    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher());
+    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher(), "");
     defer coord.deinit();
 
     // Validate mode has no output roots to ignore: nothing is written, so
@@ -1761,7 +1774,7 @@ test "single-target watch: unsafe SVG rebuild recovers in-session without restar
         .quiet = true,
         .watch = true,
         // targets left empty: raw single-target rebuild path (compileHtmlSite)
-    }, fake.watcher());
+    }, fake.watcher(), "");
     defer coord.deinit();
 
     // Initial build with the valid inert SVG publishes the page and asset.

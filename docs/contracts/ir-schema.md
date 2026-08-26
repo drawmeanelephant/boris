@@ -260,6 +260,23 @@ the CLI, same compiler version, and the **same host OS/filesystem semantics**:
    `contentRoot` / `outDir` are the CLI path strings as passed).
 7. Newlines: **LF only**. Pretty-print with **2-space indent**, no trailing
    spaces, final newline at EOF.
+
+### Build provenance is deliberately absent (decision #781)
+
+No IR artifact carries the baked VCS revision token (#776) — not even as an
+additive optional field. IR bytes are pinned by path-stability tests,
+packaging-determinism comparisons, and goldens whose purpose is to catch
+unintended drift; they must stay byte-identical for the same content
+regardless of build worktree state. A commit-varying field inside that set
+would invalidate a pinned byte-set on every commit and would make identical
+content hashes differ per commit inside any downstream digest surface.
+Binary-level attribution of an IR compile comes from `--build-info`,
+`--version`, or the HTML-path `--report`'s additive `vcsRevision`
+([cli.md](cli.md#build-info-query---build-info)). The provenance-carrying
+surfaces are RAG `catalog_meta.json`, recipe-scale envelopes, and Proof Packs
+— none of them feeds, or is fed by, the IR digest set. Reversing this
+decision requires redesigning what the evidence chain hashes; it is not a
+schema-field change.
 8. Integers only where specified (no floats).
 9. Do **not** iterate a hash map while serializing; arrays are built from
    sorted lists.

@@ -434,7 +434,8 @@ pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         break :blk recipe_scale.factorFromServings(current, target_count) catch return .usage;
     };
 
-    const bytes = recipe_scale_view.renderFromCompile(gpa, &result, page_id, factor, servings_view) catch |err| switch (err) {
+    // #781: the scaled view records the binary's baked vcs revision.
+    const bytes = recipe_scale_view.renderFromCompile(gpa, &result, page_id, factor, servings_view, vcs_revision) catch |err| switch (err) {
         error.PageNotFound => {
             errPrint("error: recipe page not found: {s}\n", .{page_id});
             return .content_error;
@@ -2540,6 +2541,9 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings
         .split_size = opts.split_size,
         .bundles_only = opts.bundles_only,
         .complete = opts.complete,
+        // #781: the complete-corpus catalog meta records the binary's baked
+        // vcs revision.
+        .vcs_revision = vcs_revision,
         .timings = recorder,
     }) catch |err| switch (err) {
         error.EmptyTargetDirectory,
@@ -2686,7 +2690,7 @@ fn runValidateWatch(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
     };
 
-    var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
+    var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher(), vcs_revision) catch |err| {
         return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
     };
     defer coord.deinit();
@@ -2710,7 +2714,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
         };
 
-        var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
+        var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher(), vcs_revision) catch |err| {
             return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
         };
         defer coord.deinit();
@@ -2752,6 +2756,8 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
             .allow_markdown_literals = opts.allow_markdown_links,
+            // #781: the Proof Pack pair records the binary's baked revision.
+            .vcs_revision = vcs_revision,
             .timings = recorder,
             .diagnostics = collector_ptr,
             .standard_site_verification = verification,
@@ -2782,6 +2788,8 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
             .allow_markdown_literals = opts.allow_markdown_links,
+            // #781: the Proof Pack pair records the binary's baked revision.
+            .vcs_revision = vcs_revision,
             .timings = recorder,
             .diagnostics = collector_ptr,
             .standard_site_verification = verification,

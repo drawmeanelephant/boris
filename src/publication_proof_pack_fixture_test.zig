@@ -110,8 +110,8 @@ fn overallStatus(root: std.json.ObjectMap) []const u8 {
 /// presentation change and must be deliberate.
 /// Re-pinned for #778: code-span word boundaries in `search-index.json`
 /// (an inventoried artifact) shift every downstream evidence digest.
-const poisoned_golden_sha256 = "5bd019e5e67b757a4e95abeb67b37450ce28dbf880b3b8a66a990271a244bec5";
-const poisoned_golden_len: usize = 50427;
+const poisoned_golden_sha256 = "8a0354faa9a9f045bdb20544195d0a637f64bf764d3376feaf292dd4a7c29d13";
+const poisoned_golden_len: usize = 50449;
 
 test "poisoned publication derives a deterministic Proof Pack with findings" {
     const io = std.testing.io;

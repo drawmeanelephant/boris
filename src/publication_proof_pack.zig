@@ -17,6 +17,12 @@ pub const report_format = "boris-publication-proof-pack";
 pub const schema_version: usize = 1;
 
 pub const Options = struct {
+    /// Additive build provenance (#781): the opaque VCS revision token the
+    /// producing binary was compiled from ("" when undetected, e.g. a
+    /// tarball). Copied verbatim into `proof-pack.json` after `target` and
+    /// mirrored in `_boris/proof/index.html`; never a field of any bound
+    /// evidence report, so all four upstream digests stay untouched.
+    vcs_revision: []const u8 = "",
     /// Test-only fault injection: fail before derivation completes. Production
     /// callers leave every fault injection false.
     test_fail_execution: bool = false,
@@ -245,6 +251,10 @@ const Model = struct {
     parsed_claims: *const ParsedClaims,
     parsed_touches: *const ParsedTouches,
     overall_status: []const u8,
+    /// Additive build provenance (#781): the opaque VCS revision token the
+    /// producing binary was compiled from ("" when undetected). Never read
+    /// from the evidence reports and never feeds any binding.
+    vcs_revision: []const u8,
     bindings: Inputs,
 };
 
@@ -407,6 +417,7 @@ pub fn writeAfterTouches(
         .parsed_claims = &parsed_claims,
         .parsed_touches = &parsed_touches,
         .overall_status = deriveOverallStatus(&parsed_checks.checks, &parsed_claims.claims),
+        .vcs_revision = options.vcs_revision,
         .bindings = .{
             .artifacts = artifacts_binding,
             .checks = checks_binding,
@@ -503,6 +514,14 @@ fn renderJson(
     try json_out.indent(&out, gpa, 1);
     try out.appendSlice(gpa, "\"target\": ");
     try json_out.writeString(&out, gpa, model.target);
+    try out.appendSlice(gpa, ",\n");
+    try json_out.indent(&out, gpa, 1);
+    // Additive build provenance (#781): emitted directly after `target`,
+    // before `inputs`. Copied verbatim ("" when the build could not detect
+    // one); never part of the compiler id and never a field of any bound
+    // evidence report, so all four upstream digests stay untouched.
+    try out.appendSlice(gpa, "\"vcs_revision\": ");
+    try json_out.writeString(&out, gpa, model.vcs_revision);
     try out.appendSlice(gpa, ",\n");
 
     try out.appendSlice(gpa, "  \"inputs\": {\n");
@@ -1040,7 +1059,16 @@ fn renderHtml(
     try out.appendSlice(gpa, "    <code>schema_version: 1</code> ·\n");
     try out.appendSlice(gpa, "    target <code>");
     try writeHtmlEscaped(&out, gpa, model.target);
-    try out.appendSlice(gpa, "</code>\n  </p>\n");
+    try out.appendSlice(gpa, "</code>\n");
+    // Build provenance (#781): mirrored in HTML only when the token is
+    // known; an unknown revision renders no attribution element rather than
+    // an empty claim.
+    if (model.vcs_revision.len > 0) {
+        try out.appendSlice(gpa, "    · vcs_revision <code>");
+        try writeHtmlEscaped(&out, gpa, model.vcs_revision);
+        try out.appendSlice(gpa, "</code>\n");
+    }
+    try out.appendSlice(gpa, "  </p>\n");
     try out.appendSlice(gpa, "  <div class=\"banner ");
     try out.appendSlice(gpa, statusBannerClass(model.overall_status));
     try out.appendSlice(gpa, "\" id=\"banner\">Overall presentation status: ");
@@ -1663,10 +1691,11 @@ test "clean fixture derives the canonical verified Proof Pack" {
     try std.testing.expectEqual(@as(i64, schema_version), root.get("schema_version").?.integer);
     try std.testing.expectEqualStrings("default", root.get("target").?.string);
 
-    // Canonical root member order.
+    // Canonical root member order. The additive vcs_revision (#781) sits
+    // exactly between `target` and `inputs`; nothing else may appear.
     const expected_order = [_][]const u8{
-        "format", "schema_version", "target", "inputs",      "summary",       "artifacts",
-        "checks", "findings",       "claims", "limitations", "relationships", "presentation",
+        "format", "schema_version", "target", "vcs_revision", "inputs",        "summary",      "artifacts",
+        "checks", "findings",       "claims", "limitations",  "relationships", "presentation",
     };
     var iterator = root.iterator();
     var order_index: usize = 0;
@@ -1822,6 +1851,61 @@ test "repeated generation emits byte-identical JSON and HTML" {
     defer second.deinit(gpa);
     try std.testing.expectEqualSlices(u8, first.json, second.json);
     try std.testing.expectEqualSlices(u8, first.html, second.html);
+}
+
+test "additive vcs_revision sits between target and inputs and mirrors in HTML (#781)" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    // Without provenance (unit-test default): the stable "" sentinel is
+    // emitted in JSON and no attribution element renders in HTML.
+    {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const records = cleanRecords();
+        var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+        defer out.deinit(gpa);
+
+        const target_pos = std.mem.indexOf(u8, out.json, "\"target\": \"default\"").?;
+        const sentinel_pos = std.mem.indexOf(u8, out.json, "\"vcs_revision\": \"\",\n").?;
+        const inputs_pos = std.mem.indexOf(u8, out.json, "\"inputs\": {").?;
+        try std.testing.expect(target_pos < sentinel_pos);
+        try std.testing.expect(sentinel_pos < inputs_pos);
+        // The token appears exactly once; nothing downstream re-carries it.
+        var occurrences: usize = 0;
+        var cursor: usize = 0;
+        while (std.mem.indexOfPos(u8, out.json, cursor, "\"vcs_revision\":")) |at| {
+            occurrences += 1;
+            cursor = at + 1;
+        }
+        try std.testing.expectEqual(@as(usize, 1), occurrences);
+        try std.testing.expect(std.mem.indexOf(u8, out.html, "vcs_revision") == null);
+    }
+
+    // With a known revision: copied verbatim after `target`, escaped in HTML.
+    {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const records = cleanRecords();
+        var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{ .vcs_revision = "a8ef247" });
+        defer out.deinit(gpa);
+
+        const target_pos = std.mem.indexOf(u8, out.json, "\"target\": \"default\"").?;
+        const token_pos = std.mem.indexOf(u8, out.json, "\"vcs_revision\": \"a8ef247\",").?;
+        const inputs_pos = std.mem.indexOf(u8, out.json, "\"inputs\": {").?;
+        try std.testing.expect(target_pos < token_pos);
+        try std.testing.expect(token_pos < inputs_pos);
+
+        // The embedded digest still matches the exact provenance-bearing JSON.
+        const needle = "<meta name=\"proof-pack-sha256\" content=\"";
+        const at = std.mem.indexOf(u8, out.html, needle).?;
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(out.json, &digest, .{});
+        const expected = std.fmt.bytesToHex(digest, .lower);
+        try std.testing.expectEqualSlices(u8, &expected, out.html[at + needle.len .. at + needle.len + 64]);
+
+        try std.testing.expect(std.mem.indexOf(u8, out.html, "· vcs_revision <code>a8ef247</code>") != null);
+    }
 }
 
 test "HTML embeds the exact JSON digest and mirrors model facts" {

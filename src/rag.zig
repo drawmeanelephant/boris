@@ -107,6 +107,10 @@ pub const RagOptions = struct {
     split_size: ?usize = null,
     /// Complete-corpus export (system + per-page + graph + catalog tree).
     complete: bool = false,
+    /// Additive build provenance (#781): the opaque VCS revision token this
+    /// binary was compiled from ("" when undetected). Written into
+    /// complete-mode `catalog_meta.json` only; never a working-mode field.
+    vcs_revision: []const u8 = "",
     /// Accepted for compatibility with the pre-v2 scoped-bundle workflow;
     /// working packs are bundle-style by construction, so this is a no-op.
     bundles_only: bool = false,
@@ -740,8 +744,8 @@ fn exportGraphDocs(
     return n;
 }
 
-fn exportCatalogMeta(io: Io, gpa: std.mem.Allocator, out_dir: Io.Dir) !void {
-    const text = try rag_emit.renderCatalogMeta(gpa, catalog_format, catalog_schema_version, boris_version);
+fn exportCatalogMeta(io: Io, gpa: std.mem.Allocator, out_dir: Io.Dir, vcs_revision: []const u8) !void {
+    const text = try rag_emit.renderCatalogMeta(gpa, catalog_format, catalog_schema_version, boris_version, vcs_revision);
     defer gpa.free(text);
     try writeBytes(io, out_dir, "catalog_meta.json", text);
 }
@@ -1065,7 +1069,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
             // catalog_meta.json is part of the complete-corpus catalog surface
             // only; working mode records format/schema/version in manifest.json
             // and does not emit a redundant sidecar.
-            try exportCatalogMeta(io, gpa, stage_dir);
+            try exportCatalogMeta(io, gpa, stage_dir, opts.vcs_revision);
         } else {
             try exportWorking(io, gpa, retain, stage_dir, opts, selected_pages, &stats);
         }
@@ -1122,14 +1126,16 @@ test "catalog_meta.json shape is fixed and compact (schema v2)" {
     var out_dir = try Io.Dir.cwd().openDir(io, out_rel, .{});
     defer out_dir.close(io);
 
-    try exportCatalogMeta(io, gpa, out_dir);
+    try exportCatalogMeta(io, gpa, out_dir, "");
 
     const bytes = try readFileAlloc(io, out_dir, "catalog_meta.json", gpa);
     defer gpa.free(bytes);
 
+    // The "" sentinel keeps this golden byte-stable across commits: a
+    // production binary substitutes its baked token at runtime (#781).
     const expected = try std.fmt.allocPrint(
         gpa,
-        "{{\"format\":\"{s}\",\"schema_version\":{d},\"boris_version\":\"{s}\"}}\n",
+        "{{\"format\":\"{s}\",\"schema_version\":{d},\"boris_version\":\"{s}\",\"vcs_revision\":\"\"}}\n",
         .{ catalog_format, catalog_schema_version, boris_version },
     );
     defer gpa.free(expected);
@@ -1139,6 +1145,30 @@ test "catalog_meta.json shape is fixed and compact (schema v2)" {
     defer parsed.deinit();
     try std.testing.expectEqualStrings("boris-rag", parsed.value.object.get("format").?.string);
     try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("schema_version").?.integer);
+}
+
+test "catalog_meta.json records the baked vcs revision in fixed position (#781)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/meta-provenance", .{tmp.sub_path});
+    defer gpa.free(out_rel);
+    try Io.Dir.cwd().createDirPath(io, out_rel);
+    var out_dir = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out_dir.close(io);
+
+    try exportCatalogMeta(io, gpa, out_dir, "a8ef247");
+
+    const bytes = try readFileAlloc(io, out_dir, "catalog_meta.json", gpa);
+    defer gpa.free(bytes);
+
+    // Fixed compact order: format, schema_version, boris_version,
+    // vcs_revision (rag-export.md). The token is copied verbatim.
+    const meta_marker_pos = std.mem.indexOf(u8, bytes, "\"boris_version\":").?;
+    const vcs_pos = std.mem.indexOf(u8, bytes, ",\"vcs_revision\":\"a8ef247\"}").?;
+    try std.testing.expect(meta_marker_pos < vcs_pos);
 }
 
 const RagTestPaths = struct {
