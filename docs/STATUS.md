@@ -3,8 +3,8 @@
 **As of:** 2026-08-25
 
 **Integration line:** `main`. The Build Week judging window is closed; the
-`afterparty` line landed via PR **#790** and topic branches resume from `main`.
-The `afterparty` branch stays open at the same commit for dependents.
+`afterparty` line landed via PR **#790**. Topic branches target `main`, and
+`afterparty` is retained as the staging line for larger in-flight work.
 
 **Product metadata:** released **`v0.8.1`** / `boris/0.8.1`; base IR `schemaVersion` **`0.2.0`**.
 **Phase:** v0.8.1 shipped; post-release maintenance on `main`.
