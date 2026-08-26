@@ -26,6 +26,7 @@ const builtin = @import("builtin");
 const Io = std.Io;
 const identity = @import("identity.zig");
 const page_mod = @import("page.zig");
+const diag = @import("diag.zig");
 
 pub const Page = page_mod.Page;
 pub const PageList = page_mod.PageList;
@@ -172,6 +173,89 @@ pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out
 
     // Deterministic order independent of filesystem enumeration.
     page_mod.sortPages(out.pages.items);
+}
+
+/// Failure-path probe (#744): which non-selected input family has page files
+/// under this content root? Walks the same tree the scanner walks (skipping
+/// the reserved `includes/` fragment library and `{stem}.assets/` trees) and
+/// answers with a fixed priority (`.cook`, `.textile`, `.mdx`, `.md`) so the
+/// result never depends on filesystem enumeration order. `null` means the
+/// mismatch could not be attributed to a family (caller keeps its generic
+/// guidance).
+pub fn probeForeignFamily(io: Io, dir: Io.Dir, selected: identity.InputFormat) ?identity.ContentKind {
+    var seen = [4]bool{ false, false, false, false };
+    const priority = [4]identity.ContentKind{ .cook, .textile, .mdx, .md };
+
+    var walker = dir.walkSelectively(std.heap.page_allocator) catch return null;
+    defer walker.deinit();
+    while (true) {
+        const walked = walker.next(io) catch return null;
+        const entry = walked orelse break;
+        switch (entry.kind) {
+            .directory => {
+                // Same reservation rules as discovery: the content-root
+                // `includes/` library and sibling asset trees hold no pages.
+                if (std.mem.eql(u8, entry.path, "includes")) continue;
+                if (std.mem.endsWith(u8, entry.basename, ".assets")) continue;
+                walker.enter(io, entry) catch continue;
+            },
+            .file => {
+                const kind = identity.contentKind(entry.basename) catch continue;
+                switch (kind) {
+                    .cook => seen[0] = true,
+                    .textile => seen[1] = true,
+                    .mdx => seen[2] = true,
+                    .md => seen[3] = true,
+                }
+            },
+            else => {},
+        }
+    }
+    for (priority, 0..) |kind, i| {
+        if (seen[i] and !selected.accepts(kind)) return kind;
+    }
+    return null;
+}
+
+/// Static code/message/remediation for an input-family mismatch (#744).
+///
+/// The diagnostic code follows the offending family per
+/// docs/contracts/scanner.md (`ECOOKLANG` for Cooklang pages, `ETEXTILE` for
+/// Textile pages), and the remediation names the flag that selects that
+/// family — so a `.cook`-only tree built without `--cooklang` can no longer
+/// send authors looking for `.textile` files. When no offender is known
+/// (non-filesystem sources), falls back to the requested-mode wording.
+pub fn modeMismatchGuidance(
+    selected: identity.InputFormat,
+    offender: ?identity.ContentKind,
+) struct { code: diag.Code, message: []const u8, remediation: []const u8 } {
+    if (offender) |kind| {
+        if (!selected.accepts(kind)) {
+            switch (kind) {
+                .cook => return .{
+                    .code = .ECOOKLANG,
+                    .message = "content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode",
+                    .remediation = "Pass --cooklang for a .cook-only tree, or drop --cooklang for Markdown input",
+                },
+                .textile => return .{
+                    .code = .ETEXTILE,
+                    .message = "content root mixes Textile and non-Textile page extensions, or uses the wrong explicit input mode",
+                    .remediation = "Pass --textile for a .textile-only tree",
+                },
+                else => {},
+            }
+        }
+    }
+    if (selected == .cook) return .{
+        .code = .ECOOKLANG,
+        .message = "content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode",
+        .remediation = "Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input",
+    };
+    return .{
+        .code = .ETEXTILE,
+        .message = "content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode",
+        .remediation = "Use Markdown-only input by default, or pass --textile for a .textile-only tree",
+    };
 }
 
 pub fn registerDiscoveredPage(retain: std.mem.Allocator, out: *PageList, walk_path: []const u8) ScanError!void {
@@ -617,4 +701,79 @@ test "scan: duplicate entity ids preserved for later diagnostics" {
     // Tie-break: source_path order.
     try testing.expectEqualStrings("same.md", list.items()[0].source_path);
     try testing.expectEqualStrings("same.mdx", list.items()[1].source_path);
+}
+
+test "probeForeignFamily attributes mismatch to offending family deterministically" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{ .iterate = true });
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "recipe.cook", .data = "Boil @water{1%l}.\n" });
+        try content.createDirPath(io, "guides");
+        try content.writeFile(io, .{ .sub_path = "guides/old.textile", .data = "h1. Old\n" });
+        // Reserved fragment library and asset trees never attribute blame.
+        try content.createDirPath(io, "includes");
+        try content.writeFile(io, .{ .sub_path = "includes/frag.textile", .data = "fragment\n" });
+        try content.createDirPath(io, "page.assets");
+        try content.writeFile(io, .{ .sub_path = "page.assets/pic.textile", .data = "junk\n" });
+    }
+
+    const cwd = Io.Dir.cwd();
+    var dir = try cwd.openDir(io, content_rel, .{ .iterate = true });
+    defer dir.close(io);
+
+    try testing.expectEqual(identity.ContentKind.cook, probeForeignFamily(io, dir, .markdown).?);
+    try testing.expectEqual(identity.ContentKind.cook, probeForeignFamily(io, dir, .textile).?);
+    try testing.expect(probeForeignFamily(io, dir, .cook) != null);
+
+    // Priority is fixed (.cook first) regardless of enumeration order.
+    try testing.expectEqual(identity.ContentKind.cook, probeForeignFamily(io, dir, .markdown).?);
+}
+
+test "probeForeignFamily returns null when nothing foreign remains" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "page.md", .data = "# page\n" });
+    }
+
+    const cwd = Io.Dir.cwd();
+    var dir = try cwd.openDir(io, content_rel, .{ .iterate = true });
+    defer dir.close(io);
+    try testing.expect(probeForeignFamily(io, dir, .markdown) == null);
+}
+
+test "modeMismatchGuidance names the flag for the offending family" {
+    const t = comptime struct {
+        fn expectCase(selected: InputFormat, offender: ?identity.ContentKind, want_code: diag.Code, want_flag: []const u8) !void {
+            const g = modeMismatchGuidance(selected, offender);
+            try std.testing.expectEqual(want_code, g.code);
+            try std.testing.expect(std.mem.indexOf(u8, g.remediation, want_flag) != null);
+        }
+    };
+    // A .cook-only tree built without --cooklang blames Cooklang, not Textile (#744).
+    try t.expectCase(.markdown, .cook, .ECOOKLANG, "--cooklang");
+    try t.expectCase(.textile, .cook, .ECOOKLANG, "--cooklang");
+    // Symmetric: a .textile tree without --textile keeps ETEXTILE and names it.
+    try t.expectCase(.markdown, .textile, .ETEXTILE, "--textile");
+    // Unknown offender falls back to the requested-mode wording.
+    try t.expectCase(.cook, null, .ECOOKLANG, "--cooklang");
+    try t.expectCase(.markdown, null, .ETEXTILE, "--textile");
 }

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "boris-testdata-profile/1",
+  "name": "bounded-nav-v1",
+  "description": "README-shaped pages whose theme bounds navigation to breadcrumb plus direct children, keeping per-page anchors flat as the corpus grows",
+  "style": "readme",
+  "includeAssets": true,
+  "barbs": [],
+  "nav": "children"
+}

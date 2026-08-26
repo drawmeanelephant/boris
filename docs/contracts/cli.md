@@ -88,8 +88,8 @@ preflight. See the normative [validation contract](validation.md).
 `validate` does not create HTML, IR, RAG, context, RSS, cache, search, or
 publication-evidence artifacts. It accepts applicable existing HTML options,
 including target/layout/theme and sitemap configuration, and rejects export
-selectors, `--incremental`, `--jobs`, and `--format`; `--report PATH` writes
-the shared `html-build-report-0.1.0` JSON (additive; see
+selectors, `--incremental`, `--refresh-evidence`, `--jobs`, and `--format`; `--report PATH` writes
+the shared `html-build-report-0.2.0` JSON (additive; see
 [Machine-readable reports](#machine-readable-reports)). With `--watch` it
 becomes the zero-write validation daemon described above. `check` and `impact`
 likewise create no product artifacts; only their explicit `--report` path may
@@ -110,6 +110,28 @@ content or writing artifacts. `--version` / `-V` exit `0` printing the compiler
 id (`pipeline.compiler_id`, e.g. `boris/0.8.1`) to stdout without reading
 content or writing artifacts.
 
+Usage diagnostics on the exit-2 path are self-attributing (issues #761 and
+#764). When a value rejection has a parser-known flag — the layout/theme path
+grammar shared by `--theme` and `--html-layout` — the diagnostic names that
+flag with the grammar rule, never a different flag guessed by scanning argv.
+When a conflicting-options rejection has one unambiguous offending pair, both
+tokens are named as typed, e.g. `error: check conflicts with --theme`;
+ambiguous multi-cause conflicts keep the generic `conflicting options (try
+--help)` form. The `--help` conflict matrix lists the analyzer×HTML-selector
+family and the HTML-selector×explicit-`--out` family alongside the rest.
+Exit codes, exit-code classes, and accepted argv are unchanged by attribution;
+the frontmatter `status:` enum semantics (draft renders but is excluded from
+nav, search, sitemap, RSS, and publication projections) are stated in `--help`
+and remain normative in [frontmatter.md](frontmatter.md).
+
+The exit-2 path stays short (#777): each usage error prints its
+self-attributing cause line plus one synopsis line (`usage: boris <command>
+[options] …`) and nothing else — the full option help appears only on an
+explicit `--help`. The `standard-site` family is the exception: its bare,
+unknown-subcommand, missing-profile/identity, and conflicting-flag errors
+print the subcommand-family list instead of the generic synopsis, as
+specified above.
+
 ## stdout machine surface
 
 stdout is a real machine surface, not a void. A closed set of commands and
@@ -123,6 +145,7 @@ The closed stdout-emitting set, with each entry's default document:
 | Command / flag | stdout document |
 |---|---|
 | `--version` / `-V` | One line: the base compiler id |
+| `--build-info` | One line: the `boris-build-info` provenance document (#776) |
 | `--timings` | `boris-timings` JSON report (appended after the run, including failed runs) |
 | `plan` | Normalized publication declaration JSON |
 | `standard-site plan` | Standard.site plan JSON |
@@ -225,7 +248,7 @@ reimplementing frontmatter or graph resolution.
 
 The HTML path has its own machine-readable diagnostics report: `boris build
 --report PATH` and `boris validate --report PATH` write a deterministic JSON
-report on both success and failure (`html-build-report-0.1.0` schema, same
+report on both success and failure (`html-build-report-0.2.0` schema, same
 diagnostic-object shape as the IR report). It covers every HTML-path
 diagnostic class — parse/graph, component, include, wiki-link, asset,
 link-audit, and layout/theme — and is the surface the preview server and
@@ -240,7 +263,7 @@ editor consume. `--report` is rejected on `watch` and on non-HTML build modes;
 | Command | What `--report PATH` writes | Without `--report` |
 |---|---|---|
 | `check` / `impact` | The Documentation Intelligence analysis report (human or JSON per `--format`) | The same report prints to **stderr** |
-| `build` / `validate` | The HTML-path diagnostics report (`html-build-report-0.1.0` JSON) | No report file; diagnostics stay on stderr as text |
+| `build` / `validate` | The HTML-path diagnostics report (`html-build-report-0.2.0` JSON) | No report file; diagnostics stay on stderr as text |
 
 On `build`/`validate` the file is additive: stderr text and exit codes are
 unchanged with or without it. On `check`/`impact` the file replaces the
@@ -284,6 +307,49 @@ esac
 
 Treat all ids as opaque `name/version` text: compare them exactly rather than
 substring-matching on the version portion, since suffixes are possible.
+
+### Build info query (`--build-info`)
+
+`boris --version` deliberately stays byte-stable across builds of the same
+release, so it cannot distinguish two binaries compiled from different
+commits (#776). `boris --build-info` is the additive provenance query: it
+joins the `--help`/`--version` short-circuit family (invalid trailing flags
+ignored; first flag seen wins; exits `0`, reads no content, writes no
+artifacts) and prints exactly one JSON line on stdout:
+
+```text
+{"format": "boris-build-info", "schemaVersion": "1", "version": "boris/0.8.1", "vcsRevision": "a8ef247"}
+```
+
+`vcsRevision` is an opaque token baked in at compile time by `build.zig`
+(auto-detected from git, overridable with `-Dvcs-revision=…`; a dirty
+worktree appends `.dirty`; tarball builds without git carry `""`). It never
+alters the compiler id, exit codes, or any artifact schema. The HTML-path
+`--report` document mirrors the same token as its additive `vcsRevision`
+field ([diagnostics.md](diagnostics.md#html-path-machine-readable-report)).
+
+**Provenance carriers and the IR decision (#781).** Three further surfaces
+copy the same token verbatim (with the `""` sentinel when undetected), each
+as an additive field that no upstream digest covers:
+
+- complete-mode RAG `catalog_meta.json` — trailing `vcs_revision`
+  ([rag-export.md](rag-export.md#catalog_metajson-complete-mode-only));
+- `boris-recipe-scale` view envelopes — `vcsRevision` after `compiler`
+  ([cooklang-compatibility.md](cooklang-compatibility.md));
+- publication Proof Packs — `vcs_revision` between `target` and `inputs`,
+  mirrored in `_boris/proof/index.html`
+  ([publication-proof-pack.md](publication-proof-pack.md));
+
+The **IR artifact set** (`manifest.json`, `graph.json`, `completion.json`,
+`build-report.json`) deliberately does not carry it — decision recorded for
+#781. IR bytes are pinned by path-stability, packaging-determinism, and
+evidence-chain goldens that exist precisely to catch unintended drift; they
+must stay byte-stable for the same content regardless of worktree state. A
+commit-varying field inside that set would break those guarantees at every
+commit. Attribution for an IR compile remains binary-level: pair a given IR
+artifact set with `--build-info`, `--version`, or the HTML-path `--report`.
+Reversing this decision would require redesigning what the evidence chain
+hashes, not a schema-field addition.
 
 ## Timing report (`--timings`)
 

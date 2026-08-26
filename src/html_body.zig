@@ -23,6 +23,13 @@ const source_provider = @import("source_provider.zig");
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
     nodes: []const graph_mod.Node = &.{},
+    /// Prebuilt wiki id→node map covering exactly `nodes` (#726). When set, the
+    /// wiki rewrite reuses it instead of rebuilding a per-page map; callers
+    /// rendering many pages against one frozen graph should supply it.
+    shared_node_map: ?*const wikilink.NodeMap = null,
+    /// Prebuilt source_path→node map covering exactly `nodes` (#726), for the
+    /// documentation-link rewrite. Same sharing contract as `shared_node_map`.
+    shared_doclink_map: ?*const doclink.SourceNodeMap = null,
     heading_index: ?*const wikilink.HeadingIndex = null,
     /// When non-null, rewrite Markdown image destinations into this page's
     /// sibling asset tree (see `docs/contracts/content-local-assets.md`).
@@ -36,6 +43,10 @@ pub const Options = struct {
     output_profile: render.OutputProfile = .html,
     /// When set, include expansion reads through this provider instead of `content_dir`.
     sources: ?source_provider.Provider = null,
+    /// Build-scoped include expansion memo (#760). Callers rendering many
+    /// pages in one build supply one shared cache; each unique fragment is
+    /// then read and expanded once instead of once per consuming page.
+    include_cache: ?*include_mod.IncludeCache = null,
 };
 
 fn readIncludeFromProvider(ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) include_mod.IncludeError![]u8 {
@@ -282,11 +293,18 @@ fn prepareBody(
     // (pre-render). This runs before include expansion so source-relative links
     // retain the owning page's source context; included fragments are a
     // deliberate first-slice limitation.
-    const with_doc_links = doclink.rewrite(arena, body, .{
-        .nodes = options.nodes,
-        .source_path = source_path,
-        .output_path = output_path,
-    }) catch return error.ReferenceFailed;
+    const with_doc_links = (if (options.shared_doclink_map) |shared_map|
+        doclink.rewriteWithSourceMap(arena, body, .{
+            .nodes = options.nodes,
+            .source_path = source_path,
+            .output_path = output_path,
+        }, shared_map)
+    else
+        doclink.rewrite(arena, body, .{
+            .nodes = options.nodes,
+            .source_path = source_path,
+            .output_path = output_path,
+        })) catch return error.ReferenceFailed;
 
     // Scanners below measure offsets in the body slice, but the diagnostics
     // contract specifies the full-source line. Shift by the frontmatter.
@@ -298,25 +316,44 @@ fn prepareBody(
         .ptr = @ptrCast(p),
         .readFn = readIncludeFromProvider,
     } else null;
-    const expanded = include_mod.expandIncludesWithReader(
-        io,
-        content_dir,
-        include_reader,
-        gpa,
-        arena,
-        with_doc_links,
-        source_path,
-        &include_fail,
-    ) catch |err| {
+    const expanded = (if (options.include_cache) |cache|
+        include_mod.expandIncludesWithCache(
+            io,
+            content_dir,
+            include_reader,
+            gpa,
+            arena,
+            with_doc_links,
+            source_path,
+            &include_fail,
+            cache,
+        )
+    else
+        include_mod.expandIncludesWithReader(
+            io,
+            content_dir,
+            include_reader,
+            gpa,
+            arena,
+            with_doc_links,
+            source_path,
+            &include_fail,
+        )) catch |err| {
         include_mod.printDiagnostic(gpa, err, source_path, include_fail, options.diagnostics);
         return error.IncludeFailed;
     };
 
     var wiki_fail: wikilink.FailInfo = .{ .line_base = fail_line_base };
-    const with_wiki = wikilink.rewriteWikiLinksOpts(arena, expanded, options.nodes, output_path, &wiki_fail, .{
-        .heading_index = options.heading_index,
-        .validate_fragments = options.heading_index != null,
-    }) catch |err| {
+    const with_wiki = (if (options.shared_node_map) |shared_map|
+        wikilink.rewriteWikiLinksWithMapOpts(arena, expanded, shared_map, output_path, &wiki_fail, .{
+            .heading_index = options.heading_index,
+            .validate_fragments = options.heading_index != null,
+        })
+    else
+        wikilink.rewriteWikiLinksOpts(arena, expanded, options.nodes, output_path, &wiki_fail, .{
+            .heading_index = options.heading_index,
+            .validate_fragments = options.heading_index != null,
+        })) catch |err| {
         wikilink.printDiagnostic(gpa, err, source_path, wiki_fail, options.diagnostics);
         return error.ReferenceFailed;
     };

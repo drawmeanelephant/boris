@@ -29,6 +29,7 @@ pub const ExitCode = enum(u8) {
 
 pub const Options = struct {
     help: bool = false,
+    version: bool = false,
     quiet: bool = false,
     /// Skip the combined Markdown convenience bundles.
     no_bundles: bool = false,
@@ -221,6 +222,10 @@ pub const ExportStats = struct {
 // CLI
 // ---------------------------------------------------------------------------
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this tool does not import `src/`.
+pub const tool_id = "boris-source-rag/0.8.1";
+
 pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var opts: Options = .{};
     var i: usize = if (args.len > 0) 1 else 0;
@@ -228,6 +233,9 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         const a = args[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
             opts.help = true;
+            return opts;
+        } else if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) {
+            opts.version = true;
             return opts;
         } else if (std.mem.eql(u8, a, "--quiet") or std.mem.eql(u8, a, "-q")) {
             opts.quiet = true;
@@ -303,6 +311,7 @@ fn printUsage() void {
         \\
         \\Options:
         \\  -h, --help           Show this help and exit 0
+        \\  -V, --version        Print the tool id and exit 0
         \\  -q, --quiet          Suppress progress lines
         \\  --no-bundles         Skip combined bundles; emit per-file corpus and sidecars
         \\  --bundles-only       Emit combined bundles and sidecars; omit files/** tree
@@ -2246,6 +2255,14 @@ pub fn main(init: std.process.Init) u8 {
         return ExitCode.success.int();
     }
 
+    if (opts.version) {
+        var stdout_buffer: [128]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+        stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+        stdout_writer.interface.flush() catch {};
+        return ExitCode.success.int();
+    }
+
     _ = exportCorpus(io, gpa, opts) catch |err| {
         std.log.err("source-rag export failed: {s}", .{@errorName(err)});
         return ExitCode.io_error.int();
@@ -2271,6 +2288,10 @@ test "parseOptions: help and defaults" {
 
     const h = try parseOptions(&.{ "boris-source-rag", "--help" });
     try std.testing.expect(h.help);
+
+    const v = try parseOptions(&.{ "boris-source-rag", "-V" });
+    try std.testing.expect(v.version);
+    try std.testing.expectEqualStrings("boris-source-rag/0.8.1", tool_id);
 
     const o2 = try parseOptions(&.{ "boris-source-rag", "--out=./pack", "--root=../repo", "--max-bytes=1000", "--split-size=100", "--quiet", "--no-bundles", "--profile=docs" });
     try std.testing.expectEqualStrings("./pack", o2.out_dir);

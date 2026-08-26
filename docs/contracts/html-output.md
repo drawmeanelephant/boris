@@ -144,7 +144,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 
    | Marker | Value |
    |--------|--------|
-   | `{{nav}}` | Full site forest (root Trunks id-ascending, recursively nested children id-ascending) |
+   | `{{nav}}` | Full site forest (root Trunks id-ascending, recursively nested children id-ascending; draft-rooted subtrees pruned). May be written `{{nav depth=N}}` with N ≥ 1 to cap the rendered levels (level 1 = root Trunks); plain `{{nav}}` stays unbounded. Both spellings are one slot under the at-most-once rule. |
    | `{{breadcrumb}}` | Parent chain root → current page (inclusive) |
    | `{{title}}` | Page title, or entity id when title is absent (HTML-escaped text) |
    | `{{toc}}` | In-page outline from **this page’s** body headings (h1–h3 with `id`) |
@@ -182,9 +182,41 @@ Before any page render, the HTML path:
    `{{nav}}` / `{{breadcrumb}}` / `{{children}}` (and fingerprint material when
    graph chrome is present).
 
+### Status gating on the default HTML target (#738)
+
+`status` is a document fact; each projection owns its eligibility rule. On the
+default HTML target a `status: draft` page is **emitted but not advertised**:
+
+| Surface | Draft behavior |
+|---------|----------------|
+| Page HTML at its normal route | **Emitted.** A draft is unlisted, not absent: wiki-links and Markdown links to it keep resolving, and the output link audit keeps auditing the complete output set. |
+| `{{nav}}` | **Pruned**, including the whole subtree below a drafted page (no re-rooting; publish the trunk to re-advertise its section). An all-draft forest still emits the empty `<nav>` wrapper shape. |
+| `{{children}}` | Direct draft children are **omitted**; an all-draft child list emits the empty fragment. |
+| `{{breadcrumb}}` | Unchanged — per-page context, not advertising; a drafted ancestor stays a crumb. |
+| Search index / sitemap / RSS | Excluded (same rule as before this section existed). The publication-checks report applies the same eligibility rule: an emitted draft is not a `rendered-search` check subject, so its absence from the index cannot fail that check (#752; inventory records the fact as `"advertised": false`). |
+| `{{metadata}}` on the drafted page itself | Unchanged (own-page context). |
+| `archived` | Treated exactly like published on the HTML target, consistent with Standard.site and Nostr eligibility. |
+| IR (`graph.json`) / RAG | Keep every validated page regardless of status; they are source-derived corpora, not publication advertisements. |
+
+The frozen graph is unchanged by status gating: drafts remain graph nodes,
+`graph.json` keeps its shape, and no `schemaVersion` bump occurs.
+
 ### Site nav HTML (normative shape)
 
 When `{{nav}}` is present, emit a deterministic rooted forest (no hash-map order):
+draft-rooted subtrees are pruned per [status gating](#status-gating-on-the-default-html-target-738).
+
+- With the plain `{{nav}}` spelling the forest is unbounded: every level of
+  every Trunk subtree renders.
+- With `{{nav depth=N}}` (N ≥ 1, ASCII digits), exactly the first `N` levels
+  render (level 1 = root Trunks); deeper nodes and their nested lists are
+  omitted from every page's nav, while every page still builds at its route.
+- Ordering, classes, escaping, and relative-href rules are identical under
+  both spellings; depth only bounds how many levels render. A depth beyond
+  the tree height renders byte-identical output to plain `{{nav}}`.
+- Malformed arguments (`depth=0`, non-numeric, extra tokens) fail layout load
+  with `ELAYOUTNAVDEPTH`; any two nav-form tokens are the duplicate-slot
+  error.
 
 ```html
 <nav class="site-nav" aria-label="Site">
@@ -226,7 +258,8 @@ Last crumb is the current page (unlinked text). Earlier crumbs are links.
 ### Direct-children HTML (normative shape)
 
 When `{{children}}` is present, Boris emits only the current frozen node's
-**direct** children, in canonical entity-id ascending order:
+**direct** children, in canonical entity-id ascending order (draft direct
+children omitted; see [status gating](#status-gating-on-the-default-html-target-738)):
 
 ```html
 <nav class="page-children" aria-label="Children">
@@ -251,10 +284,16 @@ When `{{children}}` is present, Boris emits only the current frozen node's
 
 When the layout contains `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, or
 `{{children}}`, each such page fingerprint includes a **site nav material**
-digest derived from the frozen ordered list of `(id, title, parent, role)` for
-every page. This conservative shared material keeps title, output-path, parent,
+digest derived from the frozen ordered list of `(id, title, parent, role,
+status)` for
+every page: the raw material is hashed once per build, and each page
+fingerprint folds in that fixed-size SHA-256 digest rather than rehashing the
+per-page-count material. This conservative shared material keeps title, output-path, parent,
 and direct-child changes correct across incremental builds; a title or parent
-change on any page dirties every page using graph chrome. Layouts without graph
+change on any page dirties every page using graph chrome. The status field is
+load-bearing: flipping a page between `draft` and published-equivalent states
+changes what `{{nav}}`/`{{children}}` render and must dirty chrome pages.
+Layouts without graph
 chrome keep the prior page-local fingerprint inputs
 (source, includes, layout bytes, entity id, target identity).
 
@@ -268,14 +307,18 @@ published as IR or RAG semantic edges.
 On `--incremental`, a page is **reused** only when all of the following hold:
 
 1. Prior `dist/.boris-cache/manifest.json` parses and its `format_version`
-   equals the fingerprint discriminator (`boris-cache-v2-layout-rules`).
+   equals the fingerprint discriminator (`boris-cache-v3-nav-digest`).
 2. A manifest entry matches the page’s `entity_id`, `output_path`, effective
    `selected_layout`, and current **input** fingerprint (source / includes /
    selected layout path+bytes / target / nav material / theme material).
 3. The on-disk HTML file exists and is non-empty.
 4. The file’s **SHA-256** (lowercase hex) equals the entry’s `output_digest`.
 
-`output_size` is recorded as a **cheap prefilter** only. Same-length
+`output_size` is recorded as a **cheap prefilter** only.
+On unchanged builds the publication-evidence chain may additionally be reused
+without re-derivation under its own digest gate; see
+[publication-checks](publication-checks.md#incremental-evidence-reuse).
+`--refresh-evidence` forces full re-derivation. Same-length
 corruption of published HTML must still fail the digest check and force a
 re-render. Older manifests with a different `format_version` (including
 `boris-cache-v1-multitarget`) force a cold rebuild.
@@ -423,6 +466,17 @@ On the OS/filesystem where `zig build test` runs:
 ### Symlink safety below output root (H-03)
 
 During staged file publication (`publishStageTree`), every destination parent path component relative to the output root is validated with no-follow semantics (`statFile` with `follow_symlinks = false`). If any parent component along the destination path is a symlink or a non-directory file, publication immediately fails with `error.TargetOutputSymlink`. Symlinked parent directories below the output root are rejected and never traversed or followed.
+
+### Zero-page sites
+
+A content root that scans to **zero pages** is still a successful publication
+(empty sites are valid; see [rendered-search.md](rendered-search.md)): the
+target commits proof, search, and theme assets and exits 0 without page
+output. That success is easy to misread as a populated build, so the compiler
+prints a stderr warning naming the content root — also under `--quiet`,
+matching the publication-evidence warning policy. A `--timings` report on
+such a run honestly shows every counter at zero (#775): no page was read,
+fingerprinted, rendered, or audited.
 
 ---
 

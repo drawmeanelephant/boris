@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const page_mod = @import("page.zig");
 const wikilink = @import("wikilink.zig");
+const doclink = @import("doclink.zig");
 const include_mod = @import("include.zig");
 const json_out = @import("json_out.zig");
 const cache_mod = @import("cache.zig");
@@ -190,6 +191,7 @@ pub fn buildSiteHeadingIndex(
     prior_harvest: ?*const ParsedHeadingHarvest,
     recorder: ?*timings.Recorder,
     sink: ?*diag.Collector,
+    include_cache: ?*include_mod.IncludeCache,
 ) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
     var index: wikilink.HeadingIndex = .{};
     errdefer index.deinit(gpa);
@@ -231,6 +233,12 @@ pub fn buildSiteHeadingIndex(
 
     var doc_arena = std.heap.ArenaAllocator.init(gpa);
     defer doc_arena.deinit();
+
+    // One shared wiki id→node map for every cache-miss re-render below (#726).
+    var shared_wiki_map = if (nodes.len == 0) null else try wikilink.buildNodeMap(gpa, nodes);
+    defer if (shared_wiki_map) |*m| m.deinit(gpa);
+    var shared_doclink_map = if (nodes.len == 0) null else try doclink.buildSourceNodeMap(gpa, nodes);
+    defer if (shared_doclink_map) |*m| m.deinit(gpa);
 
     // The adapter identity is part of a page's cache key: changing which
     // language produced the Markdown must invalidate the fingerprint.
@@ -283,8 +291,11 @@ pub fn buildSiteHeadingIndex(
         const html = try html_body.renderSource(io, gpa, content_dir, &doc_arena, source, page.source_path, page.output_path, .{
             .input_format = input_format,
             .nodes = nodes,
+            .shared_node_map = if (shared_wiki_map) |*m| m else null,
+            .shared_doclink_map = if (shared_doclink_map) |*m| m else null,
             // Do not validate fragments while building the index they depend on.
             .diagnostics = sink,
+            .include_cache = include_cache,
         });
 
         var ids: std.ArrayList([]const u8) = .empty;

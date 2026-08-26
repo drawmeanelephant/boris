@@ -61,6 +61,27 @@ see [oliver-renderer.md](oliver-renderer.md).
 smoke-validated; it is not the silent default, so single-thread builds stay
 the conservative path.
 
+### Measured scope and expected ceiling (#731)
+
+Workers parallelize page render+publish only. Every other phase — discovery,
+parse, graph validate, dependency resolution, fingerprinting, heading
+harvest, search/sitemap projection, link audit, inventory, checks, claims,
+touches, and proof pack — runs sequentially before or after the worker pool,
+by the scope rule above. Wall-clock benefit therefore follows Amdahl's law:
+`--jobs N` accelerates only the `render` slice of a build.
+
+On a fixed 5,000-page / ~28 MB corpus (ReleaseSafe, 2026-08), the phase
+profile was approximately: render ~1.9 s of ~7.3 s serial total; `--jobs 8`
+cut render to ~0.7 s for ~2.7× phase speedup, while total wall time improved
+only ~1.25× (7.3 s → 5.8 s) because the contractually sequential phases
+dominated. Sites with heavier per-page rendering (larger bodies, more
+includes) see proportionally more benefit; small sites see almost none.
+
+Dependency resolution previously rebuilt its doclink source map per page,
+which made that sequential pre-pass O(pages × nodes) and masked even the
+render-phase gains. It now builds one shared map per pass through the same
+#726 seam the renderer uses; output bytes are unchanged.
+
 ### Permanent evidence gates
 
 - `src/compile.zig` — `compilePages: parallel constructs stable under jobs

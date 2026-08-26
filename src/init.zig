@@ -280,7 +280,22 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) 
             \\  boris standard-site plan --profile standard-site.json          inspect Atmosphere records
             \\  boris watch --input content --html-dir dist --theme themes/boris   rebuild on change
             \\
+            \\conventions:
+            \\  shared fragments live under content/includes/ and never compile as pages
+            \\  page images live in <stem>.assets/ beside the page that owns them
+            \\
         , .{target_dir});
     }
     return @intFromEnum(ExitCode.success);
+}
+
+test "starter layout marks the search extraction root" {
+    const marker = "<main class=\"site-body\" data-boris-search-root>";
+    var count: usize = 0;
+    var idx: usize = 0;
+    while (std.mem.indexOfPos(u8, starter_layout, idx, marker)) |at| {
+        count += 1;
+        idx = at + marker.len;
+    }
+    try std.testing.expectEqual(@as(usize, 1), count);
 }

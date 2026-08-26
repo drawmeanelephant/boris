@@ -7,7 +7,7 @@
 # and does not claim macOS-vs-Linux byte identity.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 note() { printf '==> %s\n' "$*"; }

@@ -158,7 +158,7 @@ open YAML. The ninth key is a documented Cooklang-convention exception.
 | `id` | no | plain/dquoted entity id | Override path-derived id; shape rules in [identity-and-paths.md](identity-and-paths.md) |
 | `title` | no | plain/dquoted string | ≤512 UTF-8 bytes |
 | `parent` | no | plain/dquoted entity id | Foreign key to a direct parent page; ≤255 bytes |
-| `status` | no | `draft` \| `published` \| `archived` | Exact spellings only |
+| `status` | no | `draft` \| `published` \| `archived` | Exact spellings only. Eligibility is projection-specific: on the default HTML target a draft is emitted but not advertised (see [html-output.md](html-output.md) § Status gating); Standard.site, Nostr, RSS, sitemap, and search exclude drafts; IR and RAG keep every page. |
 | `tags` | no | `[a, b, "c"]` only | Bracket list; plain or double-quoted items |
 | `relations` | no | `[kind=target, …]` only | ≤128 bounded semantic relations; token grammar and validation in [semantic-relations.md](semantic-relations.md) |
 | `published_at` | no | `YYYY-MM-DDTHH:MM:SSZ` | Explicit UTC calendar time only; requires `summary` when present |

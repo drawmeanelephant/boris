@@ -42,7 +42,7 @@ The command accepts the existing HTML vocabulary where applicable:
   `--layout-rule TARGET SELECTOR PATH`;
 - `--sitemap`, `--sitemap-path PATH`, and their required `--site-url URL`;
 - `--quiet`, `--help`, and `--report PATH` (the HTML-path diagnostics
-  report, `html-build-report-0.1.0`; see
+  report, `html-build-report-0.2.0`; see
   [`diagnostics.md`](diagnostics.md#html-path-machine-readable-report));
 - `--watch` (issue #647): the zero-write validation daemon. `validate --watch`
   repeats the preflight on every debounced change using the same watch
@@ -174,7 +174,7 @@ the exit code. `validate` rejects `--format`, which belongs to Documentation
 Intelligence analysis, and must not misuse the Documentation Intelligence
 schema or write IR `build-report.json`; `--report PATH` (one-shot or under
 `--watch`) writes the HTML-path diagnostics report
-(`html-build-report-0.1.0`), never a semantic authority file. Under `--watch`
+(`html-build-report-0.2.0`), never a semantic authority file. Under `--watch`
 the daemon keeps running across recoverable failures and exits `0` on
 SIGINT/SIGTERM (same policy as HTML watch mode).
 

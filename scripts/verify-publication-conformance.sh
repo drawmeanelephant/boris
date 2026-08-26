@@ -11,7 +11,7 @@
 # absolute paths enter the Boris inputs.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 BORIS="./zig-out/bin/boris"
@@ -78,6 +78,23 @@ run_capture() {
 assert_empty() {
     local path="$1"
     [[ ! -s "$path" ]] || fail "expected empty stream: ${path}"
+}
+
+# Failed publication checks are surfaced on stderr by design (#740/#741),
+# including under --quiet: a committed target may legitimately carry a
+# failing check, and silencing the verdict is exactly what made it
+# invisible. Success fixtures therefore tolerate these advisory lines and
+# nothing else.
+strip_check_warnings() {
+    local path="$1"
+    grep -v "^warning: publication check '" "$path" > "${path}.filtered" || true
+    mv "${path}.filtered" "$path"
+}
+
+assert_stderr_quiet_clean() {
+    local path="$1"
+    strip_check_warnings "$path"
+    assert_empty "$path"
 }
 
 assert_nonempty() {
@@ -195,13 +212,13 @@ run_html_success() {
 
     run_capture "${name}-a" 0 "$BORIS" --html --input "$input" --html-dir "$first" --html-layout "$LAYOUT" --quiet "$@"
     assert_empty "$OUT/logs/${name}-a.stdout"
-    assert_empty "$OUT/logs/${name}-a.stderr"
+    assert_stderr_quiet_clean "$OUT/logs/${name}-a.stderr"
     assert_file "$first/index.html"
     assert_cmp "$expected_html" "$first/index.html"
 
     run_capture "${name}-b" 0 "$BORIS" --html --input "$input" --html-dir "$second" --html-layout "$LAYOUT" --quiet "$@"
     assert_empty "$OUT/logs/${name}-b.stdout"
-    assert_empty "$OUT/logs/${name}-b.stderr"
+    assert_stderr_quiet_clean "$OUT/logs/${name}-b.stderr"
     assert_tree_equal "$first" "$second"
     pass "${name}: exit 0, golden, and repeat tree"
 }
@@ -264,12 +281,12 @@ while IFS='|' read -r name depth title marker expected_exit expected_html expect
     if [[ "$expected_exit" == "0" ]]; then
         run_capture "c02-${name}" 0 "$BORIS" --html --input "$input" --html-dir "$output" --html-layout "$LAYOUT" --quiet
         assert_empty "$OUT/logs/c02-${name}.stdout"
-        assert_empty "$OUT/logs/c02-${name}.stderr"
+        assert_stderr_quiet_clean "$OUT/logs/c02-${name}.stderr"
         assert_file "$output/index.html"
         assert_cmp "$C02/$expected_html" "$output/index.html"
         run_capture "c02-${name}-repeat" 0 "$BORIS" --html --input "$input" --html-dir "$OUT/outputs/${name}-repeat" --html-layout "$LAYOUT" --quiet
         assert_empty "$OUT/logs/c02-${name}-repeat.stdout"
-        assert_empty "$OUT/logs/c02-${name}-repeat.stderr"
+        assert_stderr_quiet_clean "$OUT/logs/c02-${name}-repeat.stderr"
         assert_tree_equal "$output" "$OUT/outputs/${name}-repeat"
         pass "c02-${name}: generated ${depth}-level chain, exit 0, golden, repeat tree"
     else
@@ -290,13 +307,13 @@ for variant in trailing no-trailing; do
     output="$OUT/outputs/c03-${variant}"
     run_capture "c03-${variant}" 0 "$BORIS" --html --input "$C03/content" --html-dir "$output" --html-layout "$C03/layout.html" --sitemap-path meta/discovery.xml --site-url "$url" --quiet
     assert_empty "$OUT/logs/c03-${variant}.stdout"
-    assert_empty "$OUT/logs/c03-${variant}.stderr"
+    assert_stderr_quiet_clean "$OUT/logs/c03-${variant}.stderr"
     assert_cmp "$SITEMAP_GOLDEN" "$output/meta/discovery.xml"
 done
 assert_tree_equal "$OUT/outputs/c03-trailing" "$OUT/outputs/c03-no-trailing"
 run_capture "c03-trailing-repeat" 0 "$BORIS" --html --input "$C03/content" --html-dir "$OUT/outputs/c03-trailing-repeat" --html-layout "$C03/layout.html" --sitemap-path meta/discovery.xml --site-url "$SITE_URL" --quiet
 assert_empty "$OUT/logs/c03-trailing-repeat.stdout"
-assert_empty "$OUT/logs/c03-trailing-repeat.stderr"
+assert_stderr_quiet_clean "$OUT/logs/c03-trailing-repeat.stderr"
 assert_tree_equal "$OUT/outputs/c03-trailing" "$OUT/outputs/c03-trailing-repeat"
 pass "c03: sitemap golden, slash normalization, and repeat trees"
 
@@ -322,12 +339,12 @@ for limit in 2 3 4; do
     output="$OUT/outputs/c04-feed-${limit}.xml"
     run_capture "c04-feed-${limit}" 0 "$BORIS" --rss --input "$C04/content" --rss-path "$output" --site-url "$RSS_SITE_URL" --rss-title "$RSS_TITLE" --rss-description "$RSS_DESCRIPTION" --rss-limit "$limit" --quiet
     assert_empty "$OUT/logs/c04-feed-${limit}.stdout"
-    assert_empty "$OUT/logs/c04-feed-${limit}.stderr"
+    assert_stderr_quiet_clean "$OUT/logs/c04-feed-${limit}.stderr"
     assert_cmp "$C04/expected/feed-limit-${limit}.xml" "$output"
 done
 run_capture "c04-feed-3-repeat" 0 "$BORIS" --rss --input "$C04/content" --rss-path "$OUT/outputs/c04-feed-3-repeat.xml" --site-url "$RSS_SITE_URL" --rss-title "$RSS_TITLE" --rss-description "$RSS_DESCRIPTION" --rss-limit 3 --quiet
 assert_empty "$OUT/logs/c04-feed-3-repeat.stdout"
-assert_empty "$OUT/logs/c04-feed-3-repeat.stderr"
+assert_stderr_quiet_clean "$OUT/logs/c04-feed-3-repeat.stderr"
 assert_cmp "$OUT/outputs/c04-feed-3.xml" "$OUT/outputs/c04-feed-3-repeat.xml"
 pass "c04: feed limit goldens, escaping, and repeat feed"
 
@@ -391,7 +408,7 @@ c01_ok() {
     shift
     run_capture "c01-${name}" 0 "$BORIS" --textile --html --input "$C01/content" --html-dir "$OUT/outputs/c01-${name}" --html-layout "$C01/layout.html" --quiet "$@"
     assert_empty "$OUT/logs/c01-${name}.stdout"
-    assert_empty "$OUT/logs/c01-${name}.stderr"
+    assert_stderr_quiet_clean "$OUT/logs/c01-${name}.stderr"
     assert_file "$OUT/outputs/c01-${name}/index.html"
     assert_file "$OUT/outputs/c01-${name}/guides/satellite.html"
 }
@@ -476,7 +493,7 @@ C05_INC_ARGS=(--html --input "$C05/content" --html-dir "$C05_INC_OUT" --html-lay
 # Step 1: clean baseline — incremental first publication into one target.
 run_capture c05-incr-base 0 "$BORIS" "${C05_INC_ARGS[@]}"
 assert_empty "$OUT/logs/c05-incr-base.stdout"
-assert_empty "$OUT/logs/c05-incr-base.stderr"
+assert_stderr_quiet_clean "$OUT/logs/c05-incr-base.stderr"
 assert_contains "C05-TARGET" "$C05_INC_OUT/reference/config.html"
 assert_contains "C05-GLOBAL" "$C05_INC_OUT/index.html"
 assert_file "$C05_INC_OUT/.boris-cache/manifest.json"
@@ -490,7 +507,7 @@ mv "$C05_INC/layouts/target.next" "$C05_INC/layouts/target.html"
 assert_file "$C05_INC_OUT/.boris-cache/manifest.json"
 run_capture c05-incr-win 0 "$BORIS" "${C05_INC_ARGS[@]}"
 assert_empty "$OUT/logs/c05-incr-win.stdout"
-assert_empty "$OUT/logs/c05-incr-win.stderr"
+assert_stderr_quiet_clean "$OUT/logs/c05-incr-win.stderr"
 assert_contains "C05-TARGET-V2" "$C05_INC_OUT/reference/config.html"
 assert_cmp "$OUT/logs/c05-incr-index-v1.html" "$C05_INC_OUT/index.html"
 cp "$C05_INC_OUT/reference/config.html" "$OUT/logs/c05-incr-config-v2.html"
@@ -502,7 +519,7 @@ mv "$C05_INC/layouts/glob.next" "$C05_INC/layouts/glob.html"
 assert_file "$C05_INC_OUT/.boris-cache/manifest.json"
 run_capture c05-incr-lose 0 "$BORIS" "${C05_INC_ARGS[@]}"
 assert_empty "$OUT/logs/c05-incr-lose.stdout"
-assert_empty "$OUT/logs/c05-incr-lose.stderr"
+assert_stderr_quiet_clean "$OUT/logs/c05-incr-lose.stderr"
 assert_cmp "$OUT/logs/c05-incr-config-v2.html" "$C05_INC_OUT/reference/config.html"
 assert_cmp "$OUT/logs/c05-incr-index-v1.html" "$C05_INC_OUT/index.html"
 pass "c05-incr: same target; winning layout edit propagates, losing layout edit has no effect"
@@ -523,7 +540,7 @@ c06_incr() {
     shift
     run_capture "c06-${name}-base" 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-${name}" --quiet --incremental "$@"
     assert_empty "$OUT/logs/c06-${name}-base.stdout"
-    assert_empty "$OUT/logs/c06-${name}-base.stderr"
+    assert_stderr_quiet_clean "$OUT/logs/c06-${name}-base.stderr"
 }
 c06_incr_rebuild() {
     local name="$1"
@@ -533,7 +550,7 @@ c06_incr_rebuild() {
     assert_file "$OUT/outputs/c06-${name}/.boris-cache/manifest.json"
     run_capture "c06-${name}-reb" 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-${name}" --quiet --incremental "$@"
     assert_empty "$OUT/logs/c06-${name}-reb.stdout"
-    assert_empty "$OUT/logs/c06-${name}-reb.stderr"
+    assert_stderr_quiet_clean "$OUT/logs/c06-${name}-reb.stderr"
 }
 
 # No-op reuse: baseline, snapshot payload, two unchanged incremental rebuilds.

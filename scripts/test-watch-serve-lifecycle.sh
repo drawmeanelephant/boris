@@ -14,7 +14,7 @@
 # associative arrays, no bash-4+isms.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 BORIS="./zig-out/bin/boris"

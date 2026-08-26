@@ -1,7 +1,8 @@
 {
   "format": "boris-recipe-scale",
-  "schemaVersion": "0.1.0",
+  "schemaVersion": "0.2.0",
   "compiler": "boris/0.8.1+cooklang",
+  "vcsRevision": "",
   "factor": { "num": 2, "den": 1 },
   "page": "carbonara",
   "ingredients": [
@@ -19,7 +20,7 @@
     { "name": "frying pan", "quantity": { "amount": { "class": "empty", "original": "", "scaled": "" }, "unit": "" } }
   ],
   "timers": [
-    { "name": "", "quantity": { "amount": { "class": "scalable", "original": "5", "scaled": "5" }, "unit": "minutes" } },
-    { "name": "pasta", "quantity": { "amount": { "class": "scalable", "original": "9", "scaled": "9" }, "unit": "minutes" } }
+    { "name": "", "quantity": { "amount": { "class": "scalable", "original": "5", "scaled": "5" }, "unit": "minutes" }, "scaling": "locked" },
+    { "name": "pasta", "quantity": { "amount": { "class": "scalable", "original": "9", "scaled": "9" }, "unit": "minutes" }, "scaling": "locked" }
   ]
 }

@@ -30,9 +30,16 @@ pub const Profile = struct {
     style: markdown.Style,
     include_assets: bool,
     default_barbs: []const barbs.Kind,
+    /// Which site-navigation slot the generated theme requests. `.full` asks
+    /// Boris for the recursive whole-graph `{{nav}}` (anchors grow with page
+    /// count); `.children` bounds per-page navigation to breadcrumb plus direct
+    /// children so scale corpora measure the compiler instead of the nav (#729).
+    nav: NavDensity = .full,
     owns_name: bool = false,
     owns_description: bool = false,
     owns_barbs: bool = false,
+
+    pub const NavDensity = enum { full, children };
 
     pub fn deinit(self: *Profile, allocator: std.mem.Allocator) void {
         if (self.owns_name) allocator.free(self.name);
@@ -99,6 +106,14 @@ pub fn builtinProfile(name: []const u8) ?Profile {
         .include_assets = true,
         .default_barbs = &mild_barbs,
     };
+    if (std.mem.eql(u8, name, "bounded-nav-v1")) return .{
+        .name = "bounded-nav-v1",
+        .description = "README-shaped pages whose theme bounds navigation to breadcrumb plus direct children, keeping per-page anchors flat as the corpus grows",
+        .style = .readme,
+        .include_assets = true,
+        .default_barbs = &readme_barbs,
+        .nav = .children,
+    };
     return null;
 }
 
@@ -125,6 +140,7 @@ pub fn loadProfile(allocator: std.mem.Allocator, io: Io, selector: []const u8) !
     errdefer allocator.free(description);
     const style = try parseStyle(try jsonString(object, "style"));
     const include_assets = jsonBool(object, "includeAssets") orelse true;
+    const nav = try parseNavDensity(try jsonStringOr(object, "nav", "full"));
 
     var barb_list: std.ArrayList(barbs.Kind) = .empty;
     if (object.get("barbs")) |value| {
@@ -147,6 +163,7 @@ pub fn loadProfile(allocator: std.mem.Allocator, io: Io, selector: []const u8) !
         .style = style,
         .include_assets = include_assets,
         .default_barbs = owned_barbs,
+        .nav = nav,
         .owns_name = true,
         .owns_description = true,
         .owns_barbs = owned_barbs.len > 0,
@@ -213,13 +230,14 @@ pub fn generate(options: GenerateOptions) !GenerateSummary {
 
     try writeIncludes(options.io, fixture, options.allocator, &inventory, assignments);
     try writeAssets(options.io, fixture, &inventory, profile.include_assets);
-    const theme_description = try writeTheme(
+    const theme_description = try writeThemeWithNav(
         options.io,
         fixture,
         options.allocator,
         &inventory,
         options.theme_path,
         hasBarb(assignments, .invalid_theme),
+        profile.nav,
     );
     const template_bytes = if (options.template_path) |path|
         try readFilePath(options.io, options.allocator, path, max_template_bytes)
@@ -500,15 +518,34 @@ fn writeTheme(
     external_path: ?[]const u8,
     invalid: bool,
 ) ![]const u8 {
+    return writeThemeWithNav(io, fixture, allocator, inventory, external_path, invalid, .full);
+}
+
+/// `.full` requests Boris's recursive whole-graph `{{nav}}`; `.children`
+/// bounds per-page navigation to breadcrumb plus direct children (#729).
+pub fn builtinLayout(nav_density: Profile.NavDensity, invalid: bool) []const u8 {
+    if (invalid) return "<!doctype html>\n<html><body><main>{{title}}</main></body></html>\n";
+    return switch (nav_density) {
+        .full => "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"{{asset-url assets/css/docs.css}}\"></head><body><nav>{{nav}}</nav><main>{{content}}</main><footer>{{footer}}</footer></body></html>\n",
+        .children => "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"{{asset-url assets/css/docs.css}}\"></head><body><nav>{{breadcrumb}} {{children}}</nav><main>{{content}}</main><footer>{{footer}}</footer></body></html>\n",
+    };
+}
+
+fn writeThemeWithNav(
+    io: Io,
+    fixture: Io.Dir,
+    allocator: std.mem.Allocator,
+    inventory: *manifest.Inventory,
+    external_path: ?[]const u8,
+    invalid: bool,
+    nav_density: Profile.NavDensity,
+) ![]const u8 {
     if (external_path != null and !invalid) {
         try copyTree(io, allocator, external_path.?, fixture, inventory, "optional-theme");
         return external_path.?;
     }
 
-    const layout = if (invalid)
-        "<!doctype html>\n<html><body><main>{{title}}</main></body></html>\n"
-    else
-        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"{{asset-url assets/css/docs.css}}\"></head><body><nav>{{nav}}</nav><main>{{content}}</main><footer>{{footer}}</footer></body></html>\n";
+    const layout = builtinLayout(nav_density, invalid);
     try writeTracked(io, fixture, allocator, inventory, "optional-theme/layouts/main.html", "theme", layout, null);
     try writeTracked(io, fixture, allocator, inventory, "optional-theme/footer.html", "theme", "<small>Generated by boris-testdata.</small>\n", null);
     try writeTracked(io, fixture, allocator, inventory, "optional-theme/assets/css/docs.css", "theme", "body{font-family:system-ui,sans-serif;max-width:70rem;margin:auto;padding:2rem}main{line-height:1.6}nav{border-bottom:1px solid #ccc;padding-bottom:1rem}\n", null);
@@ -1402,6 +1439,18 @@ fn readArtifactRecord(allocator: std.mem.Allocator, reader: *std.json.Reader) !A
                 },
                 else => return error.InvalidArtifactInventory,
             }
+        } else if (std.mem.eql(u8, key, "advertised")) {
+            // Extended page record (#752): null, true, or false; not needed by
+            // the generator, but the vocabulary is strict so an unknown shape
+            // still fails closed.
+            const token = try reader.nextAllocMax(allocator, .alloc_if_needed, 4096);
+            defer freeJsonToken(allocator, token);
+            switch (token) {
+                .null => {},
+                .true => {},
+                .false => {},
+                else => return error.InvalidArtifactInventory,
+            }
         } else {
             return error.InvalidArtifactInventory;
         }
@@ -1736,6 +1785,19 @@ fn parseStyle(value: []const u8) !markdown.Style {
     return error.InvalidProfile;
 }
 
+fn jsonStringOr(object: std.json.ObjectMap, key: []const u8, fallback: []const u8) ![]const u8 {
+    return switch (object.get(key) orelse return fallback) {
+        .string => |value| value,
+        else => error.InvalidProfile,
+    };
+}
+
+fn parseNavDensity(value: []const u8) !Profile.NavDensity {
+    if (std.mem.eql(u8, value, "full")) return .full;
+    if (std.mem.eql(u8, value, "children")) return .children;
+    return error.InvalidProfile;
+}
+
 fn pathExists(io: Io, path: []const u8) bool {
     if (std.fs.path.isAbsolute(path)) {
         Io.Dir.accessAbsolute(io, path, .{}) catch return false;
@@ -1791,6 +1853,25 @@ test "builtin profiles expose ideal, nightmare, and preserved cases" {
     try std.testing.expect(builtinProfile("nightmare-v1").?.default_barbs.len > 5);
     try std.testing.expectEqual(@as(usize, 1), builtinProfile("preserved-edge-v1").?.default_barbs.len);
     try std.testing.expectEqual(@as(usize, 8), builtinProfile("mild-poison-v1").?.default_barbs.len);
+}
+
+test "bounded-nav profile bounds the generated theme's navigation slots" {
+    const bounded = builtinProfile("bounded-nav-v1").?;
+    try std.testing.expectEqual(Profile.NavDensity.children, bounded.nav);
+    try std.testing.expect(builtinProfile("readme-realistic-v1").?.nav == .full);
+
+    // Full nav requests the recursive whole-graph slot; bounded nav must not.
+    try std.testing.expect(std.mem.indexOf(u8, builtinLayout(.full, false), "{{nav}}") != null);
+    const bounded_layout = builtinLayout(.children, false);
+    try std.testing.expect(std.mem.indexOf(u8, bounded_layout, "{{breadcrumb}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bounded_layout, "{{children}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bounded_layout, "{{nav}}") == null);
+    // Both variants keep the required content marker and stay one-line stable.
+    try std.testing.expect(std.mem.indexOf(u8, bounded_layout, "{{content}}") != null);
+    try std.testing.expect(std.mem.endsWith(u8, bounded_layout, "</body></html>\n"));
+
+    // Invalid-theme layouts are independent of nav density.
+    try std.testing.expectEqualStrings(builtinLayout(.full, true), builtinLayout(.children, true));
 }
 
 test "asset-excluded profiles do not emit dangling generated image references" {

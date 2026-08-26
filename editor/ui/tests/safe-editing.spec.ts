@@ -2531,7 +2531,7 @@ test('theme layouts list closed slots and preview widths are named (#418 M8)', a
     disk: '<html><body>{{title}}{{content}}{{nav}}</body></html>\n',
     commands: {
       html_build: commandResult('html_build', {
-        report_version: 'html-build-report-0.1.0',
+        report_version: 'html-build-report-0.2.0',
         problems: [{
           severity: 'info', code: 'ILAYOUTSELECTED', message: 'layout rule id:index selected themes/boris/layouts/main.html',
           remediation: '', source_path: 'index.md', line: 1, column: 1, id: 'index',

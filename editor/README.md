@@ -168,7 +168,7 @@ dirty.
 
 IR build diagnostics come only from Boris's `.boris/build-report.json`.
 Check and impact consume Boris Documentation Intelligence reports under
-`.boris/`. Validate consumes the machine-readable `html-build-report-0.1.0`
+`.boris/`. Validate consumes the machine-readable `html-build-report-0.2.0`
 (`.boris/html-build-report.json`), so problems carry exact positions and never
 fall back to stderr; HTML build uses the same report with a bounded stderr
 adapter as a compatibility fallback. Exit 1 (content), 2 (usage/configuration),
@@ -214,7 +214,7 @@ diagnostic path as the one-shot runner, so the report file is the single
 authority and `/api/commands/run` validate responses stay byte-compatible:
 per-cycle outcomes map to the same convention as the one-shot exit codes
 (0 success, 1 content failure), and `report_version` is
-`html-build-report-0.1.0`.
+`html-build-report-0.2.0`.
 
 - **Lazy start.** The daemon spawns on the first validate demand and stays up
   until the host exits. `GET /api/version` advertises

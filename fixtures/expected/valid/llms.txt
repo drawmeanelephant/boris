@@ -4,11 +4,11 @@
 
 ## Documentation
 
-- [empty-no-fm](/empty-no-fm/): empty-no-fm
-- [Hierarchy Trunk](/hierarchy-trunk/): Root of the multi-level hierarchy fixture.
-  - [Hierarchy Mid](/hierarchy-mid/): Direct Satellite of the root and parent of the leaf.
-    - [Hierarchy Leaf](/hierarchy-leaf/): Third-level Satellite in the deterministic hierarchy fixture.
-      - [Hierarchy Great-Grandchild](/hierarchy-great-grandchild/): Fourth-level Satellite in the deterministic hierarchy fixture.
-- [Home Trunk](/home/): Root Trunk with explicit `id` and `title`. Satellites may point at `home`.
-  - [Child Satellite](/satellite-child/): Satellite with exactly one `parent` naming the Trunk entity id `home`.
-- [Nested Deep Page](/nested/deep/page/): Canonical entity id is path-derived: `nested/deep/page` \(forward slashes only; no leading/trailing slash\). Demonstrates slash normalization for nested paths.
+- [empty-no-fm](/empty-no-fm.html): empty-no-fm
+- [Hierarchy Trunk](/hierarchy-trunk.html): Root of the multi-level hierarchy fixture.
+  - [Hierarchy Mid](/hierarchy-mid.html): Direct Satellite of the root and parent of the leaf.
+    - [Hierarchy Leaf](/hierarchy-leaf.html): Third-level Satellite in the deterministic hierarchy fixture.
+      - [Hierarchy Great-Grandchild](/hierarchy-great-grandchild.html): Fourth-level Satellite in the deterministic hierarchy fixture.
+- [Home Trunk](/home.html): Root Trunk with explicit `id` and `title`. Satellites may point at `home`.
+  - [Child Satellite](/satellite-child.html): Satellite with exactly one `parent` naming the Trunk entity id `home`.
+- [Nested Deep Page](/nested/deep/page.html): Canonical entity id is path-derived: `nested/deep/page` \(forward slashes only; no leading/trailing slash\). Demonstrates slash normalization for nested paths.

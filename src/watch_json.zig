@@ -53,7 +53,7 @@ fn appendOptionalU32(sink: *Sink, value: ?u32) !void {
 }
 
 /// One diagnostic object, byte-identical in shape and field order to the
-/// `build-report.json` / `html-build-report-0.1.0` diagnostic object
+/// `build-report.json` / `html-build-report-0.2.0` diagnostic object
 /// (severity, code, message, remediation, sourcePath, line, column, id).
 fn appendDiagnostic(sink: *Sink, d: diag.Diagnostic) !void {
     try sink.lit("{\"severity\":");

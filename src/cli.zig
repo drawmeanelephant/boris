@@ -17,6 +17,28 @@ const recipe_scale = @import("recipe_scale.zig");
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
 
+/// Diagnostic detail threaded out of a failed `parseOptionsWithDetail` call
+/// alongside the error value, so usage errors can name the option(s) actually
+/// at fault instead of guessing from an argv scan (`findBadArg`). All fields
+/// are argv views or static strings; nothing to free.
+pub const ParseErrorDetail = struct {
+    /// Option at fault for value-shaped errors (`InvalidValue`); overrides
+    /// the findBadArg scan for the reported token.
+    blame_flag: ?[]const u8 = null,
+    /// Static explanatory suffix for `blame_flag`, set when the failure has
+    /// one well-known cause worth stating inline.
+    blame_hint: ?[]const u8 = null,
+    /// Both sides of a `ConflictingFlags` rejection, as the user-typed tokens
+    /// (commands bare, flags dashed).
+    conflict_a: ?[]const u8 = null,
+    conflict_b: ?[]const u8 = null,
+};
+
+/// Shared explanation for layout/theme path grammar rejections (#761): the
+/// same grammar governs `--theme`, `--html-layout`, `--target-layout`, and
+/// `--layout-rule` paths.
+const layout_path_hint = "layout/theme paths are workspace-relative: no leading '/', drive prefix, '..' segments, or trailing separator";
+
 /// Build mode selected by flags.
 pub const Mode = enum {
     /// Emit content-compiler IR under `--out` (default `.boris`).
@@ -85,6 +107,9 @@ pub const Options = struct {
     help: bool = false,
     /// When true, print the compiler version and exit successfully (no pipeline).
     version: bool = false,
+    /// When true, print the build-info provenance document (#776) and exit
+    /// successfully (no pipeline). Additive stdout machine surface.
+    build_info: bool = false,
     /// Suppress progress and success chatter on stderr (`--quiet`).
     ///
     /// This never suppresses errors or fatal diagnostics. A nonzero exit must
@@ -206,6 +231,9 @@ pub const Options = struct {
     owned_html_layout: bool = false,
     /// Explicit incremental HTML build mode (HTML mode only).
     incremental: bool = false,
+    /// Force full publication-evidence re-derivation even when reuse applies
+    /// (HTML mode only, #728).
+    refresh_evidence: bool = false,
     /// Bounded parallel rendering worker count (HTML mode only).
     jobs: usize = 1,
     /// Opt-in local-development watch mode for HTML builds and, with the
@@ -312,6 +340,19 @@ const default_html_layout = "themes/boris/layouts/main.html";
 /// own builder; build-shaped commands share the conflict matrix, mode
 /// resolution, and per-mode option construction.
 pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError!Options {
+    return parseOptionsWithDetail(gpa, args, null);
+}
+
+/// `parseOptions` plus an optional diagnostic-detail out-channel (#761,
+/// #764): when parsing fails, `detail` receives whatever context the failing
+/// path recorded (blamed option, conflict pair). On success it is reset to
+/// the default. The error set and every parsed value are identical to
+/// `parseOptions`.
+pub fn parseOptionsWithDetail(
+    gpa: std.mem.Allocator,
+    args: []const []const u8,
+    detail: ?*ParseErrorDetail,
+) ParseError!Options {
     var st = ParseState{};
     errdefer freeTargetList(gpa, &st.targets);
     errdefer if (st.publication_location) |*location| location.deinit(gpa);
@@ -321,28 +362,42 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     defer st.target_profiles.deinit(gpa);
     defer st.pending_rules.deinit(gpa);
 
+    const opts = parseOptionsAccumulate(gpa, args, &st) catch |err| {
+        if (detail) |d| d.* = st.err_detail;
+        return err;
+    };
+    if (detail) |d| d.* = st.err_detail;
+    return opts;
+}
+
+fn parseOptionsAccumulate(gpa: std.mem.Allocator, args: []const []const u8, st: *ParseState) ParseError!Options {
     var i: usize = if (args.len > 0) 1 else 0;
-    try parseCommandPrefix(args, &i, &st);
+    try parseCommandPrefix(args, &i, st);
 
     while (i < args.len) : (i += 1) {
         const a = args[i];
 
-        if (captureCommandPositional(&st, a)) continue;
+        if (captureCommandPositional(st, a)) continue;
 
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h") or
-            std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V"))
+            std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V") or
+            std.mem.eql(u8, a, "--build-info"))
         {
-            // Help/version short-circuits: do not validate remaining args.
-            // The first of the two flags wins (they share one exit path).
-            // Release any targets accumulated before the flag: the returned
-            // Options carries an empty list (no allocation), and the caller's
-            // deinit would never see the accumulated one (errdefer only fires
-            // on error), so `--target X --help`/`--version` must not leak it.
+            // Help/version/build-info short-circuits: do not validate
+            // remaining args. The first of the three flags wins (they share
+            // one exit path). Release any targets accumulated before the
+            // flag: the returned Options carries an empty list (no
+            // allocation), and the caller's deinit would never see the
+            // accumulated one (errdefer only fires on error), so
+            // `--target X --help`/`--version`/`--build-info` must not leak it.
             freeTargetList(gpa, &st.targets);
             const wants_help = std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h");
+            const wants_version = !wants_help and
+                (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V"));
             return .{
                 .help = wants_help,
-                .version = !wants_help,
+                .version = wants_version,
+                .build_info = !wants_help and !wants_version,
                 .quiet = st.quiet,
                 .timings = st.saw_timings,
                 .command = st.command,
@@ -360,22 +415,22 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             };
         }
 
-        if (try parseGlobalFlags(&st, a)) continue;
-        if (try parseProfileAndPlanFlags(&st, a, args, &i)) continue;
-        if (try parseNostrFlags(&st, a, args, &i)) continue;
-        if (try parseRecipeScaleFlags(&st, a, args, &i)) continue;
-        if (try parseModeFlags(&st, a, args, &i)) continue;
-        if (try parseAnalysisFlags(&st, a, args, &i)) continue;
-        if (try parseTargetSpecs(gpa, &st, a, args, &i)) continue;
-        if (try parseSessionFlags(&st, a, args, &i)) continue;
-        if (try parsePathFlags(&st, a, args, &i)) continue;
-        if (try parseHtmlFlags(&st, a, args, &i)) continue;
+        if (try parseGlobalFlags(st, a)) continue;
+        if (try parseProfileAndPlanFlags(st, a, args, &i)) continue;
+        if (try parseNostrFlags(st, a, args, &i)) continue;
+        if (try parseRecipeScaleFlags(st, a, args, &i)) continue;
+        if (try parseModeFlags(st, a, args, &i)) continue;
+        if (try parseAnalysisFlags(st, a, args, &i)) continue;
+        if (try parseTargetSpecs(gpa, st, a, args, &i)) continue;
+        if (try parseSessionFlags(st, a, args, &i)) continue;
+        if (try parsePathFlags(st, a, args, &i)) continue;
+        if (try parseHtmlFlags(st, a, args, &i)) continue;
 
         if (std.mem.startsWith(u8, a, "-")) return error.UnknownFlag;
         return error.UnexpectedPositional;
     }
 
-    try resolveThemeSugar(gpa, &st);
+    try resolveThemeSugar(gpa, st);
     errdefer if (st.owned_html_layout) gpa.free(st.html_layout);
 
     // `impact` requires its target; the loop capture defers the immediate-
@@ -384,21 +439,21 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
 
     // One explicit source family per build. Two adapters at once has no
     // meaning: each is a whole-tree mode that refuses the other's extension.
-    if (st.saw_textile and st.saw_cooklang) return error.ConflictingFlags;
+    if (st.saw_textile and st.saw_cooklang) return failConflict(st, "--textile", "--cooklang");
 
     switch (st.command) {
-        .plan => return try buildPlanOptions(&st),
-        .nostr_plan => return try buildNostrPlanOptions(&st),
-        .nostr_sign => return try buildNostrSignOptions(&st),
-        .nostr_publish => return try buildNostrPublishOptions(&st),
-        .init => return try buildInitOptions(&st),
-        .recipe_scale => return try buildRecipeScaleOptions(&st),
-        .standard_site => return try buildStandardSiteOptions(&st),
+        .plan => return try buildPlanOptions(st),
+        .nostr_plan => return try buildNostrPlanOptions(st),
+        .nostr_sign => return try buildNostrSignOptions(st),
+        .nostr_publish => return try buildNostrPublishOptions(st),
+        .init => return try buildInitOptions(st),
+        .recipe_scale => return try buildRecipeScaleOptions(st),
+        .standard_site => return try buildStandardSiteOptions(st),
         .build, .validate, .check, .impact, .watch => {},
     }
 
-    try validateBuildConflicts(&st);
-    const mode = resolveMode(&st);
+    try validateBuildConflicts(st);
+    const mode = resolveMode(st);
 
     // The HTML-path diagnostics report (`--report`) belongs to the HTML mode.
     // `check`/`impact` reuse the same flag name for their analysis report (see
@@ -407,16 +462,16 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         return error.ConflictingFlags;
     }
 
-    try finalizePublicationIdentity(gpa, &st);
+    try finalizePublicationIdentity(gpa, st);
     // Snapshot before synthesizing the default target below: the HTML option
     // construction distinguishes explicit --target lists from the synthesized
     // single-target form.
     const had_explicit_targets = st.hasExplicitTargets();
-    try synthesizeDefaultTarget(gpa, &st, mode);
-    try applyTargetLayouts(&st);
-    try applyTargetProfiles(&st);
-    const default_profile = scanDefaultProfile(&st);
-    if (st.pending_rules.items.len > 0) try attachLayoutRules(gpa, &st);
+    try synthesizeDefaultTarget(gpa, st, mode);
+    try applyTargetLayouts(st);
+    try applyTargetProfiles(st);
+    const default_profile = scanDefaultProfile(st);
+    if (st.pending_rules.items.len > 0) try attachLayoutRules(gpa, st);
 
     // Canonical target order: equivalent --target argv permutations produce the
     // same Options.targets sequence (sorted by name). Execution/diagnostics use
@@ -425,7 +480,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         target_mod.sortTargetSpecsByName(st.targets.items);
     }
 
-    return buildOptionsForMode(&st, mode, default_profile, had_explicit_targets);
+    return buildOptionsForMode(st, mode, default_profile, had_explicit_targets);
 }
 
 // ---------------------------------------------------------------------------
@@ -525,6 +580,7 @@ const ParseState = struct {
     saw_html_layout: bool = false,
     saw_theme: bool = false,
     saw_incremental: bool = false,
+    saw_refresh_evidence: bool = false,
     saw_jobs: bool = false,
     saw_watch: bool = false,
     saw_watch_json: bool = false,
@@ -603,6 +659,11 @@ const ParseState = struct {
     target_layouts: std.ArrayListUnmanaged(PendingTargetLayout) = .{ .items = &.{}, .capacity = 0 },
     target_profiles: std.ArrayListUnmanaged(PendingTargetProfile) = .{ .items = &.{}, .capacity = 0 },
     pending_rules: std.ArrayListUnmanaged(PendingLayoutRule) = .{ .items = &.{}, .capacity = 0 },
+
+    /// Diagnostic detail recorded by failing paths that know more than the
+    /// argv scan can guess (#761, #764). Copied out by
+    /// `parseOptionsWithDetail` when accumulation returns an error.
+    err_detail: ParseErrorDetail = .{},
 
     fn hasExplicitTargets(st: *const ParseState) bool {
         return st.targets.items.len > 0;
@@ -698,6 +759,7 @@ const ModeBoolFlag = enum {
     sitemap,
     html,
     incremental,
+    refresh_evidence,
     watch,
     serve,
     watch_json,
@@ -718,6 +780,7 @@ const mode_bool_flags = [_]struct { name: []const u8, flag: ModeBoolFlag }{
     .{ .name = "--sitemap", .flag = .sitemap },
     .{ .name = "--html", .flag = .html },
     .{ .name = "--incremental", .flag = .incremental },
+    .{ .name = "--refresh-evidence", .flag = .refresh_evidence },
     .{ .name = "--watch", .flag = .watch },
     .{ .name = "--serve", .flag = .serve },
     .{ .name = "--watch-json", .flag = .watch_json },
@@ -729,6 +792,38 @@ const mode_bool_flags = [_]struct { name: []const u8, flag: ModeBoolFlag }{
 fn markSaw(saw: *bool) ParseError!void {
     if (saw.*) return error.DuplicateFlag;
     saw.* = true;
+}
+
+/// Record a conflicting-flag pair for diagnostics, then fail (#764). Both
+/// tokens are displayed as the user typed them: commands bare, flags dashed.
+fn failConflict(st: *ParseState, a: []const u8, b: []const u8) ParseError {
+    st.err_detail = .{ .conflict_a = a, .conflict_b = b };
+    return error.ConflictingFlags;
+}
+
+/// Record the option at fault for a value-shaped rejection, then fail (#761).
+fn failInvalidValue(st: *ParseState, flag: []const u8, hint: ?[]const u8) ParseError {
+    st.err_detail = .{ .blame_flag = flag, .blame_hint = hint };
+    return error.InvalidValue;
+}
+
+/// First explicit HTML-selector token present in this run, for naming
+/// analyzer×selector and selector×`--out` conflicts (#764). The order is a
+/// fixed list, so the named token is deterministic for any argv. Covers
+/// exactly the `explicitHtml()` constituents.
+fn htmlSelectorToken(st: *const ParseState) ?[]const u8 {
+    // --theme precedes --html-layout because resolveThemeSugar mirrors the
+    // theme root into saw_html_layout; name what the user typed (#761).
+    if (st.saw_html) return "--html";
+    if (st.saw_html_dir) return "--html-dir";
+    if (st.saw_theme) return "--theme";
+    if (st.saw_html_layout) return "--html-layout";
+    if (st.hasExplicitTargets()) return "--target";
+    if (st.hasTargetLayouts()) return "--target-layout";
+    if (st.hasTargetProfiles()) return "--target-profile";
+    if (st.hasLayoutRules()) return "--layout-rule";
+    if (st.wantsSitemap()) return if (st.saw_sitemap) "--sitemap" else "--sitemap-path";
+    return null;
 }
 
 fn applyModeBoolFlag(st: *ParseState, entry: ModeBoolFlag) ParseError!void {
@@ -744,6 +839,7 @@ fn applyModeBoolFlag(st: *ParseState, entry: ModeBoolFlag) ParseError!void {
         .sitemap => &st.saw_sitemap,
         .html => &st.saw_html,
         .incremental => &st.saw_incremental,
+        .refresh_evidence => &st.saw_refresh_evidence,
         .watch => &st.saw_watch,
         .serve => &st.saw_serve,
         .watch_json => &st.saw_watch_json,
@@ -1374,7 +1470,8 @@ fn parseHtmlFlags(
     if (std.mem.eql(u8, a, "--html-layout") or std.mem.startsWith(u8, a, "--html-layout=")) {
         try markSaw(&st.saw_html_layout);
         st.html_layout = try takeValue(args, i, a, "--html-layout");
-        layout_select.validateLayoutPath(st.html_layout) catch return error.InvalidValue;
+        layout_select.validateLayoutPath(st.html_layout) catch
+            return failInvalidValue(st, "--html-layout", layout_path_hint);
         return true;
     }
 
@@ -1385,7 +1482,11 @@ fn parseHtmlFlags(
         st.theme_root = try takeValue(args, i, a, "--theme");
         // Theme root uses the same no-escape relative path grammar; the
         // synthesized layout path is validated after composition below.
-        layout_select.validateLayoutPath(st.theme_root.?) catch return error.InvalidValue;
+        // Blame this flag, not the first value-taking flag findBadArg scans
+        // (#761): an out-of-workspace theme root previously surfaced as
+        // "invalid value for --input".
+        layout_select.validateLayoutPath(st.theme_root.?) catch
+            return failInvalidValue(st, "--theme", layout_path_hint);
         return true;
     }
     return false;
@@ -1395,7 +1496,7 @@ fn parseHtmlFlags(
 fn resolveThemeSugar(gpa: std.mem.Allocator, st: *ParseState) ParseError!void {
     if (st.theme_root) |tr| {
         if (tr.len == 0) return error.EmptyValue;
-        if (st.saw_html_layout) return error.ConflictingFlags;
+        if (st.saw_html_layout) return failConflict(st, "--theme", "--html-layout");
         // Joined path is owned by Options (freed in deinit).
         st.html_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{tr});
         st.owned_html_layout = true;
@@ -1403,7 +1504,7 @@ fn resolveThemeSugar(gpa: std.mem.Allocator, st: *ParseState) ParseError!void {
         layout_select.validateLayoutPath(st.html_layout) catch {
             gpa.free(st.html_layout);
             st.owned_html_layout = false;
-            return error.InvalidValue;
+            return failInvalidValue(st, "--theme", layout_path_hint);
         };
     }
 }
@@ -1451,7 +1552,7 @@ fn buildNostrPlanOptions(st: *ParseState) ParseError!Options {
     // stdout belongs to the single plan document — hence no `--timings`.
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or st.wantsSitemap() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental)
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence)
     {
         return error.ConflictingFlags;
     }
@@ -1481,7 +1582,7 @@ fn buildNostrSignOptions(st: *ParseState) ParseError!Options {
     if (!st.nostr_key_stdin) return error.MissingValue;
     if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs)
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
         return error.ConflictingFlags;
     }
@@ -1515,7 +1616,7 @@ fn buildNostrPublishOptions(st: *ParseState) ParseError!Options {
     if (st.nostr_bundle_path == null) return error.MissingValue;
     if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs)
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
         return error.ConflictingFlags;
     }
@@ -1545,7 +1646,7 @@ fn buildInitOptions(st: *ParseState) ParseError!Options {
     if (st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
         st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
-        st.saw_profile or st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_out or st.saw_rag_dir or st.saw_incremental or st.saw_jobs)
+        st.saw_profile or st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_out or st.saw_rag_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
         return error.ConflictingFlags;
     }
@@ -1577,7 +1678,7 @@ fn buildRecipeScaleOptions(st: *ParseState) ParseError!Options {
     // JSON stream.
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_jobs or st.saw_profile)
+        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile)
     {
         return error.ConflictingFlags;
     }
@@ -1610,7 +1711,7 @@ fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
         st.wantsSitemap() or st.wantsRag() or st.saw_no_rag or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
         st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
         st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_rag_dir or st.saw_scope or st.saw_split_size or st.saw_bundles_only or st.saw_complete or
-        st.saw_incremental or st.saw_jobs or st.saw_llms_path or st.saw_rss_path or st.saw_sitemap_path or st.saw_context_dir)
+        st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_llms_path or st.saw_rss_path or st.saw_sitemap_path or st.saw_context_dir)
     {
         return error.ConflictingStandardSiteFlags;
     }
@@ -1696,7 +1797,7 @@ fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
 /// Command-shape conflicts for the compiler-facing commands that share the
 /// mode-selection tail (`build`, `validate`, `check`, `impact`, `watch`).
 /// Per-family validation lives with each command's builder above.
-fn validateBuildConflicts(st: *const ParseState) ParseError!void {
+fn validateBuildConflicts(st: *ParseState) ParseError!void {
     // `--profile` on the HTML build is the Standard.site verification-emit
     // opt-in (#533) and the Nostr `nostr:naddr` alternate-link emit (#571).
     // Other modes already have their own profile commands (`plan`,
@@ -1718,7 +1819,7 @@ fn validateBuildConflicts(st: *const ParseState) ParseError!void {
         // select another projection or imply filesystem state.
         if (st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or
             st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_scope or
-            st.saw_split_size or st.saw_bundles_only or st.saw_incremental or st.saw_jobs or
+            st.saw_split_size or st.saw_bundles_only or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or
             st.saw_format)
         {
             return error.ConflictingFlags;
@@ -1736,7 +1837,13 @@ fn validateBuildConflicts(st: *const ParseState) ParseError!void {
     }
 
     if (st.command == .check or st.command == .impact) {
-        if (st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.wantsSitemap() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.explicitHtml() or st.saw_jobs or st.saw_watch or st.saw_incremental or st.saw_theme or st.saw_html_layout or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules()) {
+        // Analyzer commands never render, so every HTML selector is a
+        // conflict; name the offending pair instead of the generic text
+        // (#764). The remaining non-HTML projections keep the generic form.
+        if (htmlSelectorToken(st)) |selector| {
+            return failConflict(st, if (st.command == .check) "check" else "impact", selector);
+        }
+        if (st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_jobs or st.saw_watch or st.saw_incremental or st.saw_refresh_evidence) {
             return error.ConflictingFlags;
         }
     } else if (st.command == .build and st.saw_format) {
@@ -1757,7 +1864,7 @@ fn validateBuildConflicts(st: *const ParseState) ParseError!void {
 
 /// The cross-projection conflict matrix: at most one output projection may
 /// be selected, and each projection's companion options must stay with it.
-fn validateProjectionConflicts(st: *const ParseState) ParseError!void {
+fn validateProjectionConflicts(st: *ParseState) ParseError!void {
     const wants_rag = st.wantsRag();
     const wants_context = st.wantsContext();
     const wants_ir = st.wantsIr();
@@ -1767,10 +1874,12 @@ fn validateProjectionConflicts(st: *const ParseState) ParseError!void {
     const explicit_html = st.explicitHtml();
     const saw_pages_location = st.sawPagesLocation();
 
-    if (st.saw_rag and st.saw_no_rag) return error.ConflictingFlags;
-    if (st.saw_no_rag and st.saw_rag_dir) return error.ConflictingFlags;
+    if (st.saw_rag and st.saw_no_rag) return failConflict(st, "--rag", "--no-rag");
+    if (st.saw_no_rag and st.saw_rag_dir) return failConflict(st, "--no-rag", "--rag-dir");
     // Explicit --out must never be combined with RAG-only selection.
-    if (st.saw_out and wants_rag) return error.ConflictingFlags;
+    if (st.saw_out and wants_rag) {
+        return failConflict(st, "--out", if (st.saw_rag_dir) "--rag-dir" else "--rag");
+    }
     if (wants_context and (wants_rag or wants_ir)) return error.ConflictingFlags;
     if ((st.saw_scope or st.saw_split_size) and !(wants_rag or wants_context)) return error.ConflictingFlags;
     if (st.bundles_only and !wants_rag) return error.ConflictingFlags;
@@ -1790,15 +1899,19 @@ fn validateProjectionConflicts(st: *const ParseState) ParseError!void {
     if (wants_sitemap and st.site_url == null) return error.SitemapSiteUrlRequired;
     if (wants_sitemap and (wants_rag or wants_ir or wants_context or wants_llms or wants_rss)) return error.ConflictingFlags;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
+    // When explicit --out is the collision, name the pair (#764).
     if (explicit_html and (wants_rag or wants_context or st.saw_out)) {
+        if (st.saw_out) {
+            if (htmlSelectorToken(st)) |selector| return failConflict(st, selector, "--out");
+        }
         return error.ConflictingFlags;
     }
     // HTML-only options conflict with IR or RAG selection (default HTML is fine).
-    if ((st.saw_jobs or st.saw_watch or st.saw_incremental) and (wants_ir or wants_rag or wants_context or wants_rss)) {
+    if ((st.saw_jobs or st.saw_watch or st.saw_incremental or st.saw_refresh_evidence) and (wants_ir or wants_rag or wants_context or wants_rss)) {
         return error.ConflictingFlags;
     }
     // Target conflict rules
-    if (st.hasExplicitTargets() and st.saw_html_dir) return error.ConflictingFlags;
+    if (st.hasExplicitTargets() and st.saw_html_dir) return failConflict(st, "--target", "--html-dir");
     if (wants_sitemap and st.targets.items.len > 1) return error.ConflictingFlags;
 }
 
@@ -2032,6 +2145,7 @@ fn buildOptionsForMode(
             o.html_layout = st.html_layout;
             o.owned_html_layout = st.owned_html_layout;
             o.incremental = st.saw_incremental or st.saw_watch;
+            o.refresh_evidence = st.saw_refresh_evidence;
             o.jobs = st.jobs;
             o.watch = st.saw_watch;
             o.watch_json = st.saw_watch_json;
@@ -2179,6 +2293,8 @@ pub fn printUsage() void {
         \\  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
         \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
+        \\  --refresh-evidence  Force full evidence re-derivation, skipping reuse of
+        \\                      unchanged committed evidence (HTML mode, #728)
         \\  --watch             Compatibility flag; same as the watch command; with `validate`
         \\                      starts the zero-write validation daemon (validate --watch)
         \\  --watch-json        Emit one NDJSON event per build phase on stderr (watch only,
@@ -2232,6 +2348,7 @@ pub fn printUsage() void {
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
+        \\  --textile with --cooklang
         \\  --complete without --rag / --rag-dir
         \\  --complete with --scope, --split-size, or --bundles-only
         \\  --context / --context-dir with --rag, --out, or HTML selectors
@@ -2239,8 +2356,13 @@ pub fn printUsage() void {
         \\  --sitemap / --sitemap-path without --site-url, with non-HTML modes,
         \\  or with multiple targets sharing one ambiguous public URL
         \\  explicit --out with --rag or --rag-dir
-        \\  --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
+        \\  --html / --html-dir / --html-layout / --theme / --target / --target-layout /
+        \\  --target-profile / --layout-rule with --rag, --rag-dir, --context, or explicit --out
         \\  --target with --html-dir
+        \\  --theme with --html-layout (both select the one global layout)
+        \\  check / impact with any HTML selector (--html, --html-dir,
+        \\  --html-layout, --theme, --target, --target-layout, --target-profile,
+        \\  --layout-rule, --sitemap / --sitemap-path)
         \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
         \\  validate with non-HTML exports, --incremental, --jobs, --format, or --out
         \\  validate --watch with --html-dir, --target, --serve/--port, --incremental, --jobs, or --format
@@ -2268,6 +2390,9 @@ pub fn printUsage() void {
         \\      --html / --html-dir / bare CLI map to a single target named "default".
         \\      Equivalent --target / --target-layout / --layout-rule permutations yield the
         \\      same config (targets sorted by name; rules canonicalized). No layout frontmatter.
+        \\      Frontmatter `status:` is exactly draft, published, or archived (unknown
+        \\      values fail validation). A draft renders to its .html files but is
+        \\      excluded from nav, search, sitemap, RSS, and publication projections.
         \\
     , .{});
 }
@@ -2311,6 +2436,13 @@ pub fn printStandardSiteUsage() void {
 /// Print a usage diagnostic. Uses `std.debug.print` (not `std.log.err`) so
 /// unit tests that exercise the usage path are not failed by the test logger.
 pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
+    printParseErrorDetail(err, bad_arg, null);
+}
+
+/// `printParseError` with optional parse context (#761, #764): a recorded
+/// conflict pair or blamed option is named; without context the historical
+/// generic text stands.
+pub fn printParseErrorDetail(err: ParseError, bad_arg: ?[]const u8, detail: ?*const ParseErrorDetail) void {
     switch (err) {
         error.UnknownFlag => {
             if (bad_arg) |a| {
@@ -2341,6 +2473,14 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
             }
         },
         error.ConflictingFlags => {
+            if (detail) |d| {
+                if (d.conflict_a) |a| {
+                    if (d.conflict_b) |b| {
+                        std.debug.print("error: {s} conflicts with {s} (try --help)\n", .{ a, b });
+                        return;
+                    }
+                }
+            }
             std.debug.print("error: conflicting options (try --help)\n", .{});
         },
         error.DuplicateFlag => {
@@ -2351,6 +2491,18 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
             }
         },
         error.InvalidValue => {
+            if (detail) |d| {
+                if (d.blame_flag) |flag| {
+                    // The failing path named its flag; never let the argv
+                    // scan misattribute the rejection (#761).
+                    if (d.blame_hint) |hint| {
+                        std.debug.print("error: invalid value for {s} ({s})\n", .{ flag, hint });
+                    } else {
+                        std.debug.print("error: invalid value for {s}\n", .{flag});
+                    }
+                    return;
+                }
+            }
             if (bad_arg) |a| {
                 std.debug.print("error: invalid value for {s}\n", .{a});
             } else {
@@ -2441,6 +2593,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         const a = args[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
         if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) continue;
+        if (std.mem.eql(u8, a, "--build-info")) continue;
         for (never_blamed_flags) |f| {
             if (std.mem.eql(u8, a, f)) break;
         } else return a;
@@ -2450,6 +2603,8 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
 /// Dispatch parsed options through a small injectable runner.
 ///
 /// - Version: calls `runner.printVersion()` and returns success; never calls `run`.
+/// - Build info: calls `runner.printBuildInfo()` when the runner provides it
+///   and returns success; never calls `run` (#776).
 /// - Help: calls `runner.printHelp()` and returns success; never calls `run`.
 /// - Build modes: calls `runner.run(opts)` and returns its exit code.
 ///
@@ -2457,6 +2612,11 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
 pub fn execute(opts: Options, runner: anytype) ExitCode {
     if (opts.version) {
         runner.printVersion();
+        return .success;
+    }
+    if (opts.build_info) {
+        const Runner = @TypeOf(runner.*);
+        if (@hasDecl(Runner, "printBuildInfo")) runner.printBuildInfo();
         return .success;
     }
     if (opts.help) {
@@ -2472,17 +2632,20 @@ pub fn execute(opts: Options, runner: anytype) ExitCode {
 
 /// Parse argv and execute. Maps all parse failures to exit code 2.
 ///
-/// On parse failure, calls `runner.reportUsage(err, bad_arg)` when that method
-/// exists; otherwise falls back to `printParseError` + `printUsage`.
+/// On parse failure, calls `runner.reportUsage(err, bad_arg, detail)` when
+/// that method exists; otherwise falls back to `printParseErrorDetail` +
+/// `printUsage`. `detail` carries the failing path's own attribution when it
+/// recorded one (#761, #764); `bad_arg` remains the findBadArg scan result.
 pub fn runArgs(args: []const []const u8, runner: anytype) u8 {
     const gpa = if (@hasField(@TypeOf(runner.*), "gpa")) runner.gpa else std.testing.allocator;
-    var opts = parseOptions(gpa, args) catch |err| {
-        const bad = findBadArg(args);
+    var detail = ParseErrorDetail{};
+    var opts = parseOptionsWithDetail(gpa, args, &detail) catch |err| {
+        const bad = if (detail.blame_flag) |flag| flag else findBadArg(args);
         const Runner = @TypeOf(runner.*);
         if (@hasDecl(Runner, "reportUsage")) {
-            runner.reportUsage(err, bad);
+            runner.reportUsage(err, bad, &detail);
         } else {
-            printParseError(err, bad);
+            printParseErrorDetail(err, bad, &detail);
             printUsage();
         }
         return ExitCode.usage.int();
@@ -3574,6 +3737,31 @@ test "parse: help/version short-circuit and do not validate trailing junk" {
     try expectEqual(@as(usize, 0), o7.targets.items.len);
 }
 
+test "parse: --build-info joins the short-circuit family" {
+    // #776: --build-info is a stdout query surface like --version.
+    var o1 = try parseOptions(std.testing.allocator, &.{ "boris", "--build-info" });
+    defer o1.deinit(std.testing.allocator);
+    try expect(o1.build_info);
+    try expect(!o1.help);
+    try expect(!o1.version);
+
+    // First flag wins across the whole query family.
+    var o2 = try parseOptions(std.testing.allocator, &.{ "boris", "--help", "--build-info" });
+    defer o2.deinit(std.testing.allocator);
+    try expect(o2.help);
+    try expect(!o2.build_info);
+
+    var o3 = try parseOptions(std.testing.allocator, &.{ "boris", "--build-info", "--not-a-real-flag" });
+    defer o3.deinit(std.testing.allocator);
+    try expect(o3.build_info);
+
+    // Targets accumulated before the short-circuit are released.
+    var o4 = try parseOptions(std.testing.allocator, &.{ "boris", "--target", "a=dist", "--build-info" });
+    defer o4.deinit(std.testing.allocator);
+    try expect(o4.build_info);
+    try expectEqual(@as(usize, 0), o4.targets.items.len);
+}
+
 test "execute: help does not invoke pipeline (dependency injection)" {
     const Spy = struct {
         pipeline_calls: usize = 0,
@@ -3678,10 +3866,11 @@ test "runArgs: usage errors exit 2; help/version exit 0" {
             _ = self;
         }
 
-        pub fn reportUsage(self: *@This(), err: ParseError, bad_arg: ?[]const u8) void {
+        pub fn reportUsage(self: *@This(), err: ParseError, bad_arg: ?[]const u8, detail: *const ParseErrorDetail) void {
             _ = self;
             _ = @errorName(err);
             _ = bad_arg;
+            _ = detail;
         }
 
         pub fn run(self: *@This(), opts: Options) ExitCode {
@@ -3936,10 +4125,11 @@ test "runArgs: invalid target parse errors exit 2" {
             _ = self;
         }
 
-        pub fn reportUsage(self: *@This(), err: ParseError, bad_arg: ?[]const u8) void {
+        pub fn reportUsage(self: *@This(), err: ParseError, bad_arg: ?[]const u8, detail: *const ParseErrorDetail) void {
             _ = self;
             _ = @errorName(err);
             _ = bad_arg;
+            _ = detail;
         }
 
         pub fn run(self: *@This(), opts: Options) ExitCode {
@@ -4209,4 +4399,98 @@ test "parse: normalized Pages location is required as one three-part identity" {
         "--pages-base-path",
         "",
     }));
+}
+
+test "parse detail: out-of-workspace --theme blames --theme, not --input (#761)" {
+    var d = ParseErrorDetail{};
+    try expectError(error.InvalidValue, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "--input", ".", "--html-dir", "dist-test", "--theme", "../themes/lab",
+    }, &d));
+    try expectEqualStrings("--theme", d.blame_flag.?);
+    try expect(d.blame_hint != null);
+    try expect(d.conflict_a == null);
+
+    // Absolute theme roots fail the same grammar and keep the attribution.
+    var abs = ParseErrorDetail{};
+    try expectError(error.InvalidValue, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "--input", "content", "--theme", "/tmp/lab",
+    }, &abs));
+    try expectEqualStrings("--theme", abs.blame_flag.?);
+
+    // The same grammar on --html-layout names that flag.
+    var layout = ParseErrorDetail{};
+    try expectError(error.InvalidValue, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "--html-layout", "../layouts/main.html",
+    }, &layout));
+    try expectEqualStrings("--html-layout", layout.blame_flag.?);
+
+    // Unrelated value failures keep the historical findBadArg behavior: no
+    // recorded blame, generic rendering.
+    var plain = ParseErrorDetail{};
+    try expectError(error.InvalidValue, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "--split-size", "0",
+    }, &plain));
+    try expect(plain.blame_flag == null);
+}
+
+test "parse detail: conflicting pairs name both sides (#764)" {
+    // Analyzer × HTML selector (the audited repro).
+    var check = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "check", "--input", "content", "--theme", "themes/boris",
+    }, &check));
+    try expectEqualStrings("check", check.conflict_a.?);
+    try expectEqualStrings("--theme", check.conflict_b.?);
+
+    var impact = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "impact", "x", "--html-dir", "dist",
+    }, &impact));
+    try expectEqualStrings("impact", impact.conflict_a.?);
+    try expectEqualStrings("--html-dir", impact.conflict_b.?);
+
+    // Theme × explicit --out (the second audited repro).
+    var theme_out = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "--out", "ir", "--theme", "themes/boris",
+    }, &theme_out));
+    try expectEqualStrings("--theme", theme_out.conflict_a.?);
+    try expectEqualStrings("--out", theme_out.conflict_b.?);
+
+    // Unambiguous single pairs elsewhere in the matrix.
+    const cases = [_]struct { argv: []const []const u8, a: []const u8, b: []const u8 }{
+        .{ .argv = &.{ "boris", "--rag", "--no-rag" }, .a = "--rag", .b = "--no-rag" },
+        .{ .argv = &.{ "boris", "--no-rag", "--rag-dir", "r" }, .a = "--no-rag", .b = "--rag-dir" },
+        .{ .argv = &.{ "boris", "--out", ".boris", "--rag" }, .a = "--out", .b = "--rag" },
+        .{ .argv = &.{ "boris", "--target", "a=da", "--html-dir", "dd" }, .a = "--target", .b = "--html-dir" },
+        .{ .argv = &.{ "boris", "--textile", "--cooklang" }, .a = "--textile", .b = "--cooklang" },
+        .{ .argv = &.{ "boris", "--theme", "t", "--html-layout", "l.html" }, .a = "--theme", .b = "--html-layout" },
+    };
+    for (cases) |c| {
+        var d = ParseErrorDetail{};
+        try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, c.argv, &d));
+        try expectEqualStrings(c.a, d.conflict_a.?);
+        try expectEqualStrings(c.b, d.conflict_b.?);
+    }
+
+    // Multi-cause conflicts stay unnamed rather than guessing a pair.
+    var generic = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "validate", "--format", "json",
+    }, &generic));
+    try expect(generic.conflict_a == null and generic.conflict_b == null);
+}
+
+test "parse detail: channel stays empty on success and parseOptions is unchanged" {
+    var d = ParseErrorDetail{};
+    var o = try parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "--input", "content", "--theme", "themes/boris", "--quiet",
+    }, &d);
+    defer o.deinit(std.testing.allocator);
+    try expect(d.blame_flag == null and d.conflict_a == null);
+
+    // The historical entry point keeps its signature and results.
+    var plain = try parseOptions(std.testing.allocator, &.{ "boris", "--theme", "themes/boris" });
+    defer plain.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, plain.mode);
 }

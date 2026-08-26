@@ -156,8 +156,10 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `ENOSTRRELAY` | error | Publish: a relay rejected the event, the connection or handshake failed, a protocol error occurred, the relay demanded NIP-42 authentication (`auth-required`), or it closed the connection before an `OK` arrived. Each relay attempt is bounded; evidence is per-relay in the report and the run still reaches a `complete`/`partial`/`failed`/`incomplete` verdict | `nostr_publish` → `boris nostr publish` |
 | `ENOSTRPLAN` | error | Plan: the corpus changed under the run — a selected source no longer parses after the graph validated. Sign/publish: the input is not a valid plan/prior/bundle artifact, a `d` tag does not match its entity id, the intention digest does not match, a prior bundle came from a different identity, or a bundle's article set does not match the plan | `nostr_plan` / `nostr_sign` / `nostr_publish` → `boris nostr plan` / `sign` / `publish` |
 | `ENOSTRSIGN` | error | Signing refusal: the secret key is malformed (not 64 hex digits or a NIP-19 `nsec`), the signer public key does not match the plan's expected author, the secp256k1 context or aux randomness is unavailable, or a signature fails to self-verify before the bundle is written | `nostr_keys` / `nostr_sign` → `boris nostr sign` |
-| `ELAYOUTMISSINGMARKER` | error | Layout template lacks a required/declared slot marker, or names an unknown marker | `assemble.loadLayout` → HTML load/validate |
+| `ELAYOUTMISSINGMARKER` | error | Layout template lacks the required `{{content}}` slot marker | `assemble.loadLayout` → HTML load/validate |
+| `ELAYOUTUNKNOWNMARKER` | error | Layout template names a marker outside the closed slot set; remediation enumerates every accepted marker | `assemble.loadLayout` → HTML load/validate |
 | `ELAYOUTDUPLICATEMARKER` | error | Layout template repeats a slot marker | `assemble.loadLayout` → HTML load/validate |
+| `ELAYOUTNAVDEPTH` | error | A `{{nav …}}` token whose argument is not exactly `depth=N` with N ≥ 1 | `assemble.loadLayout` → HTML load/validate |
 | `ELAYOUTPATH` | error | Layout path is illegal (absolute, `..`, backslash, or otherwise non-relative) | `layout_select.validateLayoutPath` → HTML load/validate |
 | `ELAYOUTASSET` | error | Layout template references an invalid or excessive asset url | `assemble.loadLayout` / `theme.requireReferencedAssets` → HTML load/validate |
 | `ELAYOUTRULE` | error | Layout-rule selection failure (ambiguous glob, duplicate/invalid selector, mixed theme roots, or rule bounds) | `layout_select` → HTML load/validate |
@@ -185,12 +187,24 @@ component, include, wiki-link, asset, link-audit (`EROUTEMISSING`,
 the preview server ([#392]'s `serve` loop) and the Boris editor expose; the IR
 path keeps its own auto-written `build-report.json`.
 
-- Schema: `html-build-report-0.1.0` — see
-  [schemas/html-build-report-0.1.0.schema.json](schemas/html-build-report-0.1.0.schema.json).
+- Schema: `html-build-report-0.2.0` — see
+  [schemas/html-build-report-0.2.0.schema.json](schemas/html-build-report-0.2.0.schema.json).
 - Top-level shape matches the IR report: `schemaVersion`, `compilerId`, `ok`,
   `contentRoot`, `outDir`, `errorCount`, `diagnostics`. There is no
   `pageCount` (the HTML path does not expose a single page count across
-  targets).
+  targets). An additive `vcsRevision` string (#776) follows `compilerId`:
+  the opaque VCS revision token the producing binary was compiled from,
+  `""` when the build could not detect one — build provenance without
+  touching the compiler id.
+- Optional `proofPack` section (#741): when a single-output build committed
+  its target evidence and `<outDir>/_boris/proof/checks.json` was readable,
+  the report mirrors the
+  per-check verdicts — `path`, `allPassed` (false when any check reported
+  `failed`/`incomplete`), and `checks[]`. A failing check never fails the
+  committed target ([publication-checks.md](publication-checks.md));
+  `allPassed: false` tells machine consumers to read that file's `findings[]`.
+  Multi-target reports omit the section because evidence lives under each
+  target directory; validate and pre-publication failures never carry it.
 - Each diagnostic object uses the **exact key order** of the IR diagnostic
   object: `severity, code, message, remediation, sourcePath, line, column, id`.
 - Diagnostics are sorted with the same deterministic comparator as the IR
@@ -294,7 +308,11 @@ Rules:
 3. Do not exit `0` if any `error` was emitted, even if some files parsed.
 4. `--help` / `-h` exit `0` without scanning content or writing artifacts.
 5. Prefer `3` over `1` for pure I/O failures (missing content root, read errors
-   classified as `EIO` with `failure: io`).
+   classified as `EIO` with `failure: io`). The HTML path's missing-content-root
+   diagnostic names the probed content root —
+   `content root "…" not found or not a directory` plus the create-or-`--input`
+   remediation (#779) — matching the IR pipeline's wording, so a wrong-cwd
+   invocation reads as an invocation problem rather than an opaque error class.
 6. On content failure the pipeline writes `build-report.json` with diagnostics
    and does **not** publish graph-dependent IR; that does **not** make the exit
    code `0`.

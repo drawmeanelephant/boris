@@ -98,11 +98,16 @@ pub const Code = enum {
     /// secp256k1 context cannot be initialized, or the signature fails to
     /// self-verify. Never emitted with a bundle.
     ENOSTRSIGN,
-    /// Layout template lacks a required or declared slot marker (or names an
-    /// unknown marker).
+    /// Layout template lacks the required `{{content}}` slot marker.
     ELAYOUTMISSINGMARKER,
+    /// Layout template names a marker outside the closed slot set. The
+    /// remediation enumerates every accepted marker (#737).
+    ELAYOUTUNKNOWNMARKER,
     /// Layout template repeats a slot marker.
     ELAYOUTDUPLICATEMARKER,
+    /// A `{{nav …}}` token whose argument is not exactly `depth=N` with N ≥ 1
+    /// (the only argument-bearing nav form).
+    ELAYOUTNAVDEPTH,
     /// Layout path is illegal (absolute, `..`, or otherwise non-relative).
     ELAYOUTPATH,
     /// Layout template references an invalid or excessive asset url.
@@ -132,7 +137,9 @@ pub const Code = enum {
     pub fn remediationForLayout(code: Code) []const u8 {
         return switch (code) {
             .ELAYOUTMISSINGMARKER => "Add the required {{content}} (and any other referenced slot) marker to the layout template",
+            .ELAYOUTUNKNOWNMARKER => "Use only these markers, each at most once per layout: {{content}} (required), {{nav}}, {{breadcrumb}}, {{title}}, {{toc}}, {{children}}, {{metadata}}, {{relations}}, {{backlinks}}, {{footer}}, {{head}}; plus the {{asset-url PATH}} helper",
             .ELAYOUTDUPLICATEMARKER => "Keep exactly one marker per slot in the layout template",
+            .ELAYOUTNAVDEPTH => "Write {{nav}} for the full forest, or {{nav depth=N}} with an integer N ≥ 1 to cap the rendered levels",
             .ELAYOUTPATH => "Use a workspace-relative layout path with no .., absolute, or backslash segments",
             .ELAYOUTASSET => "Reference layout assets as assets/… urls relative to the theme root, one per slot",
             .ELAYOUTRULE => "Give each layout rule a unique, valid selector and stay under the per-target rule limit",
@@ -200,11 +207,21 @@ pub fn sortDiagnostics(diags: []Diagnostic) void {
 /// When true, `printText` emits nothing. `boris watch --watch-json` replaces
 /// the prose diagnostic form with NDJSON events; structured collection via
 /// `Collector` is unaffected. The watch coordinator sets this for the
-/// duration of a `--watch-json` compile. Off everywhere else, so `--quiet`
-/// semantics ("never suppress the explanation for a nonzero exit") are
-/// untouched: this flag suppresses error text only when the same data is
-/// carried by the machine-readable stream.
-pub var text_suppressed: std.atomic.Value(bool) = .init(false);
+/// duration of a `--watch-json` compile. Off for the CLI outside that mode,
+/// so `--quiet` semantics ("never suppress the explanation for a nonzero
+/// exit") are untouched: this flag suppresses error text only when the same
+/// data is carried by the machine-readable stream.
+///
+/// Unit-test binaries are the one other default-on context: they compile with
+/// `builtin.is_test`, so expected negative-path prose (validation failures,
+/// publication-evidence failures) stays off stderr during green runs. The
+/// Zig 0.16 build runner captures a test binary's stderr and re-prints it on
+/// the step even when every test passes, appending a red `failed command:`
+/// line — indistinguishable from a real failure (#768). Test evidence flows
+/// through returned diagnostics, `Collector`s, and writer-injected buffers,
+/// not through this prose channel; a test binary run directly still fails
+/// loudly on unexpected errors via its own assertions and crash output.
+pub var text_suppressed: std.atomic.Value(bool) = .init(@import("builtin").is_test);
 
 /// Format `d` and print it to stderr, unless watch-json text suppression is
 /// active. This is the single choke point for formatted diagnostic text, so

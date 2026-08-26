@@ -112,8 +112,13 @@ pub const Mode = enum {
     }
 };
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this lab does not import `src/`.
+pub const tool_id = "boris-migration-lab/0.8.1";
+
 pub const Options = struct {
     help: bool = false,
+    version: bool = false,
     quiet: bool = false,
     mode: Mode = .astro,
     /// Astro project/export root to scan (relative to cwd unless absolute).
@@ -173,6 +178,8 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         const arg = args[index];
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             options.help = true;
+        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+            options.version = true;
         } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
             options.quiet = true;
         } else if (std.mem.startsWith(u8, arg, "--mode=")) {
@@ -380,6 +387,7 @@ fn printUsage() void {
         \\
         \\Common options:
         \\  -h, --help         Show this help and exit
+        \\  -V, --version      Print the tool id and exit
         \\  -q, --quiet        Suppress progress lines
         \\  --mode=MODE        astro (default) | astro-import-plan | astro-import-apply | wordpress | wordpress-theme | instagram | obsidian | notion | filed | filed-scan | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
         \\  --out=DIR          Output directory (default: migration-report)
@@ -552,6 +560,14 @@ pub fn main(init: std.process.Init) u8 {
 
     if (opts.help) {
         printUsage();
+        return ExitCode.success.int();
+    }
+
+    if (opts.version) {
+        var stdout_buffer: [128]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+        stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+        stdout_writer.interface.flush() catch {};
         return ExitCode.success.int();
     }
 
@@ -1039,6 +1055,7 @@ test {
     _ = frontmatter_review;
     _ = astro_import_plan;
     _ = astro_import_apply;
+    _ = link_audit;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -1505,6 +1522,32 @@ test "astro: sources are never modified" {
     Io.Dir.cwd().deleteTree(io, out_rel) catch {};
 }
 
+test "astro: output is lab-owned, reruns replace it, nested out refused" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const out_rel = "fixtures/.test-astro-owned";
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+
+    try archaeology.run(io, gpa, .{ .root_dir = "fixtures/mini-astro", .out_dir = out_rel, .quiet = true });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out.close(io);
+    const marker = try archaeology.readFileAlloc(io, out, publication.marker_name, gpa);
+    defer gpa.free(marker);
+    try std.testing.expect(std.mem.indexOf(u8, marker, "format=boris-migration-lab-output") != null);
+
+    // A second run replaces the lab-owned output rather than refusing it.
+    try archaeology.run(io, gpa, .{ .root_dir = "fixtures/mini-astro", .out_dir = out_rel, .quiet = true });
+
+    // A --out nested inside --root is refused before any write.
+    try std.testing.expectError(error.InputOutputOverlap, archaeology.run(io, gpa, .{
+        .root_dir = "fixtures/mini-astro",
+        .out_dir = "fixtures/mini-astro/src",
+        .quiet = true,
+    }));
+}
+
 test "astro: adversarial corpus preserves unicode and reports route ambiguity" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -1826,6 +1869,50 @@ test "wordpress: buildFrontmatter closed grammar" {
     // no forbidden keys
     try std.testing.expect(std.mem.indexOf(u8, fm, "layout:") == null);
     try std.testing.expect(std.mem.indexOf(u8, fm, "parentEntry") == null);
+}
+
+test "wordpress: buildFrontmatter neutralizes hostile tags and titles" {
+    const gpa = std.testing.allocator;
+
+    // `": "` titles must be quoted so they remain a single scalar.
+    const t = try wordpress.buildFrontmatter(gpa, "WordPress: A Guide", "posts", "published", &.{});
+    defer gpa.free(t);
+    try std.testing.expect(std.mem.indexOf(u8, t, "title: \"WordPress: A Guide\"\n") != null);
+
+    // A hostile WXR nicename must not terminate its quote and inject keys.
+    const hostile = "x\"], status: published, parent: evil[\"";
+    const fm = try wordpress.buildFrontmatter(gpa, "Safe", "posts", "published", &.{hostile});
+    defer gpa.free(fm);
+    try std.testing.expect(std.mem.indexOf(u8, fm, "parent: posts\n") != null);
+    // The hostile nicename stays one quoted flow scalar: embedded quotes are
+    // neutralized and no `status:`/`parent:` key is injected on its own line.
+    try std.testing.expect(std.mem.indexOf(u8, fm, "tags: [\"x'], status: published, parent: evil['\"]\n") != null);
+}
+
+test "wordpress: post name matches only on segment boundary" {
+    try std.testing.expect(wordpress.postNameMatchesTarget("contact", "contact"));
+    try std.testing.expect(wordpress.postNameMatchesTarget("contact", "/contact"));
+    try std.testing.expect(wordpress.postNameMatchesTarget("contact", "/about/contact"));
+    try std.testing.expect(!wordpress.postNameMatchesTarget("contact", "xcontact"));
+    try std.testing.expect(!wordpress.postNameMatchesTarget("contact", "/about/xcontact"));
+    try std.testing.expect(!wordpress.postNameMatchesTarget("contact", ""));
+    try std.testing.expect(!wordpress.postNameMatchesTarget("", "contact"));
+}
+
+test "wordpress: attributed item before bare item both parse" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const xml =
+        \\<rss><channel><title>Test</title><link>https://example.test</link></channel>
+        \\<item wp:post_id="1"><title>First</title><wp:post_id>1</wp:post_id></item>
+        \\<item><title>Second</title><wp:post_id>2</wp:post_id></item>
+        \\</rss>
+    ;
+    const doc = try wordpress.parseWxr(a, xml);
+    try std.testing.expectEqual(@as(usize, 2), doc.items.len);
+    try std.testing.expectEqualStrings("First", doc.items[0].title);
+    try std.testing.expectEqualStrings("Second", doc.items[1].title);
 }
 
 test "wordpress: fixture conversion is deterministic and preserves export" {

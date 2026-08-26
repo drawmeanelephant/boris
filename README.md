@@ -2,6 +2,8 @@
 
 **The Content Exit Hatch**
 
+[![Greptile: The War on Bugs](https://www.greptile.com/badge.svg)](https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source)
+
 Boris is a graph-native publication compiler. It turns Markdown into a
 validated content graph, then publishes that graph to one or more contracted
 targets. HTML `dist/` is the default target, not the whole product.
@@ -54,6 +56,10 @@ surface, not a second product.
   strikethrough.
 - Deterministic HTML output with trusted static layouts and copied assets.
 - Validated Trunk/Satellite navigation and graph-aware breadcrumbs/children.
+- `{{include path}}` composition with a reserved fragment library: files under
+  `content/includes/` are never discovered as pages (no stray HTML, no nav
+  entries, no `unreferenced_page` findings); fragments anywhere else compile as
+  normal pages too.
 - Closed, explicit frontmatter rather than unrestricted YAML or executable MDX.
 - Authoritative `boris validate` preflight with no generated output or evidence.
 - Incremental builds, watch mode, isolated targets, and bounded page workers.
@@ -343,7 +349,7 @@ reviewed or uploaded to an LLM when useful.
 - [x] Publication evidence chain (artifacts, checks, claims, Touch Atlas, Proof Pack).
 - [x] Local Boris Editor (compiler-backed authoring).
 - [x] Migration labs and real-site dogfood evidence.
-- [x] v0.8.1 candidate packaging (untagged; 200+ changelog fragments queued).
+- [x] v0.8.1 release cut: changelog assembled from the queued fragments; tagged on `main`.
 - [x] Archive-layout browser review and evidence-gated presentation fixes ([#667](https://github.com/drawmeanelephant/boris/pull/667)).
 - [ ] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)).
 - [x] Nostr NIP-23 CLI (`plan` / `sign` / `publish`). Not a verified target.

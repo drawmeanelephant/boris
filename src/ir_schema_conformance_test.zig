@@ -270,10 +270,10 @@ test "the published recipe-scale view schema matches a freshly rendered view" {
     try std.testing.expect(compiled.ok);
 
     const factor = try recipe_scale.parseFactor("2");
-    const bytes = try recipe_scale_view.renderFromCompile(gpa, &compiled, "carbonara", factor, null);
+    const bytes = try recipe_scale_view.renderFromCompile(gpa, &compiled, "carbonara", factor, null, "");
     defer gpa.free(bytes);
 
-    const schema_bytes = try readAlloc(io, Io.Dir.cwd(), "docs/contracts/schemas/recipe-scale-view-0.1.0.schema.json", gpa);
+    const schema_bytes = try readAlloc(io, Io.Dir.cwd(), "docs/contracts/schemas/recipe-scale-view-0.2.0.schema.json", gpa);
     defer gpa.free(schema_bytes);
     var schema_parsed = try std.json.parseFromSlice(std.json.Value, gpa, schema_bytes, .{});
     defer schema_parsed.deinit();
@@ -283,6 +283,14 @@ test "the published recipe-scale view schema matches a freshly rendered view" {
     defer arena_state.deinit();
     const v: Validator = .{ .root = schema_parsed.value, .arena = arena_state.allocator() };
     try v.validate(schema_parsed.value, doc_parsed.value, "recipe-scale-view");
+
+    // The additive `vcsRevision` provenance field (#781) must also validate
+    // when a token is present (production binaries carry the baked value).
+    const with_token = try recipe_scale_view.renderFromCompile(gpa, &compiled, "carbonara", factor, null, "a8ef247");
+    defer gpa.free(with_token);
+    var token_doc = try std.json.parseFromSlice(std.json.Value, gpa, with_token, .{});
+    defer token_doc.deinit();
+    try v.validate(schema_parsed.value, token_doc.value, "recipe-scale-view");
 }
 
 test "conformance validator actually rejects drift" {

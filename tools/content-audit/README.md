@@ -79,7 +79,7 @@ boris-content-audit --mode=poetry --root=DIR --content-root=content --out=DIR [o
 | `1` | Findings selected by `--fail-on` were present. |
 | `2` | Usage error. |
 | `3` | I/O or output-ownership error. |
-| `4` | Malformed source, policy, or previous-report contract. |
+| `4` | Malformed policy or previous-report contract. Malformed source files are reported as findings and can trigger exit 1. |
 
 By default: missing poetry is a report finding, not a failure; placeholder
 poetry is a finding, not a failure; density extremes are informational.

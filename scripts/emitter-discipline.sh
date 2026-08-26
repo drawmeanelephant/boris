@@ -11,7 +11,7 @@
 # name-based check would miss a new rss.zig entirely.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 REGISTRY="src/emitter_discipline_test.zig"

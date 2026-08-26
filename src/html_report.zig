@@ -16,14 +16,38 @@ const std = @import("std");
 const diag = @import("diag.zig");
 const json_out = @import("json_out.zig");
 
-/// Schema version pinned by `docs/contracts/schemas/html-build-report-0.1.0.schema.json`.
-pub const schema_version = "html-build-report-0.1.0";
+/// Schema version pinned by `docs/contracts/schemas/html-build-report-0.2.0.schema.json`.
+pub const schema_version = "html-build-report-0.2.0";
+
+/// One publication-check verdict mirrored into the optional proofPack
+/// section (#741). `status` uses the committed checks.json spelling.
+pub const ProofCheck = struct {
+    id: []const u8,
+    status: []const u8,
+};
+
+pub const ProofSection = struct {
+    /// Target-relative path of the committed checks report (caller-owned).
+    path: []const u8,
+    checks: []const ProofCheck,
+
+    pub fn allPassed(self: ProofSection) bool {
+        for (self.checks) |check| {
+            if (std.mem.eql(u8, check.status, "failed") or
+                std.mem.eql(u8, check.status, "incomplete")) return false;
+        }
+        return true;
+    }
+};
 
 pub const Report = struct {
     ok: bool,
     content_root: []const u8,
     out_dir: []const u8,
     diagnostics: []const diag.Diagnostic,
+    /// Optional publication-check mirror (#741); present only when the run
+    /// committed target evidence and `_boris/proof/checks.json` was readable.
+    proof: ?ProofSection = null,
 
     pub fn errorCount(self: *const Report) usize {
         return diag.countErrors(self.diagnostics);
@@ -31,6 +55,13 @@ pub const Report = struct {
 };
 
 pub fn renderHtmlReport(gpa: std.mem.Allocator, compiler_id: []const u8, report: Report) ![]u8 {
+    return renderHtmlReportVcs(gpa, compiler_id, "", report);
+}
+
+/// `renderHtmlReport` with the build-provenance token (#776): the VCS
+/// revision the producing binary was compiled from, or "" when unknown.
+/// Emitted additively after `compilerId` so key order stays stable.
+pub fn renderHtmlReportVcs(gpa: std.mem.Allocator, compiler_id: []const u8, vcs_revision: []const u8, report: Report) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
 
@@ -42,6 +73,11 @@ pub fn renderHtmlReport(gpa: std.mem.Allocator, compiler_id: []const u8, report:
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"compilerId\": ");
     try json_out.writeString(&buf, gpa, compiler_id);
+    try buf.appendSlice(gpa, ",\n");
+    try json_out.indent(&buf, gpa, 1);
+    // Additive build provenance (#776); "" when the binary carries no token.
+    try buf.appendSlice(gpa, "\"vcsRevision\": ");
+    try json_out.writeString(&buf, gpa, vcs_revision);
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"ok\": ");
@@ -58,6 +94,37 @@ pub fn renderHtmlReport(gpa: std.mem.Allocator, compiler_id: []const u8, report:
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"errorCount\": ");
     try json_out.writeUsize(&buf, gpa, report.errorCount());
+    if (report.proof) |proof| {
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 1);
+        try buf.appendSlice(gpa, "\"proofPack\": {\n");
+        try json_out.indent(&buf, gpa, 2);
+        try buf.appendSlice(gpa, "\"path\": ");
+        try json_out.writeString(&buf, gpa, proof.path);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 2);
+        try buf.appendSlice(gpa, "\"allPassed\": ");
+        try json_out.writeBool(&buf, gpa, proof.allPassed());
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 2);
+        try buf.appendSlice(gpa, "\"checks\": ");
+        if (proof.checks.len == 0) {
+            try buf.appendSlice(gpa, "[]\n");
+        } else {
+            try buf.appendSlice(gpa, "[ ");
+            for (proof.checks, 0..) |check, i| {
+                if (i > 0) try buf.appendSlice(gpa, ", ");
+                try buf.appendSlice(gpa, "{\"id\": ");
+                try json_out.writeString(&buf, gpa, check.id);
+                try buf.appendSlice(gpa, ", \"status\": ");
+                try json_out.writeString(&buf, gpa, check.status);
+                try buf.appendSlice(gpa, "}");
+            }
+            try buf.appendSlice(gpa, " ]\n");
+        }
+        try json_out.indent(&buf, gpa, 1);
+        try buf.appendSlice(gpa, "}");
+    }
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"diagnostics\": ");
@@ -147,7 +214,7 @@ test "html report renders deterministic shape with diagnostics" {
     });
     defer gpa.free(rendered);
 
-    try std.testing.expect(std.mem.indexOf(u8, rendered, "\"schemaVersion\": \"html-build-report-0.1.0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "\"schemaVersion\": \"html-build-report-0.2.0\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "\"ok\": false") != null);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "\"errorCount\": 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "\"code\": \"ELAYOUTDUPLICATEMARKER\"") != null);
@@ -173,4 +240,58 @@ test "html report renders empty diagnostics as ok" {
     try std.testing.expect(std.mem.indexOf(u8, rendered, "\"ok\": true") != null);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "\"errorCount\": 0") != null);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "\"diagnostics\": []") != null);
+    // No evidence published → no proofPack section.
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "\"proofPack\"") == null);
+}
+
+test "#741: proofPack mirrors check verdicts with allPassed=false on failure" {
+    const gpa = std.testing.allocator;
+    const checks = [_]ProofCheck{
+        .{ .id = "artifact-integrity", .status = "passed" },
+        .{ .id = "rendered-html", .status = "passed" },
+        .{ .id = "rendered-search", .status = "failed" },
+    };
+    const rendered = try renderHtmlReport(gpa, "boris/0.8.1", .{
+        .ok = true,
+        .content_root = "content",
+        .out_dir = "dist",
+        .diagnostics = &.{},
+        .proof = .{ .path = "_boris/proof/checks.json", .checks = &checks },
+    });
+    defer gpa.free(rendered);
+
+    try std.testing.expect(std.mem.indexOf(u8, rendered,
+        \\  "proofPack": {
+    ) != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "\"path\": \"_boris/proof/checks.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "\"allPassed\": false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "\"id\": \"rendered-search\", \"status\": \"failed\"") != null);
+    // proofPack sits between errorCount and diagnostics; key order is pinned.
+    const proof_pos = std.mem.indexOf(u8, rendered, "\"proofPack\"").?;
+    const error_pos = std.mem.indexOf(u8, rendered, "\"errorCount\"").?;
+    const diag_pos = std.mem.indexOf(u8, rendered, "\"diagnostics\"").?;
+    try std.testing.expect(error_pos < proof_pos and proof_pos < diag_pos);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, rendered, .{});
+    defer parsed.deinit();
+    const proof_pack = parsed.value.object.get("proofPack").?.object;
+    try std.testing.expectEqual(false, proof_pack.get("allPassed").?.bool);
+    try std.testing.expectEqual(@as(usize, 3), proof_pack.get("checks").?.array.items.len);
+}
+
+test "#741: proofPack allPassed tolerates not-applicable checks" {
+    const gpa = std.testing.allocator;
+    const checks = [_]ProofCheck{
+        .{ .id = "artifact-integrity", .status = "passed" },
+        .{ .id = "rendered-search", .status = "not-applicable" },
+    };
+    const rendered = try renderHtmlReport(gpa, "boris/0.8.1", .{
+        .ok = true,
+        .content_root = "content",
+        .out_dir = "dist",
+        .diagnostics = &.{},
+        .proof = .{ .path = "_boris/proof/checks.json", .checks = &checks },
+    });
+    defer gpa.free(rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "\"allPassed\": true") != null);
 }

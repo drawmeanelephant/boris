@@ -87,10 +87,14 @@ the publication checks bind search documents to the selected HTML page set;
 neither result is a claim that an external deployed search request succeeded.
 
 Without `--pages-file`, the CLI recursively discovers regular files whose path
-ends in lowercase `.html`, rejects symlinks, and excludes the configured output
-directory when nested below the root. With `--pages-file`, every non-empty line
-is an exact output-relative `.html` path subject to the same separator,
-component, regular-file, and no-symlink rules. Duplicate entries fail closed.
+ends in lowercase `.html`, rejects symlinks, excludes the configured output
+directory when nested below the root, and prunes the Boris-owned `_boris/`
+evidence namespace: proof chrome and the search artifact itself are never
+searchable content (#750), matching the compiler-owned page list. With
+`--pages-file`, every non-empty line is an exact output-relative `.html` path
+subject to the same separator, component, regular-file, and no-symlink rules;
+an entry under `_boris/` fails closed with a reserved-path error rather than
+diverging from the discovery rule. Duplicate entries fail closed.
 
 ## Extraction and normalization
 
@@ -113,7 +117,11 @@ code is stored. ASCII whitespace is collapsed to one U+0020 and trimmed at
 both ends. Table cells (`td`/`th`) and `<br>`/`<hr>` are word separators in
 `text`, so adjacent cells do not concatenate. Other UTF-8 text is preserved;
 there is no case folding, stemming, punctuation removal, or language-specific
-normalization. Code is kept in `code` rather than merged into `text`.
+normalization. Code is kept in `code` rather than merged into `text`. Within
+one section, successive code fragments are joined by a single U+0020 in
+`code`, and prose gains a word boundary at an inline-code span's edges, so
+neither bucket fuses adjacent terms (#778); consumers searching code match
+against whole tokens, not one concatenated blob.
 
 Sections retain document order. Text before the first heading is level zero;
 each `h1`–`h6` begins the next section. An explicit heading `id` is copied as

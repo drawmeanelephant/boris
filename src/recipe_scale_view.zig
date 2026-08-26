@@ -11,7 +11,7 @@ const pipeline = @import("pipeline.zig");
 const recipe_scale = @import("recipe_scale.zig");
 
 pub const format_name = "boris-recipe-scale";
-pub const schema_version = "0.1.0";
+pub const schema_version = "0.2.0";
 
 pub const ServingsScale = struct {
     current: u32,
@@ -19,16 +19,19 @@ pub const ServingsScale = struct {
     authored: ?[]const u8,
 };
 
-/// Scale one compiled page into the contracted view document.
+/// Scale one compiled page into the contracted view document. `vcs_revision`
+/// is the additive build-provenance token (#781) copied verbatim into the
+/// envelope ("" when the binary could not detect one).
 pub fn renderFromCompile(
     gpa: std.mem.Allocator,
     result: *const pipeline.Result,
     page_id: []const u8,
     factor: recipe_scale.Factor,
     servings: ?ServingsScale,
+    vcs_revision: []const u8,
 ) ![]u8 {
     const page = findPage(result, page_id) orelse return error.PageNotFound;
-    return render(gpa, page.id, page.recipe, factor, servings);
+    return render(gpa, page.id, page.recipe, factor, servings, vcs_revision);
 }
 
 fn findPage(result: *const pipeline.Result, page_id: []const u8) ?*const pipeline.PageEntry {
@@ -44,6 +47,7 @@ pub fn render(
     recipe: cooklang_seam.Recipe,
     factor: recipe_scale.Factor,
     servings: ?ServingsScale,
+    vcs_revision: []const u8,
 ) ![]u8 {
     var owned: std.ArrayList(recipe_scale.ScaledAmount) = .empty;
     defer {
@@ -66,6 +70,14 @@ pub fn render(
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"compiler\": ");
     try json_out.writeString(&buf, gpa, pipeline.recipe_compiler_id);
+    try buf.appendSlice(gpa, ",\n");
+    try json_out.indent(&buf, gpa, 1);
+    // Additive build provenance (#781): the opaque VCS revision token this
+    // binary was compiled from, or "" when undetected. Copied verbatim so
+    // the envelope's key set stays fixed; mirrors the HTML-path report's
+    // additive `vcsRevision` (#776). Never part of the compiler id.
+    try buf.appendSlice(gpa, "\"vcsRevision\": ");
+    try json_out.writeString(&buf, gpa, vcs_revision);
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"factor\": { \"num\": ");
@@ -153,6 +165,12 @@ fn writeNamedList(
         try json_out.writeString(buf, gpa, item.name);
         try buf.appendSlice(gpa, ", \"quantity\": ");
         try writeQuantity(buf, gpa, amount, item.quantity.unit);
+        if (is_timer) {
+            // The timer lock is part of the output (#743): an unchanged
+            // scalable amount must never read as a scaling bug. Pinned by
+            // recipe-scale-view-0.2.0.schema.json.
+            try buf.appendSlice(gpa, ", \"scaling\": \"locked\"");
+        }
         try buf.appendSlice(gpa, " }");
         if (i + 1 < items.len) try buf.append(gpa, ',');
         try buf.append(gpa, '\n');
@@ -216,9 +234,9 @@ test "carbonara doubled matches the contracted golden" {
     try std.testing.expect(compiled.ok);
 
     const factor = try recipe_scale.parseFactor("2");
-    const first = try renderFromCompile(gpa, &compiled, "carbonara", factor, null);
+    const first = try renderFromCompile(gpa, &compiled, "carbonara", factor, null, "");
     defer gpa.free(first);
-    const second = try renderFromCompile(gpa, &compiled, "carbonara", factor, null);
+    const second = try renderFromCompile(gpa, &compiled, "carbonara", factor, null, "");
     defer gpa.free(second);
     try std.testing.expectEqualStrings(first, second);
 
@@ -247,12 +265,31 @@ test "carbonara --servings 4 matches the contracted golden" {
         .target = 4,
         .authored = page.servings.?.authored,
     };
-    const bytes = try renderFromCompile(gpa, &compiled, "carbonara", factor, servings);
+    const bytes = try renderFromCompile(gpa, &compiled, "carbonara", factor, servings, "");
     defer gpa.free(bytes);
 
     const golden = try std.Io.Dir.cwd().readFileAlloc(io, "docs/contracts/fixtures/cooklang-compatibility/expected/recipe-scale-carbonara-servings-4.json", gpa, .limited(64 * 1024));
     defer gpa.free(golden);
     try std.testing.expectEqualStrings(golden, bytes);
+}
+
+test "the view records the baked vcs revision in fixed position (#781)" {
+    const gpa = std.testing.allocator;
+
+    const factor = try recipe_scale.parseFactor("2");
+    const bytes = try render(gpa, "rev", .{
+        .ingredients = &.{.{ .name = "water", .quantity = .{ .amount = "1", .unit = "cup" } }},
+        .cookware = &.{},
+        .timers = &.{},
+    }, factor, null, "a8ef247");
+    defer gpa.free(bytes);
+
+    // Fixed order: format, schemaVersion, compiler, vcsRevision, then the
+    // scale body; the token is copied verbatim.
+    const compiler_pos = std.mem.indexOf(u8, bytes, "\"compiler\"").?;
+    try std.testing.expect(std.mem.startsWith(u8, bytes[compiler_pos..], "\"compiler\": \"boris/"));
+    const vcs_line = std.mem.indexOf(u8, bytes, "\"vcsRevision\": \"a8ef247\",\n").?;
+    try std.testing.expect(compiler_pos < vcs_line);
 }
 
 test "missing page is a view error, not a rewrite" {
@@ -268,7 +305,7 @@ test "missing page is a view error, not a rewrite" {
     try std.testing.expect(compiled.ok);
 
     const factor = try recipe_scale.parseFactor("2");
-    try std.testing.expectError(error.PageNotFound, renderFromCompile(gpa, &compiled, "missing", factor, null));
+    try std.testing.expectError(error.PageNotFound, renderFromCompile(gpa, &compiled, "missing", factor, null, ""));
 }
 
 test "fixed amounts and timers stay put in the view" {
@@ -288,7 +325,7 @@ test "fixed amounts and timers stay put in the view" {
         },
     };
 
-    const bytes = try render(gpa, "fixed", recipe, factor, null);
+    const bytes = try render(gpa, "fixed", recipe, factor, null, "");
     defer gpa.free(bytes);
 
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"original\": \"some\", \"scaled\": \"some\"") != null);
@@ -296,4 +333,6 @@ test "fixed amounts and timers stay put in the view" {
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"original\": \"1\", \"scaled\": \"2\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"original\": \"10\", \"scaled\": \"10\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"class\": \"fixed\"") != null);
+    // The timer lock is explicit in the view (#743).
+    try std.testing.expect(std.mem.indexOf(u8, bytes, ", \"scaling\": \"locked\" }") != null);
 }

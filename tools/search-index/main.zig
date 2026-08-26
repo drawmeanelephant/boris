@@ -3,6 +3,10 @@ const std = @import("std");
 const Io = std.Io;
 const search = @import("search_index");
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this tool does not import `src/`.
+pub const tool_id = "boris-search-index/0.8.1";
+
 const Options = struct {
     root: []const u8 = "dist",
     out: []const u8 = "dist/_boris/search",
@@ -14,12 +18,22 @@ const Options = struct {
 
 const CliError = error{
     Help,
+    Version,
     MissingValue,
     UnknownFlag,
     InvalidPath,
     DuplicatePage,
     SymlinkNotAllowed,
+    ReservedPage,
 };
+
+/// Boris-owned evidence namespace (#750): `_boris/**` holds proof chrome and
+/// the search artifact itself. It is never searchable content, matching the
+/// in-build producer, which receives an explicit page list that cannot
+/// contain it.
+fn isReservedNamespace(path: []const u8) bool {
+    return under(path, "_boris");
+}
 
 fn usage() void {
     std.debug.print(
@@ -32,7 +46,8 @@ fn usage() void {
             "  --require-root-marker   Require data-boris-search-root on every page\n" ++
             "  --check                 Compare against existing search-index.json\n" ++
             "  --quiet, -q             Suppress the success message\n" ++
-            "  --help, -h              Show this help\n",
+            "  --help, -h              Show this help\n" ++
+            "  --version, -V           Print the tool id and exit\n",
         .{},
     );
 }
@@ -57,6 +72,9 @@ fn parse(args: []const []const u8) CliError!Options {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             usage();
             return error.Help;
+        }
+        if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+            return error.Version;
         }
         if (std.mem.eql(u8, arg, "--require-root-marker")) {
             options.require_root_marker = true;
@@ -175,7 +193,7 @@ fn collect(io: Io, dir: Io.Dir, prefix: []const u8, skip: []const u8, allocator:
             try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, entry.name });
         errdefer allocator.free(relative);
         if (entry.kind == .sym_link) return error.SymlinkNotAllowed;
-        if (under(relative, skip)) {
+        if (under(relative, skip) or isReservedNamespace(relative)) {
             allocator.free(relative);
             continue;
         }
@@ -202,7 +220,7 @@ fn sortAndRejectDuplicates(paths: []const []const u8) CliError!void {
 pub fn main(init: std.process.Init) u8 {
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch return 2;
     run(init.gpa, init.io, args) catch |err| {
-        if (err == error.Help) return 0;
+        if (err == error.Help or err == error.Version) return 0;
         std.debug.print("search-index: {s}\n", .{@errorName(err)});
         return 1;
     };
@@ -211,9 +229,20 @@ pub fn main(init: std.process.Init) u8 {
 
 fn run(allocator: std.mem.Allocator, io: Io, args: []const []const u8) !void {
     const options = parse(args) catch |err| {
+        if (err == error.Version) {
+            var stdout_buffer: [128]u8 = undefined;
+            var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+            stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+            stdout_writer.interface.flush() catch {};
+            return err;
+        }
         if (err != error.Help) usage();
         return err;
     };
+    return runInner(allocator, io, options);
+}
+
+fn runInner(allocator: std.mem.Allocator, io: Io, options: Options) !void {
     var root = try Io.Dir.cwd().openDir(io, options.root, .{ .iterate = true });
     defer root.close(io);
     var paths: std.ArrayList([]const u8) = .empty;
@@ -230,6 +259,7 @@ fn run(allocator: std.mem.Allocator, io: Io, args: []const []const u8) !void {
             const path = std.mem.trim(u8, line, " \t\r");
             if (path.len == 0) continue;
             if (!validRelative(path) or !std.mem.endsWith(u8, path, ".html")) return error.InvalidPath;
+            if (isReservedNamespace(path)) return error.ReservedPage;
             try validateNoSymlink(io, root, path);
             try paths.append(allocator, try allocator.dupe(u8, path));
         }
@@ -296,4 +326,46 @@ test "CLI rejects unsafe and duplicate page paths" {
     try std.testing.expect(!validRelative("./guide.html"));
     try std.testing.expect(!validRelative("guide/../index.html"));
     try std.testing.expectError(error.DuplicatePage, sortAndRejectDuplicates(&[_][]const u8{ "a.html", "a.html" }));
+}
+
+test "the _boris evidence namespace is reserved (#750)" {
+    try std.testing.expect(isReservedNamespace("_boris"));
+    try std.testing.expect(isReservedNamespace("_boris/proof/index.html"));
+    try std.testing.expect(isReservedNamespace("_boris/search/search-index.json"));
+    try std.testing.expect(!isReservedNamespace("boris.html"));
+    try std.testing.expect(!isReservedNamespace("_borisite/index.html"));
+}
+
+test "discovery prunes _boris proof chrome from the indexed set (#750)" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // A realistic committed target: one live page plus boris's own proof
+    // viewer chrome and the search artifact beneath the output directory.
+    try writeFileRel(io, tmp.dir, "index.html", "<html><body><main>Home</main></body></html>");
+    try writeFileRel(io, tmp.dir, "_boris/proof/index.html", "<html><body><main>Proof</main></body></html>");
+    try writeFileRel(io, tmp.dir, "_boris/search/search-index.json", "{}");
+
+    var root = try tmp.dir.openDir(io, ".", .{ .iterate = true });
+    defer root.close(io);
+    var paths: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (paths.items) |path| allocator.free(path);
+        paths.deinit(allocator);
+    }
+    try collect(io, root, "", "", allocator, &paths);
+    std.mem.sort([]const u8, paths.items, {}, struct {
+        fn less(_: void, left: []const u8, right: []const u8) bool {
+            return std.mem.order(u8, left, right) == .lt;
+        }
+    }.less);
+    try std.testing.expectEqual(@as(usize, 1), paths.items.len);
+    try std.testing.expectEqualStrings("index.html", paths.items[0]);
+}
+
+fn writeFileRel(io: Io, dir: Io.Dir, sub_path: []const u8, data: []const u8) !void {
+    const slash = std.mem.lastIndexOfScalar(u8, sub_path, '/');
+    if (slash) |at| try dir.createDirPath(io, sub_path[0..at]);
+    try dir.writeFile(io, .{ .sub_path = sub_path, .data = data });
 }

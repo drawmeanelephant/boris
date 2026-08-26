@@ -11,6 +11,23 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Build provenance (#776): the VCS revision this binary was compiled
+    // from, baked in at compile time. Auto-detected from git when available;
+    // packagers (scripts/agent-pack.sh) can pin it explicitly with
+    // `-Dvcs-revision=<token>`. Empty when the tree is not a git checkout
+    // (e.g. a source tarball). A dirty worktree appends ".dirty" so a local
+    // uncommitted build is never mistaken for a clean commit artifact. The
+    // token is opaque provenance text: it never alters the compiler id,
+    // exit codes, or artifact schemas — it surfaces only through the additive
+    // `--build-info` query and the reports' additive `vcs_revision` field.
+    const vcs_revision = b.option(
+        []const u8,
+        "vcs-revision",
+        "VCS revision token baked into the binary (default: auto-detect from git)",
+    ) orelse detectVcsRevision(b);
+    const build_info = b.addOptions();
+    build_info.addOption([]const u8, "vcs_revision", vcs_revision);
+
     // Portable AT Protocol OAuth primitives. This module has no host I/O,
     // clock, filesystem, or ambient-randomness dependency; consumers provide
     // those capabilities at their platform boundary.
@@ -463,6 +480,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    root_mod.addOptions("build_info", build_info);
     root_mod.addImport("secp256k1", secp.c_module);
     root_mod.linkLibrary(secp.library);
     linkOliver(root_mod, oliver_mod);
@@ -719,6 +737,22 @@ pub fn build(b: *std.Build) void {
         "Run the version query + artifact provenance pin guard",
     );
     test_version_pin_step.dependOn(&version_pin_run.step);
+
+    // Phantom-failure guard (#768): a passing unit-test step must not echo
+    // captured stderr as a `failed command:` block. The nested build reuses
+    // the cached embed-wasm test binary, so the guard is cheap after a warm
+    // build and exercises the exact runner path that produced #768.
+    const quiet_pass_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-quiet-pass.sh",
+    });
+    quiet_pass_run.setCwd(b.path("."));
+    quiet_pass_run.has_side_effects = true;
+    const test_quiet_pass_step = b.step(
+        "test-quiet-pass",
+        "Run the green-run phantom-failure output guard",
+    );
+    test_quiet_pass_step.dependOn(&quiet_pass_run.step);
 
     // Teaching-layer link guard (#394): every relative markdown link in
     // README.md and docs/authoring-spine.md must resolve to a real file or
@@ -1843,6 +1877,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&init_run.step);
     test_step.dependOn(&reference_theme_run.step);
     test_step.dependOn(&version_pin_run.step);
+    test_step.dependOn(&quiet_pass_run.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_embed_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
@@ -2028,4 +2063,23 @@ fn buildSecp256k1(
     c_module.linkLibrary(lib);
 
     return .{ .library = lib, .c_module = c_module };
+}
+
+/// Best-effort VCS revision detection for build provenance (#776). Runs git
+/// against the build root; any failure (no git, not a repository, detached
+/// plumbing) yields an empty token so tarball builds simply carry no revision.
+/// A dirty worktree appends ".dirty" so an uncommitted local build is never
+/// mistaken for a clean commit artifact.
+fn detectVcsRevision(b: *std.Build) []const u8 {
+    const argv = [_][]const u8{ "git", "rev-parse", "--short", "HEAD" };
+    var code: u8 = 0;
+    const raw = b.runAllowFail(&argv, &code, .ignore) catch return "";
+    const trimmed = std.mem.trim(u8, raw, " \n\r\t");
+    if (trimmed.len == 0) return "";
+    const dirty_argv = [_][]const u8{ "git", "status", "--porcelain" };
+    const dirty = b.runAllowFail(&dirty_argv, &code, .ignore) catch "";
+    if (std.mem.trim(u8, dirty, " \n\r\t").len > 0) {
+        return std.fmt.allocPrint(b.allocator, "{s}.dirty", .{trimmed}) catch trimmed;
+    }
+    return trimmed;
 }

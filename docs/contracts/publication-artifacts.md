@@ -65,14 +65,15 @@ fixed key order shown here:
       "sha256": "lowercase-64-hex-digest",
       "format_version": null,
       "dimensions": null,
-      "semantics": "static"
+      "semantics": "static",
+      "advertised": true
     }
   ]
 }
 ```
 
 The published schema is [`publication-artifacts-1.schema.json`](schemas/publication-artifacts-1.schema.json).
-Every first-slice record has these fields, in this order (the `dimensions` and `semantics` keys are optional-on-parse so inventories written before they existed round-trip as `null`):
+Every first-slice record has these fields, in this order (the `dimensions`, `semantics`, and `advertised` keys are optional-on-parse so inventories written before they existed round-trip as `null`):
 
 | Field | Meaning |
 |---|---|
@@ -86,6 +87,7 @@ Every first-slice record has these fields, in this order (the `dimensions` and `
 | `format_version` | A known producer format/schema version, or explicit `null` when the payload has no such version. |
 | `dimensions` | Pixel `{width, height}` for image assets where determinable from the payload header (PNG, GIF, WebP, JPEG, SVG); `null` for non-images, unsupported formats, and malformed headers. |
 | `semantics` | Explicit asset ownership semantics: `static` for theme-owned `assets/` files copied verbatim, `content-reference` for content-local `.assets/` trees owned by page content and pointed at by rewritten Markdown destinations, or `null` for non-asset records such as rendered pages and projections. |
+| `advertised` | Publication-surface eligibility (#752): `false` marks an emitted `html-page` that is deliberately unadvertised (`status: draft`) — committed HTML excluded from public projections such as search and sitemap; `true` for every other rendered page; `null` for non-page records. |
 
 Records sort by target-relative `path` using bytewise ordering, then by `kind`
 when a future producer vocabulary permits multiple records at one path.

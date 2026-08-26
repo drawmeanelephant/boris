@@ -77,6 +77,10 @@ pub const Options = struct {
     /// Test-only fault injection. Production callers leave both false.
     test_fail_execution: bool = false,
     test_fail_write: bool = false,
+    /// When set, receives one `Outcome` per executed check after the report
+    /// bytes are built, so the CLI can surface failed checks without parsing
+    /// the committed JSON (#741). The list is caller-owned and not cleared.
+    outcomes_out: ?*std.ArrayList(Outcome) = null,
 };
 
 pub const Error = std.mem.Allocator.Error || error{
@@ -351,6 +355,20 @@ fn writeScope(out: *std.ArrayList(u8), gpa: std.mem.Allocator, scope: Scope) !vo
     try out.appendSlice(gpa, "\n      }");
 }
 
+/// One executed check's verdict, for callers that must surface results
+/// without re-parsing the committed report (#741).
+pub const Outcome = struct {
+    id: []const u8,
+    status: Status,
+};
+
+fn appendOutcomes(out: ?*std.ArrayList(Outcome), gpa: std.mem.Allocator, checks: []const Check) !void {
+    const sink = out orelse return;
+    for (checks) |check| {
+        try sink.append(gpa, .{ .id = check.id, .status = check.status });
+    }
+}
+
 fn writeCheck(out: *std.ArrayList(u8), gpa: std.mem.Allocator, check: Check) !void {
     try out.appendSlice(gpa, "    {\n      \"id\": ");
     try json_out.writeString(out, gpa, check.id);
@@ -434,6 +452,7 @@ fn buildReport(
     root: Io.Dir,
     target: []const u8,
     inventory_binding: InventoryBinding,
+    outcomes_out: ?*std.ArrayList(Outcome),
 ) Error![]u8 {
     var inventory = try parseInventoryFile(io, root, report_gpa, target);
     defer inventory.deinit();
@@ -442,13 +461,22 @@ fn buildReport(
     defer findings.deinit(report_gpa);
     var page_paths: std.ArrayList([]const u8) = .empty;
     defer page_paths.deinit(report_gpa);
+    var search_page_paths: std.ArrayList([]const u8) = .empty;
+    defer search_page_paths.deinit(report_gpa);
     var route_paths: std.ArrayList([]const u8) = .empty;
     defer route_paths.deinit(report_gpa);
     var search_record_index: ?usize = null;
     for (inventory.records, 0..) |record, index| {
         if (record.status != .committed) continue;
         try route_paths.append(report_gpa, record.path);
-        if (record.kind == .html_page) try page_paths.append(report_gpa, record.path);
+        if (record.kind == .html_page) {
+            try page_paths.append(report_gpa, record.path);
+            // #752: a draft page is committed HTML but deliberately
+            // unadvertised, so it is an ineligible rendered-search subject.
+            // Inventories written before `advertised` existed parse as null
+            // and stay eligible.
+            if (record.advertised != false) try search_page_paths.append(report_gpa, record.path);
+        }
         if (record.kind == .rendered_search) {
             if (search_record_index != null) return error.MultipleRenderedSearchArtifacts;
             search_record_index = index;
@@ -460,7 +488,7 @@ fn buildReport(
         .pages = &.{},
         .expected_page_paths = page_paths.items,
         .intended_route_paths = route_paths.items,
-        .search_page_paths = page_paths.items,
+        .search_page_paths = search_page_paths.items,
     }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.CheckerExecutionFailed,
@@ -652,6 +680,7 @@ fn buildReport(
     }
 
     const checks = [_]Check{ integrity_check, html_check, search_check };
+    try appendOutcomes(outcomes_out, payload_gpa, &checks);
     return writeReport(report_gpa, target, inventory_binding, &inventory, &checks, findings.items) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.NoSpaceLeft => unreachable,
@@ -680,7 +709,7 @@ pub fn writeAfterCommit(
     const report = try buildReport(io, report_gpa, gpa, root, target, .{
         .bytes = inventory_binding.bytes,
         .sha256 = inventory_binding.sha256,
-    });
+    }, options.outcomes_out);
 
     var atomic = root.createFileAtomic(io, output_path, .{ .replace = true, .make_path = true }) catch {
         return error.ChecksWriteFailed;
@@ -733,13 +762,22 @@ pub fn renderFromPayloads(
     defer findings.deinit(report_gpa);
     var page_paths: std.ArrayList([]const u8) = .empty;
     defer page_paths.deinit(report_gpa);
+    var search_page_paths: std.ArrayList([]const u8) = .empty;
+    defer search_page_paths.deinit(report_gpa);
     var route_paths: std.ArrayList([]const u8) = .empty;
     defer route_paths.deinit(report_gpa);
     var search_record_index: ?usize = null;
     for (inventory.records, 0..) |record, index| {
         if (record.status != .committed) continue;
         try route_paths.append(report_gpa, record.path);
-        if (record.kind == .html_page) try page_paths.append(report_gpa, record.path);
+        if (record.kind == .html_page) {
+            try page_paths.append(report_gpa, record.path);
+            // #752: a draft page is committed HTML but deliberately
+            // unadvertised, so it is an ineligible rendered-search subject.
+            // Inventories written before `advertised` existed parse as null
+            // and stay eligible.
+            if (record.advertised != false) try search_page_paths.append(report_gpa, record.path);
+        }
         if (record.kind == .rendered_search) {
             if (search_record_index != null) return error.MultipleRenderedSearchArtifacts;
             search_record_index = index;
@@ -751,7 +789,7 @@ pub fn renderFromPayloads(
         .pages = &.{},
         .expected_page_paths = page_paths.items,
         .intended_route_paths = route_paths.items,
-        .search_page_paths = page_paths.items,
+        .search_page_paths = search_page_paths.items,
     }) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.CheckerExecutionFailed,
@@ -1290,6 +1328,31 @@ test "clean checks publish all three executions deterministically" {
     try std.testing.expectEqual(@as(i64, 0), objectAt(checks[0], "finding_offset").integer);
     try std.testing.expectEqual(@as(i64, 0), objectAt(checks[1], "finding_offset").integer);
     try std.testing.expectEqual(@as(i64, 0), objectAt(checks[2], "finding_offset").integer);
+
+    // The outcomes sink mirrors the committed checks without re-parsing (#741).
+    var outcomes: std.ArrayList(Outcome) = .empty;
+    defer outcomes.deinit(gpa);
+    try writeAfterCommit(io, gpa, tmp.dir, "public", .{ .outcomes_out = &outcomes });
+    try std.testing.expectEqual(@as(usize, 3), outcomes.items.len);
+    try std.testing.expectEqualStrings("artifact-integrity", outcomes.items[0].id);
+    try std.testing.expectEqual(Status.passed, outcomes.items[0].status);
+    try std.testing.expectEqualStrings("rendered-html", outcomes.items[1].id);
+    try std.testing.expectEqual(Status.passed, outcomes.items[1].status);
+    try std.testing.expectEqualStrings("rendered-search", outcomes.items[2].id);
+    try std.testing.expectEqual(Status.passed, outcomes.items[2].status);
+
+    // A stale search artifact surfaces as a non-passing verdict.
+    const stale_search = "{\"format\":\"wrong\"}";
+    try writePayload(io, tmp.dir, search_index.output_path, stale_search);
+    var degraded: std.ArrayList(Outcome) = .empty;
+    defer degraded.deinit(gpa);
+    try writeAfterCommit(io, gpa, tmp.dir, "public", .{ .outcomes_out = &degraded });
+    try std.testing.expectEqual(@as(usize, 3), degraded.items.len);
+    var saw_non_passing = false;
+    for (degraded.items) |outcome| {
+        if (outcome.status == .failed or outcome.status == .incomplete) saw_non_passing = true;
+    }
+    try std.testing.expect(saw_non_passing);
 }
 
 test "publication checks retain bounded metadata instead of the aggregate payload set" {
@@ -1563,6 +1626,69 @@ test "zero-page HTML target is eligible and a selected empty search can pass" {
     try std.testing.expectEqualStrings("passed", objectAt(checks[1], "status").string);
     try std.testing.expectEqual(@as(i64, 0), objectAt(objectAt(checks[1], "counts"), "eligible").integer);
     try std.testing.expectEqualStrings("passed", objectAt(checks[2], "status").string);
+}
+
+test "an unadvertised draft page is not an expected rendered-search subject (#752)" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const published_html = "<main data-boris-search-root><h1 id=home>Home</h1></main>";
+    const draft_html = "<main data-boris-search-root><h1 id=secret>Secret</h1></main>";
+    // The search producer's own filtered slice: only the advertised page.
+    const indexed = "{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n" ++
+        "  \"documents\": [{\"path\":\"index.html\",\"title\":\"Home\",\"sections\":[{\"level\":1,\"heading\":\"Home\",\"fragment\":\"home\",\"text\":\"\",\"code\":\"\"}]}]\n}\n";
+    try writePayload(io, tmp.dir, "index.html", published_html);
+    try writePayload(io, tmp.dir, "secret.html", draft_html);
+    try writePayload(io, tmp.dir, search_index.output_path, indexed);
+
+    var records = [_]artifact_inventory.Record{
+        recordFor("index.html", .html_page, published_html),
+        recordFor("secret.html", .html_page, draft_html),
+        recordFor(search_index.output_path, .rendered_search, indexed),
+    };
+    records[1].advertised = false;
+
+    // Without the #752 eligibility rule this inventory fails the check with
+    // SEARCH_DOCUMENT_MISSING for secret.html; with it the intended state
+    // passes completely.
+    const inventory_bytes = try writeInventory(io, gpa, tmp.dir, "public", &records);
+    defer gpa.free(inventory_bytes);
+    try writeAfterCommit(io, gpa, tmp.dir, "public", .{});
+    const report = try readPayload(io, tmp.dir, gpa, output_path);
+    defer gpa.free(report);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, report, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    const checks = root.get("checks").?.array.items;
+    try std.testing.expectEqualStrings("passed", objectAt(checks[2], "status").string);
+    try std.testing.expect(!reportHasCode(root, "SEARCH_DOCUMENT_MISSING"));
+
+    // A stale document outside every committed page still fails: the draft
+    // rule narrows eligibility, it does not disable staleness detection.
+    var tmp_stale = std.testing.tmpDir(.{});
+    defer tmp_stale.cleanup();
+    const stale = "{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n" ++
+        "  \"documents\": [{\"path\":\"gone.html\",\"title\":\"Gone\",\"sections\":[]}]\n}\n";
+    try writePayload(io, tmp_stale.dir, "index.html", published_html);
+    try writePayload(io, tmp_stale.dir, "secret.html", draft_html);
+    try writePayload(io, tmp_stale.dir, search_index.output_path, stale);
+    const stale_records = [_]artifact_inventory.Record{
+        recordFor("index.html", .html_page, published_html),
+        recordFor("secret.html", .html_page, draft_html),
+        recordFor(search_index.output_path, .rendered_search, stale),
+    };
+    var stale_with_draft = stale_records;
+    stale_with_draft[1].advertised = false;
+    const stale_inventory = try writeInventory(io, gpa, tmp_stale.dir, "public", &stale_with_draft);
+    defer gpa.free(stale_inventory);
+    try writeAfterCommit(io, gpa, tmp_stale.dir, "public", .{});
+    const stale_report = try readPayload(io, tmp_stale.dir, gpa, output_path);
+    defer gpa.free(stale_report);
+    var stale_parsed = try std.json.parseFromSlice(std.json.Value, gpa, stale_report, .{});
+    defer stale_parsed.deinit();
+    try std.testing.expect(reportHasCode(stale_parsed.value.object, "SEARCH_DOCUMENT_STALE"));
 }
 
 test "invalid inventory and atomic write failure preserve a prior report" {

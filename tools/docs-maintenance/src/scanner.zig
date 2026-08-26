@@ -480,30 +480,39 @@ fn isExcludedDirOrFile(name: []const u8) bool {
     return false;
 }
 
+/// Path prefix match with a segment boundary: `src` matches `src` and
+/// `src/foo`, but never `srch/…` or `src-x/…`. A prefix already ending in
+/// `/` carries its own boundary.
+pub fn hasPathPrefix(path: []const u8, prefix: []const u8) bool {
+    if (!std.mem.startsWith(u8, path, prefix)) return false;
+    if (prefix.len == 0 or prefix[prefix.len - 1] == '/') return true;
+    return path.len == prefix.len or path[prefix.len] == '/';
+}
+
 fn classifyFile(rel_path: []const u8, options: ScanOptions) ?model.FileKind {
     if (std.mem.eql(u8, rel_path, "CHANGELOG.md")) return .product_changelog;
     if (std.mem.startsWith(u8, rel_path, "tools/") and std.mem.endsWith(u8, rel_path, "/CHANGELOG.md")) return .tool_changelog;
 
-    if (std.mem.startsWith(u8, rel_path, options.source_root)) {
+    if (hasPathPrefix(rel_path, options.source_root)) {
         if (std.mem.endsWith(u8, rel_path, ".zig")) {
             if (std.mem.endsWith(u8, rel_path, "_test.zig")) return .zig_test;
             return .zig_source;
         }
     }
 
-    if (std.mem.startsWith(u8, rel_path, options.dossier_root)) {
+    if (hasPathPrefix(rel_path, options.dossier_root)) {
         if (std.mem.endsWith(u8, rel_path, ".md")) return .source_dossier;
     }
 
-    if (std.mem.startsWith(u8, rel_path, "docs/contracts")) {
+    if (hasPathPrefix(rel_path, "docs/contracts")) {
         if (std.mem.endsWith(u8, rel_path, ".md")) return .contract;
     }
 
-    if (std.mem.startsWith(u8, rel_path, "docs/field-notes")) {
+    if (hasPathPrefix(rel_path, "docs/field-notes")) {
         if (std.mem.endsWith(u8, rel_path, ".md")) return .field_note;
     }
 
-    if (std.mem.startsWith(u8, rel_path, "docs/") or std.mem.startsWith(u8, rel_path, "content/")) {
+    if (hasPathPrefix(rel_path, "docs/") or hasPathPrefix(rel_path, "content/")) {
         if (std.mem.endsWith(u8, rel_path, ".md")) return .documentation;
     }
 

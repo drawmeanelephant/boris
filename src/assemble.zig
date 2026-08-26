@@ -44,6 +44,9 @@ const Io = std.Io;
 
 pub const content_marker = "{{content}}";
 pub const nav_marker = "{{nav}}";
+/// Prefix of the depth-bounded nav form; the argument follows one space and
+/// must be exactly `depth=<digits>` with a value ≥ 1.
+pub const nav_depth_prefix = "{{nav ";
 pub const breadcrumb_marker = "{{breadcrumb}}";
 pub const title_marker = "{{title}}";
 pub const toc_marker = "{{toc}}";
@@ -76,6 +79,8 @@ pub const LayoutError = error{
     TooManyLayoutSegments,
     InvalidAssetUrl,
     TooManyAssetUrls,
+    /// A `{{nav …}}` token whose argument is not exactly `depth=N` with N ≥ 1.
+    InvalidNavMarker,
     /// Layout bytes are not valid UTF-8 (validated at split / load boundary).
     InvalidUtf8,
 };
@@ -167,6 +172,21 @@ pub fn validateAssetUrlPath(path: []const u8) LayoutError!void {
     }
 }
 
+/// Parse the inner text of a `{{nav …}}` argument: exactly `depth=` followed
+/// by one or more ASCII digits forming a value ≥ 1. No internal whitespace.
+fn parseNavDepth(inner: []const u8) ?u32 {
+    const prefix = "depth=";
+    if (!std.mem.startsWith(u8, inner, prefix)) return null;
+    const digits = inner[prefix.len..];
+    if (digits.len == 0) return null;
+    for (digits) |c| {
+        if (c < '0' or c > '9') return null;
+    }
+    const value = std.fmt.parseInt(u32, digits, 10) catch return null;
+    if (value == 0) return null;
+    return value;
+}
+
 /// Immutable multi-slot closed plan of a layout template (e.g. `layouts/main.html`).
 ///
 /// Segment slices are views into `raw`. Keep the `Layout` (and the allocator
@@ -180,6 +200,9 @@ pub const Layout = struct {
     asset_paths: [max_asset_urls][]const u8 = undefined,
     asset_path_count: usize = 0,
     has_nav: bool = false,
+    /// Rendered-level cap for `{{nav depth=N}}` (level 1 = root Trunks).
+    /// `null` (plain `{{nav}}`) keeps the unbounded whole-forest render.
+    nav_depth: ?u32 = null,
     has_breadcrumb: bool = false,
     has_title: bool = false,
     has_toc: bool = false,
@@ -245,6 +268,15 @@ pub const Layout = struct {
                 if (seen_nav) return error.DuplicateLayoutMarker;
                 seen_nav = true;
                 layout.has_nav = true;
+                try layout.appendSlot(.nav);
+            } else if (std.mem.startsWith(u8, token, nav_depth_prefix)) {
+                // `{{nav depth=N}}` — bounded forest; same once-per-layout slot.
+                const inner = token[nav_depth_prefix.len .. token.len - 2];
+                const depth = parseNavDepth(inner) orelse return error.InvalidNavMarker;
+                if (seen_nav) return error.DuplicateLayoutMarker;
+                seen_nav = true;
+                layout.has_nav = true;
+                layout.nav_depth = depth;
                 try layout.appendSlot(.nav);
             } else if (std.mem.eql(u8, token, breadcrumb_marker)) {
                 if (seen_breadcrumb) return error.DuplicateLayoutMarker;
@@ -796,6 +828,39 @@ test "layout multi-slot nav breadcrumb title toc" {
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{relations}}{{relations}}{{content}}"));
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{backlinks}}{{backlinks}}{{content}}"));
     try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{nope}}{{content}}"));
+}
+
+test "layout nav depth forms parse bounded and reject malformed arguments" {
+    // Bounded form: same slot, explicit cap.
+    const bounded = try Layout.split("<body>{{nav depth=3}}{{content}}</body>");
+    try std.testing.expect(bounded.has_nav);
+    try std.testing.expectEqual(@as(?u32, 3), bounded.nav_depth);
+
+    const one = try Layout.split("{{nav depth=1}}{{content}}");
+    try std.testing.expectEqual(@as(?u32, 1), one.nav_depth);
+
+    // Plain form stays unbounded.
+    const plain = try Layout.split("{{nav}}{{content}}");
+    try std.testing.expect(plain.has_nav);
+    try std.testing.expectEqual(@as(?u32, null), plain.nav_depth);
+
+    // Any two nav-form tokens are still the duplicate-slot error.
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav depth=2}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav depth=2}}{{nav depth=3}}{{content}}"));
+
+    // Malformed arguments fail loud at load (never silently unbounded).
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=0}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=x}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth= 2}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=2 3}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav levels=2}}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav }}{{content}}"));
+    try std.testing.expectError(error.InvalidNavMarker, Layout.split("{{nav depth=99999999999}}{{content}}"));
+    // A token that merely starts with "nav" but is not the helper is unknown.
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{navish}}{{content}}"));
 }
 
 test "layout asset-url and segment bounds are hard errors" {

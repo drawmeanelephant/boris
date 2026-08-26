@@ -13,6 +13,11 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run.step);
     const tests = b.addTest(.{ .root_module = search_mod });
     const run_tests = b.addRunArtifact(tests);
+    // The standalone CLI surface is tested too (#750): discovery exclusion,
+    // reserved-namespace rules, and flag parsing live in main.zig.
+    const cli_tests = b.addTest(.{ .root_module = mod });
+    const run_cli_tests = b.addRunArtifact(cli_tests);
     const test_step = b.step("test", "Run rendered search tests");
     test_step.dependOn(&run_tests.step);
+    test_step.dependOn(&run_cli_tests.step);
 }

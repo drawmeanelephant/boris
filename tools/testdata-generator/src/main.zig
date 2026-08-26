@@ -4,6 +4,10 @@ const validator = @import("validator.zig");
 
 const Io = std.Io;
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this tool does not import `src/`.
+pub const tool_id = "boris-testdata/0.8.1";
+
 const ExitCode = enum(u8) {
     success = 0,
     content_failure = 1,
@@ -27,6 +31,7 @@ const Options = struct {
     format: Format = .human,
     force: bool = false,
     help: bool = false,
+    version: bool = false,
     jobs: usize = 1,
     barb_names: []const []const u8 = &.{},
 };
@@ -60,6 +65,13 @@ pub fn main(init: std.process.Init) u8 {
     };
     if (options.help) {
         printUsage();
+        return @intFromEnum(ExitCode.success);
+    }
+    if (options.version) {
+        var stdout_buffer: [128]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+        stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+        stdout_writer.interface.flush() catch {};
         return @intFromEnum(ExitCode.success);
     }
 
@@ -135,12 +147,16 @@ pub fn main(init: std.process.Init) u8 {
 
 fn parseOptions(allocator: std.mem.Allocator, args: []const [:0]const u8) ParseError!Options {
     if (args.len < 2) return error.MissingCommand;
-    // Help genuinely wins regardless of argument position and of malformed or
-    // missing option values: honor `-h`/`--help` before validating anything
-    // else, so `run --jobs abc --help` prints help rather than a usage error.
+    // Help/version genuinely win regardless of argument position and of
+    // malformed or missing option values: honor `-h`/`--help` and
+    // `-V`/`--version` before validating anything else, so `run --jobs abc
+    // --help` prints help rather than a usage error.
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             return .{ .command = .generate, .help = true };
+        }
+        if (std.mem.eql(u8, arg, "-V") or std.mem.eql(u8, arg, "--version")) {
+            return .{ .command = .generate, .version = true };
         }
     }
     const command = parseCommand(args[1]) orelse return error.UnknownCommand;
@@ -268,6 +284,10 @@ fn printUsage() void {
         \\Run options:
         \\  --jobs N       Requested Boris parallel HTML workers (1–64; default 1)
         \\
+        \\Global options:
+        \\  -h, --help     Show this help and exit
+        \\  -V, --version  Print the tool id and exit
+        \\
         \\Generate options:
         \\  --pages N       Exact positive page count workload (default: 24)
         \\  --seed U64      Stable SplitMix-style seed (default: 20260801)
@@ -357,6 +377,15 @@ test "help wins regardless of argument position and malformed jobs values" {
     });
     defer std.testing.allocator.free(before.barb_names);
     try std.testing.expect(before.help);
+
+    // `--version` shares the same position-independent short-circuit.
+    const version = try parseOptions(std.testing.allocator, &.{
+        "boris-testdata", "run", "--jobs", "abc", "--version",
+    });
+    defer std.testing.allocator.free(version.barb_names);
+    try std.testing.expect(version.version);
+    try std.testing.expect(!version.help);
+    try std.testing.expectEqualStrings("boris-testdata/0.8.1", tool_id);
 
     // `--help` with a missing jobs value.
     const missing = try parseOptions(std.testing.allocator, &.{

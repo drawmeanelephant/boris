@@ -3,7 +3,7 @@
 # See docs/RELEASE-GATE.md.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
 
 GATE_DIR=".release-gate"
@@ -157,13 +157,19 @@ META="${RAG_COMPLETE}/catalog_meta.json"
 if [[ ! -f "${META}" ]]; then
   fail "missing catalog_meta.json (complete corpus)"
 else
-  # Fixed compact shape (schema v2)
-  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":2,\"boris_version\":\"${PRODUCT_VERSION}\"}"
+  # Fixed compact shape (schema v2 + additive vcs_revision #781). The
+  # baked token is fetched from the same binary (#776), so the expectation
+  # is exact for every worktree state (clean, .dirty, or tarball "").
+  VCS_REV="$("${BORIS}" --build-info | sed -E 's/.*"vcsRevision"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+  if [[ ! "${VCS_REV}" =~ ^[A-Za-z0-9._-]*$ ]]; then
+    fail "could not read vcsRevision from --build-info"
+  fi
+  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":2,\"boris_version\":\"${PRODUCT_VERSION}\",\"vcs_revision\":\"${VCS_REV}\"}"
   GOT_META="$(tr -d '\n' < "${META}" | sed 's/[[:space:]]//g')"
   # Allow trailing newline already stripped; tolerate pretty vs compact by
   # requiring keys and values rather than exact whitespace.
   if [[ "${GOT_META}" == "${EXPECT_META}" ]]; then
-    pass "catalog_meta.json fields (format/schema_version/boris_version)"
+    pass "catalog_meta.json fields (format/schema_version/boris_version/vcs_revision)"
   else
     fail "catalog_meta.json shape mismatch: $(cat "${META}")"
   fi
@@ -464,11 +470,11 @@ if "${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
   --layout-rule default role:trunk "${LR_THEME}/layouts/section.html" \
   --html-dir="${LR_OUT_INC}" --incremental --quiet; then
   if [[ -f "${LR_OUT_INC}/.boris-cache/manifest.json" ]] \
-    && grep -q 'boris-cache-v2-layout-rules' "${LR_OUT_INC}/.boris-cache/manifest.json" \
+    && grep -q 'boris-cache-v3-nav-digest' "${LR_OUT_INC}/.boris-cache/manifest.json" \
     && grep -q 'selected_layout' "${LR_OUT_INC}/.boris-cache/manifest.json"; then
-    pass "layout-rules: incremental cache v2 + selected_layout"
+    pass "layout-rules: incremental cache v3 + selected_layout"
   else
-    fail "layout-rules: cache manifest missing v2/selected_layout"
+    fail "layout-rules: cache manifest missing v3 discriminator or selected_layout"
   fi
 else
   fail "layout-rules: incremental compile failed"

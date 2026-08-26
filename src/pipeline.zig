@@ -195,9 +195,22 @@ const DependencyResolver = struct {
     edges: *std.ArrayList(DependencyEdge),
     diagnostics: *std.ArrayList(diag.Diagnostic),
     scanned_sources: std.StringHashMapUnmanaged(void) = .empty,
+    /// Lazily built once per resolver (#731). Rebuilding the same source→node
+    /// map for every page made dependency resolution O(pages × nodes); with
+    /// the map shared, the whole pass stays linear like every other consumer
+    /// of the #726 seam.
+    doclink_source_map: ?doclink.SourceNodeMap = null,
 
     fn deinit(self: *DependencyResolver) void {
         self.scanned_sources.deinit(self.gpa);
+        if (self.doclink_source_map) |*m| m.deinit(self.gpa);
+    }
+
+    fn doclinkMap(self: *DependencyResolver) !*const doclink.SourceNodeMap {
+        if (self.doclink_source_map == null) {
+            self.doclink_source_map = try doclink.buildSourceNodeMap(self.gpa, self.nodes);
+        }
+        return &self.doclink_source_map.?;
     }
 
     fn appendEdge(self: *DependencyResolver, from: Endpoint, to: Endpoint, kind: []const u8) !void {
@@ -224,6 +237,7 @@ const DependencyResolver = struct {
         for (hits.items) |hit| {
             if (!findPage(self.nodes, hit.entity_id)) {
                 fail.set(hit.line, hit.column, hit.entity_id, locus);
+                if (wikilink.nearestNodeIdInNodes(self.gpa, self.nodes, hit.entity_id)) |s| fail.setHint(s);
                 try self.diagnostics.append(self.gpa, try wikilink.makeDiagnostic(
                     self.retain,
                     error.ReferenceMissing,
@@ -321,12 +335,12 @@ const DependencyResolver = struct {
         if (include_html_links) {
             var references: std.ArrayList([]const u8) = .empty;
             defer references.deinit(self.gpa);
-            const rewritten = try doclink.rewrite(self.gpa, body, .{
+            const rewritten = try doclink.rewriteWithSourceMap(self.gpa, body, .{
                 .nodes = self.nodes,
                 .source_path = page.source_path,
                 .output_path = page.id,
                 .reference_ids = &references,
-            });
+            }, try self.doclinkMap());
             self.gpa.free(rewritten);
             for (references.items) |id| {
                 try self.appendEdge(from, .{ .type = .page, .value = id }, "html-link");
@@ -804,21 +818,21 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             return result;
         },
         error.InputFormatMismatch => {
-            // Naming the wrong adapter is worse than naming none: a `.cook`
-            // tree told to fix its Textile extensions sends the author looking
-            // for a file that does not exist.
-            const is_cook = options.input_format == .cook;
+            // Name the offending family so the fix (--cooklang / --textile)
+            // is visible without trial and error (#744). The probe runs only
+            // against a real content directory; injected memory sources keep
+            // the requested-mode wording. The code follows the offending
+            // family per docs/contracts/scanner.md.
+            const offender: ?identity.ContentKind = if (dir_adapter) |*d|
+                scanner.probeForeignFamily(io, d.dir, options.input_format)
+            else
+                null;
+            const guidance = scanner.modeMismatchGuidance(options.input_format, offender);
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
-                .code = if (is_cook) .ECOOKLANG else .ETEXTILE,
-                .message = try retain.dupe(u8, if (is_cook)
-                    "content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode"
-                else
-                    "content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode"),
-                .remediation = try retain.dupe(u8, if (is_cook)
-                    "Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input"
-                else
-                    "Use Markdown-only input by default, or pass --textile for a .textile-only tree"),
+                .code = guidance.code,
+                .message = try retain.dupe(u8, guidance.message),
+                .remediation = try retain.dupe(u8, guidance.remediation),
             });
             result.failure = .content;
             diag.sortDiagnostics(result.diagnostics.items);
@@ -1098,8 +1112,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
 ///
 /// `quiet` (`--quiet`) drops warnings and info, which are chatter. Errors are
 /// always printed: a nonzero exit must explain itself even when the caller
-/// asked for silence.
+/// asked for silence. Suppressed entirely where diagnostic text is suppressed
+/// (`--watch-json`, unit-test binaries; see `diag.text_suppressed`).
 pub fn printDiagnostics(gpa: std.mem.Allocator, diags: []const diag.Diagnostic, quiet: bool) !void {
+    if (diag.text_suppressed.load(.unordered)) return;
     for (diags) |d| {
         if (quiet and d.severity != .error_) continue;
         const line = try diag.formatText(d, gpa);
@@ -1457,6 +1473,21 @@ test "Cooklang mode extracts recipes, links them, and fails closed" {
     defer mixed.deinit();
     try std.testing.expect(!mixed.ok);
     try std.testing.expectEqual(diag.Code.ECOOKLANG, mixed.diagnostics.items[0].code);
+
+    // Default (Markdown) mode over a .cook-only tree must blame Cooklang and
+    // name --cooklang — not send the author hunting for Textile files (#744).
+    var unflagged_cook = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/content",
+        .quiet = true,
+    });
+    defer unflagged_cook.deinit();
+    try std.testing.expect(!unflagged_cook.ok);
+    try std.testing.expectEqual(diag.Code.ECOOKLANG, unflagged_cook.diagnostics.items[0].code);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        unflagged_cook.diagnostics.items[0].remediation,
+        "--cooklang",
+    ) != null);
 }
 
 test "a corpus without recipes keeps its existing IR version" {

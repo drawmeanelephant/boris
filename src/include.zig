@@ -53,6 +53,10 @@ pub const FailInfo = struct {
     /// File where line/col apply (e.g. nested include path). Empty → caller page path.
     locus_len: usize = 0,
     locus_buf: [max_fail_str]u8 = undefined,
+    /// Optional nearest-valid-target hint (wiki did-you-mean, #742). Copied
+    /// like detail/locus so the graph that produced it can be freed first.
+    hint_len: usize = 0,
+    hint_buf: [max_fail_str]u8 = undefined,
 
     pub fn detail(self: *const FailInfo) []const u8 {
         return self.detail_buf[0..self.detail_len];
@@ -62,11 +66,19 @@ pub const FailInfo = struct {
         return self.locus_buf[0..self.locus_len];
     }
 
+    pub fn hint(self: *const FailInfo) []const u8 {
+        return self.hint_buf[0..self.hint_len];
+    }
+
     pub fn set(self: *FailInfo, line: u32, column: u32, detail_s: []const u8, locus_s: []const u8) void {
         self.line = line + self.line_base;
         self.column = column;
         self.detail_len = copyCap(&self.detail_buf, detail_s);
         self.locus_len = copyCap(&self.locus_buf, locus_s);
+    }
+
+    pub fn setHint(self: *FailInfo, hint_s: []const u8) void {
+        self.hint_len = copyCap(&self.hint_buf, hint_s);
     }
 
     pub fn setAt(self: *FailInfo, body: []const u8, offset: usize, detail_s: []const u8, locus_s: []const u8) void {
@@ -259,6 +271,54 @@ pub const IncludeReader = struct {
 
     pub fn read(self: IncludeReader, path: []const u8, allocator: std.mem.Allocator) IncludeError![]u8 {
         return self.readFn(self.ptr, path, allocator);
+    }
+};
+
+/// Build-scoped expansion memo (#760): content-root-relative include path →
+/// fully expanded body, so each unique fragment is read and expanded once per
+/// build instead of once per consuming page. Entries are copied into a cache-
+/// owned arena; page arenas keep their own assembled copies, so cached slices
+/// never alias page-lifetime memory. Locking covers map access and the
+/// cache-owned arena (both are shared mutable state); nested expansions run
+/// outside the lock, so recursive use cannot self-deadlock and racing workers
+/// may transiently duplicate work but never share partial state.
+pub const IncludeCache = struct {
+    gpa: std.mem.Allocator,
+    arena_state: std.heap.ArenaAllocator,
+    map: std.StringHashMapUnmanaged([]const u8) = .empty,
+    mutex: std.Io.Mutex = std.Io.Mutex.init,
+
+    pub fn init(gpa: std.mem.Allocator) IncludeCache {
+        return .{ .gpa = gpa, .arena_state = std.heap.ArenaAllocator.init(gpa) };
+    }
+
+    pub fn deinit(self: *IncludeCache) void {
+        self.map.deinit(self.gpa);
+        self.arena_state.deinit();
+        self.* = undefined;
+    }
+
+    fn get(self: *IncludeCache, io: Io, path: []const u8) ?[]const u8 {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        return self.map.get(path);
+    }
+
+    /// Store `value` under `path`, copying both into cache-owned storage. The
+    /// arena mutation shares the map's critical section: parallel workers can
+    /// reach `put` for the same uncached fragment, and `ArenaAllocator` is not
+    /// thread-safe. When a racing worker inserted the same path first, the
+    /// existing entry wins.
+    fn put(self: *IncludeCache, io: Io, path: []const u8, value: []const u8) IncludeError!void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        const arena = self.arena_state.allocator();
+        const key = arena.dupe(u8, path) catch return error.OutOfMemory;
+        const stored = arena.dupe(u8, value) catch return error.OutOfMemory;
+        const gop = self.map.getOrPut(self.gpa, key) catch return error.OutOfMemory;
+        if (gop.found_existing) return;
+        gop.key_ptr.* = key;
+        gop.value_ptr.* = stored;
     }
 };
 
@@ -472,7 +532,29 @@ pub fn expandIncludesWithReader(
     fail_out: ?*FailInfo,
 ) IncludeError![]u8 {
     var budget: ExpansionBudget = .{};
-    return expandIncludesWithBudget(io, content_dir, reader, gpa, arena, body, owner_path, fail_out, &budget);
+    var cache = IncludeCache.init(gpa);
+    defer cache.deinit();
+    return expandIncludesWithBudget(io, content_dir, reader, gpa, arena, body, owner_path, fail_out, &budget, &cache);
+}
+
+/// Expansion with a build-scoped cache (#760): identical semantics to
+/// `expandIncludesWithReader`, but fragments already expanded through `cache`
+/// in this build are neither re-read nor re-expanded. The budget stays
+/// per-call; only fragment bodies are shared. Callers must keep `cache` alive
+/// for the whole render pass (it may outlive any single page's arena).
+pub fn expandIncludesWithCache(
+    io: Io,
+    content_dir: Io.Dir,
+    reader: ?IncludeReader,
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    owner_path: []const u8,
+    fail_out: ?*FailInfo,
+    cache: *IncludeCache,
+) IncludeError![]u8 {
+    var budget: ExpansionBudget = .{};
+    return expandIncludesWithBudget(io, content_dir, reader, gpa, arena, body, owner_path, fail_out, &budget, cache);
 }
 
 const ExpansionBudget = struct {
@@ -502,14 +584,13 @@ fn expandIncludesWithBudget(
     owner_path: []const u8,
     fail_out: ?*FailInfo,
     budget: *ExpansionBudget,
+    cache: *IncludeCache,
 ) IncludeError![]u8 {
     var stack: std.ArrayList([]const u8) = .empty;
     defer stack.deinit(gpa);
-    var cache: std.StringHashMapUnmanaged([]const u8) = .{};
-    defer cache.deinit(gpa);
     try stack.append(gpa, owner_path);
     // Root expansion: locus empty so diagnostics use owner_path from the caller.
-    return expandRecursive(io, content_dir, reader, gpa, arena, body, "", &stack, &cache, budget, 0, fail_out);
+    return expandRecursive(io, content_dir, reader, gpa, arena, body, "", &stack, cache, budget, 0, fail_out);
 }
 
 fn expandRecursive(
@@ -521,7 +602,7 @@ fn expandRecursive(
     body: []const u8,
     locus_path: []const u8,
     stack: *std.ArrayList([]const u8),
-    cache: *std.StringHashMapUnmanaged([]const u8),
+    cache: *IncludeCache,
     budget: *ExpansionBudget,
     depth: usize,
     fail_out: ?*FailInfo,
@@ -615,7 +696,7 @@ fn expandRecursive(
 
             try out.appendSlice(arena, body[copy_from..start]);
 
-            const expanded = cache.get(path) orelse expanded: {
+            const expanded = cache.get(io, path) orelse expanded: {
                 const file_bytes = readIncludeBytes(io, content_dir, reader, path, gpa) catch |err| {
                     setFail(fail_out, body, start, path, locus_path);
                     return err;
@@ -633,8 +714,7 @@ fn expandRecursive(
                 };
                 _ = stack.pop();
 
-                const cache_key = try arena.dupe(u8, path);
-                try cache.put(gpa, cache_key, value);
+                try cache.put(io, path, value);
                 break :expanded value;
             };
             budget.chargeBytes(expanded.len) catch |err| {
@@ -976,6 +1056,8 @@ test "expandIncludes bounds exponential fan-out" {
         .byte_limit = 1024,
         .expansion_limit = 10_000,
     };
+    var cache = IncludeCache.init(gpa);
+    defer cache.deinit();
     var fail: FailInfo = .{};
 
     try std.testing.expectError(
@@ -990,6 +1072,7 @@ test "expandIncludes bounds exponential fan-out" {
             "page.md",
             &fail,
             &budget,
+            &cache,
         ),
     );
     try std.testing.expect(errorCode(error.ExpansionBudgetExceeded) == .EINCLUDECYCLE);
@@ -1059,4 +1142,156 @@ test "diagnostic lines are full-source, not body-relative" {
 
     // A source whose frontmatter does not parse has no offset to apply.
     try std.testing.expectEqual(@as(u32, 0), lineBaseOfSource("no frontmatter here\n"));
+}
+
+const FixtureFile = struct { path: []const u8, bytes: []const u8 };
+
+const CountingReader = struct {
+    gpa: std.mem.Allocator,
+    files: []const FixtureFile,
+    reads: usize = 0,
+
+    fn readFn(ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) IncludeError![]u8 {
+        const self: *CountingReader = @ptrCast(@alignCast(ptr));
+        self.reads += 1;
+        for (self.files) |f| {
+            if (std.mem.eql(u8, f.path, path)) {
+                return allocator.dupe(u8, f.bytes) catch return error.OutOfMemory;
+            }
+        }
+        return error.IncludeMissing;
+    }
+
+    fn reader(self: *CountingReader) IncludeReader {
+        return .{ .ptr = @ptrCast(self), .readFn = readFn };
+    }
+};
+
+const shared_cache_fixture = [_]FixtureFile{
+    .{ .path = "includes/a.md", .bytes = "FROM_A {{include includes/b.md}}\n" },
+    .{ .path = "includes/b.md", .bytes = "FROM_B\n" },
+};
+
+test "shared IncludeCache reads each fragment once across pages" {
+    const gpa = std.testing.allocator;
+    var counter = CountingReader{ .gpa = gpa, .files = &shared_cache_fixture };
+    var cache = IncludeCache.init(gpa);
+    defer cache.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    const first = try expandIncludesWithCache(
+        std.testing.io,
+        undefined,
+        counter.reader(),
+        gpa,
+        arena.allocator(),
+        "P1 {{include includes/a.md}}\n",
+        "page1.md",
+        null,
+        &cache,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, first, "FROM_A") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "FROM_B") != null);
+    try std.testing.expectEqual(@as(usize, 2), counter.reads);
+
+    _ = arena.reset(.free_all);
+    const second = try expandIncludesWithCache(
+        std.testing.io,
+        undefined,
+        counter.reader(),
+        gpa,
+        arena.allocator(),
+        "P2 {{include includes/a.md}}\n",
+        "page2.md",
+        null,
+        &cache,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, second, "FROM_A") != null);
+    try std.testing.expect(std.mem.indexOf(u8, second, "FROM_B") != null);
+    // Second page hits the cache for a.md and its transitive b.md: no new reads.
+    try std.testing.expectEqual(@as(usize, 2), counter.reads);
+}
+
+test "per-call cache re-reads fragments for every expansion" {
+    const gpa = std.testing.allocator;
+    var counter = CountingReader{ .gpa = gpa, .files = &shared_cache_fixture };
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    for (0..2) |_| {
+        const out = try expandIncludesWithReader(
+            std.testing.io,
+            undefined,
+            counter.reader(),
+            gpa,
+            arena.allocator(),
+            "{{include includes/a.md}}",
+            "page.md",
+            null,
+        );
+        try std.testing.expect(std.mem.indexOf(u8, out, "FROM_B") != null);
+    }
+    // Without a shared cache each expansion pays both reads again (#760).
+    try std.testing.expectEqual(@as(usize, 4), counter.reads);
+}
+
+test "shared IncludeCache tolerates concurrent workers racing on cold entries" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var cache = IncludeCache.init(gpa);
+    defer cache.deinit();
+
+    const RaceCtx = struct {
+        gpa: std.mem.Allocator,
+        io: Io,
+        cache: *IncludeCache,
+        reader: *CountingReader,
+        failed: bool = false,
+
+        fn run(self: *@This()) void {
+            // One page arena per worker, reset between rounds like renderPageSlots.
+            var arena = std.heap.ArenaAllocator.init(self.gpa);
+            defer arena.deinit();
+            var i: usize = 0;
+            while (i < 16) : (i += 1) {
+                _ = arena.reset(.free_all);
+                const out = expandIncludesWithCache(
+                    self.io,
+                    undefined,
+                    self.reader.reader(),
+                    self.gpa,
+                    arena.allocator(),
+                    "{{include includes/a.md}}",
+                    "page.md",
+                    null,
+                    self.cache,
+                ) catch {
+                    self.failed = true;
+                    return;
+                };
+                if (std.mem.indexOf(u8, out, "FROM_B") == null) {
+                    self.failed = true;
+                    return;
+                }
+            }
+        }
+    };
+
+    // One reader per worker: the cache is the only shared mutable object.
+    var readers: [4]CountingReader = undefined;
+    var ctxs: [4]RaceCtx = undefined;
+    for (&readers, &ctxs) |*r, *c| {
+        r.* = .{ .gpa = gpa, .files = &shared_cache_fixture };
+        c.* = .{ .gpa = gpa, .io = io, .cache = &cache, .reader = r };
+    }
+
+    var threads: [ctxs.len]std.Thread = undefined;
+    for (&threads, &ctxs) |*t, *c| t.* = try std.Thread.spawn(.{}, RaceCtx.run, .{c});
+    for (threads) |t| t.join();
+
+    for (&ctxs) |*c| try std.testing.expect(!c.failed);
 }

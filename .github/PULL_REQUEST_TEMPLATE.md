@@ -7,7 +7,7 @@
 - **Status**: [complete | partial | blocked]
 - **Branch and Worktree**:
   - Branch: `<branch-name>`
-  - Worktree: `<absolute-path-to-worktree>`
+  - Worktree: `<worktree name or branch — never a host absolute path>`
 - **Commit and PR**:
   - Commit: `<commit-hash-or-uncommitted>`
   - Target PR / Branch: `<pr-number-or-target-branch>`

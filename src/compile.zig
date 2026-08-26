@@ -51,6 +51,7 @@ const html_toc = @import("html_toc.zig");
 const html_body = @import("html_body.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
+const doclink = @import("doclink.zig");
 const json_out = @import("json_out.zig");
 const pipeline = @import("pipeline.zig");
 const theme_mod = @import("theme.zig");
@@ -74,6 +75,7 @@ const artifact_inventory = @import("artifact_inventory.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
 const publication_touches = @import("publication_touches.zig");
+const publication_evidence_state = @import("publication_evidence_state.zig");
 const publication_proof_pack = @import("publication_proof_pack.zig");
 const timings = @import("timings.zig");
 const compile_stage = @import("compile_stage.zig");
@@ -90,11 +92,14 @@ pub const FrozenSite = struct {
     nodes: []graph_mod.Node,
     edges: []graph_mod.Edge,
     nav: []graph_mod.NavEntry,
-    /// Site-nav fingerprint material (GPA-owned); empty when layout has no `{{nav}}`.
-    site_nav_material: []const u8 = "",
+    /// Site-nav fingerprint digest (GPA-owned): the fixed-size SHA-256 of the
+    /// raw `(id, title, parent, role)` material, computed once per build
+    /// (#727) so graph-chrome pages hash 32 bytes instead of O(pages) bytes.
+    /// Empty when layout has no graph chrome.
+    site_nav_digest: []const u8 = "",
 
     pub fn deinit(self: *FrozenSite) void {
-        if (self.site_nav_material.len > 0) self.gpa.free(self.site_nav_material);
+        if (self.site_nav_digest.len > 0) self.gpa.free(self.site_nav_digest);
         graph_mod.freeNav(self.gpa, self.nav);
         self.gpa.free(self.edges);
         self.gpa.free(self.nodes);
@@ -239,9 +244,13 @@ pub fn freezeSiteFromPageDb(
         }
     }
 
-    var material: []const u8 = "";
+    var site_nav_digest: []const u8 = "";
     if (include_nav_material) {
-        material = try html_nav.siteNavMaterial(gpa, g.nodes);
+        const material = try html_nav.siteNavMaterial(gpa, g.nodes);
+        defer gpa.free(material);
+        const digest = try gpa.alloc(u8, cache.hashBytes(material).len);
+        @memcpy(digest, &cache.hashBytes(material));
+        site_nav_digest = digest;
     }
     if (recorder) |t| t.stop(.graph_validate);
 
@@ -250,7 +259,7 @@ pub fn freezeSiteFromPageDb(
         .nodes = g.nodes,
         .edges = g.edges,
         .nav = nav,
-        .site_nav_material = material,
+        .site_nav_digest = site_nav_digest,
     };
 }
 
@@ -293,6 +302,9 @@ pub const CompileOptions = struct {
     test_fail_publish_at: ?usize = null,
     /// Opt-in to fast incremental rendering.
     incremental: bool = false,
+    /// Force full publication-evidence re-derivation even when the committed
+    /// artifact set is byte-identical to what on-disk evidence describes (#728).
+    refresh_evidence: bool = false,
     /// When set, inject failure before publishing cache manifest to test rollback.
     test_fail_cache_publish: bool = false,
     /// Bounded parallel rendering worker count.
@@ -385,6 +397,10 @@ pub const CompileOptions = struct {
     /// is written here instead of the process stderr, so tests can assert the
     /// line is emitted even under `--quiet`.
     publication_proof_pack_failure_writer: ?*Io.Writer = null,
+    /// Additive build provenance (#781): the opaque VCS revision token this
+    /// binary was compiled from ("" when undetected). Carried only into the
+    /// Proof Pack presentation pair; never into any evidence report.
+    vcs_revision: []const u8 = "",
     /// Opt-in phase timing/counter recorder (`--timings`); null by default.
     timings: ?*timings.Recorder = null,
 };
@@ -431,6 +447,7 @@ pub fn loadLayoutOnce(
         error.DuplicateContentMarker => return error.LayoutDuplicateMarker,
         error.DuplicateLayoutMarker => return error.LayoutDuplicateMarker,
         error.UnknownLayoutMarker => return error.LayoutUnknownMarker,
+        error.InvalidNavMarker => return error.LayoutInvalidNavMarker,
         error.TooManyLayoutSegments => return error.LayoutTooManySegments,
         error.InvalidAssetUrl => return error.LayoutInvalidAssetUrl,
         error.TooManyAssetUrls => return error.LayoutTooManyAssetUrls,
@@ -452,6 +469,7 @@ fn loadLayoutForOptions(
             error.DuplicateContentMarker => return error.LayoutDuplicateMarker,
             error.DuplicateLayoutMarker => return error.LayoutDuplicateMarker,
             error.UnknownLayoutMarker => return error.LayoutUnknownMarker,
+            error.InvalidNavMarker => return error.LayoutInvalidNavMarker,
             error.TooManyLayoutSegments => return error.LayoutTooManySegments,
             error.InvalidAssetUrl => return error.LayoutInvalidAssetUrl,
             error.TooManyAssetUrls => return error.LayoutTooManyAssetUrls,
@@ -611,11 +629,18 @@ pub fn loadAndPromoteFormat(
         error.ContentDirMissing => return error.ContentDirMissing,
         error.InputFormatMismatch => {
             if (!diag.text_suppressed.load(.unordered)) {
-                if (input_format == .cook) {
-                    std.debug.print("error: ECOOKLANG: content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode [Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input]\n", .{});
-                } else {
-                    std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
-                }
+                // Name the offending family so the fix (--cooklang /
+                // --textile) is visible without trial and error (#744); the
+                // code follows the offending family per
+                // docs/contracts/scanner.md. Falls back to the requested-mode
+                // wording when the tree cannot be re-probed.
+                const offender: ?identity.ContentKind = blk: {
+                    const root_dir = Io.Dir.cwd().openDir(io, content_root, .{ .iterate = true }) catch break :blk null;
+                    defer root_dir.close(io);
+                    break :blk scanner.probeForeignFamily(io, root_dir, input_format);
+                };
+                const guidance = scanner.modeMismatchGuidance(input_format, offender);
+                std.debug.print("error: {s}: {s} [{s}]\n", .{ guidance.code.name(), guidance.message, guidance.remediation });
             }
             return error.InputFormatMismatch;
         },
@@ -712,6 +737,12 @@ fn promoteScannedPages(
 pub const RenderOptions = struct {
     site: ?*const FrozenSite = null,
     heading_index: ?*const wikilink.HeadingIndex = null,
+    /// Prebuilt wiki id→node map covering `site.?.nodes`, shared across the
+    /// page loop (#726). When null, each wiki-linked page builds its own.
+    shared_node_map: ?*const wikilink.NodeMap = null,
+    /// Prebuilt source_path→node map covering `site.?.nodes` for the
+    /// documentation-link rewrite (#726). Same sharing contract.
+    shared_doclink_map: ?*const doclink.SourceNodeMap = null,
     theme: ?*const theme_mod.ThemeBundle = null,
     page_assets: ?*const content_asset.PageAssetBundle = null,
     /// Standard.site verification surfaces for the compiler-owned `{{head}}`
@@ -720,7 +751,25 @@ pub const RenderOptions = struct {
     verification: ?*const standard_site.VerificationSurfaces = null,
     /// Nostr head config for the same slot. Composed after Standard.site.
     nostr_head: ?*const nostr_emit.HeadConfig = null,
+    /// Build-scoped include expansion memo (#760); shared across pages and
+    /// safe for concurrent workers. Null keeps per-call expansion caching.
+    include_cache: ?*include_mod.IncludeCache = null,
 };
+
+/// Build the per-pass shared node maps (#726): wiki rewrite keys by entity id,
+/// documentation-link rewrite by source_path. Null members let every page fall
+/// back to its own per-page map exactly as before.
+fn buildSharedWikiNodeMap(gpa: std.mem.Allocator, site: ?*const FrozenSite) !?wikilink.NodeMap {
+    const s = site orelse return null;
+    if (s.nodes.len == 0) return null;
+    return try wikilink.buildNodeMap(gpa, s.nodes);
+}
+
+fn buildSharedDoclinkNodeMap(gpa: std.mem.Allocator, site: ?*const FrozenSite) !?doclink.SourceNodeMap {
+    const s = site orelse return null;
+    if (s.nodes.len == 0) return null;
+    return try doclink.buildSourceNodeMap(gpa, s.nodes);
+}
 
 /// Render one page through the canonical prepublication body and layout-slot
 /// preparation path. Returned slices live on `doc_arena`; callers must keep
@@ -758,11 +807,14 @@ fn renderPageSlots(
     const html = try html_body.renderSource(io, gpa, content_dir, doc_arena, source, page.source_path, page.output_path, .{
         .input_format = options.input_format,
         .nodes = if (render_opts.site) |s| s.nodes else &.{},
+        .shared_node_map = render_opts.shared_node_map,
+        .shared_doclink_map = render_opts.shared_doclink_map,
         .heading_index = render_opts.heading_index,
         .page_assets = render_opts.page_assets,
         .diagnostics = options.diagnostics,
         .output_profile = options.output_profile,
         .sources = options.sources,
+        .include_cache = render_opts.include_cache,
     });
 
     var slots: assemble.SlotValues = .{ .content = html };
@@ -789,7 +841,7 @@ fn renderPageSlots(
         const gi = s.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
         const node = s.nodes[gi];
         if (layout.has_nav) {
-            slots.nav = try html_nav.renderNav(arena, s.nodes, s.nav, gi, page.output_path);
+            slots.nav = try html_nav.renderNav(arena, s.nodes, s.nav, gi, page.output_path, layout.nav_depth);
         }
         if (layout.has_breadcrumb) {
             slots.breadcrumb = try html_nav.renderBreadcrumb(arena, s.nodes, s.nav, gi, page.output_path);
@@ -906,6 +958,17 @@ fn writeCacheManifest(allocator: std.mem.Allocator, writer: anytype, manifest: C
 /// Site compile: layout → promote PageDb → graph freeze → whiteboard loop → dist/.
 ///
 /// Single-threaded when `jobs == 1`. Does not mutate IR emit semantics.
+/// A content root that scans to zero pages still publishes a valid target
+/// (proof, search, and theme assets) and exits 0 (#775). That success is easy
+/// to misread as a populated site — most visibly when a `--timings` report
+/// shows every counter at zero — so say it loudly on stderr. Mirrors the
+/// publication-evidence warnings that also print under `--quiet`.
+fn warnZeroPages(content_root: []const u8) void {
+    if (!diag.text_suppressed.load(.unordered)) {
+        std.debug.print("warning: no pages found under '{s}'; published output contains proof/search assets only\n", .{content_root});
+    }
+}
+
 pub fn compileHtmlSite(
     io: Io,
     gpa: std.mem.Allocator,
@@ -959,6 +1022,7 @@ pub fn compileHtmlSite(
     } else {
         try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.timings);
     }
+    if (db.len() == 0) warnZeroPages(options.content_root);
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
@@ -977,22 +1041,28 @@ const SharedCompileState = struct {
     dep_index: dependency.DependencyIndex,
     /// Per-page source bytes (GPA-owned).
     source_bytes: [][]u8,
-    /// Per-page transitive include file contents in stable sorted path order (GPA-owned).
+    /// Per-page transitive include contents in stable sorted path order. The
+    /// byte buffers are **views** into `include_memo` (#760): each unique
+    /// fragment is read once per build and shared across consumer pages.
+    /// Only the outer per-page slices are individually GPA-owned.
     include_bytes: [][][]u8,
     /// Paths parallel to `include_bytes` (GPA-owned strings; same order).
     include_paths: [][][]u8,
+    /// Unique transitive include bytes read once per build (#760); keys live
+    /// on `path_arena`, values are GPA-owned.
+    include_memo: std.StringHashMapUnmanaged([]u8) = .empty,
 
     fn deinit(self: *SharedCompileState) void {
-        for (self.include_bytes) |list| {
-            for (list) |b| self.gpa.free(b);
-            self.gpa.free(list);
-        }
+        for (self.include_bytes) |list| self.gpa.free(list);
         self.gpa.free(self.include_bytes);
         for (self.include_paths) |list| {
             for (list) |p| self.gpa.free(p);
             self.gpa.free(list);
         }
         self.gpa.free(self.include_paths);
+        var memo_it = self.include_memo.iterator();
+        while (memo_it.next()) |entry| self.gpa.free(entry.value_ptr.*);
+        self.include_memo.deinit(self.gpa);
         for (self.source_bytes) |b| self.gpa.free(b);
         self.gpa.free(self.source_bytes);
         self.dep_index.deinit();
@@ -1060,7 +1130,7 @@ const SharedCompileState = struct {
         var includes_filled: usize = 0;
         errdefer {
             for (include_bytes[0..includes_filled]) |list| {
-                for (list) |b| gpa.free(b);
+                // Byte buffers are shared memo views; only the containers are owned here.
                 gpa.free(list);
             }
             gpa.free(include_bytes);
@@ -1069,6 +1139,15 @@ const SharedCompileState = struct {
                 gpa.free(list);
             }
             gpa.free(include_paths);
+        }
+
+        // Memoize unique include reads per build (#760): a fragment consumed
+        // by many pages is read once, and every consumer shares the bytes.
+        var include_memo: std.StringHashMapUnmanaged([]u8) = .empty;
+        errdefer {
+            var memo_it = include_memo.iterator();
+            while (memo_it.next()) |entry| gpa.free(entry.value_ptr.*);
+            include_memo.deinit(gpa);
         }
 
         for (db.items(), 0..) |page, page_idx| {
@@ -1087,15 +1166,24 @@ const SharedCompileState = struct {
             var path_list = try gpa.alloc([]u8, transit_includes.items.len);
             var j: usize = 0;
             errdefer {
-                for (list[0..j]) |b| gpa.free(b);
+                // Byte views are memo-owned; only free the containers.
                 gpa.free(list);
                 for (path_list[0..j]) |p| gpa.free(p);
                 gpa.free(path_list);
             }
             while (j < transit_includes.items.len) : (j += 1) {
-                list[j] = try readFileAlloc(io, content_dir, transit_includes.items[j], gpa);
-                path_list[j] = try gpa.dupe(u8, transit_includes.items[j]);
-                if (recorder) |t| t.bump(.include_reads, 1);
+                const inc_path = transit_includes.items[j];
+                const bytes = blk: {
+                    if (include_memo.get(inc_path)) |hit| break :blk hit;
+                    const fresh = try readFileAlloc(io, content_dir, inc_path, gpa);
+                    errdefer gpa.free(fresh);
+                    const key = try inc_alloc.dupe(u8, inc_path);
+                    try include_memo.put(gpa, key, fresh);
+                    if (recorder) |t| t.bump(.include_reads, 1);
+                    break :blk fresh;
+                };
+                list[j] = bytes;
+                path_list[j] = try gpa.dupe(u8, inc_path);
             }
             include_bytes[page_idx] = list;
             include_paths[page_idx] = path_list;
@@ -1109,6 +1197,7 @@ const SharedCompileState = struct {
             .source_bytes = source_bytes,
             .include_bytes = include_bytes,
             .include_paths = include_paths,
+            .include_memo = include_memo,
         };
     }
 };
@@ -1132,6 +1221,7 @@ pub fn isContentCompileFailure(err: anyerror) bool {
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
+        error.LayoutInvalidNavMarker,
         error.LayoutTooManySegments,
         error.LayoutInvalidAssetUrl,
         error.LayoutTooManyAssetUrls,
@@ -1202,6 +1292,7 @@ pub fn compileHtmlSiteMulti(
     defer db.deinit();
 
     try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.timings);
+    if (db.len() == 0) warnZeroPages(base_options.content_root);
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
     // material; fingerprint mixes it in only when a layout has `{{nav}}`.
@@ -1354,7 +1445,7 @@ fn loadLayoutsForPlan(
         const gop = try layout_cache.getOrPut(gpa, lp);
         if (gop.found_existing) continue;
         const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena) catch |err| {
-            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s} [{s}]\n", .{ plan.name, lp, @errorName(err), diag.Code.remediationForLayout(layoutCodeFor(err)) });
             const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
             defer gpa.free(msg);
             appendHtmlDiagnostic(base_options, .{
@@ -1430,6 +1521,7 @@ pub fn validateHtmlSiteMulti(
 test "multi-target failure classification keeps I/O distinct from content" {
     try std.testing.expect(isContentCompileFailure(error.ParseFailed));
     try std.testing.expect(isContentCompileFailure(error.LayoutMissingMarker));
+    try std.testing.expect(isContentCompileFailure(error.LayoutInvalidNavMarker));
     try std.testing.expect(isContentCompileFailure(error.AssetUnsafeSvg));
     try std.testing.expect(isContentCompileFailure(error.LinkAuditFailed));
     try std.testing.expect(!isContentCompileFailure(error.AccessDenied));
@@ -1447,9 +1539,15 @@ const ParallelContext = struct {
     options: CompileOptions,
     is_dirty: []const bool,
     site: ?*const FrozenSite,
+    /// Immutable after workers start; concurrent read-only map access is safe.
+    shared_node_map: ?*const wikilink.NodeMap = null,
+    shared_doclink_map: ?*const doclink.SourceNodeMap = null,
     heading_index: ?*const wikilink.HeadingIndex,
     theme: ?*const theme_mod.ThemeBundle,
     content_assets: ?*const content_asset.SiteAssetInventory = null,
+    /// Build-scoped include expansion memo (#760); internally locked, so
+    /// concurrent workers may share it for the whole parallel pass.
+    include_cache: ?*include_mod.IncludeCache = null,
 
     // Thread coordination
     mutex: std.Io.Mutex = std.Io.Mutex.init,
@@ -1499,9 +1597,12 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 page_index,
                 .{
                     .site = ctx.site,
+                    .shared_node_map = ctx.shared_node_map,
+                    .shared_doclink_map = ctx.shared_doclink_map,
                     .heading_index = ctx.heading_index,
                     .theme = ctx.theme,
                     .page_assets = page_assets,
+                    .include_cache = ctx.include_cache,
                 },
             ) catch |err| {
                 ctx.mutex.lockUncancelable(ctx.io);
@@ -1639,8 +1740,9 @@ fn buildSiteHeadingIndex(
     prior_harvest: ?*const ParsedHeadingHarvest,
     recorder: ?*timings.Recorder,
     sink: ?*diag.Collector,
+    include_cache: ?*include_mod.IncludeCache,
 ) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
-    return compile_heading.buildSiteHeadingIndex(io, gpa, content_dir, db.items(), site.nodes, shared.source_bytes, shared.include_bytes, shared.include_paths, input_format, prior_harvest, recorder, sink);
+    return compile_heading.buildSiteHeadingIndex(io, gpa, content_dir, db.items(), site.nodes, shared.source_bytes, shared.include_bytes, shared.include_paths, input_format, prior_harvest, recorder, sink, include_cache);
 }
 
 fn expandDirtySet(
@@ -1734,7 +1836,8 @@ fn appendHtmlDiagnostic(options: *const CompileOptions, d: diag.Diagnostic) void
 fn layoutCodeFor(err: anyerror) diag.Code {
     return switch (err) {
         error.LayoutMissingMarker => .ELAYOUTMISSINGMARKER,
-        error.LayoutUnknownMarker => .ELAYOUTMISSINGMARKER,
+        error.LayoutUnknownMarker => .ELAYOUTUNKNOWNMARKER,
+        error.LayoutInvalidNavMarker, error.InvalidNavMarker => .ELAYOUTNAVDEPTH,
         error.LayoutDuplicateMarker => .ELAYOUTDUPLICATEMARKER,
         error.LayoutInvalidAssetUrl => .ELAYOUTASSET,
         error.LayoutTooManyAssetUrls => .ELAYOUTASSET,
@@ -1792,6 +1895,7 @@ fn validatePrepublicationTarget(
     site: *const FrozenSite,
     theme_bundle: *const theme_mod.ThemeBundle,
     content_assets: *const content_asset.SiteAssetInventory,
+    include_cache: ?*include_mod.IncludeCache,
 ) !CompileStats {
     if (options.timings) |t| t.start(.heading_harvest);
     const heading_built = try buildSiteHeadingIndex(
@@ -1805,6 +1909,7 @@ fn validatePrepublicationTarget(
         null,
         options.timings,
         options.diagnostics,
+        include_cache,
     );
     if (options.timings) |t| t.stop(.heading_harvest);
     var heading_index = heading_built[0];
@@ -1870,6 +1975,7 @@ fn validatePrepublicationTarget(
                 .page_assets = &content_assets.pages[page_index],
                 .verification = if (options.standard_site_verification) |ctx| ctx.surfaces else null,
                 .nostr_head = options.nostr_head,
+                .include_cache = include_cache,
             },
         );
 
@@ -2305,20 +2411,66 @@ fn publishEvidenceReports(
     dist_dir: Io.Dir,
     options: CompileOptions,
 ) !void {
+    // Evidence reuse (Option A, #728): when the committed artifact set is
+    // byte-identical to the set the on-disk evidence was derived from — and
+    // every derived report still hashes to its recorded digest — the fully
+    // deterministic chain below would rewrite identical bytes. Skip it.
+    // `--refresh-evidence` always derives; any mismatch falls back to the
+    // full chain, so reuse is an optimization and never an authority.
+    if (!options.refresh_evidence and
+        publication_evidence_state.reuseValid(io, dist_dir, gpa, options.target_name, pipeline.compiler_id))
+    {
+        if (options.timings) |t| {
+            t.start(.checks);
+            t.stop(.checks);
+            t.start(.claims);
+            t.stop(.claims);
+            t.start(.touches);
+            t.stop(.touches);
+            t.start(.proof_pack);
+            t.stop(.proof_pack);
+        }
+        return;
+    }
+
     // The payload transaction, including artifacts.json as its deferred last
     // file, is complete before checks read the target. Checks are a separate
     // atomic report publication and never participate in that transaction.
     if (options.timings) |t| t.start(.checks);
+    var check_outcomes: std.ArrayList(publication_checks.Outcome) = .empty;
+    defer check_outcomes.deinit(gpa);
     publication_checks.writeAfterCommit(io, gpa, dist_dir, options.target_name, .{
         .test_fail_execution = options.test_fail_publication_checks,
         .test_fail_write = options.test_fail_publication_checks_write,
+        .outcomes_out = &check_outcomes,
     }) catch |err| {
-        const stderr = std.debug.lockStderr(&.{});
-        defer std.debug.unlockStderr();
-        writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        // Prose suppression is active under --watch-json and in unit-test
+        // binaries (#768): the same failure still fails the compile and
+        // reaches collectors/writer-injected assertions.
+        if (!diag.text_suppressed.load(.unordered)) {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
         return error.PublicationChecksFailed;
     };
     if (options.timings) |t| t.stop(.checks);
+
+    // A failed check never fails the committed target by design
+    // (docs/contracts/publication-checks.md), but it must not be invisible:
+    // surface every non-passing verdict even under --quiet, with the pointer
+    // to its per-finding evidence (#740, #741). The prose form is skipped
+    // where text diagnostics are suppressed (--watch-json, unit tests).
+    for (check_outcomes.items) |outcome| {
+        if (outcome.status == .passed or outcome.status == .not_applicable) continue;
+        if (diag.text_suppressed.load(.unordered)) continue;
+        const stderr = std.debug.lockStderr(&.{});
+        defer std.debug.unlockStderr();
+        stderr.file_writer.interface.print(
+            "warning: publication check '{s}' for target '{s}' reported status '{s}'; per-finding detail lives in _boris/proof/checks.json findings[] and the claim mirrors it in _boris/proof/claims.json\n",
+            .{ outcome.id, options.target_name, outcome.status.name() },
+        ) catch {};
+    }
 
     // Claims are derived from the exact committed artifacts and checks bytes.
     // A derivation, stale-binding, parser, I/O, or atomic-write failure keeps
@@ -2331,7 +2483,7 @@ fn publishEvidenceReports(
     }) catch |err| {
         if (options.publication_claims_failure_writer) |writer| {
             writePublicationClaimsFailure(writer, options.target_name, err) catch {};
-        } else {
+        } else if (!diag.text_suppressed.load(.unordered)) {
             const stderr = std.debug.lockStderr(&.{});
             defer std.debug.unlockStderr();
             writePublicationClaimsFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
@@ -2352,7 +2504,7 @@ fn publishEvidenceReports(
     }) catch |err| {
         if (options.publication_touches_failure_writer) |writer| {
             writePublicationTouchesFailure(writer, options.target_name, err) catch {};
-        } else {
+        } else if (!diag.text_suppressed.load(.unordered)) {
             const stderr = std.debug.lockStderr(&.{});
             defer std.debug.unlockStderr();
             writePublicationTouchesFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
@@ -2369,6 +2521,7 @@ fn publishEvidenceReports(
     // diagnostic is emitted even under --quiet.
     if (options.timings) |t| t.start(.proof_pack);
     publication_proof_pack.writeAfterTouches(io, gpa, dist_dir, options.target_name, .{
+        .vcs_revision = options.vcs_revision,
         .test_fail_execution = options.test_fail_publication_proof_pack,
         .test_fail_json_tmp_write = options.test_fail_proof_pack_json_tmp_write,
         .test_fail_html_tmp_write = options.test_fail_proof_pack_html_tmp_write,
@@ -2380,7 +2533,7 @@ fn publishEvidenceReports(
     }) catch |err| {
         if (options.publication_proof_pack_failure_writer) |writer| {
             writePublicationProofPackFailure(writer, options.target_name, err) catch {};
-        } else {
+        } else if (!diag.text_suppressed.load(.unordered)) {
             const stderr = std.debug.lockStderr(&.{});
             defer std.debug.unlockStderr();
             writePublicationProofPackFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
@@ -2388,6 +2541,13 @@ fn publishEvidenceReports(
         return error.PublicationProofPackFailed;
     };
     if (options.timings) |t| t.stop(.proof_pack);
+
+    // Persist reuse state so a later unchanged incremental build can skip the
+    // chain above. Incremental-only, mirroring the .boris-cache write rule;
+    // best-effort — no state simply means the next build re-derives.
+    if (options.incremental) {
+        publication_evidence_state.record(io, dist_dir, gpa, options.target_name, pipeline.compiler_id);
+    }
 }
 
 const FingerprintPlan = struct {
@@ -2421,6 +2581,7 @@ fn fingerprintPage(
     site: *const FrozenSite,
     heading_index: *wikilink.HeadingIndex,
     content_assets: *const content_asset.SiteAssetInventory,
+    ref_node_map: *const wikilink.NodeMap,
 ) !PageFingerprint {
     // Convert owned []u8 include lists to []const u8 views for the hasher.
     const inc_owned = shared.include_bytes[page_idx];
@@ -2433,7 +2594,7 @@ fn fingerprintPage(
     // `children` uses the same complete graph digest conservatively: it keeps
     // add/remove/rename/title changes correct across incremental runs.
     const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
-    const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
+    const nav_material: []const u8 = if (needs_site_material) site.site_nav_digest else "";
     var relation_material: []u8 = &.{};
     if (page_layout.has_relations or page_layout.has_backlinks) {
         const relation_index = site.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
@@ -2464,11 +2625,11 @@ fn fingerprintPage(
         wiki_paths[1 + j] = inc_paths[j];
     }
     var wiki_fail: wikilink.FailInfo = .{ .line_base = fail_line_base };
-    const ref_material = wikilink.referenceMaterialMulti(
+    const ref_material = wikilink.referenceMaterialMultiWithMap(
         gpa,
         wiki_bodies,
         wiki_paths,
-        site.nodes,
+        ref_node_map,
         &wiki_fail,
         .{ .heading_index = heading_index, .validate_fragments = true },
     ) catch |err| {
@@ -2615,6 +2776,11 @@ fn computeFingerprintsAndDirty(
 
     if (options.timings) |t| t.start(.fingerprint);
 
+    // One shared wiki id→node map for every page fingerprint (#727); the
+    // per-page reference-material pass reuses it instead of rebuilding.
+    var ref_node_map = try wikilink.buildNodeMap(gpa, site.nodes);
+    defer ref_node_map.deinit(gpa);
+
     for (db.items(), 0..) |page, page_idx| {
         const fp = try fingerprintPage(
             gpa,
@@ -2629,6 +2795,7 @@ fn computeFingerprintsAndDirty(
             site,
             heading_index,
             content_assets,
+            &ref_node_map,
         );
         fingerprints[page_idx] = fp.hex;
         if (options.timings) |t| {
@@ -2678,10 +2845,17 @@ fn renderPages(
     heading_index: *wikilink.HeadingIndex,
     theme_bundle: *theme_mod.ThemeBundle,
     content_assets: *content_asset.SiteAssetInventory,
+    include_cache: ?*include_mod.IncludeCache,
 ) !CompileStats {
     var stats: CompileStats = .{};
 
     if (options.timings) |t| t.start(.render);
+    // Per-pass shared node maps (#726): workers/serial pages reuse them
+    // read-only instead of rebuilding maps on every page.
+    var shared_wiki_map = try buildSharedWikiNodeMap(gpa, site);
+    defer if (shared_wiki_map) |*m| m.deinit(gpa);
+    var shared_doclink_map = try buildSharedDoclinkNodeMap(gpa, site);
+    defer if (shared_doclink_map) |*m| m.deinit(gpa);
     if (options.jobs > 1) {
         var ctx = ParallelContext{
             .gpa = gpa,
@@ -2693,9 +2867,12 @@ fn renderPages(
             .options = options,
             .is_dirty = is_dirty,
             .site = site,
+            .shared_node_map = if (shared_wiki_map) |*m| m else null,
+            .shared_doclink_map = if (shared_doclink_map) |*m| m else null,
             .heading_index = heading_index,
             .theme = theme_bundle,
             .content_assets = content_assets,
+            .include_cache = include_cache,
         };
 
         const num_workers = @min(options.jobs, db.len());
@@ -2769,9 +2946,12 @@ fn renderPages(
                     page_index,
                     .{
                         .site = site,
+                        .shared_node_map = if (shared_wiki_map) |*m| m else null,
+                        .shared_doclink_map = if (shared_doclink_map) |*m| m else null,
                         .heading_index = heading_index,
                         .theme = theme_bundle,
                         .page_assets = &content_assets.pages[page_index],
+                        .include_cache = include_cache,
                     },
                 );
                 stats.pages_written += 1;
@@ -3011,6 +3191,10 @@ fn writeInventoryOverlay(
             .producer = "html-render",
             .required = true,
             .allow_live = true,
+            // #752: a draft page is emitted but deliberately unadvertised.
+            // The rendered-search check consumes this so its eligible subject
+            // set mirrors the search producer's own filtered slice.
+            .advertised = page.status != .draft,
         });
     }
     for (theme_bundle.assets) |asset| {
@@ -3241,6 +3425,7 @@ fn runHeadingHarvest(
     shared: *const SharedCompileState,
     site: *const FrozenSite,
     parsed_heading_harvest: ?std.json.Parsed(ParsedHeadingHarvest),
+    include_cache: ?*include_mod.IncludeCache,
 ) !HeadingIndexes {
     // Heading id index for wiki `[[entity#heading]]` (Oliver-rendered ids only;
     // only pages that are fragment targets are rendered for the index).
@@ -3258,6 +3443,7 @@ fn runHeadingHarvest(
         prior_harvest,
         options.timings,
         options.diagnostics,
+        include_cache,
     );
     if (options.timings) |t| t.stop(.heading_harvest);
     return .{ .index = heading_built[0], .snapshot = heading_built[1] };
@@ -3306,6 +3492,13 @@ fn compilePagesInner(
         break :blk &(local_shared.?);
     };
 
+    // One include expansion memo per target compile (#760): heading harvest,
+    // validation, and render workers share it so each unique fragment is read
+    // and expanded once. Safe for concurrent workers (internal locking); it
+    // must outlive every page render below.
+    var include_cache = include_mod.IncludeCache.init(gpa);
+    defer include_cache.deinit();
+
     if (options.validation_only) {
         return validatePrepublicationTarget(
             io,
@@ -3318,6 +3511,7 @@ fn compilePagesInner(
             site,
             &theme_bundle,
             &content_assets,
+            &include_cache,
         );
     }
 
@@ -3353,7 +3547,7 @@ fn compilePagesInner(
     var cache_state = loadIncrementalCacheState(io, gpa, dist_dir, options.incremental);
     defer cache_state.deinit(gpa);
 
-    var heading_indexes = try runHeadingHarvest(io, gpa, content_dir, db, options, shared, site, cache_state.parsed_heading_harvest);
+    var heading_indexes = try runHeadingHarvest(io, gpa, content_dir, db, options, shared, site, cache_state.parsed_heading_harvest, &include_cache);
     defer heading_indexes.deinit(gpa);
 
     // Precreate output directories under staging
@@ -3398,6 +3592,7 @@ fn compilePagesInner(
         &heading_indexes.index,
         &theme_bundle,
         &content_assets,
+        &include_cache,
     );
 
     try writeIncrementalCaches(
@@ -3765,6 +3960,45 @@ test "#421: broken layout surfaces a structured ELAYOUTDUPLICATEMARKER diagnosti
     try std.testing.expect(d.line == null);
 }
 
+test "#737: unknown layout marker enumerates the closed slot set" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-737-layout", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<a>{{nosuchslot}}</a>{{content}}");
+    try writeTreeFile(io, work, "content/index.md", "# Hi\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.LayoutUnknownMarker, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .diagnostics = &collector,
+    }));
+
+    try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.ELAYOUTUNKNOWNMARKER, d.code);
+    // Every accepted marker is named so the valid set is discoverable (#737).
+    inline for (.{ "{{content}}", "{{nav}}", "{{breadcrumb}}", "{{title}}", "{{toc}}", "{{children}}", "{{metadata}}", "{{relations}}", "{{backlinks}}", "{{footer}}", "{{head}}", "{{asset-url" }) |marker| {
+        try std.testing.expect(std.mem.indexOf(u8, d.remediation, marker) != null);
+    }
+}
+
 test "#421: content failures are collected with source path and position" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -4111,6 +4345,100 @@ test "--timings recorder observes HTML publication phases" {
     // One page: load/parse read, shared-state read, render read.
     try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.page_reads)] >= 3);
     try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.hash_bytes)] > 0);
+}
+
+test "--timings include_reads counts each unique fragment once per build (#760)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-include-memo", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/includes/shared.md", "SHARED_FRAGMENT\n");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\n{{include includes/shared.md}}\n");
+    try writeTreeFile(io, work, "content/guides/a.md", "# A\n\n{{include includes/shared.md}}\n");
+    try writeTreeFile(io, work, "content/guides/b.md", "# B\n\n{{include includes/shared.md}}\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var recorder = timings.Recorder.init(io);
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &recorder,
+    });
+
+    // Three consumer pages share one fragment: exactly one read (#760), and
+    // every rendered page still carries the expanded fragment bytes.
+    try std.testing.expectEqual(@as(u64, 1), recorder.counters[@intFromEnum(timings.Counter.include_reads)]);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    for ([_][]const u8{ "index.html", "guides/a.html", "guides/b.html" }) |out| {
+        const page = try readAllFile(io, dist_dir, out, gpa);
+        defer gpa.free(page);
+        try std.testing.expect(std.mem.indexOf(u8, page, "SHARED_FRAGMENT") != null);
+    }
+}
+
+test "--timings zero-page site publishes successfully with honest zero counters (#775)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-zero-pages", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    // Content root exists but holds no page sources: the exact shape that made
+    // #775's reporter read all-zero counters as an instrumentation failure.
+    try writeTreeFile(io, work, "content/notes/readme.txt", "not a page source\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var recorder = timings.Recorder.init(io);
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &recorder,
+    });
+
+    // Empty sites stay successful (rendered-search.md), so every counter is
+    // legitimately zero: no page was read, fingerprinted, rendered, or audited.
+    try std.testing.expectEqual(@as(usize, 0), stats.pages_attempted);
+    inline for (@typeInfo(timings.Counter).@"enum".fields) |field| {
+        try std.testing.expectEqual(
+            @as(u64, 0),
+            recorder.counters[@intFromEnum(@field(timings.Counter, field.name))],
+        );
+    }
+
+    // The target still publishes its non-page artifacts.
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const search_bytes = try readAllFile(io, dist_dir, "_boris/search/search-index.json", gpa);
+    defer gpa.free(search_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, search_bytes, "\"documents\"") != null);
 }
 
 test "render failure: whiteboard resets and no final output published" {
@@ -6480,6 +6808,119 @@ test "deferred publication paths compare across host separators" {
     ));
 }
 
+test "incremental evidence reuse skips derivation and --refresh-evidence forces it" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/evidence-reuse", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "themes/docs/layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nStable body.\n");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/themes/docs/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const state_path = publication_evidence_state.state_dir_sub_path ++ "/default.json";
+    const canonical_checks = blk: {
+        const base: CompileOptions = .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout,
+            .incremental = true,
+            .quiet = true,
+        };
+        _ = try compileHtmlSite(io, gpa, base);
+        break :blk try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    };
+    defer gpa.free(canonical_checks);
+
+    // State was recorded by the first incremental build.
+    const state_bytes = try readTargetPayload(io, gpa, dist, state_path);
+    gpa.free(state_bytes);
+
+    const expectChecksEqual = struct {
+        fn go(g: std.mem.Allocator, io_l: std.Io, d: []const u8, want: []const u8) !void {
+            const got = try readTargetPayload(io_l, g, d, publication_checks.output_path);
+            defer g.free(got);
+            try std.testing.expectEqualStrings(want, got);
+        }
+    }.go;
+
+    // Unchanged tree + injected checks failure still succeeds: reuse skipped
+    // the derivation entirely.
+    var reuse_options: CompileOptions = .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+        .test_fail_publication_checks = true,
+    };
+    _ = try compileHtmlSite(io, gpa, reuse_options);
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // The same injection with --refresh-evidence must fail loud.
+    reuse_options.refresh_evidence = true;
+    try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, reuse_options));
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // A corrupt state file falls back to full derivation (injection fires).
+    reuse_options.refresh_evidence = false;
+    try writeTreeFile(io, work, "dist/.boris-cache/evidence-state/default.json", "{ broken");
+    try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, reuse_options));
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // A state file with a different compiler_id forces re-derivation: an
+    // upgraded binary must not silently reuse stale evidence.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    const fake_json =
+        \\{"format":"boris-evidence-state-v1","compiler_id":"boris/0.9.9","target":"default","artifacts_sha256":"0000000000000000000000000000000000000000000000000000000000000000","reports":[]}
+    ;
+    try writeTreeFile(io, work, "dist/.boris-cache/evidence-state/default.json", fake_json);
+    try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+        .test_fail_publication_checks = true,
+    }));
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+
+    // A tampered report digest also forces re-derivation, which restores the
+    // canonical bytes.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    try writeTreeFile(io, work, "dist/_boris/proof/checks.json", "{\"tampered\":true}\n");
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    try expectChecksEqual(gpa, io, dist, canonical_checks);
+}
+
 test "HTML publication artifact inventory is complete, deterministic, isolated, and transactional" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -6560,6 +7001,7 @@ test "HTML publication artifact inventory is complete, deterministic, isolated, 
 
     var checks_failure_options = base_options;
     checks_failure_options.test_fail_publication_checks = true;
+    checks_failure_options.refresh_evidence = true;
     try std.testing.expectError(
         error.PublicationChecksFailed,
         compileHtmlSite(io, gpa, checks_failure_options),
@@ -6849,8 +7291,238 @@ test "search publication excludes draft pages while the link audit still resolve
     // assertions above without publishing anything searchable.
     try std.testing.expect(std.mem.indexOf(u8, search_json, "PUBLISHEDBODYTOKEN") != null);
     try std.testing.expect(std.mem.indexOf(u8, search_json, "\"path\": \"index.html\"") != null);
+
+    // #752: the inventory records advertisement per page, and the rendered-
+    // search check treats the unadvertised draft as ineligible instead of
+    // reporting a missing search document for intended state.
+    const artifacts_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist, artifact_inventory.output_path });
+    defer gpa.free(artifacts_path);
+    const artifacts_json = try readFileAlloc(io, cwd, artifacts_path, gpa);
+    defer gpa.free(artifacts_json);
+    const secret_record = try std.fmt.allocPrint(
+        gpa,
+        "{{\n      \"path\": \"secret.html\",\n      \"kind\": \"html-page\",\n      \"producer\": \"html-render\",\n      \"required\": true,\n      \"status\": \"committed\",\n      \"bytes\": {d},",
+        .{draft_bytes.len},
+    );
+    defer gpa.free(secret_record);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts_json, secret_record) != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts_json, "\"advertised\": false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, artifacts_json, "\"advertised\": true") != null);
+
+    const checks_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist, publication_checks.output_path });
+    defer gpa.free(checks_path);
+    const checks_json = try readFileAlloc(io, cwd, checks_path, gpa);
+    defer gpa.free(checks_json);
+    try std.testing.expect(std.mem.indexOf(u8, checks_json, "SEARCH_DOCUMENT_MISSING") == null);
+    const rendered_search_row = try std.fmt.allocPrint(
+        gpa,
+        "{{\n      \"id\": \"rendered-search\",\n      \"eligible\": true,\n      \"ran\": true,\n      \"status\": \"{s}\",",
+        .{publication_checks.Status.passed.name()},
+    );
+    defer gpa.free(rendered_search_row);
+    try std.testing.expect(std.mem.indexOf(u8, checks_json, rendered_search_row) != null);
 }
 
+test "default target emits draft pages but prunes them from nav and children (#738)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/nav-draft", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body><nav>NAV<{{nav}}>ENDNAV</nav>BREAD<{{breadcrumb}}>ENDBREAD{{content}}KIDS<{{children}}>ENDKIDS</body></html>");
+    // The published home page links to the draft; the link audit must keep
+    // resolving it because a draft still renders to HTML.
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: Home\n---\n# Home\n\n[draft](secret.html)\n");
+    try writeTreeFile(io, work, "content/guides/a.md", "---\ntitle: Guide A\nparent: index\n---\n# A\n");
+    try writeTreeFile(io, work, "content/secret.md", "---\ntitle: Secret\nstatus: draft\n---\n# SECRETBODYTOKEN\n");
+    // A published satellite under the drafted trunk: emitted, but its nav
+    // subtree is pruned until the trunk publishes.
+    try writeTreeFile(io, work, "content/secret/kid.md", "---\ntitle: Kid\nparent: secret\n---\n# Kid\n");
+    // Archived stays advertised (consistent with Standard.site / Nostr).
+    try writeTreeFile(io, work, "content/archived.md", "---\ntitle: Archived\nstatus: archived\n---\n# Archived\n");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+
+    // Emitted but unadvertised.
+    const secret_html = try std.fmt.allocPrint(gpa, "{s}/secret.html", .{dist});
+    defer gpa.free(secret_html);
+    const secret_bytes = try readFileAlloc(io, cwd, secret_html, gpa);
+    defer gpa.free(secret_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, secret_bytes, "SECRETBODYTOKEN") != null);
+    // The draft trunk's own nav prunes itself and its subtree; its own
+    // {{children}} still lists the published kid (per-page context).
+    const secret_nav = navSegment(secret_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, secret_nav, "secret.html") == null);
+    try std.testing.expect(std.mem.indexOf(u8, secret_nav, ">Kid</a>") == null);
+
+    const kid_html = try std.fmt.allocPrint(gpa, "{s}/secret/kid.html", .{dist});
+    defer gpa.free(kid_html);
+    const kid_bytes = try readFileAlloc(io, cwd, kid_html, gpa);
+    defer gpa.free(kid_bytes);
+    // Breadcrumb context is not advertising: the drafted parent stays a crumb.
+    const kid_crumb = crumbSegment(kid_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, kid_crumb, ">Secret</a>") != null);
+
+    const index_html = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_html);
+    var home_bytes = try readFileAlloc(io, cwd, index_html, gpa);
+    defer gpa.free(home_bytes);
+    var home_nav = navSegment(home_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Secret</a>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Guide A</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Archived</a>") != null);
+
+    // The draft remains a graph/cache member: the manifest still lists it.
+    const manifest_path = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/manifest.json", .{dist});
+    defer gpa.free(manifest_path);
+    const manifest_bytes = try readFileAlloc(io, cwd, manifest_path, gpa);
+    defer gpa.free(manifest_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, manifest_bytes, "\"entity_id\": \"secret\"") != null);
+
+    // Publishing the draft dirties chrome through the status-aware nav
+    // material: an incremental rebuild must start advertising it.
+    try writeTreeFile(io, work, "content/secret.md", "---\ntitle: Secret\nstatus: published\n---\n# SECRETBODYTOKEN\n");
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+    gpa.free(home_bytes);
+    home_bytes = try readFileAlloc(io, cwd, index_html, gpa);
+    home_nav = navSegment(home_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Secret</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home_nav, ">Kid</a>") != null);
+}
+
+/// Slice the `NAV<…>ENDNAV` segment of the test layout's output.
+fn navSegment(bytes: []const u8) []const u8 {
+    const start = std.mem.indexOf(u8, bytes, "NAV<") orelse return "";
+    const end = std.mem.indexOf(u8, bytes, ">ENDNAV") orelse return "";
+    if (end < start) return "";
+    return bytes[start + 4 .. end];
+}
+
+/// Slice the `BREAD<…>ENDBREAD` segment of the test layout's output.
+fn crumbSegment(bytes: []const u8) []const u8 {
+    const start = std.mem.indexOf(u8, bytes, "BREAD<") orelse return "";
+    const end = std.mem.indexOf(u8, bytes, ">ENDBREAD") orelse return "";
+    if (end < start) return "";
+    return bytes[start + 6 .. end];
+}
+
+test "{{nav depth=N}} caps the rendered forest while every page still builds (#744)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/nav-depth", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    // Deep chain: index → a → b → c → d (five rendered levels unbounded).
+    try writeTreeFile(io, work, "layouts/bounded.html", "<html><body>NAV<{{nav depth=2}}>ENDNAV{{content}}</body></html>");
+    try writeTreeFile(io, work, "layouts/full.html", "<html><body>NAV<{{nav}}>ENDNAV{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: L1\n---\n# L1\n");
+    try writeTreeFile(io, work, "content/a.md", "---\ntitle: L2\nparent: index\n---\n# L2\n");
+    try writeTreeFile(io, work, "content/b.md", "---\ntitle: L3\nparent: a\n---\n# L3\n");
+    try writeTreeFile(io, work, "content/c.md", "---\ntitle: L4\nparent: b\n---\n# L4\n");
+    try writeTreeFile(io, work, "content/d.md", "---\ntitle: L5\nparent: c\n---\n# L5\n");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const bounded_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/bounded.html", .{work});
+    defer gpa.free(bounded_layout);
+    const full_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/full.html", .{work});
+    defer gpa.free(full_layout);
+    const bounded_dist = try std.fmt.allocPrint(gpa, "{s}/bounded", .{work});
+    defer gpa.free(bounded_dist);
+    const full_dist = try std.fmt.allocPrint(gpa, "{s}/full", .{work});
+    defer gpa.free(full_dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = bounded_dist,
+        .layout_path = bounded_layout,
+        .quiet = true,
+    });
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = full_dist,
+        .layout_path = full_layout,
+        .quiet = true,
+    });
+
+    // Every page builds under both layouts.
+    for ([_][]const u8{ "index.html", "a.html", "b.html", "c.html", "d.html" }) |page| {
+        const p = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ bounded_dist, page });
+        defer gpa.free(p);
+        const bp = try readFileAlloc(io, cwd, p, gpa);
+        defer gpa.free(bp);
+        const q = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ full_dist, page });
+        defer gpa.free(q);
+        const bq = try readFileAlloc(io, cwd, q, gpa);
+        defer gpa.free(bq);
+    }
+
+    // Bounded: level cap 2 renders trunks + direct children only; deeper
+    // titles never appear in any nav, including from the deep pages
+    // themselves.
+    const bounded_index = try std.fmt.allocPrint(gpa, "{s}/index.html", .{bounded_dist});
+    defer gpa.free(bounded_index);
+    const bi_bytes = try readFileAlloc(io, cwd, bounded_index, gpa);
+    defer gpa.free(bi_bytes);
+    const bi_nav = navSegmentForDepthTest(bi_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bi_nav, ">L1</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bi_nav, ">L2</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bi_nav, ">L3</a>") == null);
+
+    const bounded_deep = try std.fmt.allocPrint(gpa, "{s}/d.html", .{bounded_dist});
+    defer gpa.free(bounded_deep);
+    const bd_bytes = try readFileAlloc(io, cwd, bounded_deep, gpa);
+    defer gpa.free(bd_bytes);
+    const bd_nav = navSegmentForDepthTest(bd_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bd_nav, ">L2</a>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bd_nav, ">L5</a>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, bd_nav, ">L4</a>") == null);
+
+    // Unbounded control on the same tree: the deepest title is present and
+    // the bounded nav is strictly smaller.
+    const full_deep = try std.fmt.allocPrint(gpa, "{s}/d.html", .{full_dist});
+    defer gpa.free(full_deep);
+    const fd_bytes = try readFileAlloc(io, cwd, full_deep, gpa);
+    defer gpa.free(fd_bytes);
+    const fd_nav = navSegmentForDepthTest(fd_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, fd_nav, ">L5</a>") != null);
+    try std.testing.expect(bd_nav.len < fd_nav.len);
+}
+
+/// Slice the `NAV<…>ENDNAV` segment of this test's layout output.
+fn navSegmentForDepthTest(bytes: []const u8) []const u8 {
+    const start = std.mem.indexOf(u8, bytes, "NAV<") orelse return "";
+    const end = std.mem.indexOf(u8, bytes, ">ENDNAV") orelse return "";
+    if (end < start) return "";
+    return bytes[start + 4 .. end];
+}
 test "HTML sitemap uses the staged live overlay and is deterministic across clean incremental and parallel builds" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -9582,6 +10254,7 @@ test "post-commit checker failure preserves stale checks while exposing changed 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
     var failure_options = options;
     failure_options.test_fail_publication_checks = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, failure_options));
 
     const new_inventory = try readArtifactInventory(io, gpa, dist);
@@ -9715,6 +10388,7 @@ test "claims failure preserves committed payloads, inventory, checks, and prior 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
     var failure_options = options;
     failure_options.test_fail_publication_claims = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
 
     const new_inventory = try readArtifactInventory(io, gpa, dist);
@@ -9761,6 +10435,7 @@ test "claims write failure preserves the prior claims report" {
     defer gpa.free(old_claims);
     var failure_options = options;
     failure_options.test_fail_publication_claims_write = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
     const after = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
     defer gpa.free(after);
@@ -9804,6 +10479,7 @@ test "quiet claims failure emits the captured diagnostic and preserves prior cla
     defer output.deinit();
     var failure_options = options;
     failure_options.test_fail_publication_claims = true;
+    failure_options.refresh_evidence = true;
     failure_options.publication_claims_failure_writer = &output.writer;
     try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
     try std.testing.expectEqualStrings(
@@ -9961,6 +10637,7 @@ test "touches failure preserves committed payloads, inventory, checks, claims, a
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
     var failure_options = options;
     failure_options.test_fail_publication_touches = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
 
     const new_inventory = try readArtifactInventory(io, gpa, dist);
@@ -10007,6 +10684,7 @@ test "touches write failure preserves the prior touches report" {
     defer gpa.free(old_touches);
     var failure_options = options;
     failure_options.test_fail_publication_touches_write = true;
+    failure_options.refresh_evidence = true;
     try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
     const after = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
     defer gpa.free(after);
@@ -10046,6 +10724,7 @@ test "quiet touches failure emits the captured diagnostic and preserves prior to
     defer output.deinit();
     var failure_options = options;
     failure_options.test_fail_publication_touches = true;
+    failure_options.refresh_evidence = true;
     failure_options.publication_touches_failure_writer = &output.writer;
     try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
     try std.testing.expectEqualStrings(
@@ -10099,6 +10778,7 @@ test "quiet proof-pack failure emits the captured not-refreshed diagnostic and p
     defer output.deinit();
     var failure_options = options;
     failure_options.test_fail_publication_proof_pack = true;
+    failure_options.refresh_evidence = true;
     failure_options.publication_proof_pack_failure_writer = &output.writer;
     try std.testing.expectError(error.PublicationProofPackFailed, compileHtmlSite(io, gpa, failure_options));
     try std.testing.expectEqualStrings(
