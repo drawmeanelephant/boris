@@ -1,5 +1,10 @@
 # Queued-fragment inventory
 
+**Note (2026-08-25):** the fragments inventoried below were assembled into the
+`[0.8.1]` section of [`CHANGELOG.md`](../../CHANGELOG.md) by the release owner;
+the fragment files themselves are removed from the queue. This table remains as
+release bookkeeping evidence.
+
 Audited against `afterparty` commit `9505ec6` (2026-08-04). This is release
 bookkeeping, not released history: the release owner alone decides whether and
 when to assemble these retained inputs into `CHANGELOG.md`.

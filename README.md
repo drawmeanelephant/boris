@@ -349,7 +349,7 @@ reviewed or uploaded to an LLM when useful.
 - [x] Publication evidence chain (artifacts, checks, claims, Touch Atlas, Proof Pack).
 - [x] Local Boris Editor (compiler-backed authoring).
 - [x] Migration labs and real-site dogfood evidence.
-- [x] v0.8.1 candidate packaging (untagged; 200+ changelog fragments queued).
+- [x] v0.8.1 release cut: changelog assembled from the queued fragments; tagged on `main`.
 - [x] Archive-layout browser review and evidence-gated presentation fixes ([#667](https://github.com/drawmeanelephant/boris/pull/667)).
 - [ ] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)).
 - [x] Nostr NIP-23 CLI (`plan` / `sign` / `publish`). Not a verified target.
