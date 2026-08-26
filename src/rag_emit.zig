@@ -390,7 +390,7 @@ pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![
     return try doc.toOwnedSlice();
 }
 
-pub fn renderCatalogMeta(allocator: std.mem.Allocator, format: []const u8, schema_version: u32, version: []const u8) ![]u8 {
+pub fn renderCatalogMeta(allocator: std.mem.Allocator, format: []const u8, schema_version: u32, version: []const u8, vcs_revision: []const u8) ![]u8 {
     var doc = Sink.init(allocator);
     errdefer doc.deinit();
     try doc.lit("{\"format\":");
@@ -399,6 +399,13 @@ pub fn renderCatalogMeta(allocator: std.mem.Allocator, format: []const u8, schem
     try doc.jsonNumber(schema_version);
     try doc.lit(",\"boris_version\":");
     try doc.jsonString(version);
+    // Additive build provenance (#781): the opaque VCS revision token the
+    // producing binary was compiled from ("" when undetected, e.g. a
+    // tarball). Never part of the product version; the compact fixed key
+    // order gains this trailing field only, mirroring the HTML-path
+    // report's additive `vcsRevision` (#776).
+    try doc.lit(",\"vcs_revision\":");
+    try doc.jsonString(vcs_revision);
     try doc.lit("}\n");
     return try doc.toOwnedSlice();
 }

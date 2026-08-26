@@ -2,6 +2,7 @@
   "format": "boris-recipe-scale",
   "schemaVersion": "0.2.0",
   "compiler": "boris/0.8.1+cooklang",
+  "vcsRevision": "",
   "factor": { "num": 2, "den": 1 },
   "page": "carbonara",
   "ingredients": [

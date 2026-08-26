@@ -223,11 +223,21 @@ records `format`, `schema_version`, and `boris_version`. Complete-corpus
 exports carry the compact machine meta:
 
 ```json
-{"format":"boris-rag","schema_version":2,"boris_version":"0.8.1"}
+{"format":"boris-rag","schema_version":2,"boris_version":"0.8.1","vcs_revision":""}
 ```
 
-Field order fixed: `format`, `schema_version`, `boris_version`. Compact JSON
-plus trailing LF. No timestamps or host fields.
+Field order fixed: `format`, `schema_version`, `boris_version`,
+`vcs_revision`. Compact JSON plus trailing LF. No timestamps or host fields.
+
+`vcs_revision` is additive build provenance (#781): the opaque VCS revision
+token the producing binary was compiled from (`""` when the build could not
+detect one, e.g. a source tarball), mirroring the HTML-path report's
+additive `vcsRevision` (#776). It never alters the product version; readers
+must ignore unknown keys, so corpora written by older binaries stay valid.
+Unlike the evidence-chain artifacts (see
+[cli.md](cli.md#build-info-query---build-info)), this surface carries no
+committed digest obligations: byte-identical claims above hold for identical
+inputs **and the same binary build configuration**.
 
 ---
 
@@ -296,10 +306,12 @@ Schema-versioned machine surfaces (`catalog_meta.json`, `catalog.jsonl`,
 ## Schema versioning
 
 Emitted on **every successful complete-corpus export** as `catalog_meta.json`
-(working mode records the same three fields inside `manifest.json`):
+(working mode records only `format`, `schema_version`, and `boris_version`
+inside its `manifest.json` sidecar; no provenance field, no redundant
+`catalog_meta.json`):
 
 ```json
-{"format":"boris-rag","schema_version":2,"boris_version":"0.8.1"}
+{"format":"boris-rag","schema_version":2,"boris_version":"0.8.1","vcs_revision":""}
 ```
 
 | Field | Type | Notes |
@@ -307,9 +319,10 @@ Emitted on **every successful complete-corpus export** as `catalog_meta.json`
 | `format` | string | Always `boris-rag` |
 | `schema_version` | number | Integer; bump when this contract breaks consumers |
 | `boris_version` | string | Product version that produced the corpus |
+| `vcs_revision` | string | Additive provenance (#781): opaque compile-time VCS revision token of the producing binary, or `""`. Readers ignore unknown keys; corpora from older binaries lack the field. |
 
-Field order is fixed: `format`, `schema_version`, `boris_version`. Compact JSON
-plus trailing LF. No timestamps or host fields.
+Field order is fixed: `format`, `schema_version`, `boris_version`,
+`vcs_revision`. Compact JSON plus trailing LF. No timestamps or host fields.
 
 **Version history:**
 
@@ -319,7 +332,9 @@ plus trailing LF. No timestamps or host fields.
   becomes the explicit full-corpus export; content documents are verbatim
   authoring sources (H1 and `<Aside>` / `<Details>` preserved); per-document
   integrity moved to the `manifest.json` sidecar; parts machinery removed from
-  complete mode (working packs cover bounded uploads).
+  complete mode (working packs cover bounded uploads). Additive within `2`
+  (#781): complete-mode `catalog_meta.json` gained the trailing
+  `vcs_revision` provenance field; readers ignore unknown keys.
 
 Breaking changes to corpus layout, catalog fields, or title/H1 rules require a
 `schema_version` bump.
@@ -338,6 +353,13 @@ Identical inputs on the **same host** → **byte-identical** corpus trees.
 - Hostnames, usernames, environment variables
 - Hash-map iteration order as emit order
 - Filesystem walk order as emit order
+
+The `vcs_revision` provenance field (#781) is not a violation of this list: it
+is an opaque token **baked in at compile time** (see
+[cli.md](cli.md#build-info-query---build-info)), observed by neither the
+compiler nor the export at runtime. A dirty worktree suffix (`.dirty`) is part
+of that baked token, so two exports may legitimately differ when produced by
+binaries built from different worktree states — attribution, not nondeterminism.
 
 ### Required stable sort keys
 

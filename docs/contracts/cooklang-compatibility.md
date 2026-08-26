@@ -371,7 +371,14 @@ Schema for one scaled amount:
 ```
 
 The page envelope is `docs/contracts/schemas/recipe-scale-view-0.2.0.schema.json`
-(`format: boris-recipe-scale`). Timer `scaled` equals `original` even when
+(`format: boris-recipe-scale`). Additive build provenance (#781): the
+envelope's `vcsRevision` field, emitted directly after `compiler`, carries the
+opaque VCS revision token the producing binary was compiled from (`""` when
+the build could not detect one); the schema describes it as optional so
+documents from older binaries stay valid, and every current emitter writes it.
+It never alters the compiler id and is copied verbatim — committed envelope
+goldens pin the `""` sentinel, so byte-goldens stay stable across commits. Timer
+`scaled` equals `original` even when
 the amount classifies as scalable, and every timer entry carries
 `"scaling": "locked"` so the unchanged amount is self-describing rather than
 looking like a scaling bug (#743):

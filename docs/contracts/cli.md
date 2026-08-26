@@ -327,9 +327,29 @@ worktree appends `.dirty`; tarball builds without git carry `""`). It never
 alters the compiler id, exit codes, or any artifact schema. The HTML-path
 `--report` document mirrors the same token as its additive `vcsRevision`
 field ([diagnostics.md](diagnostics.md#html-path-machine-readable-report)).
-The IR artifact set records only the base/variant compiler id: its bytes feed
-the committed evidence digest chain, which must stay deterministic for the
-same content regardless of build worktree state.
+
+**Provenance carriers and the IR decision (#781).** Three further surfaces
+copy the same token verbatim (with the `""` sentinel when undetected), each
+as an additive field that no upstream digest covers:
+
+- complete-mode RAG `catalog_meta.json` — trailing `vcs_revision`
+  ([rag-export.md](rag-export.md#catalog_metajson-complete-mode-only));
+- `boris-recipe-scale` view envelopes — `vcsRevision` after `compiler`
+  ([cooklang-compatibility.md](cooklang-compatibility.md));
+- publication Proof Packs — `vcs_revision` between `target` and `inputs`,
+  mirrored in `_boris/proof/index.html`
+  ([publication-proof-pack.md](publication-proof-pack.md));
+
+The **IR artifact set** (`manifest.json`, `graph.json`, `completion.json`,
+`build-report.json`) deliberately does not carry it — decision recorded for
+#781. IR bytes are pinned by path-stability, packaging-determinism, and
+evidence-chain goldens that exist precisely to catch unintended drift; they
+must stay byte-stable for the same content regardless of worktree state. A
+commit-varying field inside that set would break those guarantees at every
+commit. Attribution for an IR compile remains binary-level: pair a given IR
+artifact set with `--build-info`, `--version`, or the HTML-path `--report`.
+Reversing this decision would require redesigning what the evidence chain
+hashes, not a schema-field addition.
 
 ## Timing report (`--timings`)
 

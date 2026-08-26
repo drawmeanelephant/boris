@@ -104,6 +104,7 @@ Define this exact root order:
 format
 schema_version
 target
+vcs_revision (additive #781; emitted directly after `target`)
 inputs
 summary
 artifacts
@@ -122,7 +123,18 @@ format: boris-publication-proof-pack
 schema_version: 1
 ```
 
-The root object has exactly these keys. Canonical member ordering is assigned
+`vcs_revision` (#781) is additive build provenance: the opaque VCS revision
+token the producing binary was compiled from (`""` when the build could not
+detect one). It is copied verbatim after `target`, before `inputs`, and it is
+the **only** place in the evidence chain where the token may appear: the four
+bound reports (`artifacts`, `checks`, `claims`, `touches`) never carry it, so
+every upstream digest stays deterministic for the same content regardless of
+worktree state (see [cli.md](cli.md#build-info-query---build-info)). It never
+alters the compiler id or any upstream byte.
+
+The root object has exactly these keys, with `vcs_revision` optional (older
+packs written by binaries without baked provenance lack it; readers must
+ignore unknown keys). Canonical member ordering is assigned
 to the runtime serializer, exact-byte golden tests, and HTML/JSON parity
 tests; the schema enforces the exact key set and structural vocabulary, not
 object property order (JSON Schema Draft 2020-12 does not enforce member
@@ -456,6 +468,13 @@ The `_boris/proof/index.html` must be:
 - clear about failed, incomplete, not-applicable, and limited evidence; and
 - honest when a section contains no applicable records.
 
+When the model's `vcs_revision` (#781) is known (non-empty), the HTML header
+must mirror it (`vcs_revision` next to `format`, `schema_version`, and
+`target`), so the rendered page and its JSON model attribute to the same
+build. When the token is unknown (`""`), the JSON still carries the sentinel
+but the HTML renders no attribution element rather than an empty claim — an
+omission, never a new or upgraded fact.
+
 Allow progressive enhancement only when the complete content remains available
 without JavaScript. Do not create an interactive graph dependency in v1; the
 relationship section is a compact readable index, not a canvas or JS graph.
@@ -560,7 +579,11 @@ Require:
 - no durations;
 - no absolute paths;
 - no CWD;
-- no host, PID, username, Git state, or environment;
+- no host, PID, username, or environment; runtime-observed Git state is
+  forbidden — the additive `vcs_revision` (#781) is not a Git-state
+  observation but an opaque token **baked in at compile time** (see
+  [cli.md](cli.md#build-info-query---build-info)), copied verbatim after
+  `target`; it names the build, it never re-reads the repository;
 - no filesystem traversal;
 - no payload rereads;
 - no random IDs;

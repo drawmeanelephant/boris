@@ -397,6 +397,10 @@ pub const CompileOptions = struct {
     /// is written here instead of the process stderr, so tests can assert the
     /// line is emitted even under `--quiet`.
     publication_proof_pack_failure_writer: ?*Io.Writer = null,
+    /// Additive build provenance (#781): the opaque VCS revision token this
+    /// binary was compiled from ("" when undetected). Carried only into the
+    /// Proof Pack presentation pair; never into any evidence report.
+    vcs_revision: []const u8 = "",
     /// Opt-in phase timing/counter recorder (`--timings`); null by default.
     timings: ?*timings.Recorder = null,
 };
@@ -2517,6 +2521,7 @@ fn publishEvidenceReports(
     // diagnostic is emitted even under --quiet.
     if (options.timings) |t| t.start(.proof_pack);
     publication_proof_pack.writeAfterTouches(io, gpa, dist_dir, options.target_name, .{
+        .vcs_revision = options.vcs_revision,
         .test_fail_execution = options.test_fail_publication_proof_pack,
         .test_fail_json_tmp_write = options.test_fail_proof_pack_json_tmp_write,
         .test_fail_html_tmp_write = options.test_fail_proof_pack_html_tmp_write,
