@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>{{title}} · lab</title>
+  <script>
+  (() => {
+    try {
+      let t = localStorage.getItem("lab-theme");
+      if (t !== "dark" && t !== "light" && t !== "pride")
+        t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  })();
+  </script>
+  <link rel="stylesheet" href="{{asset-url assets/css/lab.css}}">
+  <link rel="stylesheet" href="{{asset-url assets/css/modes.css}}">
+  {{head}}
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header">
+  <div class="masthead">
+    <p class="site-title">lab</p>
+    <div class="masthead-controls">
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Cycle color theme">☾ dark</button>
+      <div class="search" data-boris-search-ui>
+        <form class="search-form" data-boris-search-form action="_boris/search/" method="get" role="search">
+          <input type="search" id="site-search-input" name="q" placeholder="Search the graph  ( / )"
+                 autocomplete="off" spellcheck="false" aria-label="Search pages">
+        </form>
+        <div class="search-panel" data-boris-search-panel hidden>
+          <p class="sr-empty" data-boris-search-status role="status" aria-live="polite"></p>
+          <ol class="search-results" data-boris-search-results aria-label="Search results"></ol>
+        </div>
+        <noscript><p class="sr-empty">Search needs JavaScript in this static site. Use the navigation tree instead.</p></noscript>
+      </div>
+    </div>
+  </div>
+</header>
+<main class="site-body" id="main-content" tabindex="-1" data-boris-search-root>
+  <div class="site-breadcrumb" data-boris-search-exclude>{{breadcrumb}}</div>
+  <div class="site-cols">
+    <aside class="site-rail" data-boris-search-exclude>
+      <nav class="treewrap">{{nav}}</nav>
+      <aside class="site-toc">{{toc}}</aside>
+    </aside>
+    <article class="site-content">
+      {{metadata}}
+      {{content}}
+      <section class="graph-panel">
+        <div class="gp-block" id="gp-relations"><p class="gp-title">relations</p>{{relations}}</div>
+        <div class="gp-block" id="gp-children"><p class="gp-title">children</p>{{children}}</div>
+        <div class="gp-block" id="gp-backlinks"><p class="gp-title">backlinks</p>{{backlinks}}</div>
+      </section>
+    </article>
+  </div>
+</main>
+<footer class="site-footer">{{footer}}</footer>
+<script>
+(() => {
+  "use strict";
+  const root = document.documentElement;
+  const ORDER = ["dark", "light", "pride"];
+  const LABEL = { dark: "☾ dark", light: "☀ light", pride: "✶ pride" };
+  const toggle = document.getElementById("theme-toggle");
+  const apply = t => { root.dataset.theme = t; if (toggle) toggle.textContent = LABEL[t]; };
+  apply(root.dataset.theme || "dark");
+  if (toggle) toggle.addEventListener("click", () => {
+    const next = ORDER[(ORDER.indexOf(root.dataset.theme) + 1) % ORDER.length];
+    try { localStorage.setItem("lab-theme", next); } catch (e) {}
+    apply(next);
+  });
+
+  const ui = document.querySelector("[data-boris-search-ui]");
+  if (!ui) return;
+  const input = ui.querySelector("#site-search-input");
+  const form = ui.querySelector("[data-boris-search-form]");
+  const panel = ui.querySelector("[data-boris-search-panel]");
+  const status = ui.querySelector("[data-boris-search-status]");
+  const results = ui.querySelector("[data-boris-search-results]");
+  // Derive site-root-relative prefix from the page-relative theme stylesheet
+  // href emitted by asset-url ("" from index.html, "../" from guides/x.html).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
+  const expectedFormat = "boris-rendered-search-index";
+  const expectedSchema = 1;
+  let documents = [];
+  let active = -1;
+
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const fields = section => [section.heading, section.text, section.code].map(normalize);
+  const excerpt = (section, terms) => {
+    const source = String(section.text || section.code || section.heading || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+    const needle = terms.find(term => source.toLowerCase().indexOf(term) >= 0);
+    const start = needle ? Math.max(0, source.toLowerCase().indexOf(needle) - 48) : 0;
+    return (start ? "…" : "") + source.slice(start, start + 150) + (start + 150 < source.length ? "…" : "");
+  };
+  const scoreDocument = (doc, terms, phrase) => {
+    const title = normalize(doc.title);
+    let best = null;
+    (Array.isArray(doc.sections) ? doc.sections : []).forEach((section, sectionIndex) => {
+      const values = fields(section);
+      let score = 0;
+      terms.forEach(term => {
+        if (title.includes(term)) score += 12;
+        if (values[0].includes(term)) score += 8;
+        if (values[1].includes(term)) score += 2;
+        if (values[2].includes(term)) score += 1;
+      });
+      if (section.level === 1) score += 1;
+      if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
+      if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
+    });
+    return best;
+  };
+  const setStatus = message => { status.textContent = message; };
+  const render = () => {
+    results.replaceChildren();
+    active = -1;
+    const query = normalize(input.value);
+    if (!query) { panel.hidden = true; return; }
+    const terms = query.split(" ").filter(Boolean);
+    const matches = documents.map(doc => scoreDocument(doc, terms, query)).filter(Boolean)
+      .sort((a, b) => b.score - a.score || String(a.doc.path).localeCompare(String(b.doc.path)) || a.sectionIndex - b.sectionIndex);
+    panel.hidden = false;
+    if (!matches.length) { setStatus("No matches in the graph. Try a different search."); return; }
+    setStatus(matches.length + " result" + (matches.length === 1 ? "" : "s") + ".");
+    matches.slice(0, 12).forEach(match => {
+      const item = document.createElement("li"); item.className = "site-search__result";
+      const link = document.createElement("a"); link.className = "site-search__link";
+      link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const title = document.createElement("span"); title.className = "sr-title"; title.textContent = match.section.heading || match.doc.title;
+      const path = document.createElement("span"); path.className = "sr-path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
+      const text = document.createElement("span"); text.className = "sr-snippet"; text.textContent = excerpt(match.section, terms);
+      link.append(title, path, text); item.append(link); results.append(item);
+    });
+  };
+  const setActive = index => {
+    const links = [...results.querySelectorAll(".site-search__link")];
+    if (!links.length) return;
+    active = (index + links.length) % links.length;
+    links.forEach((l, i) => l.classList.toggle("is-active", i === active));
+    links[active].scrollIntoView({ block: "nearest" });
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); render(); setActive(active < 0 ? 0 : active); });
+  input.addEventListener("input", render);
+  input.addEventListener("keydown", event => {
+    if (event.key === "ArrowDown") { event.preventDefault(); setActive(active + 1); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); setActive(active - 1); }
+    else if (event.key === "Enter" && active >= 0) {
+      const link = results.querySelectorAll(".site-search__link")[active];
+      if (link) location.href = link.href;
+    } else if (event.key === "Escape") { panel.hidden = true; input.blur(); }
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "/" && document.activeElement !== input && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+      event.preventDefault(); input.focus();
+    }
+  });
+  document.addEventListener("click", event => {
+    if (!event.target.closest("[data-boris-search-ui]")) panel.hidden = true;
+  });
+  fetch(indexUrl, { credentials: "same-origin" }).then(response => { if (!response.ok) throw new Error("index request failed"); return response.json(); }).then(index => {
+    if (!index || index.format !== expectedFormat || index.schema_version !== expectedSchema || !Array.isArray(index.documents)) throw new Error("unsupported search index");
+    documents = index.documents.filter(doc => doc && typeof doc.path === "string" && typeof doc.title === "string" && Array.isArray(doc.sections)).map(doc => ({
+      path: doc.path,
+      title: doc.title,
+      sections: doc.sections.filter(section => section && typeof section.level === "number" && typeof section.heading === "string" && typeof section.fragment === "string" && typeof section.text === "string" && typeof section.code === "string")
+    }));
+  }).catch(() => { documents = []; });
+})();
+</script>
+</body>
+</html>

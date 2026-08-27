@@ -1,0 +1,92 @@
+/* ---------- theme modes ---------- */
+/* default: dark (the :root block above) */
+
+html[data-theme="light"] {
+  --bg: #f5f3ee;
+  --panel: #ffffff;
+  --panel-2: #efece5;
+  --ink: #2a3138;
+  --bright: #14181d;
+  --muted: #6b7280;
+  --accent: #0f766e;
+  --accent2: #a21caf;
+  --rule: #ddd8cd;
+  --code-bg: #eceae3;
+  --mark: rgba(15,118,110,.18);
+}
+
+html[data-theme="pride"] {
+  --bg: #120a1e;
+  --panel: #1a1030;
+  --panel-2: #150c26;
+  --ink: #e6dcff;
+  --bright: #fdf4ff;
+  --muted: #9d8ec7;
+  --accent: #ff8ae2;
+  --accent2: #ffd166;
+  --rule: #34245c;
+  --code-bg: #180e2e;
+  --mark: rgba(255,138,226,.25);
+}
+
+/* rainbow chrome, pride mode only */
+html[data-theme="pride"] body {
+  background:
+    radial-gradient(1100px 480px at 85% -12%, rgba(255,105,180,.16), transparent),
+    radial-gradient(900px 420px at -10% 8%, rgba(80,200,255,.13), transparent),
+    radial-gradient(800px 400px at 55% 115%, rgba(255,209,102,.10), transparent),
+    var(--bg);
+}
+
+html[data-theme="pride"] .site-header {
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(90deg,
+    #ff5757, #ff9edb, #ffb84d, #ffe873, #63e6a5, #5ac8fa, #b28bff) 1;
+}
+
+html[data-theme="pride"] .site-title {
+  background: linear-gradient(92deg,
+    #ff8a8a, #ffb8de, #ffd58a, #fef08a, #8affc1, #8ad7ff, #c39bff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+html[data-theme="pride"] .site-content h2 {
+  border-bottom: 2px solid transparent;
+  border-image: linear-gradient(90deg,
+    #ff8a8a, #ffd58a, #8affc1, #8ad7ff, #c39bff) 1;
+  padding-bottom: .32rem;
+}
+
+html[data-theme="pride"] .site-content a {
+  text-decoration-color: rgba(195,155,255,.55);
+  text-underline-offset: 3px;
+}
+
+html[data-theme="pride"] .treewrap .is-current > a,
+html[data-theme="pride"] .treewrap a[aria-current="page"] {
+  background: linear-gradient(90deg, rgba(255,138,226,.14), rgba(138,215,255,.14));
+}
+
+html[data-theme="pride"] .graph-panel { border-top: 2px solid transparent; border-image: linear-gradient(90deg,#ff8a8a,#8affc1,#8ad7ff) 1; }
+
+html[data-theme="pride"] ::selection { background: rgba(195,155,255,.35); color: #fff; }
+
+/* theme toggle */
+.theme-toggle {
+  flex: 0 0 auto;
+  font: .78rem/1 var(--mono);
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: .48rem .7rem;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
+/* print always renders light-on-paper regardless of active mode */
+@media print {
+  html[data-theme] body { background: #fff !important; }
+}
