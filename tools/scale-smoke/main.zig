@@ -12,6 +12,10 @@ const generated_root = "tools/scale-smoke/.generated";
 const default_page_count: usize = 100;
 const satellites_per_section: usize = 24;
 
+/// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
+/// release line (`pipeline.boris_version`); this harness does not import `src/`.
+pub const tool_id = "boris-scale-smoke/0.8.1";
+
 const ExitCode = enum(u8) {
     success = 0,
     usage = 2,
@@ -22,6 +26,7 @@ const Options = struct {
     page_count: usize = default_page_count,
     boris_path: []const u8 = "./zig-out/bin/boris",
     help: bool = false,
+    version: bool = false,
 };
 
 const ParseError = error{
@@ -31,12 +36,24 @@ const ParseError = error{
 };
 
 fn parseOptions(args: []const []const u8) ParseError!Options {
+    // Version wins position-independently, mirroring the other helpers after #787
+    // (`--version`/`-V` must answer even when other flags are malformed).
+    if (args.len > 1) {
+        for (args[1..]) |a| {
+            if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) {
+                return .{ .version = true };
+            }
+        }
+    }
     var options: Options = .{};
     var index: usize = if (args.len == 0) 0 else 1;
     while (index < args.len) : (index += 1) {
         const arg = args[index];
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             options.help = true;
+        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+            options.version = true;
+            return options;
         } else if (std.mem.startsWith(u8, arg, "--pages=")) {
             options.page_count = try parsePageCount(arg["--pages=".len..]);
         } else if (std.mem.eql(u8, arg, "--pages")) {
@@ -75,6 +92,7 @@ fn printUsage() void {
         \\  --pages N       Generated page count (default: 100)
         \\  --boris PATH    Built Boris executable (default: ./zig-out/bin/boris)
         \\  -h, --help       Show this help and exit
+        \\  -V, --version    Print the tool id and exit
         \\
         \\The harness owns and removes only tools/scale-smoke/.generated.
         \\
@@ -253,6 +271,13 @@ pub fn main(init: std.process.Init) u8 {
         printUsage();
         return @intFromEnum(ExitCode.usage);
     };
+    if (options.version) {
+        var stdout_buffer: [128]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+        stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
+        stdout_writer.interface.flush() catch {};
+        return @intFromEnum(ExitCode.success);
+    }
     if (options.help) {
         printUsage();
         return @intFromEnum(ExitCode.success);
