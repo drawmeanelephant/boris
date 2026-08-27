@@ -1,9 +1,15 @@
-//! `boris init`: materialize a deterministic starter site.
+//! `boris init`: materialize a deterministic starter site and prove it compiles.
 //!
 //! Writes a small, comprehensible tree that builds and validates out of the
 //! box: three Markdown pages exercising the graph (trunk, satellite, wiki
 //! links, a semantic relation), a starter theme using the closed layout
-//! slots, and a publication profile ready for `boris plan --profile`.
+//! slots with a working browser search client, and a publication profile
+//! ready for `boris plan --profile`.
+//!
+//! After materializing, `init` compiles the fresh tree into a probe output
+//! directory and deletes it again. Exit 0 therefore means "materialized AND
+//! compiled": agents and scripts can assert the stronger postcondition, and
+//! a starter that ever stops compiling fails loudly instead of shipping.
 //!
 //! The tree is byte-deterministic: every file is a fixed constant, so two
 //! runs in identical conditions produce identical trees. `init` refuses to
@@ -11,6 +17,7 @@
 //! clobbering.
 
 const std = @import("std");
+const compile = @import("compile.zig");
 const diagnostic = @import("diagnostic.zig");
 const Io = std.Io;
 
@@ -46,10 +53,14 @@ const index_md =
     \\  index.md                    trunk page (this one)
     \\  guides/getting-started.md   satellite, parent: index
     \\  guides/publishing.md        satellite, parent: index
-    \\themes/boris/                 starter theme (closed layout slots)
+    \\themes/boris/                 starter theme (closed layout slots, search UI)
     \\boris.json                    publication profile (GitHub Pages)
     \\standard-site.json            Atmosphere profile (edit the fake DID/URL)
     \\```
+    \\
+    \\Search is wired up: the compiler publishes
+    \\`dist/_boris/search/search-index.json` and this theme ships the
+    \\no-dependency browser client that queries it. Press `/` on any page.
     \\
 ;
 
@@ -253,6 +264,64 @@ pub fn materialize(io: Io, gpa: std.mem.Allocator, target_dir: []const u8) ![]co
     return "";
 }
 
+/// Compile the freshly materialized starter into a probe output directory,
+/// then remove the probe tree. `init` writes a starter tree, not a built
+/// site, so the probe output never survives a successful run.
+///
+/// All probe paths are derived relative to the process working directory,
+/// even when `target_dir` was spelled absolute: layout paths are
+/// contractually required to be clean relative paths
+/// (`layout_select.validateLayoutPath`), and every generated probe path is
+/// resolved against the workspace like any other output tree. A target
+/// outside the workspace cannot host the probe at all; the caller is told so
+/// it can report the skipped verification honestly instead of pretending.
+///
+/// The probe lives inside `target_dir` (which `init` owns: the directory was
+/// empty before it ran), keeping every generated path inside the target like
+/// any other output tree. A crashed probe can leave the directory non-empty,
+/// which the next `init` refuses with its normal message — the same failure
+/// shape as a crash during materialization.
+pub const ProbeResult = union(enum) {
+    /// Pages compiled from the starter tree.
+    verified: usize,
+    /// Target resolves outside the workspace; probe skipped (reported).
+    skipped,
+};
+
+fn verifyStarter(io: Io, gpa: std.mem.Allocator, target_dir: []const u8) !ProbeResult {
+    const cwd = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd);
+    const target_abs = try std.fs.path.resolve(gpa, &.{ cwd, target_dir });
+    defer gpa.free(target_abs);
+    const rel_target = try std.fs.path.relative(gpa, cwd, null, cwd, target_abs);
+    defer gpa.free(rel_target);
+
+    // Outside the workspace: the probe's output tree would violate the same
+    // containment rule every other generated output obeys.
+    if (std.mem.startsWith(u8, rel_target, "..")) return .skipped;
+
+    // `init .` into a fresh empty cwd is legal (relative() then returns an
+    // empty or "." path); path.join skips empty parts.
+    const base: []const u8 = if (std.mem.eql(u8, rel_target, ".")) "" else rel_target;
+
+    const content_root = try std.fs.path.join(gpa, &.{ base, "content" });
+    defer gpa.free(content_root);
+    const layout_path = try std.fs.path.join(gpa, &.{ base, "themes/boris/layouts/main.html" });
+    defer gpa.free(layout_path);
+    const probe_dist = try std.fs.path.join(gpa, &.{ base, ".boris-init-probe" });
+    defer gpa.free(probe_dist);
+
+    errdefer Io.Dir.cwd().deleteTree(io, probe_dist) catch {};
+    const stats = try compile.compileHtmlSite(io, gpa, .{
+        .content_root = content_root,
+        .dist_dir = probe_dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    Io.Dir.cwd().deleteTree(io, probe_dist) catch {};
+    return .{ .verified = stats.pages_written };
+}
+
 pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) u8 {
     const message = materialize(io, gpa, target_dir) catch |err| {
         std.debug.print("error: boris init failed: {s}\n", .{@errorName(err)});
@@ -264,27 +333,57 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) 
         return @intFromEnum(ExitCode.usage);
     }
 
+    // Self-verify before claiming success. The starter tree is fixed, so a
+    // probe failure means the binary and its starter templates disagree —
+    // never ship that silently. Remove the whole tree (it was empty before
+    // `init` ran) so exit 0 keeps meaning "materialized AND compiled".
+    const outcome = verifyStarter(io, gpa, target_dir) catch |err| {
+        Io.Dir.cwd().deleteTree(io, target_dir) catch {};
+        std.debug.print(
+            "error: the starter tree failed to compile ({s}); the target directory was removed — this is a compiler/starter drift bug, please report it\n",
+            .{@errorName(err)},
+        );
+        return @intFromEnum(ExitCode.content_error);
+    };
+
     if (!quiet) {
         std.debug.print(
             \\ok: initialized a Boris site in {s}
             \\  content/index.md                  trunk page
             \\  content/guides/getting-started.md satellite page
             \\  content/guides/publishing.md      satellite page with a relation
-            \\  themes/boris/                     starter theme (closed layout slots)
+            \\  themes/boris/                     starter theme (closed layout slots, search UI)
             \\  boris.json                        publication profile (GitHub Pages)
             \\  standard-site.json                Atmosphere profile (replace the fake DID/URL)
             \\
+            \\
+        , .{target_dir});
+        switch (outcome) {
+            .verified => |pages| std.debug.print(
+                "verified: starter compiled {d} page(s)\n\n",
+                .{pages},
+            ),
+            .skipped => std.debug.print(
+                "note: target directory resolves outside the workspace; skipped the starter compile probe\n\n",
+                .{},
+            ),
+        }
+        std.debug.print(
             \\next steps:
             \\  boris --input content --html-dir dist --theme themes/boris     build the site
+            \\  boris check                                                    graph-health report
+            \\  boris impact guides/getting-started                            dependency impact report
+            \\  boris --context --quiet                                        AI Context Bundle
             \\  boris plan --profile boris.json                                inspect the plan
             \\  boris standard-site plan --profile standard-site.json          inspect Atmosphere records
             \\  boris watch --input content --html-dir dist --theme themes/boris   rebuild on change
             \\
             \\conventions:
+            \\  search works out of the box: the theme ships the client for dist/_boris/search/search-index.json
             \\  shared fragments live under content/includes/ and never compile as pages
             \\  page images live in <stem>.assets/ beside the page that owns them
             \\
-        , .{target_dir});
+        , .{});
     }
     return @intFromEnum(ExitCode.success);
 }
@@ -298,4 +397,92 @@ test "starter layout marks the search extraction root" {
         idx = at + marker.len;
     }
     try std.testing.expectEqual(@as(usize, 1), count);
+}
+
+test "starter layout carries the search client seams" {
+    // These strings are the browser/compiler seam from the rendered-search
+    // contract and the hooks the embedded client queries. If the starter and
+    // the repo theme's search UI ever drift apart, this test names what went
+    // missing instead of leaving a starter site with silent search.
+    const layout_markers = [_][]const u8{
+        "data-boris-search-ui",
+        "data-boris-search-form",
+        "data-boris-search-status",
+        "data-boris-search-results",
+        "_boris/search/search-index.json",
+        "<noscript>",
+        // The Standard.site contract requires the init reference layout to
+        // include the closed {{head}} slot.
+        "{{head}}",
+    };
+    for (layout_markers) |marker| {
+        try std.testing.expect(std.mem.indexOf(u8, starter_layout, marker) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, starter_layout, "data-boris-search-exclude") != null);
+    try std.testing.expect(std.mem.indexOf(u8, starter_css, ".site-search") != null);
+}
+
+test "materialized starter compiles and the probe cleans up after itself" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(root);
+    const refused = try materialize(io, gpa, root);
+    defer if (refused.len > 0) gpa.free(refused);
+    try std.testing.expectEqual(@as(usize, 0), refused.len);
+
+    // The production probe path: the fixed starter tree must compile, and the
+    // probe output must be gone again afterwards.
+    const outcome = try verifyStarter(io, gpa, root);
+    try std.testing.expectEqual(@as(usize, 3), outcome.verified);
+
+    const probe_dist = try std.fmt.allocPrint(gpa, "{s}/.boris-init-probe", .{root});
+    defer gpa.free(probe_dist);
+    try std.testing.expectError(error.FileNotFound, Io.Dir.cwd().openDir(io, probe_dist, .{}));
+
+    // The black-box script inits with an absolute target inside the
+    // workspace; the probe must still find clean relative layout paths there.
+    const cwd = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd);
+    const abs_root = try std.fs.path.resolve(gpa, &.{ cwd, root });
+    defer gpa.free(abs_root);
+    const abs_outcome = try verifyStarter(io, gpa, abs_root);
+    try std.testing.expectEqual(@as(usize, 3), abs_outcome.verified);
+
+    // A target outside the workspace cannot host the probe (the containment
+    // rule every generated output obeys); it must be skipped, not failed.
+    const outside = try std.fs.path.resolve(gpa, &.{ cwd, "../../boris-init-outside" });
+    defer gpa.free(outside);
+    const skip = try verifyStarter(io, gpa, outside);
+    try std.testing.expect(skip == .skipped);
+
+    // One real compile to lock the rendered seams: the search index artifact
+    // exists and a rendered page carries the search UI from the starter theme.
+    const content_root = try std.fmt.allocPrint(gpa, "{s}/content", .{root});
+    defer gpa.free(content_root);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/themes/boris/layouts/main.html", .{root});
+    defer gpa.free(layout_path);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/.init-test-dist", .{root});
+    defer gpa.free(dist);
+    _ = try compile.compileHtmlSite(io, gpa, .{
+        .content_root = content_root,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    var dist_dir = try Io.Dir.cwd().openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    _ = try dist_dir.statFile(io, "_boris/search/search-index.json", .{});
+    const index_html = blk: {
+        var file = try dist_dir.openFile(io, "index.html", .{});
+        defer file.close(io);
+        var reader = file.reader(io, &.{});
+        break :blk try reader.interface.allocRemaining(gpa, .unlimited);
+    };
+    defer gpa.free(index_html);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "data-boris-search-ui") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "_boris/search/search-index.json") != null);
 }

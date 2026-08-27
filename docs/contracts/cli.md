@@ -25,6 +25,7 @@ boris recipe-scale --input DIR --id PAGE (--factor TEXT | --servings N) [--cookl
 | `check` | Validate the frozen graph and emit a deterministic health report | Nothing unless `--report` is supplied |
 | `impact ID` | Emit the transitive dependents of a page or source endpoint | Nothing unless `--report` is supplied |
 | `watch` | Run an HTML build, then rebuild after debounced source/layout changes | HTML output selected by build options |
+| `init` | Materialize a deterministic starter site and verify that it compiles | Starter tree into `DIR` (must be empty); probe output is removed again |
 | `plan` | Parse and normalize one publication profile without executing it | Nothing; normalized declaration JSON is written to stdout |
 | `standard-site <subcommand>` | Explicit Standard.site family (plan / records / verify / login / sessions / logout / publish / smoke) | Plan/records/verify/publish-evidence/smoke artifacts on stdout or `--out PATH`; login writes a `0600` session document under the session root |
 | `nostr plan` | Emit the offline NIP-23 publication plan for the selected profile (no key, no signature, no relay) | Nothing; plan JSON on stdout |
@@ -94,6 +95,26 @@ the shared `html-build-report-0.2.0` JSON (additive; see
 becomes the zero-write validation daemon described above. `check` and `impact`
 likewise create no product artifacts; only their explicit `--report` path may
 be written.
+
+### `init`: deterministic starter scaffold with self-verification
+
+`boris init [DIR]` (default `.`) writes a fixed starter tree — three content
+pages exercising the graph, a closed-slot theme whose layout ships the
+[rendered-search browser client](rendered-search.md), and the two publication
+profiles — into `DIR`, which must not exist or must be empty. The tree is
+byte-deterministic across runs.
+
+After materializing, `init` compiles the fresh tree through the normal HTML
+pipeline into a probe output directory (`DIR/.boris-init-probe`) and removes
+it again. Exit `0` therefore means "materialized **and** compiled": the
+success report includes the verified page count. Probe paths are resolved
+relative to the process working directory like every other generated output
+tree; when `DIR` resolves outside the workspace, the probe is skipped and the
+success report says so. A probe failure is a compiler/starter drift bug:
+`init` removes the tree it just wrote (the target was empty before it ran),
+prints the reason, and exits `1` (content class). `--quiet` suppresses the
+success chatter, never errors. `init` writes nothing to stdout and never
+touches the network.
 
 ## Exit codes
 
