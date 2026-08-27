@@ -40,3 +40,21 @@ body {
 .site-content pre { background: #f6f8fa; border-radius: 6px; padding: 0.75rem 1rem; overflow-x: auto; }
 
 .site-footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.9rem; }
+
+/* Search client for the compiler's dist/_boris/search/search-index.json. */
+.site-search { margin-top: 1rem; padding: 0.8rem; border: 1px solid var(--rule); border-radius: 6px; background: #f6f8fa; }
+.site-search__label { display: block; margin-bottom: 0.35rem; font-size: 0.8rem; font-weight: 700; }
+.site-search__controls { display: flex; gap: 0.35rem; }
+.site-search input { min-width: 0; width: 100%; padding: 0.45rem 0.55rem; border: 1px solid var(--rule); border-radius: 4px; color: inherit; background: var(--paper); font: inherit; }
+.site-search button { flex: 0 0 auto; padding: 0.45rem 0.6rem; border: 1px solid var(--rule); border-radius: 4px; color: inherit; background: #dbeafe; font: inherit; cursor: pointer; }
+.site-search button:hover, .site-search button:focus-visible { background: #bfdbfe; }
+.site-search__status { margin: 0.55rem 0 0; font-size: 0.8rem; color: var(--muted); }
+.site-search__results { margin: 0.65rem 0 0; padding: 0; list-style: none; }
+.site-search__result { margin: 0.55rem 0; }
+.site-search__result a { display: block; color: inherit; text-decoration: none; }
+.site-search__result a:hover, .site-search__result a:focus-visible { text-decoration: underline; }
+.site-search__title { display: block; color: var(--accent); font-weight: 700; }
+.site-search__path { display: block; font-size: 0.72rem; color: var(--muted); overflow-wrap: anywhere; }
+.site-search__excerpt { display: block; margin-top: 0.1rem; font-size: 0.8rem; line-height: 1.4; color: var(--muted); }
+.site-search__fallback { margin: 0.55rem 0 0; font-size: 0.8rem; color: var(--muted); }
+@media print { .site-search { display: none; } }
