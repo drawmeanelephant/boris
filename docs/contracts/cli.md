@@ -114,7 +114,8 @@ success report says so. A probe failure is a compiler/starter drift bug:
 `init` removes the tree it just wrote (the target was empty before it ran),
 prints the reason, and exits `1` (content class). `--quiet` suppresses the
 success chatter, never errors. `init` writes nothing to stdout and never
-touches the network.
+touches the network. `boris init --help` / `-h` prints init-specific help
+(exit 0), the same narrow-help behavior as the `standard-site` family.
 
 ## Exit codes
 

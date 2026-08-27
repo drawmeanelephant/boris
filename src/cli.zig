@@ -2433,6 +2433,35 @@ pub fn printStandardSiteUsage() void {
     , .{});
 }
 
+/// Narrow help for the init command (`boris init --help`, exit 0). Help is
+/// a stderr surface like every other text output (docs/contracts/cli.md).
+pub fn printInitUsage() void {
+    std.debug.print(
+        \\Boris init — materialize a deterministic starter site and verify it compiles
+        \\
+        \\Usage: boris init [DIR] [--quiet]
+        \\
+        \\Writes a fixed starter tree into DIR (default `.`): three content pages
+        \\exercising the graph (trunk, satellites, wiki links, a semantic relation),
+        \\a closed-slot theme whose layout ships the rendered-search browser client,
+        \\and the two publication profiles (boris.json, standard-site.json).
+        \\DIR must be empty or not exist; the tree is byte-deterministic.
+        \\
+        \\  --quiet          Suppress the success report; errors always print
+        \\
+        \\After writing, init compiles the fresh tree through the normal HTML
+        \\pipeline into a probe directory that is removed again. Exit 0 means
+        \\the starter is materialized AND compiled, with the page count in the
+        \\report. A target outside the workspace skips the probe (reported);
+        \\a probe failure removes the tree and exits 1.
+        \\
+        \\Next steps:
+        \\  boris check                      graph-health report
+        \\  boris --help                     full option list
+        \\
+    , .{});
+}
+
 /// Print a usage diagnostic. Uses `std.debug.print` (not `std.log.err`) so
 /// unit tests that exercise the usage path are not failed by the test logger.
 pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
@@ -2622,6 +2651,8 @@ pub fn execute(opts: Options, runner: anytype) ExitCode {
     if (opts.help) {
         if (opts.command == .standard_site) {
             printStandardSiteUsage();
+        } else if (opts.command == .init) {
+            printInitUsage();
         } else {
             runner.printHelp();
         }
@@ -2974,6 +3005,18 @@ test "parse: init takes an optional target directory" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "init", "--input", "docs" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "init", "--rag" }));
     try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "init", "a", "b" }));
+
+    // `--help` / `-h` is init-specific help (exit 0), not the full compiler
+    // help; execute() routes on the recorded command.
+    var init_help = try parseOptions(std.testing.allocator, &.{ "boris", "init", "--help" });
+    defer init_help.deinit(std.testing.allocator);
+    try expect(init_help.help);
+    try expectEqual(Command.init, init_help.command);
+
+    var init_h = try parseOptions(std.testing.allocator, &.{ "boris", "init", "-h" });
+    defer init_h.deinit(std.testing.allocator);
+    try expect(init_h.help);
+    try expectEqual(Command.init, init_h.command);
 }
 
 test "parse: plan selects an explicit profile and preserves only supported overrides" {
