@@ -1307,6 +1307,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    source_rag_mod.addOptions("build_info", build_info);
 
     const source_rag_exe = b.addExecutable(.{
         .name = "boris-source-rag",

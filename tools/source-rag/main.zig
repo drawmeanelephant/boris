@@ -12,10 +12,16 @@
 
 const std = @import("std");
 const Io = std.Io;
+const build_info = @import("build_info");
 
 pub const format_id = "boris-source-rag";
 pub const schema_version: u32 = 1;
 pub const tool_version = "0.1.0";
+
+/// Opaque VCS revision token baked at compile time ("" when undetected,
+/// e.g. tarball builds; ".dirty" suffix for uncommitted worktrees).
+/// Threaded explicitly through the export pipeline; no ambient git probe.
+pub const vcs_revision: []const u8 = build_info.vcs_revision;
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -54,6 +60,10 @@ pub const Options = struct {
     /// Test-only deterministic failure injection after this many staged source
     /// documents have been written. Not accepted by the CLI.
     test_fail_after_stage_writes: ?usize = null,
+    /// Additive build provenance (#795): opaque VCS revision token of the
+    /// producing binary. Threaded explicitly from the entry point; never
+    /// probed at runtime. "" sentinel when undetected.
+    vcs_revision: []const u8 = "",
 
     pub fn includeBundles(self: Options) bool {
         return !self.no_bundles;
@@ -1318,12 +1328,12 @@ fn exportBundles(
     }
 }
 
-fn exportCatalogMeta(io: Io, out_dir: Io.Dir, profile: Profile, split_size: usize) !void {
-    var buf: [192]u8 = undefined;
+fn exportCatalogMeta(io: Io, out_dir: Io.Dir, profile: Profile, split_size: usize, vcs_revision_param: []const u8) !void {
+    var buf: [256]u8 = undefined;
     const line = try std.fmt.bufPrint(
         &buf,
-        "{{\"format\":\"{s}\",\"schema_version\":{d},\"tool_version\":\"{s}\",\"profile\":\"{s}\",\"split_size\":{d}}}\n",
-        .{ format_id, schema_version, tool_version, profileName(profile), split_size },
+        "{{\"format\":\"{s}\",\"schema_version\":{d},\"tool_version\":\"{s}\",\"profile\":\"{s}\",\"split_size\":{d},\"vcs_revision\":\"{s}\"}}\n",
+        .{ format_id, schema_version, tool_version, profileName(profile), split_size, vcs_revision_param },
     );
     try writeBytes(io, out_dir, "catalog_meta.json", line);
 }
@@ -1673,7 +1683,7 @@ fn exportIndex(
         \\
         \\| File | Role |
         \\|------|------|
-        \\| `catalog_meta.json` | format + schema_version + tool_version + profile + split target |
+        \\| `catalog_meta.json` | format + schema_version + tool_version + profile + split target + vcs_revision |
         \\| `catalog.jsonl` | one JSON object per document (sorted by rag_path) |
         \\| `profile_manifest.json` | selected profile and sorted source paths |
         \\| `part_manifest.json` | ordered parts, source paths, and byte counts |
@@ -2191,7 +2201,7 @@ fn exportPackTree(
     // INDEX after catalog is sorted (lists source rows).
     try exportIndex(io, gpa, out, catalog.items, stats, opts, bundle_parts.items);
     try exportCatalogJsonl(io, gpa, out, catalog.items);
-    try exportCatalogMeta(io, out, opts.profile, opts.split_size);
+    try exportCatalogMeta(io, out, opts.profile, opts.split_size, opts.vcs_revision);
     try exportProfileManifest(io, gpa, out, opts.profile, stats, packed_paths.items);
     try exportPartManifest(io, gpa, out, opts.profile, opts.split_size, opts.includeBundles(), bundle_parts.items);
     if (opts.bundles_only) {
@@ -2263,7 +2273,10 @@ pub fn main(init: std.process.Init) u8 {
         return ExitCode.success.int();
     }
 
-    _ = exportCorpus(io, gpa, opts) catch |err| {
+    var opts_with_revision = opts;
+    opts_with_revision.vcs_revision = vcs_revision;
+
+    _ = exportCorpus(io, gpa, opts_with_revision) catch |err| {
         std.log.err("source-rag export failed: {s}", .{@errorName(err)});
         return ExitCode.io_error.int();
     };

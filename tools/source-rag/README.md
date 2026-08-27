@@ -80,7 +80,7 @@ source-rag/
   boris-docs[-N].md     # one or more ordered whole-file docs parts
   boris-content[-N].md  # one or more ordered whole-file content parts
   catalog.jsonl         # one JSON object per document
-  catalog_meta.json     # format + schema_version + tool_version + profile + split target
+  catalog_meta.json     # format + schema_version + tool_version + profile + split target + vcs_revision
   profile_manifest.json  # selected profile, counts, and sorted packed paths
   part_manifest.json     # profile, ordered parts, source paths, and byte counts
   upload_manifest.json   # --bundles-only only: upload order, sizes, chars/4 token estimates
@@ -161,8 +161,10 @@ bytes: 4610
 ### catalog_meta.json
 
 ```json
-{"format":"boris-source-rag","schema_version":1,"tool_version":"0.1.0","profile":"all","split_size":524288}
+{"format":"boris-source-rag","schema_version":1,"tool_version":"0.1.0","profile":"all","split_size":524288,"vcs_revision":""}
 ```
+
+`vcs_revision` is the opaque VCS revision token baked into the producing binary at compile time (`""` when undetected, e.g. tarball builds; `".dirty"` suffix for uncommitted worktrees). Readers ignore unknown keys.
 
 ### catalog.jsonl (field order)
 
@@ -212,7 +214,7 @@ Emitted artifacts:
 | `INDEX.md` | Retrieval map (notes that `files/**` is omitted) |
 | `UPLOAD-GUIDE.md` | Upload / system-prompt guidance for the bundles pack |
 | `catalog.jsonl` | One JSON object per source (logical `files/...` rag paths) |
-| `catalog_meta.json` | Format + schema + profile + split target |
+| `catalog_meta.json` | Format + schema + profile + split target + vcs_revision |
 | `profile_manifest.json` | Selected profile, counts, sorted packed paths |
 | `part_manifest.json` | Ordered parts, sources, and body byte counts |
 | `upload_manifest.json` | Recommended upload order, on-disk sizes, total bytes, chars/4 tokens |
