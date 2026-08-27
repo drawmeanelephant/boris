@@ -24,6 +24,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | Cloudflare Worker host example | `hosts/cloudflare-worker/` | [embedding.md](contracts/embedding.md) |
 | Cooklang recipe scale | `src/recipe_scale.zig`, `src/recipe_scale_view.zig` | [cooklang-compatibility.md](contracts/cooklang-compatibility.md), [cli.md](contracts/cli.md) |
 | HTML body, nav, TOC, assemble | `src/html_body.zig`, `src/html_nav.zig`, `src/html_toc.zig`, `src/assemble.zig`, `src/compile.zig` | [html-output.md](contracts/html-output.md) |
+| HTML compiler tests | `src/compile_test_kit.zig`, `src/compile_*_test.zig` (wired from `compile.zig`, the `test-compile` root) | [html-output.md](contracts/html-output.md) |
 | Themes, layouts, assets | `src/theme.zig`, `src/layout_select.zig`, `src/content_asset.zig` | [templating-and-themes.md](contracts/templating-and-themes.md), [content-local-assets.md](contracts/content-local-assets.md) |
 | Incremental / watch / jobs | `src/cache.zig`, `src/watch.zig`, `src/timings.zig` | [watch-mode.md](contracts/watch-mode.md), [parallel-rendering.md](contracts/parallel-rendering.md) |
 | IR / RAG / Context / llms.txt | `src/ir_emit.zig`, `src/rag.zig`, `src/rag_emit.zig`, `src/context.zig`, `src/llms.zig`, `src/artifact_sink.zig` | [ir-schema.md](contracts/ir-schema.md), [rag-export.md](contracts/rag-export.md), [context-bundle.md](contracts/context-bundle.md), [llms-txt.md](contracts/llms-txt.md), [artifact-sink.md](contracts/artifact-sink.md) |
