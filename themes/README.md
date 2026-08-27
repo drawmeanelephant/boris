@@ -39,6 +39,7 @@ themes/<name>/
 | [`tokens`](tokens/) | Fluid custom properties | `--theme themes/tokens` |
 | [`corporate`](corporate/) | Dense product-docs chrome | `--theme themes/corporate` |
 | [`minimal`](minimal/) | Same shell, no search | `--theme themes/minimal` |
+| [`lab`](lab/) | Dark-first lab terminal, three color modes | `--theme themes/lab` |
 
 Sample sites that build these themes live under `examples/<name>-site/`.
 
