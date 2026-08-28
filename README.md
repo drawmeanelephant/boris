@@ -329,6 +329,13 @@ and current lab usage in [`tools/migration-lab/README.md`](tools/migration-lab/R
 
 ## AI and OpenAI Build Week
 
+**In memoriam.** Boris entered OpenAI Build Week and did not place: we firmly
+lost. The judging window closed in August 2026, the `afterparty` staging line
+landed via [#790](https://github.com/drawmeanelephant/boris/pull/790), and
+development continues on `main`. The week was a deadline, not the product —
+the graph-native compiler, its contracts, and its verified targets outlive the
+scoreboard.
+
 Boris was built through continuous human–AI collaboration using ChatGPT 5.6,
 Codex, delegated implementation, hostile testing, migration audits, and
 deliberate scope cuts. AI accelerated exploration and execution; the project’s

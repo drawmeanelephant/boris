@@ -1,9 +1,10 @@
 # Project status — Boris
 
-**As of:** 2026-08-25
+**As of:** 2026-08-28
 
-**Integration line:** `main`. The Build Week judging window is closed; the
-`afterparty` line landed via PR **#790**. Topic branches target `main`, and
+**Integration line:** `main`. The Build Week judging window is closed; Boris
+did not place (README "AI and OpenAI Build Week"). The `afterparty` line landed
+via PR **#790**. Topic branches target `main`, and
 `afterparty` is retained as the staging line for larger in-flight work.
 
 **Product metadata:** released **`v0.8.1`** / `boris/0.8.1`; base IR `schemaVersion` **`0.2.0`**.
