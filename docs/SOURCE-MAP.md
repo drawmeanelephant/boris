@@ -79,6 +79,8 @@ Completed audits were archived per
 | [`docs/cloudflare-container.md`](cloudflare-container.md) | Hosted runner + Cloudflare Containers example (not a target) |
 | [`docs/standard-site.md`](standard-site.md) | Standard.site first-tester path |
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
+| [`docs/AGENT-BINARY-KITS.md`](AGENT-BINARY-KITS.md) | Agent binary kit build and verification |
+| [`docs/AGENT-COLD-START.md`](AGENT-COLD-START.md) | Agent cold-start onboarding evaluation protocol |
 | [`AGENTS.md`](../AGENTS.md) | Repository policy and agent constraints |
 | [`content/`](../content/) | Compiled public documentation site (Oliver-rendered) |
 | [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) | Where `src/` clusters live. Not a function catalog. |

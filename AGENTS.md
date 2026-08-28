@@ -41,16 +41,17 @@ agent/docs guidance may be edited without widening that authority.
 
 ## Branch and worktree safety
 
-`main` is frozen during the current Build Week judging window. **`afterparty` is
-the active integration line** until the user explicitly reopens the release line.
-This routing exception does not relax product policy.
+The **active integration line** is whatever [`docs/STATUS.md`](docs/STATUS.md)
+declares in its banner. Standing policy never hardcodes the line or a window:
+read the banner, fetch, fast-forward the declared line, branch from it, and
+target the PR at it. If a line is frozen for a window (release cut, judging) or
+a staging line is retained, the banner says so.
 
-- **Never commit or push directly to `main`** unless the user explicitly orders a
-  named direct land. During judging, do not push directly to `afterparty` either.
-- Start substantive work on a fresh, owned topic branch from the up-to-date active
-  integration line. During judging: fetch, fast-forward `afterparty`, branch from
-  it, and target its PR at `afterparty`. Resume branching from `main` only after
-  the integration line changes or the user names another base.
+- **Never commit or push directly to the declared integration line** unless the
+  user explicitly orders a named direct land. The same applies to any frozen or
+  staging line while the banner declares it.
+- Start substantive work on a fresh, owned topic branch from the up-to-date
+  active integration line.
 - One agent owns a branch and its hot files until handoff, merge, or abandonment.
   Do not rewrite shared/published history or force-push without explicit user
   direction. Land collaborative work by PR; use a concise prefixed branch name.
@@ -61,7 +62,9 @@ This routing exception does not relax product policy.
 - **Binary handoffs:** Before creating a build or packaging workflow, use
   [`scripts/agent-pack.sh`](scripts/agent-pack.sh) from the target PR worktree.
   Keep generated handoff kits outside tracked product files. See
-  [`docs/AGENT-BINARY-KITS.md`](docs/AGENT-BINARY-KITS.md).
+  [`docs/AGENT-BINARY-KITS.md`](docs/AGENT-BINARY-KITS.md). To evaluate
+  onboarding from a bare binary — the standard cold-start experiment — use
+  [`docs/AGENT-COLD-START.md`](docs/AGENT-COLD-START.md).
 
 ## Boris boundaries
 
