@@ -23,7 +23,8 @@
         "html": true,
         "sitemap": {"path": "sitemap.xml"},
         "rss": {"path": "feed.xml", "limit": 12},
-        "llms": {"path": "llms.txt"}
+        "llms": {"path": "llms.txt"},
+        "static": null
       }
     },
     {
@@ -40,7 +41,8 @@
         "html": true,
         "sitemap": null,
         "rss": null,
-        "llms": null
+        "llms": null,
+        "static": null
       }
     }
   ],

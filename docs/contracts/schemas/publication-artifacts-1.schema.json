@@ -32,10 +32,10 @@
           ]
         },
         "kind": {
-          "enum": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms"]
+          "enum": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms", "static-file"]
         },
         "producer": {
-          "enum": ["html-render", "theme-assets", "content-assets", "rendered-search", "sitemap", "rss", "llms"]
+          "enum": ["html-render", "theme-assets", "content-assets", "rendered-search", "sitemap", "rss", "llms", "static-files"]
         },
         "required": { "type": "boolean" },
         "status": { "enum": ["committed", "omitted-by-plan", "not-applicable"] },

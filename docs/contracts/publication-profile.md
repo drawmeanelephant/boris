@@ -85,11 +85,15 @@ equal the normalized publication `base_url`; this prevents sitemap/RSS and
 Pages metadata from silently naming different locations.
 
 Each target requires `name` and `output`; optional fields are `public`, exactly
-one of `theme`/`layout`, `layout_rules`, `sitemap`, `rss`, and `llms`.
+one of `theme`/`layout`, `layout_rules`, `sitemap`, `rss`, `llms`, and
+`static`.
 `layout_rules` entries contain exactly `selector` and `layout` and use the
 existing closed selector grammar and canonical ordering. A target's `sitemap`,
-`rss`, and `llms` objects respectively allow only `path`, `path`/`limit`, and
-`path`. Project editions require `output`; RAG also accepts `scope`,
+`rss`, `llms`, and `static` objects respectively allow only `path`,
+`path`/`limit`, `path`, and `dir`. `static.dir` (#804) is a project-relative
+input directory whose contents copy byte-identically into the target root; it
+may not nest with the target output or the content root in either direction.
+Project editions require `output`; RAG also accepts `scope`,
 `split_size`, and `bundles_only`, while Context accepts `scope` and
 `split_size`.
 

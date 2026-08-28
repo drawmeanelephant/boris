@@ -102,6 +102,9 @@ pub const SiteMetadata = struct {
 pub const SitemapPlan = struct { path: []u8 };
 pub const RssPlan = struct { path: []u8, limit: usize = 20 };
 pub const LlmsPlan = struct { path: []u8 };
+/// Static passthrough declaration (#804): a project-relative directory whose
+/// contents copy byte-identically into the target root.
+pub const StaticPlan = struct { dir: []u8 };
 pub const IrPlan = struct { output: []u8 };
 pub const RagPlan = struct { output: []u8, scope: ?[]u8 = null, split_size: ?usize = null, bundles_only: bool = false };
 pub const ContextPlan = struct { output: []u8, scope: ?[]u8 = null, split_size: ?usize = null };
@@ -163,6 +166,7 @@ pub const HtmlTargetPlan = struct {
     sitemap: ?SitemapPlan = null,
     rss: ?RssPlan = null,
     llms: ?LlmsPlan = null,
+    static: ?StaticPlan = null,
 
     fn deinit(self: *HtmlTargetPlan, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
@@ -177,6 +181,7 @@ pub const HtmlTargetPlan = struct {
         if (self.sitemap) |v| allocator.free(v.path);
         if (self.rss) |v| allocator.free(v.path);
         if (self.llms) |v| allocator.free(v.path);
+        if (self.static) |v| allocator.free(v.dir);
         self.* = undefined;
     }
 };
@@ -573,7 +578,7 @@ fn parseTargets(allocator: std.mem.Allocator, value: std.json.Value) Error![]Htm
 }
 fn parseTarget(allocator: std.mem.Allocator, value: std.json.Value) Error!HtmlTargetPlan {
     const obj = try object(value);
-    try only(obj, &.{ "name", "output", "public", "theme", "layout", "layout_rules", "sitemap", "rss", "llms" });
+    try only(obj, &.{ "name", "output", "public", "theme", "layout", "layout_rules", "sitemap", "rss", "llms", "static" });
     const name = try string(try required(obj, "name"));
     if (name.len > max_target_name_bytes or !target.isValidTargetName(name)) return error.InvalidTarget;
     var out = HtmlTargetPlan{ .name = try dup(allocator, name), .output = try dup(allocator, try checkedPath(try required(obj, "output"))) };
@@ -590,6 +595,7 @@ fn parseTarget(allocator: std.mem.Allocator, value: std.json.Value) Error!HtmlTa
     if (field(obj, "sitemap")) |v| out.sitemap = try parseSitemap(allocator, v);
     if (field(obj, "rss")) |v| out.rss = try parseRss(allocator, v);
     if (field(obj, "llms")) |v| out.llms = try parseLlms(allocator, v);
+    if (field(obj, "static")) |v| out.static = try parseStatic(allocator, v);
     return out;
 }
 fn parseRules(allocator: std.mem.Allocator, value: std.json.Value) Error![]layout_select.LayoutRule {
@@ -638,6 +644,11 @@ fn parseLlms(allocator: std.mem.Allocator, value: std.json.Value) Error!LlmsPlan
     const path = try checkedPath(try required(obj, "path"));
     sitemap.validateOutputPath(path) catch return error.InvalidPath;
     return .{ .path = try dup(allocator, path) };
+}
+fn parseStatic(allocator: std.mem.Allocator, value: std.json.Value) Error!StaticPlan {
+    const obj = try object(value);
+    try only(obj, &.{"dir"});
+    return .{ .dir = try dup(allocator, try checkedPath(try required(obj, "dir"))) };
 }
 
 fn parseEditions(allocator: std.mem.Allocator, plan: *PublicationPlan, value: std.json.Value) Error!void {
@@ -743,6 +754,12 @@ pub fn validatePlan(plan: *const PublicationPlan) Error!void {
         }
         if (std.mem.eql(u8, t.output, ".boris-cache") or std.mem.startsWith(u8, t.output, "_boris/")) return error.ReservedOutputRoot;
         if (std.mem.eql(u8, t.output, plan.input) or pathNest(t.output, plan.input)) return error.OutputConflict;
+        // Static passthrough (#804) is an input tree: it may not nest with the
+        // target output or the content root in either direction.
+        if (t.static) |static| {
+            if (pathNest(t.output, static.dir) or pathNest(static.dir, t.output)) return error.OutputConflict;
+            if (pathNest(plan.input, static.dir) or pathNest(static.dir, plan.input)) return error.OutputConflict;
+        }
         for (plan.targets[i + 1 ..]) |other| if (pathNest(t.output, other.output)) return error.OutputConflict;
     }
     if (public_count > 1) return error.MultiplePublicTargets;

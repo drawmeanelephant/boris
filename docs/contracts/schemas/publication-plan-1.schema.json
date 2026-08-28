@@ -93,15 +93,22 @@
       "required": ["path"],
       "properties": { "path": { "$ref": "#/$defs/path" } }
     },
+    "static": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["dir"],
+      "properties": { "dir": { "$ref": "#/$defs/path" } }
+    },
     "projections": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["html", "sitemap", "rss", "llms"],
+      "required": ["html", "sitemap", "rss", "llms", "static"],
       "properties": {
         "html": { "const": true },
         "sitemap": { "$ref": "#/$defs/sitemap" },
         "rss": { "$ref": "#/$defs/rss" },
-        "llms": { "$ref": "#/$defs/llms" }
+        "llms": { "$ref": "#/$defs/llms" },
+        "static": { "$ref": "#/$defs/static" }
       }
     },
     "target": {

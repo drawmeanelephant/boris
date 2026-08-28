@@ -4845,7 +4845,7 @@ test "publication touches runtime vocabulary matches its draft 2020-12 schema" {
     try expectJsonStrings(defs.get("claim_node").?.object.get("properties").?.object.get("metadata").?.object.get("required").?, &.{ "claim_index", "claim_id", "status" });
     try expectJsonStrings(defs.get("limitation_node").?.object.get("properties").?.object.get("metadata").?.object.get("required").?, &.{ "limitation_index", "limitation_id", "source" });
 
-    try expectJsonStrings(defs.get("artifact_kind").?.object.get("enum").?, &.{ "html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms" });
+    try expectJsonStrings(defs.get("artifact_kind").?.object.get("enum").?, &.{ "html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms", "static-file" });
     try expectJsonStrings(defs.get("artifact_status").?.object.get("enum").?, &.{ "committed", "omitted-by-plan", "not-applicable" });
     try expectJsonStrings(defs.get("check_id").?.object.get("enum").?, &.{ "artifact-integrity", "rendered-html", "rendered-search" });
     try expectJsonStrings(defs.get("check_status").?.object.get("enum").?, &.{ "passed", "failed", "incomplete", "not-applicable" });

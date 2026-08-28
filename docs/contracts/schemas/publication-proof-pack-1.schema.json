@@ -259,7 +259,7 @@
     "artifact_by_kind": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms"],
+      "required": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms", "static-file"],
       "properties": {
         "html-page": { "type": "integer", "minimum": 0 },
         "theme-asset": { "type": "integer", "minimum": 0 },
@@ -267,7 +267,8 @@
         "rendered-search": { "type": "integer", "minimum": 0 },
         "sitemap": { "type": "integer", "minimum": 0 },
         "rss": { "type": "integer", "minimum": 0 },
-        "llms": { "type": "integer", "minimum": 0 }
+        "llms": { "type": "integer", "minimum": 0 },
+        "static-file": { "type": "integer", "minimum": 0 }
       }
     },
     "check_by_status": {

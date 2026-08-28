@@ -16,7 +16,8 @@
         "html": true,
         "sitemap": null,
         "rss": null,
-        "llms": null
+        "llms": null,
+        "static": null
       }
     }
   ],

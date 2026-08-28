@@ -2251,6 +2251,7 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*ti
         .quiet = opts.quiet,
         .input_format = opts.input_format,
         .sitemap_path = opts.sitemap_path,
+        .static_dir = opts.static_dir,
         .site_url = opts.site_url,
         .publication_location = if (opts.publication_location) |*location| location else null,
         .allow_markdown_literals = opts.allow_markdown_links,
@@ -2623,9 +2624,20 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings
 /// unique layout parent (global `--html-layout` and per-target overrides and
 /// rules), with theme roots watched whole so footer and asset edits produce
 /// events (#59).
-fn addWatchRoots(gpa: std.mem.Allocator, opts: Options, watcher: *watch.PollingWatcher) !void {
+fn addWatchRoots(io: Io, gpa: std.mem.Allocator, opts: Options, watcher: *watch.PollingWatcher) !void {
     const layout_path = opts.html_layout;
     try watcher.addRoot(opts.input_dir);
+
+    // Static passthrough directory (#804): watch it whole so edits produce
+    // rebuild events; only when it exists (a missing dir is reported by the
+    // compile itself with the full fail-loud diagnostic).
+    if (opts.static_dir) |static_dir| {
+        if (Io.Dir.cwd().statFile(io, static_dir, .{})) |_| {
+            if (!std.mem.eql(u8, static_dir, opts.input_dir)) {
+                try watcher.addRoot(static_dir);
+            }
+        } else |_| {}
+    }
 
     // Watch unique layout parent directories (global + per-target overrides).
     var layout_roots: std.StringHashMapUnmanaged(void) = .{};
@@ -2686,7 +2698,7 @@ fn runValidateWatch(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     var watcher = watch.PollingWatcher.init(gpa, io);
     defer watcher.deinit();
 
-    addWatchRoots(gpa, opts, &watcher) catch |err| {
+    addWatchRoots(io, gpa, opts, &watcher) catch |err| {
         return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
     };
 
@@ -2710,7 +2722,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         var watcher = watch.PollingWatcher.init(gpa, io);
         defer watcher.deinit();
 
-        addWatchRoots(gpa, opts, &watcher) catch |err| {
+        addWatchRoots(io, gpa, opts, &watcher) catch |err| {
             return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
         };
 
@@ -2753,6 +2765,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .jobs = opts.jobs,
             .input_format = opts.input_format,
             .sitemap_path = opts.sitemap_path,
+            .static_dir = opts.static_dir,
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
             .allow_markdown_literals = opts.allow_markdown_links,
@@ -2785,6 +2798,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .jobs = opts.jobs,
             .input_format = opts.input_format,
             .sitemap_path = opts.sitemap_path,
+            .static_dir = opts.static_dir,
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
             .allow_markdown_literals = opts.allow_markdown_links,
@@ -2853,6 +2867,11 @@ fn mapHtmlError(
         error.SitemapSiteUrlRequired,
         error.SitemapSiteUrlWithoutOutput,
         error.AmbiguousSitemapTargets,
+        error.StaticDirMissing,
+        error.StaticDirNotDirectory,
+        error.StaticSymlink,
+        error.StaticPathUnsafe,
+        error.StaticPathCollision,
         => {
             errPrint("error: invalid target configuration: {s}\n", .{@errorName(err)});
             if (targets.len > 0 and !diag.text_suppressed.load(.unordered)) {

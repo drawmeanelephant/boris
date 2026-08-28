@@ -34,7 +34,8 @@
         "html": true,
         "sitemap": {"path": "sitemap.xml"},
         "rss": null,
-        "llms": null
+        "llms": null,
+        "static": null
       }
     }
   ],
