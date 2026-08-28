@@ -1244,7 +1244,7 @@ test "publication report runtime vocabulary matches its draft 2020-12 schema" {
 
     const defs = root.get("$defs").?.object;
     try expectJsonStrings(defs.get("status").?.object.get("enum").?, &.{ "committed", "omitted-by-plan", "not-applicable" });
-    try expectJsonStrings(defs.get("kind").?.object.get("enum").?, &.{ "html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms" });
+    try expectJsonStrings(defs.get("kind").?.object.get("enum").?, &.{ "html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms", "static-file" });
     try expectJsonStrings(defs.get("check").?.object.get("properties").?.object.get("status").?.object.get("enum").?, &.{ "passed", "failed", "incomplete", "not-applicable" });
     try expectJsonStrings(defs.get("check").?.object.get("properties").?.object.get("coverage").?.object.get("enum").?, &.{ "complete", "incomplete", "not-applicable" });
     try expectJsonStrings(defs.get("inventory_binding").?.object.get("required").?, &.{ "path", "bytes", "sha256", "format", "schema_version", "target", "artifact_count" });

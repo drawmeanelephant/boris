@@ -561,7 +561,7 @@ fn renderSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const 
     var committed: usize = 0;
     var omitted: usize = 0;
     var na_artifact: usize = 0;
-    var by_kind = [_]usize{0} ** 7;
+    var by_kind = [_]usize{0} ** std.meta.fields(artifact_inventory.Kind).len;
     for (model.inventory.records) |record| {
         artifacts_total += 1;
         switch (record.status) {
@@ -619,7 +619,7 @@ fn renderSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const 
     try out.appendSlice(gpa, ",\n        \"not-applicable\": ");
     try json_out.writeUsize(out, gpa, na_artifact);
     try out.appendSlice(gpa, "\n      },\n      \"by_kind\": {\n");
-    const kind_names = [_][]const u8{ "html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms" };
+    const kind_names = [_][]const u8{ "html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms", "static-file" };
     for (kind_names, 0..) |name, index| {
         try out.appendSlice(gpa, "        ");
         try json_out.writeString(out, gpa, name);
@@ -1115,7 +1115,7 @@ fn renderHtmlSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *co
     var committed: usize = 0;
     var omitted: usize = 0;
     var na_artifact: usize = 0;
-    var by_kind = [_]usize{0} ** 7;
+    var by_kind = [_]usize{0} ** std.meta.fields(artifact_inventory.Kind).len;
     for (model.inventory.records) |record| {
         artifacts_total += 1;
         switch (record.status) {
@@ -1181,6 +1181,8 @@ fn renderHtmlSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *co
     try writeHtmlNumber(out, gpa, by_kind[5]);
     try out.appendSlice(gpa, ", llms ");
     try writeHtmlNumber(out, gpa, by_kind[6]);
+    try out.appendSlice(gpa, ", static-file ");
+    try writeHtmlNumber(out, gpa, by_kind[7]);
     try out.appendSlice(gpa, ")</td></tr>\n");
     try out.appendSlice(gpa, "        <tr><th>Checks</th><td>");
     try writeHtmlNumber(out, gpa, model.parsed_checks.checks.len);

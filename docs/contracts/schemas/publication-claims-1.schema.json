@@ -310,7 +310,7 @@
       "enum": ["committed", "omitted-by-plan", "not-applicable"]
     },
     "kind": {
-      "enum": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms"]
+      "enum": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms", "static-file"]
     },
     "limitation": {
       "type": "object",

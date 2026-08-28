@@ -20,6 +20,7 @@ The inventory covers the current HTML transaction's:
 - HTML pages;
 - theme assets;
 - content-local page assets;
+- static passthrough files (when a static directory is declared, #804);
 - rendered search index; and
 - XML sitemap when sitemap publication is selected.
 
@@ -78,7 +79,7 @@ Every first-slice record has these fields, in this order (the `dimensions`, `sem
 | Field | Meaning |
 |---|---|
 | `path` | Target-relative path using `/`; never an absolute or staging path. |
-| `kind` | Closed stable kind name such as `html-page`, `theme-asset`, `content-asset`, `rendered-search`, `sitemap`, `rss`, or `llms`. |
+| `kind` | Closed stable kind name such as `html-page`, `theme-asset`, `content-asset`, `rendered-search`, `sitemap`, `rss`, `llms`, or `static-file`. |
 | `producer` | Plain stable producing phase name, not arbitrary prose. |
 | `required` | Whether the selected publication requires this payload. |
 | `status` | First-slice records are `committed`; the vocabulary also reserves `omitted-by-plan` and `not-applicable` for later plan-aware inventories. |
@@ -105,6 +106,7 @@ The inventory is assembled from producer facts already held by the compiler:
 | Content-local asset | loaded sibling-asset inventory | newly staged asset | `content-assets` |
 | Rendered search | `search_index.output_path` | newly staged search file | `rendered-search` |
 | Sitemap | selected sitemap path | newly staged sitemap file | `sitemap` |
+| Static passthrough file | declared static directory inventory | newly staged file | `static-files` |
 
 The collector does not crawl the target directory, parse human reports, infer
 artifacts from directory names, or claim unrelated deployment-owned files.

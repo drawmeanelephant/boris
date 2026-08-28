@@ -32,6 +32,8 @@ Modules:
 - `src/compile.zig` — site loop, PageDb promote, Whiteboard, Oliver render
 - `src/assemble.zig` — closed layout plan, zero-copy splice, Atomic publish
 - `src/theme.zig` — theme root, asset inventory/copy, collision checks (F9.1)
+- `src/static_files.zig` — static passthrough directory discovery, collision
+  checks, staged copy, and stale-file scrub (#804)
 - `src/artifact_inventory.zig` — deterministic target-owned payload inventory
 - `themes/boris/layouts/main.html` — default managed theme template (exactly
   one `{{content}}`); its copied stylesheet is emitted as
@@ -480,6 +482,58 @@ fingerprinted, rendered, or audited.
 
 ---
 
+## Static passthrough directory (`--static-dir`, #804)
+
+`--static-dir DIR` declares a project-relative directory of site-owned static
+files (the profile equivalent is the per-target `static.dir` field). Its
+contents are copied **byte-identically** into the root of each selected HTML
+target: `robots.txt`, `humans.txt`, `favicon.ico`, `.well-known/…`, and any
+other file that must be served at the target root. This generalizes the
+well-known-file precedent (`--llms`, the Standard.site
+`.well-known/site.standard.publication` emission) to arbitrary author-owned
+files.
+
+Normative rules:
+
+- **Fail-loud discovery.** A missing directory (`StaticDirMissing`), a
+  directory path that is a regular file (`StaticDirNotDirectory`), any
+  symlink inside the tree — file or directory, never followed
+  (`StaticSymlink`), and any path failing the safe-relative grammar
+  (`StaticPathUnsafe`) fail the build before any page is rendered. The same
+  checks run in the zero-write `validate` preflight.
+- **Safe paths only.** Every emitted path must pass the shared
+  target-relative grammar (UTF-8, no absolute, no `.`/`..`/empty segments, no
+  backslash, no control characters) and may never enter the compiler-owned
+  `.boris-cache/` or `_boris/` namespaces. Dot-prefixed paths are allowed:
+  `.well-known/security.txt` is a first-class use case.
+- **Declared collisions.** A passthrough path that duplicates another
+  passthrough path or collides with a page route, theme asset, content-local
+  asset, the search index, or the selected sitemap path is
+  `StaticPathCollision` (exit 2, usage class). Passthrough files must be
+  declared, not incidental.
+- **Deterministic staging.** Entries sort bytewise by relative path and are
+  staged into the target transaction like theme assets, before the artifact
+  inventory is collected. Each file is declared in
+  `_boris/proof/artifacts.json` with kind `static-file`, producer
+  `static-files`, and `semantics: "static"`.
+- **Stale-file scrub.** After a successful commit, prior-inventory
+  `static-file` records that are no longer in the current set are deleted
+  from the live target. Unrecorded deployment-owned files are never touched,
+  and a prior inventory that fails strict parsing declares no static
+  ownership (no scrub; the next successful commit self-heals).
+- **Empty directory.** A declared but empty directory commits no
+  `static-file` records and is not an error.
+- **One target.** `--static-dir` is invalid with non-HTML projections and
+  with an explicit multi-target configuration, mirroring the sitemap flags.
+- **Input, not output.** Like `--input`, the static directory's location is
+  not workspace-contained; only the emitted paths are validated as above.
+
+Deliberately not claimed: copying is a plain byte copy through the staged
+transaction (not a per-file atomic replace guarantee), and passthrough files
+are not link-audited, fingerprinted per page, or rewritten in any way.
+
+---
+
 ## Testing matrix (release-relevant)
 
 | Case | Location |
@@ -501,6 +555,7 @@ fingerprinted, rendered, or audited.
 | Fixture goldens | `test/fixtures/html/` |
 | Incremental same-size corruption / truncation / reuse / full=inc / manifest determinism | `compile` P4 cache freshness test |
 | Sitemap overlay, exclusion, collisions, rollback, cleanup, and clean/incremental/parallel bytes | `sitemap` + `compile` tests |
+| Static passthrough copy/inventory/scrub, missing dir, symlinks, unsafe paths, collisions | `static_files` + `compile_static_files_test` tests |
 
 Run: `zig build test` (includes assemble + compile modules).
 

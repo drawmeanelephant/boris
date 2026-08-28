@@ -485,6 +485,20 @@ also a usage error. Validation renders sitemap bytes in memory and discards
 them; only `build` publishes the file. See the normative
 [XML sitemap contract](xml-sitemap.md).
 
+## Static passthrough flag (`--static-dir`)
+
+`--static-dir DIR` copies a project-relative directory of site-owned static
+files byte-identically into the root of the selected HTML target and declares
+each file as a `static-file` record in the target's artifact inventory
+(#804). It is an HTML-target option valid for `build`, `validate`, and
+`watch`, and is rejected with IR, RAG, Context, llms.txt, RSS, `check`, and
+`impact`, and with an explicit multi-target configuration (same rules as the
+sitemap flags). A missing directory, symlinks, unsafe paths, and collisions
+with compiler-owned outputs fail loudly with exit 2 before publication; see
+the normative [HTML output contract](html-output.md#static-passthrough-directory---static-dir-804).
+The declared-profile equivalent is the per-target `static.dir` field
+([publication profile](publication-profile.md)).
+
 ## Serialization profile (`--target-profile`)
 
 `--target-profile NAME=PROFILE` selects Oliver's serializer profile for one

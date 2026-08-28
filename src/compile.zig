@@ -38,6 +38,7 @@ const nostr_emit = @import("nostr_emit.zig");
 const link_audit = @import("link_audit.zig");
 const publication_location = @import("publication_location.zig");
 const artifact_inventory = @import("artifact_inventory.zig");
+const static_files = @import("static_files.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
 const publication_touches = @import("publication_touches.zig");
@@ -293,6 +294,10 @@ pub const CompileOptions = struct {
     output_profile: render.OutputProfile = .html,
     /// Target-root-relative sitemap output path; null disables the projection.
     sitemap_path: ?[]const u8 = null,
+    /// Project-relative static passthrough directory (#804). When set, its
+    /// contents are copied byte-identically into the target root and declared
+    /// as `static-file` inventory records. Null disables the projection.
+    static_dir: ?[]const u8 = null,
     /// Strict public HTTP(S) base URL, required when `sitemap_path` is set.
     site_url: ?[]const u8 = null,
     /// Normalized publication identity used to audit Pages base paths and
@@ -1317,7 +1322,10 @@ pub fn compileHtmlSiteMulti(
                 err == error.DuplicateSelector or err == error.LayoutSelectionFailed or
                 err == error.InvalidSiteUrl or err == error.InvalidSitemapPath or
                 err == error.SitemapOutputCollision or err == error.SitemapSiteUrlRequired or
-                err == error.SitemapSiteUrlWithoutOutput or err == error.AmbiguousSitemapTargets)
+                err == error.SitemapSiteUrlWithoutOutput or err == error.AmbiguousSitemapTargets or
+                err == error.StaticDirMissing or err == error.StaticDirNotDirectory or
+                err == error.StaticSymlink or err == error.StaticPathUnsafe or
+                err == error.StaticPathCollision)
             {
                 any_usage_failed = true;
             } else {
@@ -2288,6 +2296,47 @@ fn discoverContentAssets(
     return content_assets;
 }
 
+/// Static passthrough discovery (#804): load the declared directory's file
+/// inventory and fail loudly on missing dir, symlinks, unsafe paths, or any
+/// collision with compiler-owned output paths. Runs before any page render so
+/// validation (`validation_only`) covers the same prepublication boundary.
+fn discoverStaticFiles(
+    io: Io,
+    gpa: std.mem.Allocator,
+    cwd: Io.Dir,
+    db: *const PageDb,
+    options: CompileOptions,
+    theme_bundle: *const theme_mod.ThemeBundle,
+    content_assets: *const content_asset.SiteAssetInventory,
+) static_files.Error![]static_files.Entry {
+    const dir_rel = options.static_dir orelse return &.{};
+    const entries = try static_files.loadInventory(io, gpa, cwd, dir_rel);
+    errdefer static_files.freeInventory(gpa, entries);
+
+    var page_outs: std.ArrayList([]const u8) = .empty;
+    defer page_outs.deinit(gpa);
+    try page_outs.ensureTotalCapacity(gpa, db.len());
+    for (db.items()) |p| try page_outs.append(gpa, p.output_path);
+
+    var theme_outs: std.ArrayList([]const u8) = .empty;
+    defer theme_outs.deinit(gpa);
+    try theme_outs.ensureTotalCapacity(gpa, theme_bundle.assets.len);
+    for (theme_bundle.assets) |a| try theme_outs.append(gpa, a.rel_path);
+
+    const content_outs = try content_assets.collectOutputPaths(gpa);
+    defer gpa.free(content_outs);
+
+    try static_files.checkCollisions(
+        entries,
+        page_outs.items,
+        theme_outs.items,
+        content_outs,
+        search_index.output_path,
+        options.sitemap_path,
+    );
+    return entries;
+}
+
 fn prepareThemeMaterial(
     gpa: std.mem.Allocator,
     db: *const PageDb,
@@ -3133,12 +3182,13 @@ fn writeInventoryOverlay(
     dist_dir: Io.Dir,
     theme_bundle: *const theme_mod.ThemeBundle,
     content_assets: *const content_asset.SiteAssetInventory,
+    static_entries: []const static_files.Entry,
 ) !void {
     var inventory_specs: std.ArrayList(artifact_inventory.Spec) = .empty;
     defer inventory_specs.deinit(gpa);
     try inventory_specs.ensureTotalCapacity(
         gpa,
-        db.len() + theme_bundle.assets.len + content_assets.pages.len + 2,
+        db.len() + theme_bundle.assets.len + content_assets.pages.len + static_entries.len + 2,
     );
     for (db.items()) |page| {
         try inventory_specs.append(gpa, .{
@@ -3185,6 +3235,14 @@ fn writeInventoryOverlay(
             .producer = "sitemap",
             .required = true,
             .format_version = "1",
+        });
+    }
+    for (static_entries) |entry| {
+        try inventory_specs.append(gpa, .{
+            .path = entry.rel_path,
+            .kind = .static_file,
+            .producer = "static-files",
+            .required = true,
         });
     }
     if (options.test_fail_before_inventory_write) return error.TestInjectedInventoryWriteFailure;
@@ -3436,6 +3494,8 @@ fn compilePagesInner(
     defer theme_bundle.deinit();
     var content_assets = try discoverContentAssets(io, gpa, content_dir, db, options, &theme_bundle);
     defer content_assets.deinit();
+    const static_entries = try discoverStaticFiles(io, gpa, cwd, db, options, &theme_bundle, &content_assets);
+    defer static_files.freeInventory(gpa, static_entries);
     const page_theme_material = try prepareThemeMaterial(gpa, db, layouts_by_path, &theme_bundle, page_sel_paths);
     defer gpa.free(page_theme_material);
     const theme_root = theme_mod.themeRootFromLayoutPath(options.layout_path) orelse "";
@@ -3499,6 +3559,9 @@ fn compilePagesInner(
     // Assets are target-owned members of the same staging transaction.
     try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
     try content_asset.copyAssetsToOutput(io, stage_dir, &content_assets);
+    if (static_entries.len > 0) {
+        try static_files.copyToStage(io, cwd, stage_dir, options.static_dir.?, static_entries);
+    }
 
     var cache_state = loadIncrementalCacheState(io, gpa, dist_dir, options.incremental);
     defer cache_state.deinit(gpa);
@@ -3566,9 +3629,17 @@ fn compilePagesInner(
     var site_overlay = try writeSearchSitemapAndStandardSite(io, gpa, db, options, stage_dir, dist_dir, prior_sitemap.marker_present);
     defer site_overlay.deinit(gpa);
     try auditOutputLinks(io, gpa, options, stage_dir, dist_dir, site_overlay.live_page_paths, &theme_bundle, &content_assets);
-    try writeInventoryOverlay(io, gpa, db, options, stage_dir, dist_dir, &theme_bundle, &content_assets);
+    try writeInventoryOverlay(io, gpa, db, options, stage_dir, dist_dir, &theme_bundle, &content_assets, static_entries);
+
+    // Prior static-file ownership is read from the committed inventory before
+    // the swap so stale passthrough files can be scrubbed after a successful
+    // commit (#804). An unreadable inventory declares no static ownership.
+    const prior_static_paths = try static_files.readPriorStaticPaths(io, gpa, dist_dir, options.target_name);
+    defer static_files.freePriorStaticPaths(gpa, prior_static_paths);
 
     try commitStagedTree(io, gpa, cwd, stage_dir, dist_dir, prior_sitemap.path, options.sitemap_path, options.dist_dir);
+
+    static_files.scrubStaleStaticFiles(io, dist_dir, prior_static_paths, static_entries);
 
     // Standard.site verification evidence, derived from the exact committed
     // bytes and written post-commit like the other proof artifacts.
@@ -3643,6 +3714,7 @@ test {
     _ = @import("compile_multi_target_test.zig");
     _ = @import("compile_search_sitemap_test.zig");
     _ = @import("compile_assets_themes_test.zig");
+    _ = @import("compile_static_files_test.zig");
     _ = @import("compile_publication_evidence_test.zig");
     _ = @import("compile_standard_site_test.zig");
 }

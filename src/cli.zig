@@ -223,6 +223,10 @@ pub const Options = struct {
     rss_limit: usize = 20,
     /// Target-root-relative sitemap path when HTML sitemap publication is enabled.
     sitemap_path: ?[]const u8 = null,
+    /// Project-relative static passthrough directory (#804). When set, its
+    /// contents are copied byte-identically into the selected HTML target
+    /// root and declared as `static-file` inventory records.
+    static_dir: ?[]const u8 = null,
     /// HTML output directory. Set for HTML mode only (default `dist`).
     html_dir: ?[]const u8 = null,
     /// Global HTML layout template (default managed Boris theme).
@@ -526,6 +530,7 @@ const ParseState = struct {
     llms_path: []const u8 = default_llms_path,
     rss_path: []const u8 = default_rss_path,
     sitemap_path: []const u8 = default_sitemap_path,
+    static_dir: ?[]const u8 = null,
     html_dir: []const u8 = default_html_dir,
     html_layout: []const u8 = default_html_layout,
     theme_root: ?[]const u8 = null,
@@ -575,6 +580,7 @@ const ParseState = struct {
     saw_rss_limit: bool = false,
     saw_sitemap: bool = false,
     saw_sitemap_path: bool = false,
+    saw_static_dir: bool = false,
     saw_html: bool = false,
     saw_html_dir: bool = false,
     saw_html_layout: bool = false,
@@ -685,11 +691,15 @@ const ParseState = struct {
         return st.saw_sitemap or st.saw_sitemap_path;
     }
 
+    fn wantsStatic(st: *const ParseState) bool {
+        return st.saw_static_dir;
+    }
+
     /// Explicit HTML selectors (not the bare default).
     fn explicitHtml(st: *const ParseState) bool {
         return st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or
             st.saw_html_layout or st.hasTargetLayouts() or st.hasTargetProfiles() or
-            st.saw_theme or st.hasLayoutRules() or st.wantsSitemap();
+            st.saw_theme or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic();
     }
 
     fn wantsRag(st: *const ParseState) bool {
@@ -823,6 +833,7 @@ fn htmlSelectorToken(st: *const ParseState) ?[]const u8 {
     if (st.hasTargetProfiles()) return "--target-profile";
     if (st.hasLayoutRules()) return "--layout-rule";
     if (st.wantsSitemap()) return if (st.saw_sitemap) "--sitemap" else "--sitemap-path";
+    if (st.wantsStatic()) return "--static-dir";
     return null;
 }
 
@@ -1390,6 +1401,13 @@ fn parsePathFlags(
         return true;
     }
 
+    if (std.mem.eql(u8, a, "--static-dir") or std.mem.startsWith(u8, a, "--static-dir=")) {
+        try markSaw(&st.saw_static_dir);
+        st.static_dir = try takeValue(args, i, a, "--static-dir");
+        if (st.static_dir.?.len == 0) return failInvalidValue(st, "--static-dir", "directory path is empty");
+        return true;
+    }
+
     if (std.mem.eql(u8, a, "--site-url") or std.mem.startsWith(u8, a, "--site-url=")) {
         try markSaw(&st.saw_site_url);
         st.site_url = try takeValue(args, i, a, "--site-url");
@@ -1519,7 +1537,7 @@ fn buildPlanOptions(st: *ParseState) ParseError!Options {
     // declaration JSON document, and it runs no compiler phase, so the
     // machine-readable timing report has nowhere to go without corrupting
     // the plan stream.
-    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
+    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
         st.saw_format or st.saw_report or st.saw_watch or st.saw_timings)
     {
@@ -1550,7 +1568,7 @@ fn buildNostrPlanOptions(st: *ParseState) ParseError!Options {
     // only configuration source. This command does scan content, so
     // `--input`/`--cooklang`/`--textile` overrides stay meaningful, but
     // stdout belongs to the single plan document — hence no `--timings`.
-    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or st.wantsSitemap() or
+    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
         st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence)
     {
@@ -1580,7 +1598,7 @@ fn buildNostrSignOptions(st: *ParseState) ParseError!Options {
     // reserved for the signed-event bundle when --out is absent.
     if (st.nostr_plan_path == null) return error.MissingValue;
     if (!st.nostr_key_stdin) return error.MissingValue;
-    if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
+    if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
         st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
@@ -1614,7 +1632,7 @@ fn buildNostrPublishOptions(st: *ParseState) ParseError!Options {
     // absent.
     if (st.nostr_plan_path == null) return error.MissingValue;
     if (st.nostr_bundle_path == null) return error.MissingValue;
-    if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
+    if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
         st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
@@ -1646,7 +1664,7 @@ fn buildInitOptions(st: *ParseState) ParseError!Options {
     if (st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
         st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
-        st.saw_profile or st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_out or st.saw_rag_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
+        st.saw_profile or st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_out or st.saw_rag_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_static_dir)
     {
         return error.ConflictingFlags;
     }
@@ -1676,7 +1694,7 @@ fn buildRecipeScaleOptions(st: *ParseState) ParseError!Options {
     // The view owns stdout. Projection selectors, watch/HTML, analysis,
     // and `--timings` would either execute another path or corrupt the
     // JSON stream.
-    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or
+    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
         st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile)
     {
@@ -1708,7 +1726,7 @@ fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
     // `--did`; `login`/`logout`/`smoke` require `--did` or `--handle`;
     // `sessions` forbids both.
     if (st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or
-        st.wantsSitemap() or st.wantsRag() or st.saw_no_rag or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
+        st.wantsStatic() or st.wantsSitemap() or st.wantsRag() or st.saw_no_rag or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
         st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
         st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_rag_dir or st.saw_scope or st.saw_split_size or st.saw_bundles_only or st.saw_complete or
         st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_llms_path or st.saw_rss_path or st.saw_sitemap_path or st.saw_context_dir)
@@ -1898,6 +1916,11 @@ fn validateProjectionConflicts(st: *ParseState) ParseError!void {
     if (wants_rss and (st.site_url == null or st.rss_title == null or st.rss_description == null)) return error.RSSMetadataRequired;
     if (wants_sitemap and st.site_url == null) return error.SitemapSiteUrlRequired;
     if (wants_sitemap and (wants_rag or wants_ir or wants_context or wants_llms or wants_rss)) return error.ConflictingFlags;
+    // Static passthrough is an HTML-target projection (#804): it must not
+    // select a machine projection and applies to exactly one target.
+    const wants_static = st.wantsStatic();
+    if (wants_static and (wants_rag or wants_ir or wants_context or wants_llms or wants_rss)) return error.ConflictingFlags;
+    if (wants_static and st.targets.items.len > 1) return error.ConflictingFlags;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
     // When explicit --out is the collision, name the pair (#764).
     if (explicit_html and (wants_rag or wants_context or st.saw_out)) {
@@ -2138,6 +2161,7 @@ fn buildOptionsForMode(
             o.report_path = if (analysis_command) null else st.analysis_report;
             o.fail_on_unreferenced = st.fail_on_unreferenced;
             o.sitemap_path = if (st.wantsSitemap()) st.sitemap_path else null;
+            o.static_dir = if (st.wantsStatic()) st.static_dir else null;
             o.site_url = st.site_url;
             o.publication_location = st.publication_location;
             o.allow_markdown_links = st.allow_markdown_links;
@@ -2270,6 +2294,8 @@ pub fn printUsage() void {
         \\  --rss-path PATH     RSS output path (implies --rss)
         \\  --sitemap           Add deterministic sitemap.xml to the HTML target
         \\  --sitemap-path PATH Target-root-relative sitemap path (implies --sitemap)
+        \\  --static-dir DIR    Copy a directory of static files byte-identically into
+        \\                      the HTML target root (robots.txt, .well-known/; #804)
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
@@ -2329,6 +2355,8 @@ pub fn printUsage() void {
         \\HTML artifacts (success; Oliver + layout splice):
         \\  <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
         \\  <target-dir>/sitemap.xml  (with --sitemap; path configurable)
+        \\  <target-dir>/**  (with --static-dir; byte-identical passthrough files,
+        \\                   declared in _boris/proof/artifacts.json)
         \\  <target-dir>/.boris-cache/manifest.json  (with --incremental / --watch)
         \\  Staging: <target-dir>.boris-stage (ephemeral; committed only on full target success)
         \\
@@ -2355,6 +2383,7 @@ pub fn printUsage() void {
         \\  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, validate, check, or impact
         \\  --sitemap / --sitemap-path without --site-url, with non-HTML modes,
         \\  or with multiple targets sharing one ambiguous public URL
+        \\  --static-dir with non-HTML modes or multiple targets
         \\  explicit --out with --rag or --rag-dir
         \\  --html / --html-dir / --html-layout / --theme / --target / --target-layout /
         \\  --target-profile / --layout-rule with --rag, --rag-dir, --context, or explicit --out
@@ -2362,7 +2391,7 @@ pub fn printUsage() void {
         \\  --theme with --html-layout (both select the one global layout)
         \\  check / impact with any HTML selector (--html, --html-dir,
         \\  --html-layout, --theme, --target, --target-layout, --target-profile,
-        \\  --layout-rule, --sitemap / --sitemap-path)
+        \\  --layout-rule, --sitemap / --sitemap-path, --static-dir)
         \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
         \\  validate with non-HTML exports, --incremental, --jobs, --format, or --out
         \\  validate --watch with --html-dir, --target, --serve/--port, --incremental, --jobs, or --format
@@ -2613,6 +2642,7 @@ const never_blamed_flags = [_][]const u8{
     "--rss",
     "--sitemap",
     "--allow-markdown-links",
+    "--static-dir",
 };
 
 /// Find a likely "bad" argv token for error messages (best-effort).

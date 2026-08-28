@@ -128,6 +128,8 @@ const modules = [_]Module{
         .source = @embedFile("sitemap.zig"),
         .raw_trusted_allowed = 1,
     },
+    .{ .name = "static_files.zig", .class = .other },
+    .{ .name = "compile_static_files_test.zig", .class = .other },
     .{ .name = "context.zig", .class = .{ .emitter = .{
         .encoder = .hand_rolled,
         .note = "context bundle YAML; audited by emitter_hostile_test, not yet on the sink",

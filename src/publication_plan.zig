@@ -221,6 +221,14 @@ fn renderProjections(out: *std.ArrayList(u8), gpa: std.mem.Allocator, target: pu
     } else {
         try json_out.writeNull(out, gpa);
     }
+    try out.appendSlice(gpa, ",\n        \"static\": ");
+    if (target.static) |static| {
+        try out.appendSlice(gpa, "{\"dir\": ");
+        try json_out.writeString(out, gpa, static.dir);
+        try out.appendSlice(gpa, "}");
+    } else {
+        try json_out.writeNull(out, gpa);
+    }
     try out.appendSlice(gpa, "\n      }");
 }
 

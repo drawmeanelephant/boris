@@ -51,6 +51,7 @@ pub const Kind = enum {
     sitemap,
     rss,
     llms,
+    static_file,
 
     pub fn name(self: Kind) []const u8 {
         return switch (self) {
@@ -61,6 +62,7 @@ pub const Kind = enum {
             .sitemap => "sitemap",
             .rss => "rss",
             .llms => "llms",
+            .static_file => "static-file",
         };
     }
 
@@ -73,6 +75,7 @@ pub const Kind = enum {
             .sitemap => "sitemap",
             .rss => "rss",
             .llms => "llms",
+            .static_file => "static-files",
         };
     }
 
@@ -85,6 +88,8 @@ pub const Kind = enum {
             .{ "sitemap", Kind.sitemap },
             .{ "rss", Kind.rss },
             .{ "llms", Kind.llms },
+            .{ "static-file", Kind.static_file },
+            .{ "static-file", Kind.static_file },
         }) |entry| {
             if (std.mem.eql(u8, value, entry[0])) return entry[1];
         }
@@ -692,7 +697,7 @@ pub fn collect(
             .format_version = spec.format_version,
             .dimensions = image_dimensions.dimensions(spec.path, bytes),
             .semantics = switch (spec.kind) {
-                .theme_asset => .static,
+                .theme_asset, .static_file => .static,
                 .content_asset => .content_reference,
                 else => null,
             },
@@ -749,7 +754,7 @@ pub fn collectFromPayloads(
             .format_version = spec.format_version,
             .dimensions = image_dimensions.dimensions(spec.path, item.bytes),
             .semantics = switch (spec.kind) {
-                .theme_asset => .static,
+                .theme_asset, .static_file => .static,
                 .content_asset => .content_reference,
                 else => null,
             },
@@ -1157,6 +1162,7 @@ test "published artifact schema matches the fixed runtime vocabulary" {
         "sitemap",
         "rss",
         "llms",
+        "static-file",
     });
     try expectStringArray(properties.get("producer").?.object.get("enum").?, &[_][]const u8{
         "html-render",
@@ -1166,6 +1172,7 @@ test "published artifact schema matches the fixed runtime vocabulary" {
         "sitemap",
         "rss",
         "llms",
+        "static-files",
     });
     try expectStringArray(properties.get("status").?.object.get("enum").?, &[_][]const u8{
         "committed",
