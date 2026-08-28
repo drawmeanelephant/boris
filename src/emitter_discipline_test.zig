@@ -360,6 +360,16 @@ const modules = [_]Module{
     .{ .name = "compile_stage.zig", .class = .other },
     .{ .name = "compile_cache.zig", .class = .other },
     .{ .name = "compile_heading.zig", .class = .other },
+    .{ .name = "compile_test_kit.zig", .class = .other },
+    .{ .name = "compile_site_core_test.zig", .class = .other },
+    .{ .name = "compile_failures_parallel_test.zig", .class = .other },
+    .{ .name = "compile_wikilinks_includes_test.zig", .class = .other },
+    .{ .name = "compile_incremental_test.zig", .class = .other },
+    .{ .name = "compile_multi_target_test.zig", .class = .other },
+    .{ .name = "compile_search_sitemap_test.zig", .class = .other },
+    .{ .name = "compile_assets_themes_test.zig", .class = .other },
+    .{ .name = "compile_publication_evidence_test.zig", .class = .other },
+    .{ .name = "compile_standard_site_test.zig", .class = .other },
 };
 
 /// Formatting calls that write caller-supplied bytes with no encoder between.
