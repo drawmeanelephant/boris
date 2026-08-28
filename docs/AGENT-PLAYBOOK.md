@@ -53,11 +53,13 @@ not overrule a stress failure.
 
 ## Branch and recovery operations
 
-During the active judging window, bring `afterparty` up to date before branching:
+Bring the integration line declared by [`docs/STATUS.md`](STATUS.md) up to date
+before branching (the block below uses `main`; if the banner declares another
+line, use that):
 
 ```bash
 git fetch origin
-git checkout afterparty
+git checkout main
 git pull --ff-only
 git checkout -b codex/short-topic
 ```
@@ -79,9 +81,10 @@ unrelated user changes.
 Until hosting enforcement exists, `AGENTS.md` remains binding. When available,
 protect `refs/heads/main` with PR-required direct-push blocking, no force pushes,
 no deletion, stale-review dismissal, zero required approvals while solo, stable
-CI checks, and narrowly allowed admin bootstrap bypass. During judging, apply the
-same controls to `refs/heads/afterparty`, prevent its deletion, and remove or
-revise the temporary rule after its deliberate PR into `main`.
+CI checks, and narrowly allowed admin bootstrap bypass. If the STATUS.md banner
+declares a frozen or retained staging line, apply the same controls to that ref,
+prevent its deletion, and remove or revise the temporary rule when the banner
+retires it.
 
 ## Supporting repository map
 

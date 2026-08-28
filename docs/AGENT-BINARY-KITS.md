@@ -43,3 +43,7 @@ These are native executables. A kit built on macOS ARM64 is not a Linux or
 x86-64 kit; send the manifest with the archive so the recipient can verify the
 target before execution. The kit supplements a source checkout and does not
 replace it.
+
+To use a kit as an onboarding evaluation rather than a work handoff — the
+standard cold-start experiment with its neutral prompt and detector reading —
+see [`AGENT-COLD-START.md`](AGENT-COLD-START.md).

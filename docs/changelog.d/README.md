@@ -8,7 +8,9 @@ conflicting on the release notes.
 
 1. Copy [`TEMPLATE.md`](TEMPLATE.md) to
    `<pr-number>-<short-kebab-case-summary>.md`, for example
-   `73-cache-cleanup.md`. The PR number makes the name unique.
+   `73-cache-cleanup.md`. The PR number makes the name unique. If you draft
+   the fragment before opening the PR, rename the file to the actual PR
+   number when the PR exists — release assembly sorts by numeric filename.
 2. Keep exactly one of the template's category headings: `Added`, `Changed`,
    `Fixed`, `Security`, or `Docs`.
 3. Write one short, user-facing or contract-visible bullet. Include at least one
