@@ -2362,11 +2362,11 @@ fn renderAnalysisHuman(
     try appendFmt(&out, gpa, "source endpoints: {d}\n", .{report.summary.source_endpoints});
     const ec = report.summary.edge_counts;
     try appendFmt(&out, gpa, "edge counts (incoming/outgoing): pages parent {d}/{d}, include {d}/{d}, reference {d}/{d}; sources parent {d}/{d}, include {d}/{d}, reference {d}/{d}\n", .{
-        ec.incoming.pages.parent,  ec.outgoing.pages.parent,
-        ec.incoming.pages.include, ec.outgoing.pages.include,
-        ec.incoming.pages.reference, ec.outgoing.pages.reference,
-        ec.incoming.sources.parent,  ec.outgoing.sources.parent,
-        ec.incoming.sources.include, ec.outgoing.sources.include,
+        ec.incoming.pages.parent,      ec.outgoing.pages.parent,
+        ec.incoming.pages.include,     ec.outgoing.pages.include,
+        ec.incoming.pages.reference,   ec.outgoing.pages.reference,
+        ec.incoming.sources.parent,    ec.outgoing.sources.parent,
+        ec.incoming.sources.include,   ec.outgoing.sources.include,
         ec.incoming.sources.reference, ec.outgoing.sources.reference,
     });
     try appendFmt(&out, gpa, "unreferenced pages: {d}\nhotspots: {d}\n", .{ report.summary.unreferenced_pages, report.summary.hotspots });
