@@ -28,7 +28,7 @@ under `dist/` — the default target, not the only one.
 |---|---|---:|
 | `build` | Compile HTML or one selected machine/publication projection | Yes, to the selected output |
 | `validate` | Run the HTML compiler preflight without publishing | No |
-| `watch` | Build HTML, then watch for changes and rebuild | Yes |
+| `watch` | Build HTML, then watch for changes and rebuild; `--serve` adds a loopback live preview with auto-reload | Yes |
 | `check` | Report graph and dependency health after validation | No |
 | `impact ID` | Report transitive dependents of a page or source endpoint | No |
 | `plan --profile PATH` | Normalize a publication profile without publishing | No |
@@ -83,6 +83,9 @@ dependents. Neither command checks layout/theme rendering or external URLs.
 | `--layout-rule TARGET SELECTOR PATH` | — | Select layouts by `id:`, `role:`, or `glob:` |
 | `--incremental` | off | Reuse the HTML cache where safe |
 | `--watch` | off | Build and watch; equivalent to watch-compatible build behavior |
+| `--serve` | off | Watch-only: serve the built target on loopback and reload browsers after each successful rebuild |
+| `--port N` | `8090` | Watch-only: loopback port for `--serve` (`0` selects an ephemeral port) |
+| `--watch-json` | off | Watch-only: emit NDJSON build events (including structured failure diagnostics) on stderr instead of prose output |
 | `--jobs N`, `-j N` | `1` | Bound page-render workers; maximum `64` |
 | `--textile` | off | Discover `.textile` input in addition to the normal Markdown path |
 

@@ -62,7 +62,8 @@ surface, not a second product.
   normal pages too.
 - Closed, explicit frontmatter rather than unrestricted YAML or executable MDX.
 - Authoritative `boris validate` preflight with no generated output or evidence.
-- Incremental builds, watch mode, isolated targets, and bounded page workers.
+- Incremental builds, watch mode with a loopback live-preview server
+  (`boris watch --serve`), isolated targets, and bounded page workers.
 - JSON IR with typed dependency edges and reverse indexes.
 - Deterministic RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports from the same tree.
 - Deterministic staged XML sitemap for one public HTML target.
@@ -161,6 +162,8 @@ Useful first commands:
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
 ./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
 ./zig-out/bin/boris validate --quiet             # HTML source/config preflight; no output
+./zig-out/bin/boris watch --serve               # rebuild on save; live preview at http://127.0.0.1:8090/
+./zig-out/bin/boris watch --watch-json          # NDJSON build events: the machine feedback loop
 ./zig-out/bin/boris check                      # graph-health report
 ./zig-out/bin/boris impact getting-started    # dependency impact report
 ./zig-out/bin/boris plan --profile boris.json  # normalized publication declaration
@@ -259,6 +262,7 @@ larger than the target fails without replacing an existing export. See the
 | --- | --- | --- |
 | `boris` | HTML under `dist/` | Default static-site target |
 | `boris validate` | None | Compiler-authoritative HTML source/configuration preflight |
+| `boris watch --serve` | Built HTML target plus a loopback preview server with auto-reload | Live feedback while authoring or editing |
 | `boris --sitemap --site-url URL` | HTML plus `sitemap.xml` | Crawler URL discovery |
 | `boris --out .boris` | JSON IR | Build tools and inspection |
 | `boris --rag` | Working-context packs | LLM site authoring (bounded uploads) |
