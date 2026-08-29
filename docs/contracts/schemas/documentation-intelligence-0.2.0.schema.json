@@ -10,12 +10,13 @@
     "input": {"type": "string"},
     "summary": {
       "type": "object",
-      "required": ["pages", "roots", "satellites", "sourceEndpoints", "unreferencedPages", "hotspots"],
+      "required": ["pages", "roots", "satellites", "sourceEndpoints", "edgeCounts", "unreferencedPages", "hotspots"],
       "properties": {
         "pages": {"type": "integer", "minimum": 0},
         "roots": {"type": "integer", "minimum": 0},
         "satellites": {"type": "integer", "minimum": 0},
         "sourceEndpoints": {"type": "integer", "minimum": 0},
+        "edgeCounts": {"$ref": "#/$defs/edgeCounts"},
         "unreferencedPages": {"type": "integer", "minimum": 0},
         "hotspots": {"type": "integer", "minimum": 0}
       },
@@ -31,6 +32,34 @@
     "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
   },
   "$defs": {
+    "edgeCounts": {
+      "type": "object",
+      "required": ["incoming", "outgoing"],
+      "properties": {
+        "incoming": {"$ref": "#/$defs/directionEdgeCounts"},
+        "outgoing": {"$ref": "#/$defs/directionEdgeCounts"}
+      },
+      "additionalProperties": false
+    },
+    "directionEdgeCounts": {
+      "type": "object",
+      "required": ["pages", "sources"],
+      "properties": {
+        "pages": {"$ref": "#/$defs/edgeKindCounts"},
+        "sources": {"$ref": "#/$defs/edgeKindCounts"}
+      },
+      "additionalProperties": false
+    },
+    "edgeKindCounts": {
+      "type": "object",
+      "required": ["parent", "include", "reference"],
+      "properties": {
+        "parent": {"type": "integer", "minimum": 0},
+        "include": {"type": "integer", "minimum": 0},
+        "reference": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
     "endpoint": {
       "type": "object",
       "required": ["type", "value"],

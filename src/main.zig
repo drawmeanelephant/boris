@@ -2359,7 +2359,17 @@ fn renderAnalysisHuman(
     var out: std.ArrayList(u8) = .empty;
     try appendFmt(&out, gpa, "Documentation Intelligence ({s})\n", .{@tagName(opts.command)});
     try appendFmt(&out, gpa, "pages: {d} (roots {d}, satellites {d})\n", .{ report.summary.pages, report.summary.roots, report.summary.satellites });
-    try appendFmt(&out, gpa, "source endpoints: {d}\nunreferenced pages: {d}\nhotspots: {d}\n", .{ report.summary.source_endpoints, report.summary.unreferenced_pages, report.summary.hotspots });
+    try appendFmt(&out, gpa, "source endpoints: {d}\n", .{report.summary.source_endpoints});
+    const ec = report.summary.edge_counts;
+    try appendFmt(&out, gpa, "edge counts (incoming/outgoing): pages parent {d}/{d}, include {d}/{d}, reference {d}/{d}; sources parent {d}/{d}, include {d}/{d}, reference {d}/{d}\n", .{
+        ec.incoming.pages.parent,  ec.outgoing.pages.parent,
+        ec.incoming.pages.include, ec.outgoing.pages.include,
+        ec.incoming.pages.reference, ec.outgoing.pages.reference,
+        ec.incoming.sources.parent,  ec.outgoing.sources.parent,
+        ec.incoming.sources.include, ec.outgoing.sources.include,
+        ec.incoming.sources.reference, ec.outgoing.sources.reference,
+    });
+    try appendFmt(&out, gpa, "unreferenced pages: {d}\nhotspots: {d}\n", .{ report.summary.unreferenced_pages, report.summary.hotspots });
     if (opts.command == .impact) {
         try appendFmt(&out, gpa, "impact ({s}):\n", .{opts.impact_id.?});
         for (report.impact.items) |endpoint| try appendFmt(&out, gpa, "  {s}: {s}\n", .{ @tagName(endpoint.type), endpoint.value });
@@ -2412,6 +2422,31 @@ fn renderAnalysisJson(
     try json_out.writeUsize(&out, gpa, report.summary.satellites);
     try w.writeAll(",\n    \"sourceEndpoints\": ");
     try json_out.writeUsize(&out, gpa, report.summary.source_endpoints);
+    try w.writeAll(",\n    \"edgeCounts\": {\n      \"incoming\": {\n        \"pages\": {\"parent\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.incoming.pages.parent);
+    try w.writeAll(", \"include\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.incoming.pages.include);
+    try w.writeAll(", \"reference\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.incoming.pages.reference);
+    try w.writeAll("},\n        \"sources\": {\"parent\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.incoming.sources.parent);
+    try w.writeAll(", \"include\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.incoming.sources.include);
+    try w.writeAll(", \"reference\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.incoming.sources.reference);
+    try w.writeAll("}\n      },\n      \"outgoing\": {\n        \"pages\": {\"parent\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.outgoing.pages.parent);
+    try w.writeAll(", \"include\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.outgoing.pages.include);
+    try w.writeAll(", \"reference\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.outgoing.pages.reference);
+    try w.writeAll("},\n        \"sources\": {\"parent\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.outgoing.sources.parent);
+    try w.writeAll(", \"include\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.outgoing.sources.include);
+    try w.writeAll(", \"reference\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.edge_counts.outgoing.sources.reference);
+    try w.writeAll("}\n      }\n    }");
     try w.writeAll(",\n    \"unreferencedPages\": ");
     try json_out.writeUsize(&out, gpa, report.summary.unreferenced_pages);
     try w.writeAll(",\n    \"hotspots\": ");

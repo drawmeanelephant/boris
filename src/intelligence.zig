@@ -51,11 +51,28 @@ pub const Finding = struct {
     count: usize = 0,
 };
 
+pub const EdgeKindCounts = struct {
+    parent: usize = 0,
+    include: usize = 0,
+    reference: usize = 0,
+};
+
+pub const DirectionEdgeCounts = struct {
+    pages: EdgeKindCounts = .{},
+    sources: EdgeKindCounts = .{},
+};
+
+pub const EdgeCounts = struct {
+    incoming: DirectionEdgeCounts = .{},
+    outgoing: DirectionEdgeCounts = .{},
+};
+
 pub const Summary = struct {
     pages: usize = 0,
     roots: usize = 0,
     satellites: usize = 0,
     source_endpoints: usize = 0,
+    edge_counts: EdgeCounts = .{},
     unreferenced_pages: usize = 0,
     hotspots: usize = 0,
 };
@@ -116,6 +133,14 @@ pub fn analyze(
             const gop = try known_sources.getOrPut(allocator, edge.to.value);
             if (!gop.found_existing) gop.value_ptr.* = {};
         }
+        switch (edge.to.type) {
+            .page => bumpKind(&report.summary.edge_counts.incoming.pages, edge.kind),
+            .source => bumpKind(&report.summary.edge_counts.incoming.sources, edge.kind),
+        }
+        switch (edge.from.type) {
+            .page => bumpKind(&report.summary.edge_counts.outgoing.pages, edge.kind),
+            .source => bumpKind(&report.summary.edge_counts.outgoing.sources, edge.kind),
+        }
     }
     report.summary.source_endpoints = known_sources.count();
 
@@ -172,6 +197,18 @@ pub fn analyze(
 }
 
 const Incoming = struct { endpoint: Endpoint, count: usize };
+
+/// The kind set is closed by the contract (`parent`, `include`, `reference`);
+/// any other kind is a caller bug and counts as nothing.
+fn bumpKind(counts: *EdgeKindCounts, kind: []const u8) void {
+    if (std.mem.eql(u8, kind, "parent")) {
+        counts.parent += 1;
+    } else if (std.mem.eql(u8, kind, "include")) {
+        counts.include += 1;
+    } else if (std.mem.eql(u8, kind, "reference")) {
+        counts.reference += 1;
+    }
+}
 
 fn findIncoming(items: []const Incoming, endpoint: Endpoint) ?usize {
     for (items, 0..) |item, index| {
@@ -231,6 +268,34 @@ test "analysis distinguishes parent edges from reference edges" {
     var report = try analyze(std.testing.allocator, &pages, &edges, .{});
     defer report.deinit();
     try std.testing.expectEqual(@as(usize, 2), report.summary.unreferenced_pages);
+}
+
+test "summary counts incoming and outgoing edges by kind and endpoint class" {
+    const pages = [_]Page{
+        .{ .id = "index" },
+        .{ .id = "guide", .parent = "index" },
+    };
+    const edges = [_]Edge{
+        .{ .from = .{ .type = .page, .value = "guide" }, .to = .{ .type = .page, .value = "index" }, .kind = "parent" },
+        .{ .from = .{ .type = .page, .value = "index" }, .to = .{ .type = .page, .value = "guide" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "index" }, .to = .{ .type = .source, .value = "_includes/x.md" }, .kind = "include" },
+        .{ .from = .{ .type = .page, .value = "guide" }, .to = .{ .type = .source, .value = "_includes/x.md" }, .kind = "include" },
+    };
+    var report = try analyze(std.testing.allocator, &pages, &edges, .{});
+    defer report.deinit();
+    const counts = report.summary.edge_counts;
+    try std.testing.expectEqual(@as(usize, 1), counts.incoming.pages.parent);
+    try std.testing.expectEqual(@as(usize, 1), counts.incoming.pages.reference);
+    try std.testing.expectEqual(@as(usize, 0), counts.incoming.pages.include);
+    try std.testing.expectEqual(@as(usize, 0), counts.incoming.sources.parent);
+    try std.testing.expectEqual(@as(usize, 2), counts.incoming.sources.include);
+    try std.testing.expectEqual(@as(usize, 0), counts.incoming.sources.reference);
+    try std.testing.expectEqual(@as(usize, 1), counts.outgoing.pages.parent);
+    try std.testing.expectEqual(@as(usize, 2), counts.outgoing.pages.include);
+    try std.testing.expectEqual(@as(usize, 1), counts.outgoing.pages.reference);
+    try std.testing.expectEqual(@as(usize, 0), counts.outgoing.sources.parent);
+    try std.testing.expectEqual(@as(usize, 0), counts.outgoing.sources.include);
+    try std.testing.expectEqual(@as(usize, 0), counts.outgoing.sources.reference);
 }
 
 test "include composition counts as inbound use, not as unreferenced (#739)" {

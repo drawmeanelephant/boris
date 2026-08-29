@@ -8,6 +8,16 @@
     "roots": 2,
     "satellites": 3,
     "sourceEndpoints": 2,
+    "edgeCounts": {
+      "incoming": {
+        "pages": {"parent": 3, "include": 0, "reference": 3},
+        "sources": {"parent": 0, "include": 3, "reference": 0}
+      },
+      "outgoing": {
+        "pages": {"parent": 3, "include": 3, "reference": 2},
+        "sources": {"parent": 0, "include": 0, "reference": 1}
+      }
+    },
     "unreferencedPages": 1,
     "hotspots": 0
   },
