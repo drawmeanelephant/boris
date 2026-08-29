@@ -437,7 +437,7 @@ fn getRecord(inventory: *const artifacts.Inventory, path: []const u8) ?artifacts
 fn kindCheckId(kind: artifacts.Kind) []const u8 {
     return switch (kind) {
         .html_page => "html-reachability",
-        .theme_asset, .content_asset => "asset-reachability",
+        .theme_asset, .content_asset, .static_file => "asset-reachability",
         .rendered_search => "rendered-search",
         .sitemap => "sitemap",
         .rss => "rss",

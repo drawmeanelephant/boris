@@ -22,6 +22,9 @@ cd my-site
 boris --quiet           # compiles content/ → dist/
 ```
 
+For a live feedback loop, `boris watch --serve` rebuilds on every save and
+serves the site at `http://127.0.0.1:8090/` with automatic browser reload.
+
 `boris init [DIR]` writes a complete starter, not archaeology: `content/`
 with an `index.md` trunk and two satellites
 (`guides/getting-started.md`, `guides/publishing.md`), a working theme

@@ -11,18 +11,20 @@ Usage: scripts/agent-pack.sh [options]
 
 Build and archive the Boris binaries for handoff to another agent.
 
-The root Boris build and every standalone tool with a tools/*/build.zig file
-are built and included automatically. The source-rag tool is part of the root
-build and is included as well.
+The default kit contains the root product CLIs: boris, boris-package, and
+boris-source-rag. Standalone developer tools are not agent handoff material;
+pass --all-tools to also build and include every executable installed by a
+direct tools/*/build.zig file.
 
 Options:
+  --all-tools     Also build and include the standalone developer tools
   --out DIR       Output directory (default: boris-agent-kit)
   --no-build      Use already-installed binaries; do not run Zig builds
   --allow-dirty   Permit uncommitted changes; the manifest records this
   -h, --help      Show this help
 
-The default run requires a clean worktree and builds Boris plus its standalone
-developer tools. The resulting archive is named by the source commit:
+The default run requires a clean worktree and builds the root Boris binaries.
+The resulting archive is named by the source commit:
   DIR/boris-agent-kit-<commit>.tar.gz
 EOF
 }
@@ -33,9 +35,11 @@ cd "$repo_root"
 out_dir="boris-agent-kit"
 do_build=1
 allow_dirty=0
+all_tools=0
 
 while (($# > 0)); do
   case "$1" in
+    --all-tools) all_tools=1; shift ;;
     --out)
       (($# >= 2)) || { echo "--out requires a directory" >&2; exit 2; }
       out_dir=$2
@@ -72,9 +76,11 @@ zig_version=$(zig version)
 platform=$(uname -s)-$(uname -m)
 
 declare -a tool_build_files=()
-while IFS= read -r build_file; do
-  tool_build_files+=("$build_file")
-done < <(find tools -mindepth 2 -maxdepth 2 -type f -name build.zig -print | LC_ALL=C sort)
+if (( all_tools )); then
+  while IFS= read -r build_file; do
+    tool_build_files+=("$build_file")
+  done < <(find tools -mindepth 2 -maxdepth 2 -type f -name build.zig -print | LC_ALL=C sort)
+fi
 
 if (( do_build )); then
   echo "building root Boris binaries..."
@@ -177,6 +183,14 @@ branch $branch for $platform with Zig $zig_version.
 Start with the machine-readable MANIFEST.json. Verify the payload with
 SHA256SUMS, then run the appropriate executable from bin/. These are native
 binaries and must match the recorded platform.
+
+Feedback loop: \`bin/boris watch --serve\` rebuilds on every save and serves
+the built site on loopback (default http://127.0.0.1:8090/) with automatic
+browser reload after each successful rebuild. \`bin/boris watch
+--watch-json\` streams machine-readable NDJSON build events, including
+structured failure diagnostics, instead of prose output.
+\`bin/boris validate --watch\` re-runs the zero-write validation preflight
+on every change.
 
 This kit is a transport artifact for agent handoff. It is not the product
 IR/RAG package and does not replace the repository source checkout.

@@ -92,6 +92,12 @@ Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the
 - **The editor is a product surface.** `editor/` is a local, compiler-backed
   authoring host. It does not own parsing, the graph, validation, rendering, or
   publication. Do not invent a parallel editor pipeline.
+- **The live server is part of the experience.** `boris watch --serve
+  [--port N]` serves the built HTML tree on loopback with automatic browser
+  reload, and `boris watch --watch-json` streams machine-readable NDJSON
+  build events with structured diagnostics — the built-in feedback loop for
+  authoring and agent work. Advertise it in onboarding surfaces; do not
+  invent a second dev server.
 - **Migration labs and source-RAG tools are standalone.** They live in the repo
   story and are not compiled into the `boris` runtime. Do not widen author
   grammar from a lab finding.

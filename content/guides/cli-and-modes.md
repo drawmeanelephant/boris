@@ -27,7 +27,7 @@ check` is graph-health analysis, not an alias for validation.
 |---|---|---|
 | `boris build` (or bare `boris`) | Can Boris publish the selected output? | HTML target and its selected publication artifacts |
 | `boris validate` | Would the selected HTML source/configuration survive prepublication compilation? | Nothing |
-| `boris watch` | Build HTML, then rebuild after debounced changes | HTML target and cache |
+| `boris watch` | Build HTML, then rebuild after debounced changes; `--serve` adds a loopback live preview | HTML target and cache |
 | `boris check` | What graph/dependency health facts and policy findings exist? | Nothing, unless `--report` is supplied |
 | `boris impact ID` | Which pages or source endpoints depend on this id? | Nothing, unless `--report` is supplied |
 | `boris plan --profile PATH` | What normalized publication declaration does this profile describe? | JSON declaration on stdout |
@@ -41,7 +41,11 @@ check` is graph-health analysis, not an alias for validation.
 > the default path.
 
 `watch` is HTML-only. The compatibility flag `--watch` and `build --watch`
-remain accepted. `check` and `impact` operate only after the graph is valid;
+remain accepted. `watch --serve` serves the built tree on loopback
+(`--port N`; default `8090`) and pushes an automatic browser reload after
+each successful rebuild; `watch --watch-json` emits machine-readable NDJSON
+build events — the built-in feedback loop for agents and scripts. `check`
+and `impact` operate only after the graph is valid;
 their first policy slice can return exit `1` for findings such as an
 unreferenced page.
 
