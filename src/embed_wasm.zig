@@ -256,6 +256,8 @@ fn writeManifest(ok: bool, diagnostics: []const diag.Diagnostic, arts: []const O
         if (d.line) |line| try w.print("{d}", .{line}) else try w.writeAll("null");
         try w.writeAll(",\"column\":");
         if (d.column) |col| try w.print("{d}", .{col}) else try w.writeAll("null");
+        try w.writeAll(",\"id\":");
+        if (d.id.len == 0) try w.writeAll("null") else try writeJsonString(w, d.id);
         try w.writeAll("}");
     }
     try w.writeAll("],\"artifacts\":[");
@@ -280,7 +282,16 @@ fn writeJsonString(w: anytype, s: []const u8) !void {
             '\n' => try w.writeAll("\\n"),
             '\r' => try w.writeAll("\\r"),
             '\t' => try w.writeAll("\\t"),
-            else => try w.writeByte(c),
+            // RFC 8259 forbids raw C0 controls inside a JSON string. Hosts
+            // supply file names over the ABI, so arbitrary bytes can reach
+            // this writer even though content sources reject them earlier.
+            else => {
+                if (c < 0x20) {
+                    try w.print("\\u{x:0>4}", .{c});
+                } else {
+                    try w.writeByte(c);
+                }
+            },
         }
     }
     try w.writeByte('"');

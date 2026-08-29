@@ -180,9 +180,46 @@ test "wasm compileBundle poisoned parent matches native diagnostics and emits no
         }
     }
     try std.testing.expect(found);
+    for (diags) |d| {
+        // diagnostics.md field list ends with `id` (string or null); the
+        // result manifest must carry it like the native report does.
+        const id = d.object.get("id") orelse return error.MissingDiagnosticId;
+        try std.testing.expect(id == .null or id == .string);
+    }
     for (parsed.value.object.get("artifacts").?.array.items) |art| {
         try std.testing.expect(std.mem.indexOf(u8, art.object.get("path").?.string, "_boris/proof/") == null);
     }
+}
+
+test "result manifest stays valid JSON for host-supplied paths with control bytes" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const source = "---\ntitle: X\nparent: missing\n---\n# X\n";
+    try tmp.dir.writeFile(io, .{ .sub_path = "orphan.md", .data = source });
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(root);
+    const host_path = try std.fmt.allocPrint(gpa, "{s}/orphan.md", .{root});
+    defer gpa.free(host_path);
+    // Hosts pass file names over the ABI with no character policy; a C0
+    // control byte in a logical path must not break the manifest's JSON.
+    const logical = "\x62\x61\x64\x0b\x6e\x61\x6d\x65\x2e\x6d\x64"; // bad\x0bname.md
+    const wasm_manifest = try invokeArgs(gpa, build_options.wasm_small_path, &.{
+        "--file", logical, host_path, "--manifest",
+    });
+    defer gpa.free(wasm_manifest);
+    const parsed = try std.json.parseFromSlice(std.json.Value, gpa, wasm_manifest, .{});
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.object.get("ok").?.bool == false);
+    var saw_path = false;
+    for (parsed.value.object.get("diagnostics").?.array.items) |d| {
+        const source_path = d.object.get("sourcePath").?.string;
+        if (std.mem.eql(u8, source_path, logical)) {
+            saw_path = true;
+        }
+    }
+    try std.testing.expect(saw_path);
 }
 
 fn expectFreestandingImage(path: []const u8) !void {

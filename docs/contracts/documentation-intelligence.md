@@ -77,7 +77,10 @@ enter output. It contains a format/schema/compiler header, input path, summary
 counts, page nodes, typed dependency edges, source locations, stable findings,
 an optional impact result, and a diagnostics array. The `nodes` and `edges`
 arrays are the consumer-facing graph projection; the older `pages` and
-`sources` arrays remain as compatibility summaries. `sourceLocations` uses
+`sources` arrays remain as compatibility summaries. The summary carries
+`edgeCounts`: incoming and outgoing edge counts by edge kind, split by
+endpoint class (`pages`, `sources`), with zero-filled fixed keys for the
+closed kind set. `sourceLocations` uses
 content-relative paths and 1-based line/column values. Valid analysis reports
 have an empty diagnostics array; invalid content returns the compiler's
 deterministic `build-report.json` diagnostics contract instead of a partial
