@@ -1,4 +1,4 @@
-<!-- Filename: 806-agent-kit-slim-default.md (rename to the actual PR number when it exists) -->
+<!-- Filename: 806-agent-kit-slim-default.md -->
 
 ### Changed
 
