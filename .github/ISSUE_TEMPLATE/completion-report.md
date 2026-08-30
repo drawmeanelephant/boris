@@ -16,6 +16,14 @@ labels: documentation
 - **Commit and PR**:
   - Commit: `<commit-hash-or-uncommitted>`
   - Target PR / Branch: `<pr-number-or-target-branch>`
+- **Linked Issues (auto-close convention)**:
+  - **`Closes #N, #M`** in the PR body when the merged change is the
+    authoritative fix — GitHub auto-closes those issues on merge.
+  - **`Refs #N` / `Related to #N`** when an issue must stay open for manual
+    verification after merge (e.g. an audit card the owner inspects before
+    closing).
+  - Be explicit about which is which; never leave the close-vs-reference
+    intent ambiguous.
 - **Changed Files**:
   - `<file-path-1>`
   - `<file-path-2>`
