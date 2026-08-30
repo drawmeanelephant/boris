@@ -168,12 +168,50 @@ pub fn validateEntityId(id: []const u8) bool {
         const seg = id[start..i];
         if (seg.len == 0) return false;
         if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
-        for (seg) |c| {
-            if (c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == '#' or c == '?' or c == '%') return false;
+        // Decode the segment as UTF-8: entity ids are valid UTF-8 per the
+        // identity contract, so a non-UTF-8 segment is rejected rather than
+        // partially checked. Reject the URL-significant bytes and every
+        // Unicode whitespace code point (ASCII space/tab/LF/VT/FF/CR, NEL,
+        // the `Zs` separators: NBSP, ideographic space, hair space, …, and
+        // the `Zl`/`Zp` line/paragraph separators) so no raw whitespace can
+        // reach a published filename or href (#830).
+        var view = std.unicode.Utf8View.init(seg) catch return false;
+        var it = view.iterator();
+        while (it.nextCodepoint()) |cp| {
+            if (cp < 0x80) {
+                switch (cp) {
+                    ' ', '\t', '\n', 0x0B, 0x0C, '\r', '#', '?', '%' => return false,
+                    else => {},
+                }
+            } else if (isUnicodeWhitespace(cp)) {
+                return false;
+            }
         }
         if (i < id.len) i += 1; // skip '/'
     }
     return true;
+}
+
+/// True for non-ASCII Unicode whitespace: `Zs` space separators (NBSP,
+/// ideographic space, hair space, …), U+0085 NEXT LINE, and the `Zl`/`Zp`
+/// separators U+2028/U+2029. ASCII White_Space (space, tab, LF, VT, FF, CR)
+/// is rejected byte-wise in `validateEntityId` itself. The identity contract
+/// rejects whitespace on the same footing as ASCII space, so the full
+/// Unicode `White_Space` set is enforced.
+fn isUnicodeWhitespace(c: u21) bool {
+    return switch (c) {
+        0x85, // NEXT LINE (White_Space)
+        0xA0, // NO-BREAK SPACE
+        0x1680, // OGHAM SPACE MARK
+        0x2000...0x200A, // EN QUAD … HAIR SPACE
+        0x2028, // LINE SEPARATOR (White_Space, Zl)
+        0x2029, // PARAGRAPH SEPARATOR (White_Space, Zp)
+        0x202F, // NARROW NO-BREAK SPACE
+        0x205F, // MEDIUM MATHEMATICAL SPACE
+        0x3000, // IDEOGRAPHIC SPACE
+        => true,
+        else => false,
+    };
 }
 
 /// Strip a single recognized trailing page extension from a canonical
@@ -519,6 +557,9 @@ test "validateEntityId shape" {
     try std.testing.expect(validateEntityId("guides/intro"));
     try std.testing.expect(validateEntityId("Guides/Intro"));
     try std.testing.expect(validateEntityId("my.notes"));
+    // Valid non-ASCII UTF-8 ids stay valid (#830): no whitespace involved.
+    try std.testing.expect(validateEntityId("caf\u{00E9}"));
+    try std.testing.expect(validateEntityId("\u{65E5}\u{672C}\u{8A9E}"));
     try std.testing.expect(!validateEntityId(""));
     try std.testing.expect(!validateEntityId("/abs"));
     try std.testing.expect(!validateEntityId("a\\b"));
@@ -530,6 +571,22 @@ test "validateEntityId shape" {
     try std.testing.expect(!validateEntityId("has#fragment"));
     try std.testing.expect(!validateEntityId("has?query"));
     try std.testing.expect(!validateEntityId("has%escape"));
+    // Unicode whitespace is rejected like ASCII space (#830): `Zs` separators
+    // and the remaining White_Space code points (VT, FF, NEL).
+    try std.testing.expect(!validateEntityId("with_nbsp_\u{00A0}x"));
+    try std.testing.expect(!validateEntityId("with_emspace_\u{2003}x"));
+    try std.testing.expect(!validateEntityId("with_hairspace_\u{200A}x"));
+    try std.testing.expect(!validateEntityId("with_ideographic_\u{3000}x"));
+    try std.testing.expect(!validateEntityId("with_nbsp_\u{00A0}x/y"));
+    try std.testing.expect(!validateEntityId("a\u{00A0}b"));
+    try std.testing.expect(!validateEntityId("has\u{202F}nnbsp"));
+    try std.testing.expect(!validateEntityId("has\u{0B}vt"));
+    try std.testing.expect(!validateEntityId("has\u{0C}ff"));
+    try std.testing.expect(!validateEntityId("has\u{85}nel"));
+    try std.testing.expect(!validateEntityId("has\u{2028}ls"));
+    try std.testing.expect(!validateEntityId("has\u{2029}ps"));
+    // Invalid UTF-8 is out of contract for ids and is rejected.
+    try std.testing.expect(!validateEntityId("\xff\xfe"));
 }
 
 test "relativeHref does not truncate deep paths" {

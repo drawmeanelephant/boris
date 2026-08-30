@@ -539,14 +539,19 @@ fn rebuildSucceededLabel(action: Action) []const u8 {
 /// Append one EIO diagnostic for a bare compile error that escaped the
 /// collector, so the report still explains a failed cycle. Mirrors the
 /// one-shot `validate` behavior in main.zig (content failures already carry
-/// their own structured diagnostics in the collector).
+/// their own structured diagnostics in the collector); skipped when the
+/// collector already holds an error diagnostic so a structured failure is
+/// never shadowed or duplicated by the generic fallback (#829).
 fn appendValidateEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror) void {
-    if (collector) |c| c.append(.{
-        .severity = .error_,
-        .code = .EIO,
-        .message = @errorName(err),
-        .remediation = "See the stderr diagnostic for the full explanation",
-    });
+    if (collector) |c| {
+        if (diag.countErrors(c.list.items) > 0) return;
+        c.append(.{
+            .severity = .error_,
+            .code = .EIO,
+            .message = @errorName(err),
+            .remediation = "See the stderr diagnostic for the full explanation",
+        });
+    }
 }
 
 /// Native helper using std.Io Clock.Duration to sleep portably.
