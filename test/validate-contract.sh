@@ -133,6 +133,69 @@ cmp "${TMP}/logs/duplicate-validate.stderr" "${TMP}/logs/duplicate-build.stderr"
 assert_no_target "${DUPLICATE_VALIDATE_OUT}"
 assert_no_target "${DUPLICATE_BUILD_OUT}"
 
+# #829: `--report` carries the real structured diagnostic — never a phantom
+# EIO fallback and never an inflated errorCount.
+FM_CONTENT="${TMP}/report-content"
+mkdir -p "${FM_CONTENT}"
+printf '%s\n' '---' 'category: unknown' '---' '# Bad' >"${FM_CONTENT}/bad.md"
+FM_REPORT="${TMP}/report-frontmatter.json"
+run_expect 1 "${TMP}/logs/report-fm.stdout" "${TMP}/logs/report-fm.stderr" \
+  "${BORIS}" validate --input="${FM_CONTENT}" --html-layout="${LAYOUT}" \
+  --html-dir="${TMP}/report-fm-output" --report="${FM_REPORT}"
+grep -q '"code": "EFRONTMATTER"' "${FM_REPORT}"
+grep -q '"sourcePath": "bad.md"' "${FM_REPORT}"
+grep -q '"line": 2' "${FM_REPORT}"
+grep -q '"errorCount": 1' "${FM_REPORT}"
+if grep -q '"code": "EIO"' "${FM_REPORT}"; then
+  printf 'report contains a phantom EIO fallback alongside EFRONTMATTER\n' >&2
+  exit 1
+fi
+assert_no_target "${TMP}/report-fm-output"
+
+DUP_REPORT="${TMP}/report-duplicate.json"
+run_expect 1 "${TMP}/logs/report-dup.stdout" "${TMP}/logs/report-dup.stderr" \
+  "${BORIS}" validate --input="${DUPLICATE}" --html-layout="${LAYOUT}" \
+  --html-dir="${TMP}/report-dup-output" --report="${DUP_REPORT}"
+test "$(grep -o '"code": "EDUPLICATEID"' "${DUP_REPORT}" | wc -l | tr -d '[:space:]')" = "1"
+grep -q '"errorCount": 1' "${DUP_REPORT}"
+if grep -q '"code": "EIO"' "${DUP_REPORT}" || grep -q GraphValidationFailed "${DUP_REPORT}"; then
+  printf 'report duplicates EDUPLICATEID with a phantom EIO: GraphValidationFailed\n' >&2
+  exit 1
+fi
+assert_no_target "${TMP}/report-dup-output"
+
+# A genuine I/O failure (missing content root) keeps the EIO fallback: no
+# structured diagnostic exists, so the report must still explain exit 3.
+IO_REPORT="${TMP}/report-io.json"
+run_expect 3 "${TMP}/logs/report-io.stdout" "${TMP}/logs/report-io.stderr" \
+  "${BORIS}" validate --input="${TMP}/no-such-content-root" --html-layout="${LAYOUT}" \
+  --html-dir="${TMP}/report-io-output" --report="${IO_REPORT}"
+grep -q '"code": "EIO"' "${IO_REPORT}"
+grep -q '"errorCount": 1' "${IO_REPORT}"
+
+# #830: Unicode whitespace in a page filename is rejected like ASCII space —
+# nothing is published with a raw non-ASCII whitespace id or href.
+NBSP_CONTENT="${TMP}/nbsp-content"
+mkdir -p "${NBSP_CONTENT}"
+printf '# nbsp page\n' >"${NBSP_CONTENT}/with_nbsp_$(printf '\xc2\xa0')x.md"
+NBSP_OUT="${TMP}/nbsp-output"
+run_expect 3 "${TMP}/logs/nbsp.stdout" "${TMP}/logs/nbsp.stderr" \
+  "${BORIS}" validate --input="${NBSP_CONTENT}" --html-layout="${LAYOUT}" \
+  --html-dir="${NBSP_OUT}"
+grep -q InvalidPath "${TMP}/logs/nbsp.stderr"
+assert_no_target "${NBSP_OUT}"
+
+# `id:` frontmatter values with Unicode whitespace are rejected as invalid
+# canonical entity ids (EINVALIDPATH), mirroring the ASCII-space rule.
+NBSP_ID_CONTENT="${TMP}/nbsp-id-content"
+mkdir -p "${NBSP_ID_CONTENT}"
+printf '%s\n' '---' "id: bad$(printf '\xc2\xa0')id" 'title: Bad id' '---' '# Body' >"${NBSP_ID_CONTENT}/index.md"
+run_expect 1 "${TMP}/logs/nbsp-id.stdout" "${TMP}/logs/nbsp-id.stderr" \
+  "${BORIS}" validate --input="${NBSP_ID_CONTENT}" --html-layout="${LAYOUT}" \
+  --html-dir="${TMP}/nbsp-id-output"
+grep -q EINVALIDPATH "${TMP}/logs/nbsp-id.stderr"
+assert_no_target "${TMP}/nbsp-id-output"
+
 # Includes, wiki links/fragments, and registered-component checks travel
 # through the normal dependency and renderer implementations.
 INCLUDE_CONTENT="${TMP}/include-content"

@@ -204,7 +204,10 @@ test "result manifest stays valid JSON for host-supplied paths with control byte
     defer gpa.free(host_path);
     // Hosts pass file names over the ABI with no character policy; a C0
     // control byte in a logical path must not break the manifest's JSON.
-    const logical = "\x62\x61\x64\x0b\x6e\x61\x6d\x65\x2e\x6d\x64"; // bad\x0bname.md
+    // U+0001 (SOH) is a non-whitespace control byte: U+000B (VT) became a
+    // whitespace rejection in validateEntityId (#830), so it no longer
+    // reaches the diagnostic stage with a sourcePath.
+    const logical = "\x62\x61\x64\x01\x6e\x61\x6d\x65\x2e\x6d\x64"; // bad\x01name.md
     const wasm_manifest = try invokeArgs(gpa, build_options.wasm_small_path, &.{
         "--file", logical, host_path, "--manifest",
     });

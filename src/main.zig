@@ -2274,14 +2274,20 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*ti
 /// Append one diagnostic for a compile error that escaped as a bare exit-code
 /// mapping (usage / I/O classes), so the machine-readable report still
 /// explains the nonzero exit even when the failing phase had no structured
-/// diagnostic of its own.
+/// diagnostic of its own. Skipped when the collector already holds an error
+/// diagnostic: a phase that emitted its own structured error (parse, graph,
+/// layout) must not be shadowed by, or duplicated with, the generic fallback
+/// (#829).
 fn appendEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror, code: ExitCode) void {
-    if (collector) |c| c.append(.{
-        .severity = .error_,
-        .code = if (code == .usage) .EUSAGE else .EIO,
-        .message = @errorName(err),
-        .remediation = "See the stderr diagnostic for the full explanation",
-    });
+    if (collector) |c| {
+        if (diag.countErrors(c.list.items) > 0) return;
+        c.append(.{
+            .severity = .error_,
+            .code = if (code == .usage) .EUSAGE else .EIO,
+            .message = @errorName(err),
+            .remediation = "See the stderr diagnostic for the full explanation",
+        });
+    }
 }
 
 /// Write the HTML-path diagnostics report (`--report PATH`) deterministically
