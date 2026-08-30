@@ -323,6 +323,48 @@ test "#421: content failures are collected with source path and position" {
     try std.testing.expect(d.column != null);
 }
 
+test "#829: parse failures reach the diagnostics collector with their locus" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-829-parse-collector", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "{{content}}");
+    // Unknown frontmatter key: EFRONTMATTER at 2:1 (issue #829 repro).
+    try writeTreeFile(io, work, "content/bad.md", "---\ncategory: unknown\n---\n# Bad\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.ParseFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .diagnostics = &collector,
+    }));
+
+    // The structured parse diagnostic must reach the collector with its
+    // content-root-relative path and locus, so `--report` never degrades to
+    // a bare `EIO: ParseFailed` fallback (#829).
+    try std.testing.expectEqual(@as(usize, 1), diag.countErrors(collector.list.items));
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.EFRONTMATTER, d.code);
+    try std.testing.expectEqualStrings("bad.md", d.source_path);
+    try std.testing.expectEqual(@as(?u32, 2), d.line);
+    try std.testing.expectEqual(@as(?u32, 1), d.column);
+}
+
 test "#395: rule-selected layout emits an info ILAYOUTSELECTED outcome finding" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

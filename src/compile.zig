@@ -470,7 +470,7 @@ pub fn compileHtmlToSink(
     defer retain_arena.deinit();
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
-    try loadAndPromoteFromProvider(io, gpa, &db, sources, options.input_format, options.timings);
+    try loadAndPromoteFromProvider(io, gpa, &db, sources, options.input_format, options.timings, options.diagnostics);
 
     var site = try freezeSiteFromPageDb(
         gpa,
@@ -581,7 +581,7 @@ pub fn loadAndPromote(
     db: *PageDb,
     content_root: []const u8,
 ) !void {
-    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, null);
+    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, null, null);
 }
 
 pub fn loadAndPromoteFormat(
@@ -591,6 +591,10 @@ pub fn loadAndPromoteFormat(
     content_root: []const u8,
     input_format: identity.InputFormat,
     recorder: ?*timings.Recorder,
+    /// Optional HTML-path diagnostic collector: parse-category failures are
+    /// appended here in addition to stderr so `--report` never degrades to a
+    /// bare `EIO: ParseFailed` fallback (#829).
+    diagnostics: ?*diag.Collector,
 ) !void {
     var scan_list = page_mod.PageList.init(gpa, db.retain);
     defer scan_list.deinit();
@@ -620,7 +624,7 @@ pub fn loadAndPromoteFormat(
 
     if (recorder) |t| t.stop(.scan);
 
-    return promoteScannedPages(io, gpa, db, content_root, input_format, recorder, &scan_list, null);
+    return promoteScannedPages(io, gpa, db, content_root, input_format, recorder, &scan_list, null, diagnostics);
 }
 
 fn loadAndPromoteFromProvider(
@@ -630,13 +634,14 @@ fn loadAndPromoteFromProvider(
     sources: source_provider.Provider,
     input_format: identity.InputFormat,
     recorder: ?*timings.Recorder,
+    diagnostics: ?*diag.Collector,
 ) !void {
     var scan_list = page_mod.PageList.init(gpa, db.retain);
     defer scan_list.deinit();
     if (recorder) |t| t.start(.scan);
     try sources.scan(&scan_list);
     if (recorder) |t| t.stop(.scan);
-    return promoteScannedPages(io, gpa, db, "", input_format, recorder, &scan_list, sources);
+    return promoteScannedPages(io, gpa, db, "", input_format, recorder, &scan_list, sources, diagnostics);
 }
 
 fn promoteScannedPages(
@@ -648,6 +653,7 @@ fn promoteScannedPages(
     recorder: ?*timings.Recorder,
     scan_list: *page_mod.PageList,
     sources: ?source_provider.Provider,
+    diagnostics: ?*diag.Collector,
 ) !void {
     const cwd = Io.Dir.cwd();
     var opened_dir: ?Io.Dir = null;
@@ -669,7 +675,10 @@ fn promoteScannedPages(
 
         const parsed = parser.parse(source);
         if (parsed.diagnostic) |pd| {
-            diag.printText(.{
+            // The structured parse diagnostic must reach the optional HTML-path
+            // collector as well as stderr: a content-only failure must not
+            // reduce `--report` to a bare `EIO: ParseFailed` fallback (#829).
+            const d: diag.Diagnostic = .{
                 .severity = .error_,
                 .code = diag.parserCategoryToCode(pd.category),
                 .message = pd.message,
@@ -677,7 +686,9 @@ fn promoteScannedPages(
                 .source_path = disc.source_path,
                 .line = pd.line,
                 .column = pd.column,
-            }, gpa);
+            };
+            diag.printText(d, gpa);
+            if (diagnostics) |sink| sink.append(d);
             return error.ParseFailed;
         }
         // Validates the adapter subset for this page; the adapted body is
@@ -989,9 +1000,9 @@ pub fn compileHtmlSite(
     defer db.deinit();
 
     if (options.sources) |sources| {
-        try loadAndPromoteFromProvider(io, gpa, &db, sources, options.input_format, options.timings);
+        try loadAndPromoteFromProvider(io, gpa, &db, sources, options.input_format, options.timings, options.diagnostics);
     } else {
-        try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.timings);
+        try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.timings, options.diagnostics);
     }
     if (db.len() == 0) warnZeroPages(options.content_root);
 
@@ -1262,7 +1273,7 @@ pub fn compileHtmlSiteMulti(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.timings);
+    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.timings, base_options.diagnostics);
     if (db.len() == 0) warnZeroPages(base_options.content_root);
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
