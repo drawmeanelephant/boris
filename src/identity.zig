@@ -172,8 +172,9 @@ pub fn validateEntityId(id: []const u8) bool {
         // identity contract, so a non-UTF-8 segment is rejected rather than
         // partially checked. Reject the URL-significant bytes and every
         // Unicode whitespace code point (ASCII space/tab/LF/VT/FF/CR, NEL,
-        // and the `Zs` separators: NBSP, ideographic space, hair space, …)
-        // so no raw whitespace can reach a published filename or href (#830).
+        // the `Zs` separators: NBSP, ideographic space, hair space, …, and
+        // the `Zl`/`Zp` line/paragraph separators) so no raw whitespace can
+        // reach a published filename or href (#830).
         var view = std.unicode.Utf8View.init(seg) catch return false;
         var it = view.iterator();
         while (it.nextCodepoint()) |cp| {
@@ -192,16 +193,19 @@ pub fn validateEntityId(id: []const u8) bool {
 }
 
 /// True for non-ASCII Unicode whitespace: `Zs` space separators (NBSP,
-/// ideographic space, hair space, …) plus U+0085 NEXT LINE. ASCII
-/// White_Space (space, tab, LF, VT, FF, CR) is rejected byte-wise in
-/// `validateEntityId` itself. The identity contract rejects whitespace on the
-/// same footing as ASCII space, so the full Unicode set is enforced.
+/// ideographic space, hair space, …), U+0085 NEXT LINE, and the `Zl`/`Zp`
+/// separators U+2028/U+2029. ASCII White_Space (space, tab, LF, VT, FF, CR)
+/// is rejected byte-wise in `validateEntityId` itself. The identity contract
+/// rejects whitespace on the same footing as ASCII space, so the full
+/// Unicode `White_Space` set is enforced.
 fn isUnicodeWhitespace(c: u21) bool {
     return switch (c) {
         0x85, // NEXT LINE (White_Space)
         0xA0, // NO-BREAK SPACE
         0x1680, // OGHAM SPACE MARK
         0x2000...0x200A, // EN QUAD … HAIR SPACE
+        0x2028, // LINE SEPARATOR (White_Space, Zl)
+        0x2029, // PARAGRAPH SEPARATOR (White_Space, Zp)
         0x202F, // NARROW NO-BREAK SPACE
         0x205F, // MEDIUM MATHEMATICAL SPACE
         0x3000, // IDEOGRAPHIC SPACE
@@ -579,6 +583,8 @@ test "validateEntityId shape" {
     try std.testing.expect(!validateEntityId("has\u{0B}vt"));
     try std.testing.expect(!validateEntityId("has\u{0C}ff"));
     try std.testing.expect(!validateEntityId("has\u{85}nel"));
+    try std.testing.expect(!validateEntityId("has\u{2028}ls"));
+    try std.testing.expect(!validateEntityId("has\u{2029}ps"));
     // Invalid UTF-8 is out of contract for ids and is rejected.
     try std.testing.expect(!validateEntityId("\xff\xfe"));
 }
