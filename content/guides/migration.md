@@ -156,6 +156,6 @@ report, then write closed frontmatter yourself.
 ## Next steps
 
 - [[guides/building-pages|Building Pages]] — Boris's authoring model
-- [[guides/publishing|Publishing Targets]] — after a slice compiles
+- [[guides/publishing|Publishing Workflows]] — after a slice compiles
 - [[reference/frontmatter|Frontmatter Reference]] — accepted keys
 - [[guides/overview|Content Model]] — understanding the graph-based hierarchy

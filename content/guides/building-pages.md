@@ -17,7 +17,7 @@ navigation tree.
 
 This site is the specimen. If you want every Oliver construct in one place,
 open [[guides/oliver-markdown|the Markdown showcase]]. If you want to
-*publish* what you wrote, open [[guides/publishing|Publishing Targets]].
+*publish* what you wrote, open [[guides/publishing|Publishing Workflows]].
 
 </Aside>
 
@@ -145,7 +145,7 @@ host if you want the browser search UI to fetch its index.
 ## Next steps
 
 - [[guides/oliver-markdown|Markdown Showcase]] — every construct this compiler will actually render.
-- [[guides/publishing|Publishing Targets]] — local `dist/`, Pages, Standard.site.
+- [[guides/publishing|Publishing Workflows]] — local `dist/`, Pages, Standard.site.
 - [[guides/themes-and-layouts|Themes & Layouts]] — customize HTML output.
 - [[guides/search-and-ui|Search & Browser UI]] — understand rendered search.
 - [[reference/commands|Command Reference]] — exact flags and exit codes.

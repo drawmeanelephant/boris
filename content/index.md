@@ -80,13 +80,14 @@ Markdown + closed frontmatter
 | Atmosphere records | Standard.site | [[guides/publishing#standard-site|Publishing → Standard.site]] |
 | A compiler-backed editor | Product surface | [[guides/editor|Boris Editor]] |
 | Machine packs | Projections | [[guides/rag-export|AI & Machine Outputs]] |
+| Machine-readable recipes | `.cook`-only recipe mode | [[guides/cooklang|CookLang Recipes]] |
 | The syntax this page is flexing | Oliver | [[guides/oliver-markdown|Markdown Showcase]] |
 
 <div class="edition-grid">
-<div class="edition-card"><span class="edition-card__tag">Default</span><h3>HTML <code>dist/</code></h3><p>The first command. Inspectable files. Any static host.</p></div>
-<div class="edition-card"><span class="edition-card__tag">Target</span><h3>GitHub Pages</h3><p>Verified hosted shop window. Inventory-only upload.</p></div>
-<div class="edition-card"><span class="edition-card__tag">Target</span><h3>Standard.site</h3><p>Atmosphere records. App password on bsky.social.</p></div>
-<div class="edition-card"><span class="edition-card__tag">Projection</span><h3>IR / RAG / RSS</h3><p>Same frozen graph. Separate invocations. No silent merge.</p></div>
+<div class="edition-card"><span class="edition-card__tag">Default</span><h3 id="edition-html-dist">HTML <code>dist/</code></h3><p>The first command. Inspectable files. Any static host.</p></div>
+<div class="edition-card"><span class="edition-card__tag">Target</span><h3 id="edition-github-pages">GitHub Pages</h3><p>Verified hosted shop window. Inventory-only upload.</p></div>
+<div class="edition-card"><span class="edition-card__tag">Target</span><h3 id="edition-standard-site">Standard.site</h3><p>Atmosphere records. App password on bsky.social.</p></div>
+<div class="edition-card"><span class="edition-card__tag">Projection</span><h3 id="edition-ir-rag-rss">IR / RAG / RSS</h3><p>Same frozen graph. Separate invocations. No silent merge.</p></div>
 </div>
 
 <Aside kind="tip" id="stranger-command">
@@ -234,13 +235,14 @@ keeps them as text. The compatibility wall is in
 | If you want to… | Start here |
 |---|---|
 | Build a first site | [[getting-started|Getting Started]] |
-| Publish it somewhere real | [[guides/publishing|Publishing Targets]] |
+| Publish it somewhere real | [[guides/publishing|Publishing Workflows]] |
 | Create pages and links | [[guides/building-pages|Building Pages]] |
 | Understand nested hierarchy | [[guides/trunk-satellite|Trunk & Satellite]] |
 | Customize HTML and themes | [[guides/themes-and-layouts|Themes & Layouts]] |
 | Use search in a rendered site | [[guides/search-and-ui|Search & Browser UI]] |
 | Edit with the local editor | [[guides/editor|Boris Editor]] |
 | Export machine-readable content | [[guides/rag-export|AI & Machine Outputs]] |
+| Write and scale recipes | [[guides/cooklang|CookLang Recipes]] |
 | Compare approaches | [[comparison|Why Boris?]] and [[technology-and-rationale|Technology & Rationale]] |
 | Find exact flags and diagnostics | [[reference/commands|Command Reference]] and [[reference/diagnostics|Diagnostics]] |
 

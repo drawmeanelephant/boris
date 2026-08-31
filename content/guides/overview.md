@@ -107,7 +107,7 @@ HTML, JSON IR, RAG, Context, `llms.txt`, RSS, and HTML sitemap output are not on
 opaque multi-writer artifact. Run the desired commands against the same source
 revision when you need aligned outputs. Hosted targets — GitHub Pages and
 Standard.site — consume that same frozen graph through the publication
-registry. [[guides/publishing|Publishing Targets]] names them;
+registry. [[guides/publishing|Publishing Workflows]] names them;
 [[guides/rag-export|AI & Machine Outputs]] covers the machine projections;
 [[guides/search-and-ui|Search & Browser UI]] covers the compiler-owned
 rendered-search artifact.
@@ -116,6 +116,6 @@ rendered-search artifact.
 
 - [[guides/building-pages|Building Pages]] — create and link pages.
 - [[guides/trunk-satellite|Trunk & Satellite]] — inspect hierarchy rules.
-- [[guides/publishing|Publishing Targets]] — local `dist/`, Pages, Standard.site.
+- [[guides/publishing|Publishing Workflows]] — local `dist/`, Pages, Standard.site.
 - [[guides/themes-and-layouts|Themes & Layouts]] — select layouts and assets.
 - [[reference/diagnostics|Diagnostics]] — understand failure categories.

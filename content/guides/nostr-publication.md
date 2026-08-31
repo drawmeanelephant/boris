@@ -25,7 +25,7 @@ A bare `boris --quiet` never needs a key, a relay, or the network. A
 failed Nostr run never invalidates a committed `dist/`. This is a CLI
 family, **not** a verified target, on purpose: relays are not a host.
 No location adapter, no Proof Pack, no live-smoke gate. See
-[[guides/publishing|Publishing Targets]].
+[[guides/publishing|Publishing Workflows]].
 
 </Aside>
 
@@ -136,7 +136,7 @@ removed local article does not retract anything on a relay.
 
 ## Next
 
-- [[guides/publishing|Publishing Targets]] — what is and is not verified
+- [[guides/publishing|Publishing Workflows]] — what is and is not verified
 - [[reference/commands|Command Reference]] — flags
 - [[reference/diagnostics|Diagnostics]] — `ENOSTR*` codes
 - Contract: [`docs/contracts/nostr-publication.md`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/nostr-publication.md)

@@ -12,7 +12,7 @@ tags: [guides, graph, hierarchy]
 The `parent` field gives Boris an explicit site hierarchy. It is a graph edge,
 not a display label or a directory convention. Hosted targets and machine
 projections consume the same frozen hierarchy — see
-[[guides/publishing|Publishing Targets]].
+[[guides/publishing|Publishing Workflows]].
 
 <Aside kind="note">
 

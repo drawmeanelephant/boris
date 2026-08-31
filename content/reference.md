@@ -31,6 +31,6 @@ Editorial
 <Aside kind="note">
 
 Teaching lives under [[guides|User Guides]]. This tree is lookup. If you
-want the publish trail, start at [[guides/publishing|Publishing Targets]].
+want the publish trail, start at [[guides/publishing|Publishing Workflows]].
 
 </Aside>

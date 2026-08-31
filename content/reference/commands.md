@@ -13,7 +13,7 @@ tags: [reference, cli, commands]
 
 This page is lookup. For which command to run first, see
 [[guides/cli-and-modes|CLI & Output Modes]] and
-[[guides/publishing|Publishing Targets]]. Nostr is
+[[guides/publishing|Publishing Workflows]]. Nostr is
 [[guides/nostr-publication|its own family]].
 
 </Aside>
@@ -234,7 +234,7 @@ profile overrides; execution and projection flags are rejected.
 Offline `plan` / `records` / `verify` need no credentials. Live publish
 against bsky.social uses `login --app-password`, not browser OAuth. App
 passwords grant broad account write — use a dedicated test identity. See
-[[guides/publishing#standard-site|Publishing Targets]].
+[[guides/publishing#standard-site|Publishing Workflows]].
 
 GitHub Pages is not a `boris pages` verb. It is the official Actions
 workflow plus `plan --profile` for the normalized location.
