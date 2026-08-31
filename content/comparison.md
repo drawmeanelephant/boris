@@ -82,7 +82,7 @@ Uncompiled Markdown folders in git repositories lack navigation menus, breadcrum
 
 Speed. Cross-OS byte identity. That a successful `dist/` was deployed.
 That Standard.site browser OAuth works on bsky.social. Measure the
-workload. Read [[guides/publishing|Publishing Targets]] for the honest
+workload. Read [[guides/publishing|Publishing Workflows]] for the honest
 target list.
 
 </Details>
@@ -90,7 +90,7 @@ target list.
 ## Next Steps
 
 - [[getting-started|Getting Started]] — Build your first site in 5 minutes.
-- [[guides/publishing|Publishing Targets]] — local `dist/`, Pages, Standard.site.
+- [[guides/publishing|Publishing Workflows]] — local `dist/`, Pages, Standard.site.
 - [[technology-and-rationale|Technology & Rationale]] — Deep dive into Zig, native Markdown rendering, and memory design.
 - [[guides/overview|Content Model & Pipeline]] — Learn how Trunk/Satellite page graphs operate.
 

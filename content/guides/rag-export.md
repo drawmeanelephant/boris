@@ -108,4 +108,4 @@ See [[reference/outputs|Outputs & Artifacts]] for the trees.
 
 - [[reference/outputs|Outputs & Artifacts]]
 - [[reference/commands|Command Reference]]
-- [[guides/publishing|Publishing Targets]]
+- [[guides/publishing|Publishing Workflows]]

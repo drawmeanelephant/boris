@@ -151,7 +151,7 @@ owns its layout, assets, cache, search artifact, and publication evidence.
 GitHub Pages is driven by the official Actions workflow, not a `boris pages`
 verb. Standard.site is the `boris standard-site` family. First testers on
 bsky.social use `login --app-password`. See
-[[guides/publishing|Publishing Targets]].
+[[guides/publishing|Publishing Workflows]].
 
 ## Exit codes
 

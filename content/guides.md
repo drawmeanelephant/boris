@@ -26,13 +26,15 @@ Site
   [[guides/cli-and-modes|CLI and output modes]]
 
 Publish
-: [[guides/publishing|Publishing targets]] — local `dist/`, GitHub Pages,
-  Standard.site, evidence chain. ·
+: [[guides/publishing|Publishing workflows]] — local `dist/`, GitHub Pages,
+  Standard.site, evidence chain, step by step. ·
   [[guides/nostr-publication|Nostr NIP-23]] — offline `plan → sign`, then
   `publish`. Not a verified target.
 
 Projections and intake
 : [[guides/rag-export|RAG, IR, Context, llms.txt]] ·
+  [[guides/cooklang|CookLang Recipes]] — the `.cook`-only recipe mode,
+  structured `recipe` IR, and `recipe-scale`. ·
   [[guides/migration|Migrating to Boris]]
 
 <Aside kind="note">

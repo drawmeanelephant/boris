@@ -104,7 +104,7 @@ search-index tool after a normal Boris build. Do not start day one with
 
 - [[guides/overview|Content Model & Pipeline]] — how discovery, graph
   validation, rendering, and projections fit together.
-- [[guides/publishing|Publishing Targets]] — Pages, Standard.site, and the
+- [[guides/publishing|Publishing Workflows]] — Pages, Standard.site, and the
   evidence chain.
 - [[guides/cli-and-modes|CLI & Output Modes]] — build, validate, watch, graph
   analysis, layouts, and machine exports.
