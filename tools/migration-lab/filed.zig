@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const product_boris = @import("product_boris.zig");
 
 pub const format_id = "boris-filed-fyi-migration-lab";
 pub const schema_version: u32 = 2;
@@ -1210,37 +1211,32 @@ test "compile: representative normalized Filed output with product Boris when av
     Io.Dir.cwd().deleteTree(io, lab_out) catch {};
     try run(io, gpa, .{ .source_root_dir = "fixtures/filed-parent-normalize", .out_dir = lab_out, .quiet = true });
 
-    const boris_from_root = "zig-out/bin/boris";
-    const layout_from_root = "layouts/main.html";
-    // Paths relative to repository root (cwd for the product process).
-    const content_from_root = "tools/migration-lab/fixtures/.test-filed-parent-compile/content";
-    const html_from_root = "test-output/filed-parent-normalize-html";
-
-    Io.Dir.cwd().access(io, "../../zig-out/bin/boris", .{}) catch {
-        Io.Dir.cwd().deleteTree(io, lab_out) catch {};
-        return; // product binary not built yet — skip compile smoke
-    };
-    Io.Dir.cwd().access(io, "../../layouts/main.html", .{}) catch {
+    // The product `boris` binary is a pinned external prerequisite (BORIS_BIN
+    // or PATH); this compile smoke keeps its optional skip-if-unavailable
+    // semantics and never reaches outside the laboratory tree.
+    const boris_bin = (try product_boris.resolve(io, gpa)) orelse {
         Io.Dir.cwd().deleteTree(io, lab_out) catch {};
         return;
     };
+    const layout_from_lab = "layouts/main.html";
+    const content_from_lab = "fixtures/.test-filed-parent-compile/content";
+    const html_from_lab = "test-output/filed-parent-normalize-html";
 
-    Io.Dir.cwd().deleteTree(io, "../../test-output/filed-parent-normalize-html") catch {};
-    try Io.Dir.cwd().createDirPath(io, "../../test-output");
+    Io.Dir.cwd().deleteTree(io, html_from_lab) catch {};
+    try Io.Dir.cwd().createDirPath(io, "test-output");
 
     const argv = [_][]const u8{
-        boris_from_root,
+        boris_bin,
         "--input",
-        content_from_root,
+        content_from_lab,
         "--html-dir",
-        html_from_root,
+        html_from_lab,
         "--html-layout",
-        layout_from_root,
+        layout_from_lab,
         "--quiet",
     };
     const result = std.process.run(gpa, io, .{
         .argv = &argv,
-        .cwd = .{ .path = "../.." },
         .stdout_limit = .limited(64 * 1024),
         .stderr_limit = .limited(64 * 1024),
     }) catch {
@@ -1258,7 +1254,6 @@ test "compile: representative normalized Filed output with product Boris when av
         std.debug.print("boris compile failed code={d} stderr={s} stdout={s}\n", .{ code, result.stderr, result.stdout });
     }
     try std.testing.expectEqual(@as(u8, 0), code);
-
     Io.Dir.cwd().deleteTree(io, lab_out) catch {};
-    Io.Dir.cwd().deleteTree(io, "../../test-output/filed-parent-normalize-html") catch {};
+    Io.Dir.cwd().deleteTree(io, "test-output/filed-parent-normalize-html") catch {};
 }

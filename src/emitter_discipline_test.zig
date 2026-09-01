@@ -269,6 +269,7 @@ const modules = [_]Module{
     .{ .name = "nostr_publish_matrix_test.zig", .class = .other },
     .{ .name = "page.zig", .class = .other },
     .{ .name = "parser.zig", .class = .other },
+    .{ .name = "parser_package_test.zig", .class = .other },
     .{ .name = "pathutil.zig", .class = .other },
     .{ .name = "pipeline.zig", .class = .other },
     .{ .name = "publication_profile.zig", .class = .other },

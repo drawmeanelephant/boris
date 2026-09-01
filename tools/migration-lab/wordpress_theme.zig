@@ -8,6 +8,7 @@
 const std = @import("std");
 const Io = std.Io;
 const publication = @import("publication.zig");
+const product_boris = @import("product_boris.zig");
 
 pub const format_id = "boris-wordpress-theme-archaeology-lab";
 pub const schema_version: u32 = 1;
@@ -949,15 +950,12 @@ test "wordpress-theme: emitted prototype compiles with product Boris" {
     defer theme.close(io);
     try theme.writeFile(io, .{ .sub_path = "layouts/main.html", .data = prototype });
 
-    const content_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}", .{content_out});
-    defer gpa.free(content_from_root);
-    const theme_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}", .{theme_out});
-    defer gpa.free(theme_from_root);
-    const html_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}", .{html_out});
-    defer gpa.free(html_from_root);
+    // The product `boris` binary is a pinned external prerequisite (BORIS_BIN
+    // or PATH); the lab never builds or reaches outside its own tree for it.
+    const boris_bin = (try product_boris.resolve(io, gpa)) orelse
+        return error.MissingProductBorisBinary;
     const result = try std.process.run(gpa, io, .{
-        .argv = &.{ "zig-out/bin/boris", "--input", content_from_root, "--theme", theme_from_root, "--html-dir", html_from_root, "--quiet" },
-        .cwd = .{ .path = "../.." },
+        .argv = &.{ boris_bin, "--input", content_out, "--theme", theme_out, "--html-dir", html_out, "--quiet" },
         .stdout_limit = .limited(64 * 1024),
         .stderr_limit = .limited(64 * 1024),
     });

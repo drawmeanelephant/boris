@@ -561,8 +561,15 @@ pub fn build(b: *std.Build) void {
     );
     test_artifact_sink_step.dependOn(&run_artifact_sink_tests.step);
 
-    // --- Frontmatter parser tests (milestone 5) ----------------------------
-    const parser_mod = b.createModule(.{
+    // --- Frontmatter parser: product tests + published package module ------
+    // The parser is the one product module the standalone migration laboratory
+    // links in-process (the astro-import-apply final gate). Register it as a
+    // public package module under the stable name `parser` so dependent builds
+    // can consume it through build.zig.zon (e.g. the future
+    // boris-migration-lab repository) instead of a relative `../../src` path.
+    // See docs/plans/migration-lab-standalone-repo.md (3.1a) and the
+    // pinned-API test below.
+    const parser_mod = b.addModule("parser", .{
         .root_source_file = b.path("src/parser.zig"),
         .target = target,
         .optimize = optimize,
@@ -573,6 +580,21 @@ pub fn build(b: *std.Build) void {
     });
     const run_parser_tests = b.addRunArtifact(parser_tests);
     run_parser_tests.setCwd(b.path("."));
+
+    // Pinned-API test: consume the parser module by its registered package
+    // name, exactly as a dependent build would, so the package surface cannot
+    // rot while the in-tree tests still pass.
+    const parser_package_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/parser_package_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "parser", .module = parser_mod }},
+    });
+    const parser_package_tests = b.addTest(.{
+        .root_module = parser_package_test_mod,
+    });
+    const run_parser_package_tests = b.addRunArtifact(parser_package_tests);
+    run_parser_package_tests.setCwd(b.path("."));
 
     // --- Explicit bounded Textile-to-Markdown adapter ---------------------
     const textile_mod = b.createModule(.{
@@ -1871,6 +1893,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_source_provider_tests.step);
     test_step.dependOn(&run_artifact_sink_tests.step);
     test_step.dependOn(&run_parser_tests.step);
+    test_step.dependOn(&run_parser_package_tests.step);
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_cooklang_tests.step);
     test_step.dependOn(&run_recipe_scale_tests.step);
