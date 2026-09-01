@@ -1,3 +1,0 @@
-bc{color:red}. x < y
-
-pre(fig#demo)[en]. alpha

@@ -1,4 +1,0 @@
-pre. <b>bold</b> &amp; stays
-  verbatim
-
-p. next

@@ -1,8 +1,0 @@
-* alpha
-# one
-# two
-* beta
-
-* after blank
-plain text
-* new list

@@ -1,4 +1,0 @@
-{c|} {|c} {L-} {-L} {Y=} {=Y}
-{A'} {'A} {a"} {"a}
-{1/4} {*} {:)} {:(}
-Macros inside "a {c|} link":url too.

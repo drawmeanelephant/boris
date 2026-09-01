@@ -1,5 +1,0 @@
-Before.
-
-bq. Quote.
-
-After.

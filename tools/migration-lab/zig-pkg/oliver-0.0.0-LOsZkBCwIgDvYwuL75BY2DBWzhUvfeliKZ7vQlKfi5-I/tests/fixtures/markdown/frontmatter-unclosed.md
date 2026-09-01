@@ -1,4 +1,0 @@
----
-title: x
-
-Body text

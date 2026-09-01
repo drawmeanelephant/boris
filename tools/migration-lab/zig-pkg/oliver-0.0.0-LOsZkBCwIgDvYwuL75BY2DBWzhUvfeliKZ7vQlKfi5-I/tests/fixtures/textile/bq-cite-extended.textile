@@ -1,5 +1,0 @@
-bq.. First paragraph.
-
-Second paragraph.
-
-bq.:http://example.test/ New cited quote.

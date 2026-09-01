@@ -1,2 +1,0 @@
-	foo	baz		bim
- 	bar	

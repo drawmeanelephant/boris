@@ -1,3 +1,0 @@
-Intro text
-h2. Heading
-More text

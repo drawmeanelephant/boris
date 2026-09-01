@@ -1,4 +1,0 @@
-"no colon" here
-"" is empty
-" spaced ":url
-"x":
