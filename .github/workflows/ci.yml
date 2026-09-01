@@ -198,8 +198,15 @@ jobs:
         with:
           version: 0.16.0
 
+      # The lab's black-box compile tests consume the product `boris` binary as
+      # a pinned external prerequisite (docs/plans/
+      # migration-lab-standalone-repo.md, 3.2): build the working tree here and
+      # export it via BORIS_BIN so a missing binary is a failure, never a skip.
+      - name: Build product binary (black-box prerequisite)
+        run: zig build
+
       - name: Migration-lab aggregate tests
-        run: zig build --build-file tools/migration-lab/build.zig test
+        run: BORIS_BIN="$GITHUB_WORKSPACE/zig-out/bin/boris" zig build --build-file tools/migration-lab/build.zig test
 
   standalone_tools_test:
     name: standalone-tools-test (${{ matrix.os }})

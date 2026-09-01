@@ -34,6 +34,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const product_boris = @import("product_boris.zig");
 const archaeology = @import("archaeology.zig");
 const wordpress = @import("wordpress.zig");
 const instagram = @import("instagram.zig");
@@ -2673,9 +2674,10 @@ test "wordpress: generated content compiles with product Boris" {
         .quiet = true,
     });
 
-    const boris_from_lab = "../../zig-out/bin/boris";
-    var boris_probe = try Io.Dir.cwd().openFile(io, boris_from_lab, .{});
-    boris_probe.close(io);
+    // The product `boris` binary is a pinned external prerequisite (BORIS_BIN
+    // or PATH); a missing binary here is a failure, never a skip.
+    const boris_bin = (try product_boris.resolve(io, gpa)) orelse
+        return error.MissingProductBorisBinary;
 
     // Copy only pages whose media was materialised (or have no local media refs).
     const clean_posts = try std.fmt.allocPrint(gpa, "{s}/content/posts", .{clean_out});
@@ -2724,25 +2726,21 @@ test "wordpress: generated content compiles with product Boris" {
         try copyTreeRecursive(io, gpa, src_root, dst_root, tree);
     }
 
-    const content_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}/content", .{clean_out});
-    defer gpa.free(content_from_root);
-    const html_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}", .{html_out});
-    defer gpa.free(html_from_root);
-    const boris_from_root = "zig-out/bin/boris";
-    const layout_from_root = "themes/boris/layouts/main.html";
+    const content_from_lab = try std.fmt.allocPrint(gpa, "{s}/content", .{clean_out});
+    defer gpa.free(content_from_lab);
+    const layout_from_lab = "layouts/main.html";
 
     const argv = [_][]const u8{
-        boris_from_root,
+        boris_bin,
         "--input",
-        content_from_root,
+        content_from_lab,
         "--html-dir",
-        html_from_root,
+        html_out,
         "--html-layout",
-        layout_from_root,
+        layout_from_lab,
     };
     const result = try std.process.run(gpa, io, .{
         .argv = &argv,
-        .cwd = .{ .path = "../.." },
         .stdout_limit = .limited(64 * 1024),
         .stderr_limit = .limited(64 * 1024),
     });

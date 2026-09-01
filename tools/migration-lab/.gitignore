@@ -26,3 +26,5 @@ fixtures/.test-starlight-*/
 .sl-dogfood-out/
 .zig-cache/
 zig-out/
+zig-pkg/
+test-output/

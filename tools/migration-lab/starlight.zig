@@ -21,6 +21,7 @@
 //! Not part of the product compiler. Does not import `src/`.
 
 const std = @import("std");
+const product_boris = @import("product_boris.zig");
 const Io = std.Io;
 const publication = @import("publication.zig");
 
@@ -3196,22 +3197,15 @@ fn absDirFromCwdViaChild(a: std.mem.Allocator, io: Io, dir_rel: []const u8, chil
     return child_abs;
 }
 
-/// Locate the Boris repo root (directory that contains `layouts/main.html`).
-/// Boris layout paths must be workspace-relative with no `..` or absolute form.
+/// Locate the laboratory root (directory that contains the lab-owned
+/// `layouts/main.html` reference layout). Boris layout paths must be
+/// workspace-relative with no `..` or absolute form, and the layout ships with
+/// the laboratory (not the product tree), so this resolves from cwd only.
 fn findRepoRoot(a: std.mem.Allocator, io: Io) !?[]const u8 {
-    const layout_candidates = [_][]const u8{
-        "layouts/main.html",
-        "../layouts/main.html",
-        "../../layouts/main.html",
-    };
-    for (layout_candidates) |c| {
-        if (!findFileIfExists(io, c)) continue;
-        const layout_abs = absFileFromCwd(a, io, c) catch continue;
-        const layouts_dir = std.fs.path.dirname(layout_abs) orelse continue;
-        const root = std.fs.path.dirname(layouts_dir) orelse continue;
-        return try a.dupe(u8, root);
-    }
-    return null;
+    const layout_abs = absFileFromCwd(a, io, "layouts/main.html") catch return null;
+    const layouts_dir = std.fs.path.dirname(layout_abs) orelse return null;
+    const root = std.fs.path.dirname(layouts_dir) orelse return null;
+    return try a.dupe(u8, root);
 }
 
 fn tryCompileWithBoris(
@@ -3237,32 +3231,18 @@ fn tryCompileWithBoris(
         };
     };
 
-    // Resolve boris binary (absolute so spawn works with cwd=repo_root).
+    // Resolve the product boris binary: explicit --boris first, then the
+    // pinned external prerequisite (BORIS_BIN / PATH), then a cwd-local
+    // zig-out install. Absolute so spawn works with cwd=repo_root.
     var boris_rel: ?[]const u8 = null;
     if (opts.boris_bin) |p| {
         if (findFileIfExists(io, p)) boris_rel = p;
     }
     if (boris_rel == null) {
-        const candidates = [_][]const u8{
-            "zig-out/bin/boris",
-            "../../zig-out/bin/boris",
-            "../zig-out/bin/boris",
-        };
-        for (candidates) |c| {
-            if (findFileIfExists(io, c)) {
-                boris_rel = c;
-                break;
-            }
-        }
+        boris_rel = try product_boris.resolve(io, gpa);
     }
-    // Also try repo_root/zig-out/bin/boris via absolute join probe.
-    if (boris_rel == null) {
-        const under_root = try std.fmt.allocPrint(a, "{s}/zig-out/bin/boris", .{repo_root});
-        var probe = Io.Dir.cwd().openFile(io, under_root, .{}) catch null;
-        if (probe) |*f| {
-            f.close(io);
-            boris_rel = under_root;
-        }
+    if (boris_rel == null and findFileIfExists(io, "zig-out/bin/boris")) {
+        boris_rel = "zig-out/bin/boris";
     }
     if (boris_rel == null) {
         return .{
@@ -3270,7 +3250,7 @@ fn tryCompileWithBoris(
             .exit_code = null,
             .boris_path = null,
             .command = "",
-            .stderr_excerpt = "boris binary not found; pass --boris=PATH or build the product first",
+            .stderr_excerpt = "boris binary not found; pass --boris=PATH or set BORIS_BIN",
         };
     }
     const boris_path = absFileFromCwd(a, io, boris_rel.?) catch boris_rel.?;
