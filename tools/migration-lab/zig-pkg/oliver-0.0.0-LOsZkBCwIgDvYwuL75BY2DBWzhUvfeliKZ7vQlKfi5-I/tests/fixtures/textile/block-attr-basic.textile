@@ -1,0 +1,23 @@
+p(example1). An example
+
+p(#big-red). Red here
+
+p(example1#big-red2). Red here
+
+p{color:blue;margin:30px}. Spacey blue
+
+p[fr]. rouge
+
+p<. align left
+
+p>. align right
+
+p=. centered
+
+p<>. justified
+
+p(. left ident 1em
+
+p((. left ident 2em
+
+p))). right ident 3em

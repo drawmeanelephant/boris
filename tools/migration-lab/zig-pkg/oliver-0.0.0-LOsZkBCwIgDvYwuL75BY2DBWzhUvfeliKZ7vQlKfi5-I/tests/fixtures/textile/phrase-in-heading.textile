@@ -1,0 +1,2 @@
+h1. A *bold* _head_
+h3. Mixed @code@ and *strong*.

@@ -1,6 +1,13 @@
 # Proposal — graduate `boris-migration-lab` into its own repository
 
-> **Status:** draft proposal — no code, contract, or CI change yet. Owner decision required before any step.
+> **Status:** executed. The freeze landed as PR drawmeanelephant/boris#841
+> (parser published as a package; lab pinned to it), the laboratory is now
+> its own repository
+> ([`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab)),
+> and the cut-over removed the lab tree, the migration-owned contracts, and
+> the `migration-lab-test` CI lane from this repo. Remaining follow-ups:
+> re-pin the fork's parser/binary pins to a released Boris tag, and transfer
+> open migration issues to the new repo.
 >
 > **Date:** 2026-08-30 · **Author:** Freebuff session · **Integration line:** n/a (planning doc)
 > **Contract change:** none proposed in this document · **Toolchain change:** n/a

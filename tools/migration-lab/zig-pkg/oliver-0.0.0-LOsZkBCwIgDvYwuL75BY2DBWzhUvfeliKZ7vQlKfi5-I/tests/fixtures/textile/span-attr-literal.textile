@@ -1,0 +1,6 @@
+%{bad x% stays literal.
+A %{x} y% run is not a span.
+%{width:50%}x% keeps its style.
+%(x)% is a plain span.
+%{color:red}% is plain too.
+%{unclosed stays literal.

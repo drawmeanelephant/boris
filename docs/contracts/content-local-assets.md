@@ -192,8 +192,10 @@ slice is stricter and more explicit:
    `{{asset-url …}}`.
 
 Migration labs may inventory “content-local” files for authors; the product
-compiler only publishes the sibling-tree contract above. Author workflow:
-[`docs/MIGRATION.md`](../MIGRATION.md).
+compiler only publishes the sibling-tree contract above. The migration
+laboratory lives in its own repository
+([`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab))
+with the author workflow guide (`MIGRATION.md`) and Contoso fixture.
 
 ---
 

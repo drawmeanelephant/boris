@@ -1,0 +1,2 @@
+|\2. spans two cols |
+| col 1 | col 2 |

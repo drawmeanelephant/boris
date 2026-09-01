@@ -1,0 +1,3 @@
+I searched "Google":http://google.com.
+"E-mail me please":mailto:someone@example.com
+A "relative":/path and a "quoted (T)":/u.

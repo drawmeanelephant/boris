@@ -1,0 +1,7 @@
+bc.. function hello() {
+  console.log("<hi>");
+
+  return 1;
+}
+
+p. After the code.

@@ -1,0 +1,3 @@
+table(fig). {color:red}_|Top|Row|
+{color:blue}|/2. Second|Row|
+|_{color:green}. Last|

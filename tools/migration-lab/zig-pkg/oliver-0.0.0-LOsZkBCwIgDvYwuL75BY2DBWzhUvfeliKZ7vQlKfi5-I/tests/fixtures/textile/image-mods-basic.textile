@@ -1,0 +1,19 @@
+!>obake.gif!
+
+!<a.png!
+
+!=b.png!
+
+!-c.png!
+
+!^d.png!
+
+!~e.png!
+
+!x 10x20!
+
+!y 10w 20h!
+
+!z 20%x40%!
+
+!w 20%!

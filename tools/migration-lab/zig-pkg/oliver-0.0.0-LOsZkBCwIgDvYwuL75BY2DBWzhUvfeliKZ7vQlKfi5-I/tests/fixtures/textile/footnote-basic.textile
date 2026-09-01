@@ -1,0 +1,3 @@
+Here is a reference[1] to a note.
+
+fn1. Down here, in fact.

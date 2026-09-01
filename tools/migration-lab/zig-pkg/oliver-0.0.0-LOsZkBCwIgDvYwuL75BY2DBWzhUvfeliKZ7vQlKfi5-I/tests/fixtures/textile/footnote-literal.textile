@@ -1,0 +1,6 @@
+Brackets[x] are not notes, and fnx. is not a footnote.
+
+[abc] and [1x] stay literal too.
+
+fn1.
+fn2{color:red}.

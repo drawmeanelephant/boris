@@ -20,7 +20,6 @@ jobs:
     name: changed paths
     runs-on: ubuntu-latest
     outputs:
-      migration_lab: ${{ steps.filter.outputs.migration_lab }}
       standalone_tools: ${{ steps.filter.outputs.standalone_tools }}
       testdata_generator: ${{ steps.filter.outputs.testdata_generator }}
       job_runner: ${{ steps.filter.outputs.job_runner }}
@@ -31,16 +30,14 @@ jobs:
 
       # Empty token forces git-based change detection (fetch-depth: 0 above).
       # The default PR-files REST API has returned GitHub Unicorn/5xx HTML,
-      # failing this job and skipping migration-lab-test even when the lab
-      # paths changed. Local git avoids that dependency.
+      # failing this job and skipping the standalone-tool lanes even when the
+      # tool paths changed. Local git avoids that dependency.
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           token: ''
           base: ${{ github.event.pull_request.base.sha || github.event.before || github.event.repository.default_branch }}
           filters: |
-            migration_lab:
-              - 'tools/migration-lab/**'
             standalone_tools:
               - 'tools/search-index/**'
               - 'tools/docs-maintenance/**'
@@ -182,31 +179,6 @@ jobs:
 
       - name: Publication plan integration
         run: ./editor/scripts/test-publication.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
-
-  migration-lab-test:
-    name: migration-lab-test (Linux)
-    needs: changes
-    if: needs.changes.outputs.migration_lab == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      # The lab's black-box compile tests consume the product `boris` binary as
-      # a pinned external prerequisite (docs/plans/
-      # migration-lab-standalone-repo.md, 3.2): build the working tree here and
-      # export it via BORIS_BIN so a missing binary is a failure, never a skip.
-      - name: Build product binary (black-box prerequisite)
-        run: zig build
-
-      - name: Migration-lab aggregate tests
-        run: BORIS_BIN="$GITHUB_WORKSPACE/zig-out/bin/boris" zig build --build-file tools/migration-lab/build.zig test
 
   standalone_tools_test:
     name: standalone-tools-test (${{ matrix.os }})
@@ -363,7 +335,6 @@ jobs:
       - build-and-test
       - editor-test
       - key-hint-lint
-      - migration-lab-test
       - standalone_tools_test
       - testdata_generator_test
       - job-runner-image
@@ -377,7 +348,6 @@ jobs:
           build_and_test="${{ needs.build-and-test.result }}"
           editor_test="${{ needs.editor-test.result }}"
           key_hint_lint="${{ needs.key-hint-lint.result }}"
-          migration_lab_test="${{ needs.migration-lab-test.result }}"
           standalone_tools_test="${{ needs.standalone_tools_test.result }}"
           testdata_generator_test="${{ needs.testdata_generator_test.result }}"
           job_runner_image="${{ needs.job-runner-image.result }}"
@@ -386,7 +356,6 @@ jobs:
           echo "build-and-test result: ${build_and_test}"
           echo "editor-test result: ${editor_test}"
           echo "key-hint lint result: ${key_hint_lint}"
-          echo "migration-lab-test result: ${migration_lab_test}"
           echo "standalone-tools-test result: ${standalone_tools_test}"
           echo "testdata-generator-test result: ${testdata_generator_test}"
           echo "job-runner-image result: ${job_runner_image}"
@@ -396,7 +365,6 @@ jobs:
           test "${editor_test}" = "success"
           # The lint lane must actually succeed: a skip must never read as green.
           test "${key_hint_lint}" = "success"
-          test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
           test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
           test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"
           test "${job_runner_image}" = "success" || test "${job_runner_image}" = "skipped"

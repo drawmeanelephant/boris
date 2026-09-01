@@ -46,8 +46,10 @@ Editor
 Cloudflare Worker host example
 : [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/) — HTTP/R2 glue around the embed Wasm ABI. Not a publication target.
 
-Migration labs / source-RAG / search-index / docs-maintenance
+source-RAG / search-index / docs-maintenance
 : [`tools/`](../tools/) — standalone. Not linked into the `boris` binary.
+  The migration laboratory moved to
+  [`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab).
 
 ## Documentation map
 
@@ -71,9 +73,8 @@ Completed audits were archived per
 | [`CHANGELOG.md`](../CHANGELOG.md) | Released-history record (`[Unreleased]` + `[0.8.0]`; pre-0.8 at [`CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md)) |
 | [`docs/changelog.d/`](changelog.d/) | Pending release fragments |
 | [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md) | Archived pre-0.8 history (pre-slim, not standing context) |
-| [`docs/MIGRATION.md`](MIGRATION.md) | Bounded author migration workflow |
 | [`docs/authoring-spine.md`](authoring-spine.md) | Teaching path from `boris init` to publish + verify |
-| [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration-lab commands |
+| [boris-migration-lab](https://github.com/drawmeanelephant/boris-migration-lab) | Standalone migration-lab commands, guide, and Contoso fixture |
 | [`tools/search-index/README.md`](../tools/search-index/README.md) | Rendered search tool |
 | [`docs/github-pages.md`](github-pages.md) | GitHub Pages setup, location model, workflow, and evidence boundary |
 | [`docs/cloudflare-container.md`](cloudflare-container.md) | Hosted runner + Cloudflare Containers example (not a target) |
@@ -91,9 +92,9 @@ Completed audits were archived per
 ## Rules
 
 - Do not grow a per-function prose twin of `src/` or `tools/`. Those
-  dossier trees were retired. Operator docs for labs live in
-  [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
-  [`tools/source-rag/README.md`](../tools/source-rag/README.md).
+  dossier trees were retired. Operator docs for the migration laboratory live
+  in [its own repository](https://github.com/drawmeanelephant/boris-migration-lab)
+  and for source-RAG in [`tools/source-rag/README.md`](../tools/source-rag/README.md).
    Historical dogfood reports and retrospectives were retired; the v0.8
    capability snapshot lives in
    [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md)

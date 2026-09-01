@@ -1,0 +1,2 @@
+I(think) not, xCSS(no) not, CSS() empty not, and CSS(open unclosed not.
+@CSS(x)@ stays code and "CSS(x)":url keeps its display.

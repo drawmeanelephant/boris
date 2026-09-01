@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris publication profile (schema v1)",
+  "description": "Machine-readable twin of publication-profile.md. Boris itself rejects duplicate object keys; JSON Schema cannot express that requirement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version"],
+  "properties": {
+    "format": { "const": "boris-publication-profile" },
+    "schema_version": { "const": 1 },
+    "input": { "$ref": "#/$defs/path" },
+    "input_format": { "enum": ["markdown", "textile"] },
+    "site": { "$ref": "#/$defs/site" },
+    "publication": { "$ref": "#/$defs/publication" },
+    "targets": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/target" } },
+    "editions": { "$ref": "#/$defs/editions" }
+  },
+  "$defs": {
+    "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "site": { "type": "object", "additionalProperties": false, "properties": { "url": { "type": "string" }, "title": { "type": "string", "maxLength": 1024 }, "description": { "type": "string", "maxLength": 1024 } } },
+    "publication": { "type": "object", "additionalProperties": false, "required": ["target", "base_url", "origin", "base_path"], "properties": { "target": { "const": "github-pages" }, "base_url": { "type": "string", "minLength": 1, "maxLength": 2048 }, "origin": { "type": "string", "minLength": 1, "maxLength": 2048 }, "base_path": { "type": "string", "maxLength": 2048 } } },
+    "rule": { "type": "object", "additionalProperties": false, "required": ["selector", "layout"], "properties": { "selector": { "type": "string" }, "layout": { "$ref": "#/$defs/path" } } },
+    "path_output": { "type": "object", "additionalProperties": false, "required": ["path"], "properties": { "path": { "$ref": "#/$defs/path" } } },
+    "target": { "type": "object", "additionalProperties": false, "required": ["name", "output"], "properties": { "name": { "type": "string", "maxLength": 64 }, "output": { "$ref": "#/$defs/path" }, "public": { "type": "boolean" }, "theme": { "$ref": "#/$defs/path" }, "layout": { "$ref": "#/$defs/path" }, "layout_rules": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/rule" } }, "sitemap": { "$ref": "#/$defs/path_output" }, "rss": { "type": "object", "additionalProperties": false, "required": ["path"], "properties": { "path": { "$ref": "#/$defs/path" }, "limit": { "type": "integer", "minimum": 1, "maximum": 500 } } }, "llms": { "$ref": "#/$defs/path_output" } }, "allOf": [{ "not": { "required": ["theme", "layout"] } }] },
+    "edition": { "type": "object", "additionalProperties": false, "required": ["output"], "properties": { "output": { "$ref": "#/$defs/path" } } },
+    "editions": { "type": "object", "additionalProperties": false, "properties": { "ir": { "$ref": "#/$defs/edition" }, "rag": { "type": "object", "additionalProperties": false, "required": ["output"], "properties": { "output": { "$ref": "#/$defs/path" }, "scope": { "$ref": "#/$defs/path" }, "split_size": { "type": "integer", "minimum": 1 }, "bundles_only": { "type": "boolean" } } }, "context": { "type": "object", "additionalProperties": false, "required": ["output"], "properties": { "output": { "$ref": "#/$defs/path" }, "scope": { "$ref": "#/$defs/path" }, "split_size": { "type": "integer", "minimum": 1 } } } } }
+  }
+}

@@ -1,0 +1,7 @@
+bq. A plain quotation.
+
+bq{color:red}. A red quote
+
+bq>. right aligned
+
+bq(famous). A classy quote

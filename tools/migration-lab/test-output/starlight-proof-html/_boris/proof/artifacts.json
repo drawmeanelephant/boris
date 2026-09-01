@@ -1,0 +1,98 @@
+{
+  "format": "boris-publication-artifacts",
+  "schema_version": 1,
+  "target": "default",
+  "artifacts": [
+    {
+      "path": "_boris/search/search-index.json",
+      "kind": "rendered-search",
+      "producer": "rendered-search",
+      "required": true,
+      "status": "committed",
+      "bytes": 2247,
+      "sha256": "6b456a5dd52310a1ad750a620ac35d585ad33a0121ea5d145cee6be59edad9a3",
+      "format_version": "1",
+      "dimensions": null,
+      "semantics": null,
+      "advertised": null
+    },
+    {
+      "path": "changelog.html",
+      "kind": "html-page",
+      "producer": "html-render",
+      "required": true,
+      "status": "committed",
+      "bytes": 1692,
+      "sha256": "5e2d85b7b98e57d00e52b8b9e065f9af432dae4a89efde172839abaf919ee5a2",
+      "format_version": null,
+      "dimensions": null,
+      "semantics": null,
+      "advertised": true
+    },
+    {
+      "path": "changelog/2026-04-22-init.html",
+      "kind": "html-page",
+      "producer": "html-render",
+      "required": true,
+      "status": "committed",
+      "bytes": 1588,
+      "sha256": "a09bf2512e2c31579fa025dc93d427c6ac43c245bf087d951bcff6fcf425e444",
+      "format_version": null,
+      "dimensions": null,
+      "semantics": null,
+      "advertised": true
+    },
+    {
+      "path": "releases.html",
+      "kind": "html-page",
+      "producer": "html-render",
+      "required": true,
+      "status": "committed",
+      "bytes": 1865,
+      "sha256": "0a0a804bd5aa4c5c3ca25bf22a4f379ffd3c8368dd7135f1a90b83964f1e4f1d",
+      "format_version": null,
+      "dimensions": null,
+      "semantics": null,
+      "advertised": true
+    },
+    {
+      "path": "releases/v0.1.0.html",
+      "kind": "html-page",
+      "producer": "html-render",
+      "required": true,
+      "status": "committed",
+      "bytes": 1514,
+      "sha256": "a2f691562db8be1db4b74725f3719606dc5ee1b09e5497310f3a2e4ca9c0bfad",
+      "format_version": null,
+      "dimensions": null,
+      "semantics": null,
+      "advertised": true
+    },
+    {
+      "path": "releases/v0.1.1-trust-surface-residue.html",
+      "kind": "html-page",
+      "producer": "html-render",
+      "required": true,
+      "status": "committed",
+      "bytes": 1630,
+      "sha256": "967648b3bbca2485cb04aa9dda5a3242acdd9f92900de4e84149ae9f408b4dd2",
+      "format_version": null,
+      "dimensions": null,
+      "semantics": null,
+      "advertised": true
+    },
+    {
+      "path": "releases/v0.1.2-replacement-without-release.html",
+      "kind": "html-page",
+      "producer": "html-render",
+      "required": true,
+      "status": "committed",
+      "bytes": 1627,
+      "sha256": "cd4145ab1f0e28d3e09fa85dcdc6938c3bbee499224e10f0aaa34e023fe87e0d",
+      "format_version": null,
+      "dimensions": null,
+      "semantics": null,
+      "advertised": true
+    }
+  ]
+}

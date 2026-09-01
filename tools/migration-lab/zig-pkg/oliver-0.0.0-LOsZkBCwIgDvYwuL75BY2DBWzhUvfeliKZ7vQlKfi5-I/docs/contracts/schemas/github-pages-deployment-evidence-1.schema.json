@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris GitHub Pages deployment evidence (schema v1)",
+  "description": "A bounded post-deploy HTTP observation bound to a normalized Boris publication plan and target-local artifact inventory.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version", "identity", "deployment", "binding", "audit", "limitations"],
+  "properties": {
+    "format": {"const": "boris-github-pages-deployment-evidence"},
+    "schema_version": {"const": 1},
+    "identity": {"$ref": "#/$defs/identity"},
+    "deployment": {"$ref": "#/$defs/deployment"},
+    "binding": {"$ref": "#/$defs/binding"},
+    "audit": {"$ref": "#/$defs/audit"},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "nullable_string": {"type": ["string", "null"]},
+    "digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "result": {"enum": ["passed", "failed", "incomplete", "not-applicable"]},
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "source_commit", "workflow_ref", "workflow_sha", "run_id", "run_attempt", "deployment_id", "public_artifact_name"],
+      "properties": {
+        "repository": {"$ref": "#/$defs/nullable_string"},
+        "source_commit": {"$ref": "#/$defs/nullable_string"},
+        "workflow_ref": {"$ref": "#/$defs/nullable_string"},
+        "workflow_sha": {"$ref": "#/$defs/nullable_string"},
+        "run_id": {"$ref": "#/$defs/nullable_string"},
+        "run_attempt": {"$ref": "#/$defs/nullable_string"},
+        "deployment_id": {"$ref": "#/$defs/nullable_string"},
+        "public_artifact_name": {"$ref": "#/$defs/nullable_string"}
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "target", "site_kind", "base_url", "origin", "base_path", "page_url", "normalized_page_url"],
+      "properties": {
+        "provider": {"const": "github-pages"},
+        "target": {"type": "string", "minLength": 1},
+        "site_kind": {"enum": ["project-site", "root-site", "custom-domain"]},
+        "base_url": {"type": "string", "minLength": 1},
+        "origin": {"type": "string", "minLength": 1},
+        "base_path": {"type": "string"},
+        "page_url": {"type": "string", "minLength": 1},
+        "normalized_page_url": {"type": "string"}
+      }
+    },
+    "binding_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "inventory_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "format", "schema_version", "target", "artifact_count"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "format": {"const": "boris-publication-artifacts"},
+        "schema_version": {"const": 1},
+        "target": {"type": "string", "minLength": 1},
+        "artifact_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "inventory"],
+      "properties": {
+        "plan": {"$ref": "#/$defs/binding_ref"},
+        "inventory": {"$ref": "#/$defs/inventory_binding"}
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_requests", "max_body_bytes", "max_redirects", "timeout_ms", "max_projection_urls"],
+      "properties": {
+        "max_requests": {"type": "integer", "minimum": 1},
+        "max_body_bytes": {"type": "integer", "minimum": 1},
+        "max_redirects": {"type": "integer", "minimum": 0},
+        "timeout_ms": {"type": "integer", "minimum": 1},
+        "max_projection_urls": {"type": "integer", "minimum": 1}
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "detail"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {"$ref": "#/$defs/result"},
+        "detail": {"type": "string"}
+      }
+    },
+    "redirect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "url"],
+      "properties": {
+        "status": {"type": "integer", "minimum": 300, "maximum": 399},
+        "url": {"type": "string", "minLength": 1}
+      }
+    },
+    "headers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_type", "cache_control", "etag", "last_modified", "content_encoding", "content_length"],
+      "properties": {
+        "content_type": {"$ref": "#/$defs/nullable_string"},
+        "cache_control": {"$ref": "#/$defs/nullable_string"},
+        "etag": {"$ref": "#/$defs/nullable_string"},
+        "last_modified": {"$ref": "#/$defs/nullable_string"},
+        "content_encoding": {"$ref": "#/$defs/nullable_string"},
+        "content_length": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_id", "kind", "path", "requested_url", "final_url", "status", "redirects", "headers", "body_bytes", "observed_sha256", "expected_sha256", "expected_bytes", "transfer_decoded", "byte_result", "result", "detail"],
+      "properties": {
+        "check_id": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "requested_url": {"type": "string", "minLength": 1},
+        "final_url": {"$ref": "#/$defs/nullable_string"},
+        "status": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
+        "redirects": {"type": "array", "items": {"$ref": "#/$defs/redirect"}},
+        "headers": {"$ref": "#/$defs/headers"},
+        "body_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "observed_sha256": {"$ref": "#/$defs/digest"},
+        "expected_sha256": {"$ref": "#/$defs/digest"},
+        "expected_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "transfer_decoded": {"type": "boolean"},
+        "byte_result": {"$ref": "#/$defs/result"},
+        "result": {"$ref": "#/$defs/result"},
+        "detail": {"type": "string"}
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audited_at", "result", "requests", "completed_requests", "truncated", "bounds", "checks", "observations"],
+      "properties": {
+        "audited_at": {"type": "string", "minLength": 1},
+        "result": {"$ref": "#/$defs/result"},
+        "requests": {"type": "integer", "minimum": 0},
+        "completed_requests": {"type": "integer", "minimum": 0},
+        "truncated": {"type": "boolean"},
+        "bounds": {"$ref": "#/$defs/bounds"},
+        "checks": {"type": "array", "items": {"$ref": "#/$defs/check"}},
+        "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}}
+      }
+    }
+  }
+}

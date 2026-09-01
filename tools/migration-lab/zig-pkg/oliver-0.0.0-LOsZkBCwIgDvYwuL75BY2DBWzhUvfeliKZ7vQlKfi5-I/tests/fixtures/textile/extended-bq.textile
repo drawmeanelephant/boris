@@ -1,0 +1,6 @@
+bq.. This is paragraph one of a block quote.
+This is paragraph two of a block quote.
+
+A third paragraph.
+
+p. Now we're back to a regular paragraph.

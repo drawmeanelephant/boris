@@ -1,0 +1,4 @@
+** is not an empty emphasis
+**** is not empty strong
+foo * bar
+*

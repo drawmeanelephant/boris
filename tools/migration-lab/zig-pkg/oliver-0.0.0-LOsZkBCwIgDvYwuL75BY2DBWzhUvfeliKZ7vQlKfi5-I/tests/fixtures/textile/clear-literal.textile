@@ -1,0 +1,5 @@
+clear. with content
+clear x. not a marker
+clearb. not a marker
+
+clear.
