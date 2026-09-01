@@ -1,6 +1,0 @@
-Before
-bq. One
-bq. Two
-h2. Heading
-bq. Three
-p. After

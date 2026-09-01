@@ -1,3 +1,0 @@
-Textile is *_way_* cool.
-Nested _*inner*_ phrases.
-*one _and *two*_ three*.

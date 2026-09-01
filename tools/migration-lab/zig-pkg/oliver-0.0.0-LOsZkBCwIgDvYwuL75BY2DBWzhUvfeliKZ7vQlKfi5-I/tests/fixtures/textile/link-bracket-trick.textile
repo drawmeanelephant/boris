@@ -1,2 +1,0 @@
-You["gotta":http://example.com]seethis!
-See {also "this":/x} here.

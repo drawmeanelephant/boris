@@ -1,5 +1,0 @@
-pre.. <b>bold</b>
-
-&amp; preserved
-
-p. After.

@@ -1,5 +1,0 @@
-*{bad x* stays literal.
-A *{x} y* run is not a phrase.
-*{color:red}* is plain strong content.
-+{unclosed stays literal.
-a -- b still em-dashes, --{color:red}paired-- works.

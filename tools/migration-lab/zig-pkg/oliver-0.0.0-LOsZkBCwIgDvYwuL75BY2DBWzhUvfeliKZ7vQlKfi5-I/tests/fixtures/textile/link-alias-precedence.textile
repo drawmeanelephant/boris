@@ -1,4 +1,0 @@
-"first":a "case":A "none":foo
-
-[a]http://one
-[a]http://two

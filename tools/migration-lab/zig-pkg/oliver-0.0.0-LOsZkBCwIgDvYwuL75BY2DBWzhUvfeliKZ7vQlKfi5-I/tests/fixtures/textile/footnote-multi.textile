@@ -1,5 +1,0 @@
-Two references[1] in one line[2] here.
-
-fn1. First note.
-
-fn2. Second note.

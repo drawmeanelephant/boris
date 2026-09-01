@@ -1,4 +1,0 @@
-| name | age | sex |
-| joan | 24 | f |
-| archie | 29 | m |
-| bella | 45 | f |

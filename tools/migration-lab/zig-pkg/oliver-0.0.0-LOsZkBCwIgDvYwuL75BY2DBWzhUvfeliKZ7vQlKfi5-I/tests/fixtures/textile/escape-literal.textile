@@ -1,9 +1,0 @@
-a==x==b
-
-==x==y
-
-===x==
-
-x == y
-
-== unmatched
