@@ -1,0 +1,11 @@
+!{border:1px solid}pic.png!
+
+!(classy-image bevel)/carver.png!
+
+!(foo#bar)>x.png!
+
+!()>x.png!
+
+!{color:red}>(pic).png!
+
+!<x.png!:https://hobix.com/

@@ -1,0 +1,3 @@
+|/3. spans 3 rows | a |
+| b |
+| c |

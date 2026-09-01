@@ -1,0 +1,11 @@
+clear.
+A paragraph after a clear marker.
+
+clear<.
+p{color:red}. Left-aligned clear.
+
+clear>.
+h2. Right-aligned clear heading
+
+clear.
+* list item

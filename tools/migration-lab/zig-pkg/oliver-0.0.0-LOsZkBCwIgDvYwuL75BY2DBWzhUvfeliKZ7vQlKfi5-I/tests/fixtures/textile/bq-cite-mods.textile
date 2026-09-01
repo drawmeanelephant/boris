@@ -1,0 +1,3 @@
+bq{color:red}.:http://example.test/ Styled cited.
+
+bq(fig#demo).:https://example.test/doc. Trimmed period.

@@ -1,0 +1,4 @@
+{C|} {a'} {L-} {notamacro} stay literal.
+An unclosed {c| and a {* nested *} brace.
+@a {c|} b@ stays code; ==x {c|} y== stays literal.
+{*} and {-L} stay whole: x{*}y and * {c|} bold.

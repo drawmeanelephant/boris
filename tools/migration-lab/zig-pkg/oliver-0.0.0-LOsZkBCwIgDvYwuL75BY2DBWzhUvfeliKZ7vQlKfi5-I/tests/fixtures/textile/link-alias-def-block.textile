@@ -1,0 +1,4 @@
+I searched "Google":g and "it":g "all":g I ever "link to":g!
+
+[g]http://google.com
+[e]mailto:someone@example.com

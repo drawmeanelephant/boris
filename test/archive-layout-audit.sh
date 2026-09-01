@@ -17,7 +17,6 @@ OUT_REL="${TMP_REL}/site"
 REPEAT_REL="${TMP_REL}/repeat"
 OUT="${ROOT}/${OUT_REL}"
 REPEAT="${ROOT}/${REPEAT_REL}"
-AUDIT="${TMP}/link-audit"
 mkdir -p "${TMP}"
 trap 'rm -rf "${TMP}"' EXIT
 
@@ -68,9 +67,9 @@ grep -q 'overflow-x: auto' "${css}"
 grep -q '@media (max-width: 42rem)' "${css}"
 grep -q 'grid-template-columns: 1fr' "${css}"
 
-mkdir -p "${AUDIT}"
-zig build --build-file tools/migration-lab/build.zig run -- \
-  --mode=link-audit --root="${OUT}" --out="${AUDIT}" --quiet
-grep -q 'Found \*\*0\*\* local-link findings' "${AUDIT}/REPORT.md"
+# The generated-site link-audit pass moved with the migration laboratory to
+# drawmeanelephant/boris-migration-lab; this audit keeps the layout-level
+# guardrails above (graph children, breadcrumbs, page-local assets, responsive
+# risks). The archive tree itself is compiled and asserted by the checks above.
 
 printf 'Archive layout audit: PASS\n'

@@ -1,0 +1,13 @@
+|{color:red}|x
+
+|{color:red}. no closing pipe
+
+||. empty mods
+
+|x|. 
+
+|{bad
+
+|^|. row token
+
+|x|.y no space

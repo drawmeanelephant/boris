@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris publication artifact inventory (schema v1)",
+  "description": "Deterministic inventory of Boris-owned payload bytes committed for one HTML target. The inventory excludes itself and later proof-pack envelope files.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version", "target", "artifacts"],
+  "properties": {
+    "format": { "const": "boris-publication-artifacts" },
+    "schema_version": { "const": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    }
+  },
+  "$defs": {
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$)).+$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "producer", "required", "status", "bytes", "sha256", "format_version"],
+      "properties": {
+        "path": {
+          "allOf": [
+            { "$ref": "#/$defs/relative_path" },
+            { "not": { "const": "_boris/proof/checks.json" } }
+          ]
+        },
+        "kind": {
+          "enum": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms"]
+        },
+        "producer": {
+          "enum": ["html-render", "theme-assets", "content-assets", "rendered-search", "sitemap", "rss", "llms"]
+        },
+        "required": { "type": "boolean" },
+        "status": { "enum": ["committed", "omitted-by-plan", "not-applicable"] },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "format_version": { "type": ["string", "null"], "minLength": 1 }
+      }
+    }
+  }
+}

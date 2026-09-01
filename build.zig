@@ -563,12 +563,12 @@ pub fn build(b: *std.Build) void {
 
     // --- Frontmatter parser: product tests + published package module ------
     // The parser is the one product module the standalone migration laboratory
-    // links in-process (the astro-import-apply final gate). Register it as a
+    // links in-process (its astro-import-apply final gate). Register it as a
     // public package module under the stable name `parser` so dependent builds
-    // can consume it through build.zig.zon (e.g. the future
-    // boris-migration-lab repository) instead of a relative `../../src` path.
-    // See docs/plans/migration-lab-standalone-repo.md (3.1a) and the
-    // pinned-API test below.
+    // can consume it through build.zig.zon (the
+    // drawmeanelephant/boris-migration-lab repository) instead of a relative
+    // `../../src` path. See the migration-lab split plan and the pinned-API
+    // test below.
     const parser_mod = b.addModule("parser", .{
         .root_source_file = b.path("src/parser.zig"),
         .target = target,

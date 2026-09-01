@@ -1,0 +1,6 @@
+notextiles. not a marker
+notextilex. no period
+notextile with no dot
+This is notextile. mid-paragraph.
+
+notextile.

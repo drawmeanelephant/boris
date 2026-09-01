@@ -17,7 +17,7 @@ projection — from the same frozen graph.
 [Contracts](docs/contracts/) ·
 [GitHub Pages](docs/github-pages.md) ·
 [Standard.site](docs/standard-site.md) ·
-[Migration](docs/MIGRATION.md)
+[Migration](https://github.com/drawmeanelephant/boris-migration-lab)
 
 ## What Boris does
 
@@ -76,8 +76,10 @@ surface, not a second product.
   Not a verified target.
 - Target-local evidence chain: artifacts → checks → claims → Touch Atlas → Proof Pack.
 - Local Boris Editor: schema-aware completion, compiler-backed problems, live preview.
-- Standalone migration labs for Astro/Starlight, WordPress, Instagram, Obsidian,
-  Notion, and related source shapes.
+- Standalone migration labs (Astro/Starlight, WordPress, Instagram, Obsidian, Notion,
+  Filed, and related source shapes) live in the
+  [boris-migration-lab](https://github.com/drawmeanelephant/boris-migration-lab)
+  repository.
 
 ## Why Boris?
 
@@ -320,16 +322,15 @@ inspect → select a bounded slice → preserve/propose/review
        → compile HTML + IR → inspect the result → expand carefully
 ```
 
-The migration labs are standalone developer aids. They can inventory source
-trees, identify relationships and unsupported constructs, materialize reviewed
-themes, and produce manual-review reports. They do not add Astro, Node, or an
-MDX runtime to Boris core.
-
-Start with [`docs/MIGRATION.md`](docs/MIGRATION.md). Historical v0.8
-capabilities are preserved in the frozen snapshot
+The migration lab is a standalone developer aid in its own repository
+([`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab)).
+It can inventory source trees, identify relationships and unsupported
+constructs, materialize reviewed themes, and produce manual-review reports. It
+does not add Astro, Node, or an MDX runtime to Boris core, and its guide
+(`MIGRATION.md`) and Contoso fixture ship there. Historical v0.8 capabilities
+are preserved in the frozen snapshot
 [`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md)
-(2026-08-21); current normative behavior lives in [`docs/contracts/`](docs/contracts/)
-and current lab usage in [`tools/migration-lab/README.md`](tools/migration-lab/README.md).
+(2026-08-21); current normative behavior lives in [`docs/contracts/`](docs/contracts/).
 
 ## AI and OpenAI Build Week
 
@@ -389,11 +390,10 @@ Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase ban
 - [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) — where `src/` clusters live and documentation map
 - [`docs/contracts/`](docs/contracts/) — normative behavior
 - [`docs/authoring-spine.md`](docs/authoring-spine.md) — init → publish → verify
-- [`docs/MIGRATION.md`](docs/MIGRATION.md) — migration workflow
+- [`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab) — standalone migration laboratory (guide + converters)
 - [`docs/github-pages.md`](docs/github-pages.md) — Pages target
 - [`docs/standard-site.md`](docs/standard-site.md) — Atmosphere target
 - [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) — release checks
-- [`tools/migration-lab/`](tools/migration-lab/) — standalone migration tools
 - [`tools/source-rag/`](tools/source-rag/) — source-code RAG exporter
 - [`tools/content-audit/`](tools/content-audit/) — standalone deterministic source-content audit tool
 - [`editor/`](editor/) — local compiler-backed editor

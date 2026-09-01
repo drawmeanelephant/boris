@@ -1,0 +1,3 @@
+A note with style[1].
+
+fn1{color:blue}. Styled note.

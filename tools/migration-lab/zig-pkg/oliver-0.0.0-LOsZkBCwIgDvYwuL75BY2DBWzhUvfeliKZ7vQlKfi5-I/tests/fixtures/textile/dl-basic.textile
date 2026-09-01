@@ -1,0 +1,6 @@
+dl. textile:a cloth, especially one manufactured by weaving
+or knitting; a fabric
+format:the arrangement of data for storage or display.
+
+dl{color:red}. url:http://example.com is a site
+*term*:with phrases

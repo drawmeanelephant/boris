@@ -1,0 +1,9 @@
+|{color:red}|. Red text
+
+|(note#one)>[fr]|. Styled text
+
+|()>|. Padded right
+continues here
+
+|{color:blue}|. Blue
+p. Back to normal

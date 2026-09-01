@@ -1,0 +1,6 @@
+Empty @@ stays.
+Doubled @@code@@ stays.
+Edges @ code@ and @code @ stay.
+Embedded @a@b@ stays.
+Unclosed @code stays.
+Backslash \@code@ and @slash\@.

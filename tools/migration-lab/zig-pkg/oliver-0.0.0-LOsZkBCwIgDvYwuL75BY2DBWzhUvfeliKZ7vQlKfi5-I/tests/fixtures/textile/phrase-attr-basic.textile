@@ -1,0 +1,3 @@
+I seriously *{color:red}blushed* when I _(big)sprouted_ that %[es]cabeza%.
+**{color:blue}bold** and __{color:green}italic__ and -{color:gray}deleted- and +{color:olive}inserted+.
+^[fr]sup^ and ~[de]sub~ and ++{color:teal}bigger++ and --{color:maroon}smaller--.

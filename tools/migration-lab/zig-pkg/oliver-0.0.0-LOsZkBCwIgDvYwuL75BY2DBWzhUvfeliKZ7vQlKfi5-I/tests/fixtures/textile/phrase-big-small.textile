@@ -1,0 +1,8 @@
+++bigger++ and --smaller--.
+Nested: ++*big*++ and --_small_--.
+-deleted- and +inserted+ still work.
+---overlong--- stays literal, +++so+++ does too.
+An unmatched --x opens nothing.
+A trailing x-- closes nothing.
+Spaced a -- b and intraword foo--bar and 2--4 stay em-dashed.
+Inside @--code--@ the dashes stay literal.

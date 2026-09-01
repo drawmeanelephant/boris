@@ -1,0 +1,3 @@
+I'm %[es]cabeza% and %{color:red}red% and %(note#one)id%.
+A combined %(a#b)[fr]{x:y}z% run and a plain %plain% span.
+Nested %{color:blue}*bold*% inside.

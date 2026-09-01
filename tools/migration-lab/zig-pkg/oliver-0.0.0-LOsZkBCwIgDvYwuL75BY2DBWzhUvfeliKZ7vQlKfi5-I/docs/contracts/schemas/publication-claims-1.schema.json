@@ -1,0 +1,345 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris publication claims evidence (schema v1)",
+  "description": "Deterministic target-local claims and limitations derived strictly from the committed artifact inventory and publication checks evidence bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version", "target", "artifact_inventory", "publication_checks", "claims", "limitations"],
+  "properties": {
+    "format": { "const": "boris-publication-claims" },
+    "schema_version": { "const": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "artifact_inventory": { "$ref": "#/$defs/inventory_binding" },
+    "publication_checks": { "$ref": "#/$defs/checks_binding" },
+    "claims": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/claim",
+          "properties": {
+            "id": { "const": "committed-artifacts-match-inventory" },
+            "statement": { "const": "Every committed artifact record selected by the artifact-integrity check was inspected and matched its declared byte count and SHA-256 digest." },
+            "evidence": {
+              "properties": { "check_id": { "const": "artifact-integrity" } }
+            },
+            "limitation_ids": {
+              "prefixItems": [
+                { "const": "target-local-only" },
+                { "const": "no-deployment-verification" },
+                { "const": "no-accessibility-verification" },
+                { "const": "no-prose-quality-verification" },
+                { "const": "no-universal-reproducibility-claim" }
+              ],
+              "items": false,
+              "minItems": 5,
+              "maxItems": 5
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/claim",
+          "properties": {
+            "id": { "const": "rendered-html-passed-declared-audit" },
+            "statement": { "const": "Every committed HTML page selected by the rendered-html check completed the declared structural, route, fragment, and duplicate-ID audit within that check's scope." },
+            "evidence": {
+              "properties": { "check_id": { "const": "rendered-html" } }
+            },
+            "limitation_ids": {
+              "prefixItems": [
+                { "const": "target-local-only" },
+                { "const": "no-deployment-verification" },
+                { "const": "no-accessibility-verification" },
+                { "const": "no-prose-quality-verification" },
+                { "const": "no-universal-reproducibility-claim" }
+              ],
+              "items": false,
+              "minItems": 5,
+              "maxItems": 5
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/claim",
+          "properties": {
+            "id": { "const": "rendered-search-matches-selected-html" },
+            "statement": { "const": "The single selected rendered-search artifact matched the committed HTML page set and derived rendered-search content inspected by the rendered-search check." },
+            "evidence": {
+              "properties": { "check_id": { "const": "rendered-search" } }
+            },
+            "limitation_ids": {
+              "prefixItems": [
+                { "const": "target-local-only" },
+                { "const": "no-deployment-verification" },
+                { "const": "no-accessibility-verification" },
+                { "const": "no-prose-quality-verification" },
+                { "const": "no-universal-reproducibility-claim" },
+                { "const": "omitted-projections-not-certified" }
+              ],
+              "items": false,
+              "minItems": 6,
+              "maxItems": 6
+            }
+          }
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "limitations": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/limitation",
+          "properties": {
+            "id": { "const": "target-local-only" },
+            "statement": { "const": "These claims describe one selected local HTML target after its commit and say nothing about any other target or environment." },
+            "source": { "const": "docs/contracts/publication-checks.md#authority-and-transaction-boundary" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/limitation",
+          "properties": {
+            "id": { "const": "no-deployment-verification" },
+            "statement": { "const": "No deployment was performed or verified; local generation cannot verify deployed behavior." },
+            "source": { "const": "docs/contracts/publication-model.md#verification-vocabulary-and-claims" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/limitation",
+          "properties": {
+            "id": { "const": "no-accessibility-verification" },
+            "statement": { "const": "No accessibility audit was performed for any page or artifact in this target." },
+            "source": { "const": "docs/contracts/publication-model.md#projections" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/limitation",
+          "properties": {
+            "id": { "const": "no-prose-quality-verification" },
+            "statement": { "const": "No prose, writing, or documentation-quality judgment was made." },
+            "source": { "const": "docs/contracts/publication-model.md#verification-vocabulary-and-claims" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/limitation",
+          "properties": {
+            "id": { "const": "no-universal-reproducibility-claim" },
+            "statement": { "const": "Deterministic bytes on one recorded environment are not universal reproducibility." },
+            "source": { "const": "docs/contracts/publication-model.md#verification-vocabulary-and-claims" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/limitation",
+          "properties": {
+            "id": { "const": "omitted-projections-not-certified" },
+            "statement": { "const": "An omitted or unselected projection remains explicitly unverified and is not certified by this report." },
+            "source": { "const": "docs/contracts/publication-model.md#the-conductor-rule" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 1,
+              "maxItems": 1
+            }
+          }
+        }
+      ],
+      "items": false,
+      "minItems": 6,
+      "maxItems": 6
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "inventory_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256", "format", "schema_version", "target", "artifact_count"],
+      "properties": {
+        "path": { "const": "_boris/proof/artifacts.json" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "format": { "const": "boris-publication-artifacts" },
+        "schema_version": { "const": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "artifact_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "checks_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256", "format", "schema_version", "target", "check_count", "finding_count"],
+      "properties": {
+        "path": { "const": "_boris/proof/checks.json" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "format": { "const": "boris-publication-checks" },
+        "schema_version": { "const": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "check_count": { "type": "integer", "minimum": 0 },
+        "finding_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible", "checked", "findings"],
+      "properties": {
+        "eligible": { "type": "integer", "minimum": 0 },
+        "checked": { "type": "integer", "minimum": 0 },
+        "findings": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_id", "check_status", "coverage", "counts", "subject_sha256", "supporting_sha256", "checks_report_sha256", "reason"],
+      "properties": {
+        "check_id": { "enum": ["artifact-integrity", "rendered-html", "rendered-search"] },
+        "check_status": { "enum": ["passed", "failed", "incomplete", "not-applicable"] },
+        "coverage": { "enum": ["complete", "incomplete", "not-applicable"] },
+        "counts": { "$ref": "#/$defs/counts" },
+        "subject_sha256": { "$ref": "#/$defs/sha256" },
+        "supporting_sha256": { "$ref": "#/$defs/sha256" },
+        "checks_report_sha256": { "$ref": "#/$defs/sha256" },
+        "reason": {
+          "type": ["string", "null"],
+          "enum": [null, "check-failed", "check-incomplete", "check-not-applicable"]
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_statuses", "subject_kinds", "supporting_statuses", "supporting_kinds"],
+      "properties": {
+        "subject_statuses": { "type": "array", "items": { "$ref": "#/$defs/status" } },
+        "subject_kinds": { "type": "array", "items": { "$ref": "#/$defs/kind" } },
+        "supporting_statuses": { "type": "array", "items": { "$ref": "#/$defs/status" } },
+        "supporting_kinds": { "type": "array", "items": { "$ref": "#/$defs/kind" } }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "status", "evidence", "scope", "limitation_ids"],
+      "properties": {
+        "id": {
+          "enum": [
+            "committed-artifacts-match-inventory",
+            "rendered-html-passed-declared-audit",
+            "rendered-search-matches-selected-html"
+          ]
+        },
+        "statement": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["verified", "failed", "not-verified"] },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "limitation_ids": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "enum": [
+              "target-local-only",
+              "no-deployment-verification",
+              "no-accessibility-verification",
+              "no-prose-quality-verification",
+              "no-universal-reproducibility-claim",
+              "omitted-projections-not-certified"
+            ]
+          }
+        }
+      }
+    },
+    "status": {
+      "enum": ["committed", "omitted-by-plan", "not-applicable"]
+    },
+    "kind": {
+      "enum": ["html-page", "theme-asset", "content-asset", "rendered-search", "sitemap", "rss", "llms"]
+    },
+    "limitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "applies_to_claims", "source"],
+      "properties": {
+        "id": {
+          "enum": [
+            "target-local-only",
+            "no-deployment-verification",
+            "no-accessibility-verification",
+            "no-prose-quality-verification",
+            "no-universal-reproducibility-claim",
+            "omitted-projections-not-certified"
+          ]
+        },
+        "statement": { "type": "string", "minLength": 1 },
+        "applies_to_claims": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "committed-artifacts-match-inventory",
+              "rendered-html-passed-declared-audit",
+              "rendered-search-matches-selected-html"
+            ]
+          }
+        },
+        "source": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

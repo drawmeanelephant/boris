@@ -1,0 +1,7 @@
+h2()>. Bingo.
+
+h3()>[no]{color:red}. Bingo
+
+p{color:red}>. Right red
+
+p(notes)[en]. Annotated

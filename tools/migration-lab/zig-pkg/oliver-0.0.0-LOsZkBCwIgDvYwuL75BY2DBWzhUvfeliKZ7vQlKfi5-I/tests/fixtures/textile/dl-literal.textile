@@ -1,0 +1,8 @@
+dl. plain text stays literal.
+dl. term:
+dl. 
+After the failed signatures, this is plain text.
+
+dl. a:one
+see also: not a new term
+b:two

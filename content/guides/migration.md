@@ -9,7 +9,7 @@ tags: [guides, migration]
 
 # Migrating to Boris {#migrating}
 
-Boris does not auto-convert other site generator formats. Instead, it provides **review-first tooling** that helps you understand your existing content before porting it manually or incrementally. This guide explains the recommended workflow.
+Boris does not auto-convert other site generator formats. Instead, the migration laboratory provides **review-first tooling** that helps you understand your existing content before porting it manually or incrementally. The lab is the standalone [`boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab) repository — clone it and run the modes below from its root. This guide explains the recommended workflow.
 
 <Aside kind="warning" id="not-universal">
 
@@ -30,7 +30,7 @@ Boris's approach: inspect your source content, understand what you have, then co
 Use the migration lab to analyze your existing content tree:
 
 ```bash
-zig build --build-file tools/migration-lab/build.zig run -- \
+zig build run -- \
   --mode=frontmatter-review \
   --content=/path/to/my-old-site/content \
   --out=./.out-fmreview
@@ -60,7 +60,7 @@ For sites with complex sidebars, run the relationship candidate extractor:
 For framework-specific trees, pick a named mode and its required input path — for example Astro (`--mode=astro --root=...`), Obsidian (`--mode=obsidian --vault=...`), or Starlight (`--mode=starlight --root=...`). There is no generic `--source` workflow.
 
 ```bash
-zig build --build-file tools/migration-lab/build.zig run -- \
+zig build run -- \
   --mode=astro \
   --root=/path/to/my-old-site \
   --out=./.out-astro-review

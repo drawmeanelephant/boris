@@ -99,8 +99,6 @@ per topic:
 | Standard.site persistent sessions | [atproto-sessions.md](atproto-sessions.md) |
 | Standard.site live smoke | [atproto-live-smoke.md](atproto-live-smoke.md) |
 | Standard.site operator path (non-normative) | [../standard-site.md](../standard-site.md) |
-| Astro plan-only migration intake | [astro-import-plan.md](astro-import-plan.md) |
-| Astro initial-create migration apply | [astro-import-apply.md](astro-import-apply.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 
@@ -145,8 +143,6 @@ per topic:
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 | [cooklang-compatibility.md](cooklang-compatibility.md) | Explicit bounded `.cook`-to-Markdown input mode with structured `recipe` IR facet |
 | [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |
-| [astro-import-plan.md](astro-import-plan.md) | Plan-only plain-Markdown Astro intake; snapshot, identity, and digest rules |
-| [astro-import-apply.md](astro-import-apply.md) | Initial-create application of a verified Astro import plan |
 
 ## Redirect / compatibility paths (non-normative)
 

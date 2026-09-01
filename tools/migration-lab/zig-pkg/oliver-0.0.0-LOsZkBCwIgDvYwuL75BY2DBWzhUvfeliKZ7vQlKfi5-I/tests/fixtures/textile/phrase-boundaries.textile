@@ -1,0 +1,7 @@
+Textile is way c*oo*l.
+Text * x* and *x * are literal.
+***triple*** stays literal.
+---smaller--- stays literal.
+a^2 is not a superscript.
+50% is not a span.
+*unmatched stays literal.

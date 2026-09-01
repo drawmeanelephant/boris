@@ -31,16 +31,17 @@ worktree and asserts the Git-native predicate still enables the check.
 CI (`.github/workflows/ci.yml`) pins **Zig 0.16.0** and runs `zig build`,
 `zig build test`, and `zig build test-render` on `ubuntu-latest` and
 `macos-latest`. The root aggregate deliberately excludes standalone tools;
-changes under `tools/migration-lab/` additionally run its Linux-only targeted
-gate, while changes under `tools/search-index/`, `tools/docs-maintenance/`, or
-the shared `src/search_index.zig` run both standalone tool gates on Ubuntu and
-macOS:
+changes under `tools/search-index/`, `tools/docs-maintenance/`, or the shared
+`src/search_index.zig` run both standalone tool gates on Ubuntu and macOS:
 
 ```bash
-zig build --build-file tools/migration-lab/build.zig test
 zig build --build-file tools/search-index/build.zig test
 zig build --build-file tools/docs-maintenance/build.zig test
 ```
+
+The migration laboratory moved to its own repository
+([`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab))
+and is no longer part of this repo's CI.
 ## Checklist
 
 Items stay unchecked until the corresponding work is implemented **and**

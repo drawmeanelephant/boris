@@ -29,10 +29,12 @@ Standalone developer tools are repo development and testing material, not
 agent handoff currency, so they are excluded by default. Pass `--all-tools`
 to also build and include every executable installed by a direct
 `tools/*/build.zig` file (currently `boris-search-index`,
-`boris-migration-lab`, `boris-docs-maintenance`, `boris-scale-smoke`,
+`boris-docs-maintenance`, `boris-scale-smoke`,
 `boris-testdata`, `boris-content-audit`, and `boris-github-pages-audit`).
 Adding another direct `tools/<name>/build.zig` package automatically builds
-and includes its installed executable(s) in `--all-tools` kits.
+and includes its installed executable(s) in `--all-tools` kits. The
+migration laboratory is no longer packaged here — it lives in its own
+repository ([`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab)) with its own kit story.
 
 The kit README names the built-in feedback loop for the recipient:
 `boris watch --serve` serves the built site on loopback with automatic

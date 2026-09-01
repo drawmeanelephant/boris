@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris publication plan (schema v1)",
+  "description": "Canonical normalized publication identity and selected projections. It is a declaration, not publication evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version", "input", "input_format", "site", "targets", "editions"],
+  "properties": {
+    "format": { "const": "boris-publication-plan" },
+    "schema_version": { "const": 1 },
+    "input": { "$ref": "#/$defs/path" },
+    "input_format": { "enum": ["markdown", "textile"] },
+    "site": { "$ref": "#/$defs/site" },
+    "publication": { "$ref": "#/$defs/publication" },
+    "targets": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/target" } },
+    "editions": { "$ref": "#/$defs/editions" }
+  },
+  "$defs": {
+    "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "nullable_path": { "type": ["string", "null"], "minLength": 1, "maxLength": 1024 },
+    "nullable_string": { "type": ["string", "null"] },
+    "site": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["url", "title", "description"],
+      "properties": {
+        "url": { "$ref": "#/$defs/nullable_string" },
+        "title": { "$ref": "#/$defs/nullable_string" },
+        "description": { "$ref": "#/$defs/nullable_string" }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "base_url", "origin", "base_path", "site_kind"],
+      "properties": {
+        "target": { "const": "github-pages" },
+        "base_url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "origin": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "base_path": { "type": "string", "maxLength": 2048 },
+        "site_kind": { "enum": ["project-site", "root-site", "custom-domain"] }
+      }
+    },
+    "layout_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector", "layout"],
+      "properties": {
+        "selector": { "type": "string" },
+        "layout": { "$ref": "#/$defs/path" }
+      }
+    },
+    "sitemap": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": { "path": { "$ref": "#/$defs/path" } }
+    },
+    "rss": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["path", "limit"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+      }
+    },
+    "llms": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": { "path": { "$ref": "#/$defs/path" } }
+    },
+    "projections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["html", "sitemap", "rss", "llms"],
+      "properties": {
+        "html": { "const": true },
+        "sitemap": { "$ref": "#/$defs/sitemap" },
+        "rss": { "$ref": "#/$defs/rss" },
+        "llms": { "$ref": "#/$defs/llms" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "output", "public", "theme", "layout", "layout_rules", "projections"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "output": { "$ref": "#/$defs/path" },
+        "public": { "type": "boolean" },
+        "theme": { "$ref": "#/$defs/nullable_path" },
+        "layout": { "$ref": "#/$defs/nullable_path" },
+        "layout_rules": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/layout_rule" } },
+        "projections": { "$ref": "#/$defs/projections" }
+      }
+    },
+    "ir": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["output"],
+      "properties": { "output": { "$ref": "#/$defs/path" } }
+    },
+    "rag": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["output", "scope", "split_size", "bundles_only"],
+      "properties": {
+        "output": { "$ref": "#/$defs/path" },
+        "scope": { "$ref": "#/$defs/nullable_path" },
+        "split_size": { "type": ["integer", "null"], "minimum": 1 },
+        "bundles_only": { "type": "boolean" }
+      }
+    },
+    "context": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["output", "scope", "split_size"],
+      "properties": {
+        "output": { "$ref": "#/$defs/path" },
+        "scope": { "$ref": "#/$defs/nullable_path" },
+        "split_size": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "editions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ir", "rag", "context"],
+      "properties": {
+        "ir": { "$ref": "#/$defs/ir" },
+        "rag": { "$ref": "#/$defs/rag" },
+        "context": { "$ref": "#/$defs/context" }
+      }
+    }
+  }
+}

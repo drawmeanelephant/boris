@@ -1,0 +1,5 @@
+This is ==*a test*== of escaping.
+
+Straight quotation marks are =="left alone"== in this example.
+
+A ==2x4 -- (tm)== and *outside* phrases still work.

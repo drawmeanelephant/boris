@@ -1,0 +1,3 @@
+!https://hobix.com/sample.jpg!
+A relative !openwindow1.gif(Bunny.)! image.
+!openwindow1.gif (Bunny.)! spaced alt.

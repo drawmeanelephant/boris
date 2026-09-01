@@ -1,5 +1,0 @@
----
-title: LF record
----
-
-# LF

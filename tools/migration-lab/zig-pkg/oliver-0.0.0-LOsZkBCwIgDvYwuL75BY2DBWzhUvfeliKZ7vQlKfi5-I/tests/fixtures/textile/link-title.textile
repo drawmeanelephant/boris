@@ -1,0 +1,2 @@
+"E-mail me (Please)":mailto:someone@example.com
+"Text (With) (More)":http://example.com

@@ -73,7 +73,7 @@ Uncompiled Markdown folders in git repositories lack navigation menus, breadcrum
 - **Fail-Loud Link Safety:** Rejects broken parent relationships and supported internal wiki-links before publishing new build outputs.
 
 <Aside kind="tip">
-**Migration Path:** Want to evaluate existing Markdown frontmatter? Run a named migration-lab mode such as `zig build --build-file tools/migration-lab/build.zig run -- --mode=frontmatter-review --content=/path/to/old-content --out=./.out-fmreview`. Astro, Obsidian, Starlight, and other adapters each require their own mode and mode-specific input (`--root`, `--vault`, and so on). See [[guides/migration|Migrating to Boris]].
+**Migration Path:** Want to evaluate existing Markdown frontmatter? Clone the [boris-migration-lab](https://github.com/drawmeanelephant/boris-migration-lab) repository and run a named mode such as `zig build run -- --mode=frontmatter-review --content=/path/to/old-content --out=./.out-fmreview`. Astro, Obsidian, Starlight, and other adapters each require their own mode and mode-specific input (`--root`, `--vault`, and so on). See [[guides/migration|Migrating to Boris]].
 </Aside>
 
 ---

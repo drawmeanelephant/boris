@@ -1,0 +1,9 @@
+h1. Header 1
+
+h2(toc). TOC header
+
+h3[en]. English header
+
+h4{color:blue}. Blue header
+
+h6. Header 6
