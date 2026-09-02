@@ -97,6 +97,34 @@ exit `0` — the same shutdown contract as `boris watch`, so an embedder treats
 no drain of in-flight HTTP beyond what the single-request accept loop already
 implies.
 
+## Full editor gate
+
+[`editor/scripts/test-editor-gate.sh`](scripts/test-editor-gate.sh) runs the
+whole editor acceptance surface against a product `boris` binary in one shot:
+editor-host Zig tests, UI static checks and build, the mocked Playwright e2e
+suite, and the live integration scripts (contract fixture, host safe-editing,
+diagnostics, validation daemon, live preview, publication) against the given
+binary. The CI `editor-test` lane invokes this same script (deps installed in
+the lane with the npm cache and `--with-deps` Chromium), so the local and CI
+editor validation cannot drift; the lane renders the gate's trailing NDJSON
+line as the job summary and uploads it (with the full log) as the
+`editor-gate-summary` artifact.
+
+```bash
+./editor/scripts/test-editor-gate.sh ./zig-out/bin/boris
+./editor/scripts/test-editor-gate.sh --deps /path/to/released/boris   # fresh checkout
+```
+
+`--deps` installs the UI npm dependencies and the Playwright Chromium browser
+once (omit it when they are already present). The gate fails loudly if the
+binary is missing or does not answer `--version` with a `boris/<x.y.z>` id,
+and every outcome ends with exactly one machine-readable NDJSON summary line
+on stdout — `{"event":"editor-gate","ok":…,"boris":…,"total_ms":…,
+"stages":[{"stage":…,"ok":…,"ms":…},…]}` (a `reason` object replaces
+`stages` on guard failures) — so logs and dashboards can `tail -1` it.
+The per-surface scripts below remain available individually;
+`test-cooklang.sh` (the Cooklang-corpus variant) is not part of the lane.
+
 ## M0 gates
 
 ```bash

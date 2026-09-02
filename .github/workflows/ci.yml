@@ -142,43 +142,41 @@ jobs:
       - name: Install editor UI dependencies
         run: npm --prefix editor/ui ci
 
+      # Deps are installed here (with apt Chromium deps) rather than through
+      # the gate's own --deps so the npm cache and --with-deps apply; the gate
+      # skips its install branch when node_modules is already present.
       - name: Install browser
         run: npm exec --prefix editor/ui -- playwright install --with-deps chromium
 
-      - name: Editor format
-        run: zig fmt --check editor/build.zig editor/build.zig.zon editor/src
+      - name: Build the Boris binary under test
+        run: zig build
 
-      - name: Editor host tests
-        run: zig build --build-file editor/build.zig test
-
-      - name: Build Boris and editor host
+      # The one-shot gate (editor/scripts/test-editor-gate.sh) runs the whole
+      # editor-test lane — fmt, host tests, UI checks + build, Playwright e2e,
+      # and the live integrations — against ./zig-out/bin/boris and ends every
+      # outcome with exactly one machine-readable NDJSON line on stdout. Run it
+      # with the log captured so the summary survives a failure: the step then
+      # writes the NDJSON line to the job summary via
+      # editor-gate-summary.mjs, and the upload step below keeps log + summary
+      # as an artifact for dashboards.
+      - name: Full editor gate
         run: |
-          zig build
-          zig build --build-file editor/build.zig
+          set +e
+          ./editor/scripts/test-editor-gate.sh ./zig-out/bin/boris >"$RUNNER_TEMP/editor-gate.log" 2>&1
+          rc=$?
+          set -e
+          tail -1 "$RUNNER_TEMP/editor-gate.log" > "$RUNNER_TEMP/editor-gate.json"
+          node editor/scripts/editor-gate-summary.mjs "$RUNNER_TEMP/editor-gate.log" "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
-      - name: Editor UI checks
-        run: |
-          npm --prefix editor/ui run check
-          npm --prefix editor/ui run build
-          npm --prefix editor/ui run test:e2e
-
-      - name: Compiler contract fixture
-        run: ./editor/scripts/test-contract-fixture.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor-contract-probe
-
-      - name: Loopback host integration
-        run: ./editor/scripts/test-host.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
-
-      - name: Boris diagnostics integration
-        run: ./editor/scripts/test-diagnostics.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
-
-      - name: Validation daemon integration
-        run: ./editor/scripts/test-validation-daemon.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
-
-      - name: Live preview integration
-        run: ./editor/scripts/test-preview.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
-
-      - name: Publication plan integration
-        run: ./editor/scripts/test-publication.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+      - name: Upload editor gate summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-gate-summary
+          path: |
+            ${{ runner.temp }}/editor-gate.json
+            ${{ runner.temp }}/editor-gate.log
 
   standalone_tools_test:
     name: standalone-tools-test (${{ matrix.os }})
