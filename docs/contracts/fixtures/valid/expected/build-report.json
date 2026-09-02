@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.2.0",
-  "compiler": "boris/0.8.1",
+  "compiler": "boris/0.8.2",
   "ok": true,
   "contentRoot": "docs/contracts/fixtures/valid/content",
   "outDir": ".release-gate/ir-valid",

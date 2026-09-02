@@ -6,7 +6,7 @@ const report = @import("report.zig");
 
 /// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
 /// release line (`pipeline.boris_version`); this tool does not import `src/`.
-pub const tool_id = "boris-docs-maintenance/0.8.1";
+pub const tool_id = "boris-docs-maintenance/0.8.2";
 
 pub fn main(init: std.process.Init) u8 {
     const arena = init.arena.allocator();

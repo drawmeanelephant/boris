@@ -108,7 +108,7 @@ diagnostics, artifacts, limits, timings, workspaceRemoved, retried
 | `runnerClass` | enum | See below |
 | `exitCode` | integer \| null | Boris process exit; `null` if Boris never started |
 | `compilerId` | string \| null | From the HTML `--report` when present; else `boris --version` |
-| `borisVersion` | string \| null | Product version recorded by the runner (`0.8.1` today) |
+| `borisVersion` | string \| null | Product version recorded by the runner (`0.8.2` today) |
 | `runnerId` | string | `boris-job-runner/<product-version>` |
 | `imageDigest` | string \| null | `BORIS_IMAGE_DIGEST` when the host set it |
 | `jobId` | string | Job identity |

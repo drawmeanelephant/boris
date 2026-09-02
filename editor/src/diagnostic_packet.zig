@@ -120,7 +120,7 @@ test "packet is bounded, metadata-only, and redacts the project identity" {
     const private_root = "/Users/author/private-site";
     const long_message = private_root ++ "/content/index.md: " ++ ("diagnostic " ** 700);
     const packet = try build(allocator, .{
-        .compiler_id = "boris/0.8.1",
+        .compiler_id = "boris/0.8.2",
         .editor_id = "boris-editor/0.1.0",
         .command_mode = "ir_build",
         .failure_class = "content",
@@ -145,7 +145,7 @@ test "packet is bounded, metadata-only, and redacts the project identity" {
 test "packet rejects absolute diagnostic source identities" {
     const allocator = std.testing.allocator;
     const packet = try build(allocator, .{
-        .compiler_id = "boris/0.8.1",
+        .compiler_id = "boris/0.8.2",
         .editor_id = "boris-editor/0.1.0",
         .command_mode = "validate",
         .failure_class = "io",

@@ -26,16 +26,16 @@ const target_mod = @import("target.zig");
 const timings = @import("timings.zig");
 
 pub const schema_version = "0.2.0";
-pub const compiler_id = "boris/0.8.1";
+pub const compiler_id = "boris/0.8.2";
 pub const semantic_schema_version = "0.3.0";
-pub const semantic_compiler_id = "boris/0.8.1+semantic-relations";
+pub const semantic_compiler_id = "boris/0.8.2+semantic-relations";
 /// IR 0.4 adds the `recipe` node facet. Like semantic relations before it, the
 /// bump is conditional: a corpus with no recipes still publishes 0.2.0 or
 /// 0.3.0, so adding Cooklang support does not reshape existing artifacts.
 pub const recipe_schema_version = "0.4.0";
-pub const recipe_compiler_id = "boris/0.8.1+cooklang";
+pub const recipe_compiler_id = "boris/0.8.2+cooklang";
 /// Product version string (package / catalog_meta.boris_version).
-pub const boris_version = "0.8.1";
+pub const boris_version = "0.8.2";
 
 pub const Options = struct {
     content_root: []const u8 = "content",

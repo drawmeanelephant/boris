@@ -153,7 +153,7 @@ Useful first commands:
 
 ```bash
 ./zig-out/bin/boris --help
-./zig-out/bin/boris --version                 # print the compiler id (e.g. boris/0.8.1)
+./zig-out/bin/boris --version                 # print the compiler id (e.g. boris/0.8.2)
 ./zig-out/bin/boris --out .boris --quiet       # JSON IR
 ./zig-out/bin/boris --rag --quiet              # RAG working-context packs
 ./zig-out/bin/boris --rag --complete --quiet    # complete-corpus RAG export
@@ -362,6 +362,7 @@ reviewed or uploaded to an LLM when useful.
 - [x] Local Boris Editor (compiler-backed authoring).
 - [x] Migration labs and real-site dogfood evidence.
 - [x] v0.8.1 release cut: changelog assembled from the queued fragments; tagged on `main`.
+- [x] v0.8.2 release cut: minor version bump packaging the post-v0.8.1 line (migration-lab split, `parser` package module); tagged on `main`.
 - [x] Archive-layout browser review and evidence-gated presentation fixes ([#667](https://github.com/drawmeanelephant/boris/pull/667)).
 - [ ] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)).
 - [x] Nostr NIP-23 CLI (`plan` / `sign` / `publish`). Not a verified target.

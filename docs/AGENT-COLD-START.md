@@ -2,7 +2,7 @@
 
 **Status:** non-normative evaluation protocol. Model-agnostic; proven across
 two agents of very different capability (one low-effort, one thorough) on the
-`boris/0.8.1` kit. Related: [`AGENT-BINARY-KITS.md`](AGENT-BINARY-KITS.md) for
+`boris/0.8.2` kit. Related: [`AGENT-BINARY-KITS.md`](AGENT-BINARY-KITS.md) for
 how kits are built and verified.
 
 ## Purpose

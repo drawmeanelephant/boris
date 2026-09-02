@@ -9,7 +9,7 @@
   "properties": {
     "format": { "type": "string", "const": "boris-recipe-scale" },
     "schemaVersion": { "type": "string", "const": "0.1.0" },
-    "compiler": { "type": "string", "const": "boris/0.8.1+cooklang" },
+    "compiler": { "type": "string", "const": "boris/0.8.2+cooklang" },
     "factor": { "$ref": "#/$defs/factor" },
     "servings": { "$ref": "#/$defs/servings" },
     "page": { "type": "string", "minLength": 1 },

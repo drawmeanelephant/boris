@@ -43,7 +43,7 @@ reproducible.
   uses: actions/checkout@v4
   with:
     repository: drawmeanelephant/boris
-    ref: v0.8.1              # pin the audited Boris revision, not a moving branch
+    ref: v0.8.2              # pin the audited Boris revision, not a moving branch
     path: boris
 
 - name: Build boris-content-audit from source
@@ -65,7 +65,7 @@ and verify it before use:
 - name: Download pinned binary kit
   uses: actions/download-artifact@v4
   with:
-    name: boris-content-audit-v0.8.1-linux-x86_64
+    name: boris-content-audit-v0.8.2-linux-x86_64
     path: /tmp/boris-kit
 
 - name: Verify and install binary kit
@@ -112,7 +112,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: drawmeanelephant/boris
-          ref: v0.8.1
+          ref: v0.8.2
           path: boris
 
       - name: Build boris-content-audit from source
@@ -205,7 +205,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: drawmeanelephant/boris
-          ref: v0.8.1
+          ref: v0.8.2
           path: boris
 
       - name: Build boris-content-audit from source

@@ -89,7 +89,7 @@ fn finish(sink: *Sink) ![]u8 {
     return sink.toOwnedSlice();
 }
 
-/// `{"event":"hello","watch_events_schema":1,"compiler":"boris/0.8.1"}`
+/// `{"event":"hello","watch_events_schema":1,"compiler":"boris/0.8.2"}`
 /// First line of the stream; consumers gate on `watch_events_schema`.
 pub fn renderHello(gpa: std.mem.Allocator, compiler_id: []const u8) ![]u8 {
     var sink = Sink.init(gpa);
@@ -271,9 +271,9 @@ pub fn renderWatchStopped(gpa: std.mem.Allocator, reason: []const u8) ![]u8 {
 
 test "hello event pins schema and compiler" {
     const gpa = std.testing.allocator;
-    const line = try renderHello(gpa, "boris/0.8.1");
+    const line = try renderHello(gpa, "boris/0.8.2");
     defer gpa.free(line);
-    try std.testing.expectEqualStrings("{\"event\":\"hello\",\"watch_events_schema\":1,\"compiler\":\"boris/0.8.1\"}\n", line);
+    try std.testing.expectEqualStrings("{\"event\":\"hello\",\"watch_events_schema\":1,\"compiler\":\"boris/0.8.2\"}\n", line);
 }
 
 test "build-started rebuild carries sorted changed set" {

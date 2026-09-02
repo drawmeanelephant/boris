@@ -206,7 +206,7 @@ test "html report renders deterministic shape with diagnostics" {
             .id = "index",
         },
     };
-    const rendered = try renderHtmlReport(gpa, "boris/0.8.1", .{
+    const rendered = try renderHtmlReport(gpa, "boris/0.8.2", .{
         .ok = false,
         .content_root = "content",
         .out_dir = "dist",
@@ -230,7 +230,7 @@ test "html report renders deterministic shape with diagnostics" {
 
 test "html report renders empty diagnostics as ok" {
     const gpa = std.testing.allocator;
-    const rendered = try renderHtmlReport(gpa, "boris/0.8.1", .{
+    const rendered = try renderHtmlReport(gpa, "boris/0.8.2", .{
         .ok = true,
         .content_root = "content",
         .out_dir = "dist",
@@ -251,7 +251,7 @@ test "#741: proofPack mirrors check verdicts with allPassed=false on failure" {
         .{ .id = "rendered-html", .status = "passed" },
         .{ .id = "rendered-search", .status = "failed" },
     };
-    const rendered = try renderHtmlReport(gpa, "boris/0.8.1", .{
+    const rendered = try renderHtmlReport(gpa, "boris/0.8.2", .{
         .ok = true,
         .content_root = "content",
         .out_dir = "dist",
@@ -285,7 +285,7 @@ test "#741: proofPack allPassed tolerates not-applicable checks" {
         .{ .id = "artifact-integrity", .status = "passed" },
         .{ .id = "rendered-search", .status = "not-applicable" },
     };
-    const rendered = try renderHtmlReport(gpa, "boris/0.8.1", .{
+    const rendered = try renderHtmlReport(gpa, "boris/0.8.2", .{
         .ok = true,
         .content_root = "content",
         .out_dir = "dist",

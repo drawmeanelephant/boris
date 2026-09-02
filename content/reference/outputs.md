@@ -124,7 +124,7 @@ The chosen directory contains:
 | `graph.json` | Frozen nodes and parent, reference, include, and semantic relation edges where present |
 | `build-report.json` | Deterministic diagnostics, counts, and build information |
 
-The current compiler identifier is `boris/0.8.1`; the relation-free IR schema
+The current compiler identifier is `boris/0.8.2`; the relation-free IR schema
 is `0.2.0`. Relation-bearing pages use IR schema `0.3.0`, as described in
 [[reference/relationships|Relationships]]. Consumers should read the manifest's
 schema field rather than infer it from a path.

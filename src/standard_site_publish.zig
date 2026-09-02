@@ -300,7 +300,7 @@ const test_cid = "bafyreihwn3gfvnopsh4a6dmn2d3b7k5wqj2jqbzj6jydhpm5yfjjj7qbx4";
 
 const test_bindings = reconcile.Bindings{
     .source_commit = "0123456789abcdef",
-    .boris_pin = "boris@0.8.1",
+    .boris_pin = "boris@0.8.2",
     .oliver_pin = oliver_pin,
 };
 

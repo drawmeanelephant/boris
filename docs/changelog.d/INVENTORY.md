@@ -1,5 +1,17 @@
 # Queued-fragment inventory
 
+**Note (2026-09-02):** the sixteen fragments queued since that cut
+(`531-pds-dpop-nonce-and-transport-fixes`, `781-artifact-build-provenance`,
+`789-scale-smoke-version-flag`, `795-source-rag-vcs-revision`, `800-lab-theme`,
+`801-init-self-verify-and-starter-search`, `805-static-passthrough`,
+`806-agent-kit-slim-default`, `821-intelligence-edge-counts`,
+`822-embed-manifest-id-and-json-escapes`, `832-entity-id-unicode-whitespace`,
+`832-html-report-phantom-eio`, `832-remove-dependency-renderjson`,
+`839-docs-publishing-and-cooklang-guides`, `841-parser-package-module`,
+`842-migration-lab-cutover`) were assembled into the `[0.8.2]` section of
+[`CHANGELOG.md`](../../CHANGELOG.md) at the v0.8.2 release cut and removed from
+this queue.
+
 **Note (2026-08-25):** the fragments inventoried below were assembled into the
 `[0.8.1]` section of [`CHANGELOG.md`](../../CHANGELOG.md) by the release owner;
 the fragment files themselves are removed from the queue. This table remains as

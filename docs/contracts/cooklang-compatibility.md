@@ -393,9 +393,9 @@ The bump is conditional, exactly like the semantic-relations facet before it:
 
 | Corpus carries | `schemaVersion` | `compiler` |
 |---|---|---|
-| neither facet | `0.2.0` | `boris/0.8.1` |
-| semantic relations only | `0.3.0` | `boris/0.8.1+semantic-relations` |
-| recipes | `0.4.0` | `boris/0.8.1+cooklang` |
+| neither facet | `0.2.0` | `boris/0.8.2` |
+| semantic relations only | `0.3.0` | `boris/0.8.2+semantic-relations` |
+| recipes | `0.4.0` | `boris/0.8.2+cooklang` |
 
 `0.4.0` is a superset of `0.3.0`: a recipe corpus that also carries semantic
 relations still emits `relations`. A corpus with no recipes is byte-identical to
