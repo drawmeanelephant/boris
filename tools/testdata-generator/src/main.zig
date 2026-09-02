@@ -6,7 +6,7 @@ const Io = std.Io;
 
 /// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
 /// release line (`pipeline.boris_version`); this tool does not import `src/`.
-pub const tool_id = "boris-testdata/0.8.1";
+pub const tool_id = "boris-testdata/0.8.2";
 
 const ExitCode = enum(u8) {
     success = 0,
@@ -385,7 +385,7 @@ test "help wins regardless of argument position and malformed jobs values" {
     defer std.testing.allocator.free(version.barb_names);
     try std.testing.expect(version.version);
     try std.testing.expect(!version.help);
-    try std.testing.expectEqualStrings("boris-testdata/0.8.1", tool_id);
+    try std.testing.expectEqualStrings("boris-testdata/0.8.2", tool_id);
 
     // `--help` with a missing jobs value.
     const missing = try parseOptions(std.testing.allocator, &.{

@@ -188,7 +188,7 @@ recipe** button runs exactly this command.
 
 Once any page in the corpus carries a recipe, every `graph.json` node carries
 a `recipe` facet (`null` for pages that do not), and the IR version bumps to
-`0.4.0` (`boris/0.8.1+cooklang`). Two properties are contractual:
+`0.4.0` (`boris/0.8.2+cooklang`). Two properties are contractual:
 
 - **Quantities are strings.** Cooklang admits `2`, `1/2`, `1.5`, `1-2`, and
   bare words like `some`; the IR keeps what the author wrote. Scaling is a

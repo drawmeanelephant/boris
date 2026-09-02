@@ -4,7 +4,7 @@
     <title>Docs &amp; &lt;Feed&gt; "News"</title>
     <link>https://example.test/docs&amp;guides</link>
     <description>Recent &amp; &lt;updates&gt; "quotes"</description>
-    <generator>boris/0.8.1</generator>
+    <generator>boris/0.8.2</generator>
     <item>
       <title>A &amp; &lt;B&gt; "C"</title>
       <link>https://example.test/docs&amp;guides/posts/a.html</link>

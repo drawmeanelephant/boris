@@ -129,7 +129,7 @@ touches the network. `boris init --help` / `-h` prints init-specific help
 The command parser must reject unknown positional arguments and conflicting
 mode flags before touching the content tree. `--help` exits `0` without reading
 content or writing artifacts. `--version` / `-V` exit `0` printing the compiler
-id (`pipeline.compiler_id`, e.g. `boris/0.8.1`) to stdout without reading
+id (`pipeline.compiler_id`, e.g. `boris/0.8.2`) to stdout without reading
 content or writing artifacts.
 
 Usage diagnostics on the exit-2 path are self-attributing (issues #761 and
@@ -300,7 +300,7 @@ reading content or writing artifacts, short-circuiting exactly like `--help`
 wins). The output is exactly one line on **stdout**:
 
 ```text
-boris/0.8.1
+boris/0.8.2
 ```
 
 The id is `pipeline.compiler_id` (`src/pipeline.zig`): the base compiler id,
@@ -308,18 +308,18 @@ never suffixed. Artifacts record the base id, or a variant-suffixed id when
 the corpus engages the Cooklang or semantic-relations stack — the IR
 `manifest.json` (`compiler` field), the IR `build-report.json` (`compiler`
 field, success and failure alike), and the editor `completion.json`
-(`compiler_id` field) write e.g. `boris/0.8.1` for a Markdown corpus and
-`boris/0.8.1+cooklang` for a Cooklang corpus. Scripts and CI can therefore
+(`compiler_id` field) write e.g. `boris/0.8.2` for a Markdown corpus and
+`boris/0.8.2+cooklang` for a Cooklang corpus. Scripts and CI can therefore
 pin the compiler, and provenance checks must accept the base or a
 `+`-suffixed artifact id:
 
 ```bash
 # Pin: refuse to build with an unexpected compiler.
 BORIS_VERSION="$(boris --version)"
-[ "$BORIS_VERSION" = "boris/0.8.1" ] || exit 2
+[ "$BORIS_VERSION" = "boris/0.8.2" ] || exit 2
 
 # Verify an artifact set's provenance: the recorded id is the base id,
-# possibly suffixed for variant corpora (e.g. boris/0.8.1+cooklang).
+# possibly suffixed for variant corpora (e.g. boris/0.8.2+cooklang).
 ARTIFACT_ID="$(sed -n 's/.*"compiler": "\([^"]*\)".*/\1/p' .boris/manifest.json)"
 case "$ARTIFACT_ID" in
   "$BORIS_VERSION" | "$BORIS_VERSION"+*) ;;  # base or variant-suffixed id
@@ -340,7 +340,7 @@ ignored; first flag seen wins; exits `0`, reads no content, writes no
 artifacts) and prints exactly one JSON line on stdout:
 
 ```text
-{"format": "boris-build-info", "schemaVersion": "1", "version": "boris/0.8.1", "vcsRevision": "a8ef247"}
+{"format": "boris-build-info", "schemaVersion": "1", "version": "boris/0.8.2", "vcsRevision": "a8ef247"}
 ```
 
 `vcsRevision` is an opaque token baked in at compile time by `build.zig`

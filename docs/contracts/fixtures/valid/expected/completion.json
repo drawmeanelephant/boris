@@ -1,7 +1,7 @@
 {
   "format": "boris-completion-index",
   "schema_version": 1,
-  "compiler_id": "boris/0.8.1",
+  "compiler_id": "boris/0.8.2",
   "frozen": true,
   "entities": [
     {

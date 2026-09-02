@@ -489,7 +489,7 @@ fn expectInteger(document: *const Document, key: []const u8, expected: i64) Erro
 test "completion adapter accepts schema 1 and rejects unknown versions" {
     const allocator = std.testing.allocator;
     var good = try readCompletion(allocator,
-        \\{"format":"boris-completion-index","schema_version":1,"compiler_id":"boris/0.8.1+cooklang","frozen":true,"entities":[],"relation_kinds":[],"parent_targets":[],"layout_slots":[]}
+        \\{"format":"boris-completion-index","schema_version":1,"compiler_id":"boris/0.8.2+cooklang","frozen":true,"entities":[],"relation_kinds":[],"parent_targets":[],"layout_slots":[]}
     );
     defer good.deinit();
     try std.testing.expectEqual(.completion, good.kind);
@@ -512,21 +512,21 @@ test "IR adapters negotiate base and conditional facet versions" {
 test "HTML-path report adapter accepts html-build-report-0.2.0" {
     const allocator = std.testing.allocator;
     var report = try readHtmlBuildReport(allocator,
-        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/0.8.2","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
     );
     defer report.deinit();
     try std.testing.expectEqual(.html_build_report, report.kind);
     try std.testing.expectEqualStrings("html-build-report-0.2.0", report.version);
     // The optional proofPack section (#741) passes through untouched.
     var with_proof = try readHtmlBuildReport(allocator,
-        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[],"proofPack":{"path":"_boris/proof/checks.json","allPassed":false,"checks":[{"id":"rendered-search","status":"failed"}]}}
+        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/0.8.2","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[],"proofPack":{"path":"_boris/proof/checks.json","allPassed":false,"checks":[{"id":"rendered-search","status":"failed"}]}}
     );
     defer with_proof.deinit();
     const proof = with_proof.parsed.value.object.get("proofPack").?.object;
     try std.testing.expectEqual(false, proof.get("allPassed").?.bool);
     // The retired 0.1.0 version is no longer accepted.
     try std.testing.expectError(error.UnknownFormat, readHtmlBuildReport(allocator,
-        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/0.8.1","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+        \\{"schemaVersion":"html-build-report-0.1.0","compilerId":"boris/0.8.2","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
     ));
 
     try std.testing.expectError(error.UnsupportedSchemaVersion, readGraph(allocator,

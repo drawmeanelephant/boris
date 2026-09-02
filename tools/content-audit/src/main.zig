@@ -1825,5 +1825,5 @@ test "version flag parses and precedes required-argument validation" {
     try std.testing.expect(!options.help);
     const short = try cli.parseOptions(arena.allocator(), &.{ "boris-content-audit", "-V", "--quiet" });
     try std.testing.expect(short.version);
-    try std.testing.expectEqualStrings("boris-content-audit/0.8.1", cli.tool_id);
+    try std.testing.expectEqualStrings("boris-content-audit/0.8.2", cli.tool_id);
 }

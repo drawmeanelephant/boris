@@ -234,7 +234,7 @@ pub const ExportStats = struct {
 
 /// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
 /// release line (`pipeline.boris_version`); this tool does not import `src/`.
-pub const tool_id = "boris-source-rag/0.8.1";
+pub const tool_id = "boris-source-rag/0.8.2";
 
 pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var opts: Options = .{};
@@ -2304,7 +2304,7 @@ test "parseOptions: help and defaults" {
 
     const v = try parseOptions(&.{ "boris-source-rag", "-V" });
     try std.testing.expect(v.version);
-    try std.testing.expectEqualStrings("boris-source-rag/0.8.1", tool_id);
+    try std.testing.expectEqualStrings("boris-source-rag/0.8.2", tool_id);
 
     const o2 = try parseOptions(&.{ "boris-source-rag", "--out=./pack", "--root=../repo", "--max-bytes=1000", "--split-size=100", "--quiet", "--no-bundles", "--profile=docs" });
     try std.testing.expectEqualStrings("./pack", o2.out_dir);

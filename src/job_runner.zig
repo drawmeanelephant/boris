@@ -14,7 +14,7 @@ pub const schema_version = "boris-job-1";
 pub const format = "boris-job";
 /// Keep in lockstep with `pipeline.boris_version`. `scripts/test-version-pin.sh`
 /// checks the suffix.
-pub const runner_version = "0.8.1";
+pub const runner_version = "0.8.2";
 pub const runner_id = "boris-job-runner/" ++ runner_version;
 pub const boris_version = runner_version;
 
@@ -1398,7 +1398,7 @@ test "renderResultJson: fixed key order and no-retry" {
         .ok = false,
         .runner_class = .content,
         .exit_code = 1,
-        .compiler_id = try gpa.dupe(u8, "boris/0.8.1"),
+        .compiler_id = try gpa.dupe(u8, "boris/0.8.2"),
         .image_digest = null,
         .job_id = try gpa.dupe(u8, "k"),
         .command = .build,

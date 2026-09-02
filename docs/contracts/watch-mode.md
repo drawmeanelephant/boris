@@ -134,7 +134,7 @@ The first record is always `hello`. A consumer must refuse to proceed when
 artifacts gate on `schemaVersion`).
 
 ```json
-{"event":"hello","watch_events_schema":1,"compiler":"boris/0.8.1"}
+{"event":"hello","watch_events_schema":1,"compiler":"boris/0.8.2"}
 ```
 
 - `compiler` is the `boris/<version>` compiler identifier.

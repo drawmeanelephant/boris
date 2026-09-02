@@ -2,7 +2,7 @@
 
 **Status:** normative and implemented on the v0.8 afterparty line
 
-**Version:** Boris/0.8.1; no IR schema change
+**Version:** Boris/0.8.2; no IR schema change
 
 This contract defines the source/compiler-validity command:
 

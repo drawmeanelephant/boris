@@ -1,7 +1,7 @@
 {
   "format": "boris-recipe-scale",
   "schemaVersion": "0.2.0",
-  "compiler": "boris/0.8.1+cooklang",
+  "compiler": "boris/0.8.2+cooklang",
   "vcsRevision": "",
   "factor": { "num": 2, "den": 1 },
   "servings": { "current": 2, "target": 4, "authored": "2" },

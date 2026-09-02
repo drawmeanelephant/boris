@@ -790,7 +790,7 @@ const test_cid = "bafyreihwn3gfvnopsh4a6dmn2d3b7k5wqj2jqbzj6jydhpm5yfjjj7qbx4";
 
 const test_config = Config{
     .did = test_did_text,
-    .boris_pin = "boris@0.8.1",
+    .boris_pin = "boris@0.8.2",
     .oliver_pin = publish.oliver_pin,
 };
 

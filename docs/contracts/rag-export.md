@@ -3,7 +3,7 @@
 **Status:** normative for optional product RAG export
 **Format id:** `boris-rag`
 **Schema version:** `2` (integer in `manifest.json` / `catalog_meta.json` as applicable)
-**Product version field:** `boris_version` (package version string, currently `0.8.1`)
+**Product version field:** `boris_version` (package version string, currently `0.8.2`)
 **Milestone:** 7 implements this contract via `src/rag.zig` + CLI `--rag` /
 `--rag-dir` / `--complete`.
 
@@ -223,7 +223,7 @@ records `format`, `schema_version`, and `boris_version`. Complete-corpus
 exports carry the compact machine meta:
 
 ```json
-{"format":"boris-rag","schema_version":2,"boris_version":"0.8.1","vcs_revision":""}
+{"format":"boris-rag","schema_version":2,"boris_version":"0.8.2","vcs_revision":""}
 ```
 
 Field order fixed: `format`, `schema_version`, `boris_version`,
@@ -311,7 +311,7 @@ inside its `manifest.json` sidecar; no provenance field, no redundant
 `catalog_meta.json`):
 
 ```json
-{"format":"boris-rag","schema_version":2,"boris_version":"0.8.1","vcs_revision":""}
+{"format":"boris-rag","schema_version":2,"boris_version":"0.8.2","vcs_revision":""}
 ```
 
 | Field | Type | Notes |

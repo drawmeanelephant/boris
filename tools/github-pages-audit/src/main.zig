@@ -33,7 +33,7 @@ const CliError = error{
 
 /// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
 /// release line (`pipeline.boris_version`); this tool does not import `src/`.
-pub const tool_id = "boris-github-pages-audit/0.8.1";
+pub const tool_id = "boris-github-pages-audit/0.8.2";
 
 fn usage() void {
     std.debug.print(

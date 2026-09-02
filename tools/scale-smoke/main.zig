@@ -14,7 +14,7 @@ const satellites_per_section: usize = 24;
 
 /// Tool id printed by `--version`/`-V`. Kept in lockstep with the product
 /// release line (`pipeline.boris_version`); this harness does not import `src/`.
-pub const tool_id = "boris-scale-smoke/0.8.1";
+pub const tool_id = "boris-scale-smoke/0.8.2";
 
 const ExitCode = enum(u8) {
     success = 0,
