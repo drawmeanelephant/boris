@@ -156,9 +156,9 @@ jobs:
       # and the live integrations — against ./zig-out/bin/boris and ends every
       # outcome with exactly one machine-readable NDJSON line on stdout. Run it
       # with the log captured so the summary survives a failure: the step then
-      # writes the NDJSON line to the job summary via
-      # editor-gate-summary.mjs, and the upload step below keeps log + summary
-      # as an artifact for dashboards.
+      # writes the NDJSON line to the job summary via scripts/gate-summary.mjs,
+      # and the upload step below keeps log + summary as an artifact for
+      # dashboards.
       - name: Full editor gate
         run: |
           set +e
@@ -166,7 +166,7 @@ jobs:
           rc=$?
           set -e
           tail -1 "$RUNNER_TEMP/editor-gate.log" > "$RUNNER_TEMP/editor-gate.json"
-          node editor/scripts/editor-gate-summary.mjs "$RUNNER_TEMP/editor-gate.log" "$GITHUB_STEP_SUMMARY"
+          node scripts/gate-summary.mjs "$RUNNER_TEMP/editor-gate.log" "$GITHUB_STEP_SUMMARY"
           exit "$rc"
 
       - name: Upload editor gate summary
@@ -197,11 +197,28 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Rendered-search CLI tests
-        run: zig build --build-file tools/search-index/build.zig test
+      # The one-shot gate (scripts/gate-standalone-tools.sh) runs this lane's
+      # tool suites and ends with one machine-readable NDJSON line; the step
+      # surfaces it as the job summary (scripts/gate-summary.mjs) and the
+      # upload below keeps log + summary as an artifact.
+      - name: Standalone-tools gate
+        run: |
+          set +e
+          bash scripts/gate-standalone-tools.sh >"$RUNNER_TEMP/standalone-tools-gate.log" 2>&1
+          rc=$?
+          set -e
+          tail -1 "$RUNNER_TEMP/standalone-tools-gate.log" > "$RUNNER_TEMP/standalone-tools-gate.json"
+          node scripts/gate-summary.mjs "$RUNNER_TEMP/standalone-tools-gate.log" "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
-      - name: Documentation-maintenance tests
-        run: zig build --build-file tools/docs-maintenance/build.zig test
+      - name: Upload standalone-tools gate summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-tools-gate-summary-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/standalone-tools-gate.json
+            ${{ runner.temp }}/standalone-tools-gate.log
 
   testdata_generator_test:
     name: testdata-generator-test (Linux)
@@ -285,11 +302,28 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Content-audit build
-        run: zig build --build-file tools/content-audit/build.zig
+      # The one-shot gate (scripts/gate-content-audit.sh) runs this lane's
+      # build + tests and ends with one machine-readable NDJSON line; the step
+      # surfaces it as the job summary (scripts/gate-summary.mjs) and the
+      # upload below keeps log + summary as an artifact.
+      - name: Content-audit gate
+        run: |
+          set +e
+          bash scripts/gate-content-audit.sh >"$RUNNER_TEMP/content-audit-gate.log" 2>&1
+          rc=$?
+          set -e
+          tail -1 "$RUNNER_TEMP/content-audit-gate.log" > "$RUNNER_TEMP/content-audit-gate.json"
+          node scripts/gate-summary.mjs "$RUNNER_TEMP/content-audit-gate.log" "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
-      - name: Content-audit tests
-        run: zig build --build-file tools/content-audit/build.zig test
+      - name: Upload content-audit gate summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: content-audit-gate-summary-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/content-audit-gate.json
+            ${{ runner.temp }}/content-audit-gate.log
 
   # The only lane that builds a release binary and then publishes real content.
   # Debug cannot substitute for it: every unit test allocates through
@@ -316,15 +350,29 @@ jobs:
 
       # Markdown rendering is Oliver, a pure-Zig library pinned by content
       # hash in build.zig.zon: no CMake, no host tools, nothing to install.
-      - name: Build ReleaseSafe
-        run: zig build -Doptimize=ReleaseSafe
+      # The one-shot gate (scripts/gate-release-html-smoke.sh) runs the
+      # ReleaseSafe build + publication smoke and ends with one
+      # machine-readable NDJSON line; the step surfaces it as the job summary
+      # (scripts/gate-summary.mjs) and the upload below keeps log + summary as
+      # an artifact.
+      - name: Release HTML smoke gate
+        run: |
+          set +e
+          bash scripts/gate-release-html-smoke.sh >"$RUNNER_TEMP/release-html-smoke-gate.log" 2>&1
+          rc=$?
+          set -e
+          tail -1 "$RUNNER_TEMP/release-html-smoke-gate.log" > "$RUNNER_TEMP/release-html-smoke-gate.json"
+          node scripts/gate-summary.mjs "$RUNNER_TEMP/release-html-smoke-gate.log" "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
 
-      # Publishes a three-page site through the documented
-      # `<main data-boris-search-root>{{content}}</main>` layout, where every
-      # search root opens with a heading, then asserts a zero exit and that the
-      # pages and the search index were actually written.
-      - name: ReleaseSafe HTML publication smoke
-        run: zig build -Doptimize=ReleaseSafe test-release-html-smoke
+      - name: Upload release-html-smoke gate summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-html-smoke-gate-summary-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/release-html-smoke-gate.json
+            ${{ runner.temp }}/release-html-smoke-gate.log
 
   # Single required status check for branch protection / rulesets.
   ci:
