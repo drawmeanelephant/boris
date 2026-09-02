@@ -1,3 +1,0 @@
-### Fixed
-
-- Fix the OAuth PDS XRPC DPoP path so a live OAuth smoke can complete against bsky.social. The client no longer requires a `DPoP-Nonce` header on non-challenge responses (adopt it best-effort), recognizes a `use_dpop_nonce` challenge by its response body rather than HTTP status (bsky.social uses 401 while the reference PDS uses 400), and sizes the native transport header buffer to four headers so a DPoP `putRecord` does not panic ([`atproto_xrpc.zig`](/src/atproto_xrpc.zig), [`atproto_transport_std.zig`](/src/atproto_transport_std.zig), [#531](https://github.com/drawmeanelephant/boris/issues/531)).
