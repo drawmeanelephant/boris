@@ -1,17 +1,19 @@
 #!/usr/bin/env node
-// Render a human-readable job-summary markdown block from an editor gate log.
+// Render a human-readable GitHub job-summary markdown block from a gate log.
 //
-// The gate (test-editor-gate.sh) ends every outcome — success or failure —
-// with exactly one machine-readable NDJSON line on stdout. This helper reads
-// that log, finds the trailing {"event":"editor-gate",…} line (scanning from
-// the end so intermediate "OK"/"FAIL" noise is skipped), and renders it as a
-// GitHub job-summary markdown block: an ok/boris/total header, a stage table
-// (stage, ok, ms), and the raw JSON in a code fence. When no summary line is
-// present (an exotic pre-summary failure) it says so and quotes the log tail,
-// so a dashboard consumer never silently gets stale data.
+// Every one-shot gate (scripts/gate-lib.sh consumers: editor-gate,
+// standalone-tools-gate, content-audit-gate, release-html-smoke-gate) ends
+// every outcome — success or failure — with exactly one machine-readable
+// NDJSON line on stdout: {"event":…,"ok":…, …}. This helper reads a gate log,
+// finds that trailing line (scanning from the end so intermediate "OK"/"FAIL"
+// noise is skipped), and renders it as a job-summary markdown block: an
+// ok/boris/total header, a stage table (stage, ok, ms), and the raw JSON in a
+// code fence. When no summary line is present (an exotic pre-summary failure)
+// it says so and quotes the log tail, so a dashboard consumer never silently
+// gets stale data.
 //
 // Usage:
-//   node editor/scripts/editor-gate-summary.mjs LOG [MARKDOWN_OUT]
+//   node scripts/gate-summary.mjs LOG [MARKDOWN_OUT]
 //
 // With MARKDOWN_OUT the block is written to that file ($GITHUB_STEP_SUMMARY
 // in CI); otherwise it is printed to stdout.
@@ -19,7 +21,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const [logPath, markdownOut] = process.argv.slice(2);
 if (!logPath) {
-  console.error('usage: node editor/scripts/editor-gate-summary.mjs LOG [MARKDOWN_OUT]');
+  console.error('usage: node scripts/gate-summary.mjs LOG [MARKDOWN_OUT]');
   process.exit(2);
 }
 
@@ -34,7 +36,7 @@ const lines = log.split('\n');
 let raw = '';
 for (let i = lines.length - 1; i >= 0; i--) {
   const line = lines[i].trim();
-  if (line.startsWith('{"event":"editor-gate"')) {
+  if (line.startsWith('{"event":')) {
     raw = line;
     break;
   }
@@ -49,8 +51,10 @@ if (raw) {
   }
 }
 
-const md = ['## Editor gate summary'];
-if (summary) {
+const md = [];
+if (summary && typeof summary.event === 'string' && summary.event.length > 0) {
+  const label = summary.event.split('-').filter(Boolean).join(' ');
+  md.push(`## ${label.charAt(0).toUpperCase()}${label.slice(1)} summary`);
   md.push('');
   if (summary.boris) md.push(`- **boris:** \`${summary.boris}\``);
   md.push(`- **ok:** ${summary.ok}`);
@@ -74,8 +78,9 @@ if (summary) {
   md.push(JSON.stringify(summary));
   md.push('```');
 } else {
+  md.push('## Gate summary');
   md.push('');
-  md.push('_No `editor-gate` summary line was found — the gate likely failed before '
+  md.push('_No gate summary line was found — the gate likely failed before '
     + 'emitting one. Full log tail:_');
   if (lines.length > 0) {
     md.push('');

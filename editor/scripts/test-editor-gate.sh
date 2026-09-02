@@ -18,85 +18,27 @@
 #
 #   ./editor/scripts/test-editor-gate.sh --deps /path/to/released/boris
 #
-# Every outcome — success or failure — ends with exactly one machine-readable
-# NDJSON line on stdout: {"event":"editor-gate","ok":…,"boris":…,"total_ms":…,
-# "stages":[{"stage":…,"ok":…,"ms":…},…]} (or a "reason" object for guard
-# failures), so logs and dashboards can tail -1 and parse the result. In CI the
-# editor-gate-summary.mjs helper renders that line as the job summary and the
-# lane uploads log + NDJSON as the editor-gate-summary artifact. Per-stage
-# "OK"/"FAIL" lines keep the human-readable trail.
+# The stage/timing/NDJSON machinery comes from the shared scripts/gate-lib.sh;
+# every outcome ends with one machine-readable NDJSON line on stdout
+# (event "editor-gate"), rendered as the GitHub job summary by
+# scripts/gate-summary.mjs, with log + NDJSON uploaded as the
+# editor-gate-summary artifact. Per-stage "OK"/"FAIL" lines keep the
+# human-readable trail.
 #
 # test-cooklang.sh (Cooklang-corpus variant) is not part of the CI lane and
 # is intentionally left out; the per-surface scripts remain available
 # individually.
 set -euo pipefail
 
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+cd "$root"
+# shellcheck source=scripts/gate-lib.sh
+source "$root/scripts/gate-lib.sh"
+GATE_EVENT="editor-gate"
+
 usage() {
   echo "usage: $0 [--deps] BORIS_BIN" >&2
   exit "${1:-2}"
-}
-
-note() { printf '\n==> %s\n' "$*"; }
-pass() { printf '    OK  %s\n' "$*"; }
-fail() { printf '    FAIL %s\n' "$*" >&2; }
-
-# Epoch milliseconds. GNU date can answer directly; elsewhere fall back to
-# perl's core Time::HiRes (ships with macOS and Linux), then whole seconds.
-now_ms() {
-  local ns
-  ns="$(date +%s%N 2>/dev/null)" || ns=""
-  if [[ "$ns" =~ ^[0-9]{16,}$ ]]; then
-    printf '%s' "${ns:0:13}"
-    return
-  fi
-  perl -MTime::HiRes=time -e 'printf "%.0f\n", time()*1000' 2>/dev/null \
-    || date +%s000
-}
-
-# The single trailing machine-readable summary line. $1 = ok (true|false),
-# $2 = total_ms, $3 = optional failure reason (used when no stages ran).
-stage_results=()
-total_ms=0
-emit_summary() {
-  local ok="$1" total="$2" reason="${3:-}" out=""
-  local i
-  out="{\"event\":\"editor-gate\",\"ok\":$ok,\"boris\":\"$version\""
-  if [[ -n "$reason" ]]; then
-    out="$out,\"reason\":\"$reason\""
-  else
-    out="$out,\"total_ms\":$total,\"stages\":["
-    for ((i = 0; i < ${#stage_results[@]}; i++)); do
-      [[ $i -gt 0 ]] && out="$out,"
-      out="$out${stage_results[$i]}"
-    done
-    out="$out]"
-  fi
-  printf '%s\n' "$out}"
-}
-
-# Run one gated stage: banner, timing, result recording, and on failure a
-# machine-readable summary before exiting nonzero.
-run_stage() {
-  local label="$1" rc start elapsed
-  shift
-  note "$label"
-  start="$(now_ms)"
-  set +e
-  "$@"
-  rc=$?
-  set -e
-  elapsed=$(( $(now_ms) - start ))
-  if [[ $rc -eq 0 ]]; then
-    pass "$label"
-  else
-    fail "$label (exit $rc)"
-    total_ms=$(( total_ms + elapsed ))
-    stage_results+=("{\"stage\":\"$label\",\"ok\":false,\"ms\":$elapsed}")
-    emit_summary false "$total_ms"
-    exit 1
-  fi
-  total_ms=$(( total_ms + elapsed ))
-  stage_results+=("{\"stage\":\"$label\",\"ok\":true,\"ms\":$elapsed}")
 }
 
 install_ui_deps() {
@@ -129,14 +71,11 @@ for arg in "$@"; do
 done
 [[ -n "$boris_arg" ]] || usage 2
 
-root="$(cd "$(dirname "$0")/../.." && pwd -P)"
-cd "$root"
 if [[ -d "$(dirname "$boris_arg")" ]]; then
   boris_bin="$(cd "$(dirname "$boris_arg")" && pwd)/$(basename "$boris_arg")"
 else
   boris_bin="$boris_arg"
 fi
-version=""
 
 # The black-box stages below consume the product binary as an external
 # prerequisite: it must exist and answer --version with a boris/<x.y.z> id.
@@ -158,6 +97,7 @@ case "$version" in
     exit 1
     ;;
 esac
+GATE_BORIS="$version"
 pass "boris binary: $boris_bin -> $version"
 
 if [[ "$deps" == "1" ]]; then
