@@ -95,12 +95,15 @@ zig build source-rag -- --bundles-only --profile=core --token-budget=200000
 
 **Derivation, stated.** `--token-budget=N` computes `N × 4 × 3/4` bytes —
 the `bytes/4` token heuristic (UTF-8 byte length divided by four, integer
-floor; the same method recorded in every generated manifest as
-`token_estimate_method`) inverted, then scaled down by a 3/4 headroom factor
-so a part filled to the target *plus its own frontmatter* still fits the
-stated window. It is a planning heuristic, not any tokenizer's count. A part
-may still exceed the target when a single accepted file is larger than it —
-files are never split (see "Combined upload bundles").
+floor; recorded in generated manifests as `token_estimate_method`, labeled
+`chars/4` in `upload_manifest.json` and `bytes/4` in `pack_manifest.json`)
+inverted, then scaled down by a 3/4 headroom factor. The headroom covers
+bundle part framing (per-document frontmatter and part headers) on typical
+corpuses, not a guaranteed 25% margin — dense many-small-file corpuses spend
+more of it on framing (observed worst case on this repo: a part at ~89% of
+the stated window). It is a planning heuristic, not any tokenizer's count.
+A part may still exceed the target when a single accepted file is larger
+than it — files are never split (see "Combined upload bundles").
 
 Prefer raw bytes when the exact figure matters: pass `--split-size=N`
 directly instead. The two flags are mutually exclusive.
