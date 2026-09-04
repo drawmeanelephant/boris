@@ -57,6 +57,10 @@ pub const Options = struct {
     /// Target maximum body bytes per combined bundle part. A single source
     /// document larger than this limit is kept whole in its own part.
     split_size: usize = 512 * 1024,
+    /// Stated context-window budget in approximate tokens (#835). When set,
+    /// derives `split_size` at parse time via `splitSizeForTokenBudget`.
+    /// Mutually exclusive with an explicit `--split-size`.
+    token_budget: ?usize = null,
     /// Test-only deterministic failure injection after this many staged source
     /// documents have been written. Not accepted by the CLI.
     test_fail_after_stage_writes: ?usize = null,
@@ -238,6 +242,8 @@ pub const tool_id = "boris-source-rag/0.8.2";
 
 pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var opts: Options = .{};
+    var split_size_explicit = false;
+    var token_budget_explicit = false;
     var i: usize = if (args.len > 0) 1 else 0;
     while (i < args.len) : (i += 1) {
         const a = args[i];
@@ -296,16 +302,34 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             if (v.len == 0) return error.MissingValue;
             opts.split_size = std.fmt.parseInt(usize, v, 10) catch return error.InvalidValue;
             if (opts.split_size == 0) return error.InvalidValue;
+            split_size_explicit = true;
         } else if (std.mem.eql(u8, a, "--split-size")) {
             i += 1;
             if (i >= args.len or args[i].len == 0) return error.MissingValue;
             opts.split_size = std.fmt.parseInt(usize, args[i], 10) catch return error.InvalidValue;
             if (opts.split_size == 0) return error.InvalidValue;
+            split_size_explicit = true;
+        } else if (std.mem.startsWith(u8, a, "--token-budget=")) {
+            const v = a["--token-budget=".len..];
+            if (v.len == 0) return error.MissingValue;
+            opts.token_budget = std.fmt.parseInt(usize, v, 10) catch return error.InvalidValue;
+            if (opts.token_budget.? == 0) return error.InvalidValue;
+            token_budget_explicit = true;
+        } else if (std.mem.eql(u8, a, "--token-budget")) {
+            i += 1;
+            if (i >= args.len or args[i].len == 0) return error.MissingValue;
+            opts.token_budget = std.fmt.parseInt(usize, args[i], 10) catch return error.InvalidValue;
+            if (opts.token_budget.? == 0) return error.InvalidValue;
+            token_budget_explicit = true;
         } else {
             return error.UnknownFlag;
         }
     }
     if (opts.no_bundles and opts.bundles_only) return error.InvalidValue;
+    if (token_budget_explicit) {
+        if (split_size_explicit) return error.InvalidValue;
+        opts.split_size = splitSizeForTokenBudget(opts.token_budget.?) orelse return error.InvalidValue;
+    }
     return opts;
 }
 
@@ -331,8 +355,10 @@ fn printUsage() void {
         \\  --root=DIR           Project root to scan (default: .)
         \\  --max-bytes=N        Skip files larger than N bytes (default: 524288)
         \\  --split-size=N       Target body bytes per combined bundle part (default: 524288)
+        \\  --token-budget=N     Derive --split-size from an approximate-token context budget
         \\
         \\  --no-bundles and --bundles-only are mutually exclusive.
+        \\  --token-budget and --split-size are mutually exclusive.
         \\
         \\Default scan (when present under --root):
         \\  dirs:  src docs content layouts scripts tools test SUPPORT
@@ -705,6 +731,25 @@ const managed_tree_names = [_][]const u8{
 /// `chars/4` heuristic on UTF-8 byte length (integer floor). Not a tokenizer.
 pub fn approxTokensFromBytes(byte_count: usize) usize {
     return byte_count / 4;
+}
+
+/// Headroom factor applied when deriving a split target from a stated token
+/// budget (#835): the derived target aims at 3/4 of the budget so a full part
+/// plus its own frontmatter still fits the window. Inverse-exact against
+/// `approxTokensFromBytes` at the boundary: a part filled exactly to the
+/// derived target estimates at or under the stated budget.
+pub const token_budget_headroom_numerator: usize = 3;
+pub const token_budget_headroom_denominator: usize = 4;
+
+/// Derive the split-size byte target for a `--token-budget=N` value: the
+/// budget in `bytes/4` tokens, scaled down by the headroom factor above.
+/// Zero only when the budget itself is zero (rejected by the CLI).
+pub fn splitSizeForTokenBudget(token_budget: usize) ?usize {
+    // Checked arithmetic: a budget whose byte scale overflows usize cannot map
+    // to a usable split target, so surface a usage error instead of panicking.
+    const bytes = std.math.mul(usize, token_budget, 4) catch return null; // bytes/4 estimate inverted
+    const scaled = std.math.mul(usize, bytes, token_budget_headroom_numerator) catch return null;
+    return scaled / token_budget_headroom_denominator;
 }
 
 fn fileByteSize(io: Io, dir: Io.Dir, rel: []const u8) !usize {
@@ -2333,6 +2378,62 @@ test "parseOptions: unknown flag" {
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--profile=bogus" }));
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--split-size=0" }));
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--no-bundles", "--bundles-only" }));
+}
+
+test "parseOptions: token budget derives split size" {
+    // Both spellings accept the same value and derive the same target.
+    const eq = try parseOptions(&.{ "x", "--token-budget=200000" });
+    try std.testing.expectEqual(@as(usize, 200000), eq.token_budget.?);
+    const sep = try parseOptions(&.{ "x", "--token-budget", "200000" });
+    try std.testing.expectEqual(eq.split_size, sep.split_size);
+
+    // 200k tokens x 4 bytes/token = 800k bytes, scaled by 3/4 headroom.
+    try std.testing.expectEqual(@as(usize, 600000), eq.split_size);
+
+    // Unchanged defaults: budget unset, split target still the historical 512 KiB.
+    const d = try parseOptions(&.{"x"});
+    try std.testing.expect(d.token_budget == null);
+    try std.testing.expectEqual(@as(usize, 512 * 1024), d.split_size);
+
+    // Round numbers from the issue's example stay intuitive.
+    const m = try parseOptions(&.{ "x", "--token-budget=1000000" });
+    try std.testing.expectEqual(@as(usize, 3_000_000), m.split_size);
+
+    // Composes with unrelated flags without side effects.
+    const c = try parseOptions(&.{ "x", "--bundles-only", "--profile=core", "--token-budget=256" });
+    try std.testing.expect(c.bundles_only);
+    try std.testing.expectEqual(Profile.core, c.profile);
+    try std.testing.expectEqual(@as(usize, 768), c.split_size);
+}
+
+test "parseOptions: token budget rejects zero and split-size conflict" {
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--token-budget=0" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--token-budget", "0" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--token-budget=100", "--split-size=100" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--split-size=100", "--token-budget=100" }));
+    // Order-independence in both spellings.
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--split-size", "100", "--token-budget=100" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--token-budget", "100", "--split-size=100" }));
+    // A budget whose derived byte target overflows usize is a usage error.
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--token-budget=18446744073709551615" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--token-budget=abc" }));
+    try std.testing.expectError(error.MissingValue, parseOptions(&.{ "x", "--token-budget=" }));
+}
+
+test "splitSizeForTokenBudget: headroom keeps a full part within budget" {
+    // A budget of 1 token derives to 3 bytes; floor of the division.
+    try std.testing.expectEqual(@as(?usize, 0), splitSizeForTokenBudget(0));
+    try std.testing.expectEqual(@as(?usize, 3), splitSizeForTokenBudget(1));
+    // Inverse-exactness at the boundary: a part filled exactly to the derived
+    // target estimates at (never above) the stated budget.
+    try std.testing.expect(approxTokensFromBytes(splitSizeForTokenBudget(200000).?) <= 200000);
+    try std.testing.expectEqual(@as(usize, 150000), approxTokensFromBytes(splitSizeForTokenBudget(200000).?));
+    // Budgets whose byte scale cannot fit usize are a usage error, not a panic.
+    try std.testing.expect(splitSizeForTokenBudget(std.math.maxInt(usize)) == null);
+    try std.testing.expect(splitSizeForTokenBudget(std.math.maxInt(usize) / 4) == null);
+    // The largest clean budget derives without overflow.
+    const max_clean = (std.math.maxInt(usize) / 4) / token_budget_headroom_numerator;
+    try std.testing.expect(splitSizeForTokenBudget(max_clean) != null);
 }
 
 test "resolveOutputSkip canonicalizes nested paths and rejects collisions" {
