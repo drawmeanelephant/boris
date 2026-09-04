@@ -41,6 +41,10 @@ zig build source-rag -- --bundles-only
 # Partition combined bundles at a 256 KiB body-byte target (whole files only)
 zig build source-rag -- --split-size=262144
 
+# Size parts for a stated context budget instead of bytes
+# (200k tokens -> 600000-byte split target; see "Budget workflow" below)
+zig build source-rag -- --token-budget=200000
+
 # Export a bounded logical profile (all remains the default)
 zig build source-rag -- --profile=core --no-bundles
 
@@ -59,14 +63,50 @@ zig-out/bin/boris-source-rag --out=./source-rag --quiet
 | `--root=DIR` | `.` | Project root to scan |
 | `--max-bytes=N` | `524288` | Skip files larger than N bytes |
 | `--split-size=N` | `524288` | Target body bytes per combined bundle part |
+| `--token-budget=N` | | Derive `--split-size` from an approximate-token context budget |
 | `--no-bundles` | off | Omit combined convenience bundles and parts |
 | `--bundles-only` | off | Emit combined bundles + sidecars only; omit `files/**` |
 | `--profile=NAME` | `all` | Select `all`, `core`, `docs`, or `tools` input scope |
 | `--pack-by=AXIS` | `none` | Split output into per-segment packs: `none` or `tool` |
 
-`--no-bundles` and `--bundles-only` are mutually exclusive.
+`--no-bundles` and `--bundles-only` are mutually exclusive. So are
+`--token-budget` and `--split-size` — the budget *derives* the split target,
+so stating both is ambiguous and rejected (exit 2).
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
+
+---
+
+## Budget workflow
+
+For a single-pack upload sized to a known context window:
+
+1. **Pick a profile** bounding what gets scanned — `--profile=core`, `docs`,
+   `tools`, or `all` (default).
+2. **State the budget**, not the bytes: `--token-budget=N` derives the
+   `--split-size` target from your window's approximate token capacity.
+3. **Emit a bundles-only pack**: add `--bundles-only` so the output is one
+   ordered set of upload parts with `upload_manifest.json` (order, sizes,
+   token estimates) as the guide.
+
+```bash
+zig build source-rag -- --bundles-only --profile=core --token-budget=200000
+```
+
+**Derivation, stated.** `--token-budget=N` computes `N × 4 × 3/4` bytes —
+the `bytes/4` token heuristic (UTF-8 byte length divided by four, integer
+floor; recorded in generated manifests as `token_estimate_method`, labeled
+`chars/4` in `upload_manifest.json` and `bytes/4` in `pack_manifest.json`)
+inverted, then scaled down by a 3/4 headroom factor. The headroom covers
+bundle part framing (per-document frontmatter and part headers) on typical
+corpuses, not a guaranteed 25% margin — dense many-small-file corpuses spend
+more of it on framing (observed worst case on this repo: a part at ~89% of
+the stated window). It is a planning heuristic, not any tokenizer's count.
+A part may still exceed the target when a single accepted file is larger
+than it — files are never split (see "Combined upload bundles").
+
+Prefer raw bytes when the exact figure matters: pass `--split-size=N`
+directly instead. The two flags are mutually exclusive.
 
 ---
 
@@ -377,7 +417,8 @@ Do not invent APIs that are not present in the corpus.
 ### Bundles-only upload workflow
 
 1. Generate with `zig build source-rag -- --bundles-only` (add `--profile` /
-   `--split-size` as needed).
+   `--token-budget` — or `--split-size` — as needed; see
+   [Budget workflow](#budget-workflow)).
 2. Open `upload_manifest.json` for recommended order, per-file sizes, total
    upload bytes, and approximate tokens (`chars/4`).
 3. Upload the whole output directory, or at minimum the files listed in
