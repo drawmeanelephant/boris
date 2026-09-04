@@ -85,6 +85,7 @@ Completed audits were archived per
 | [`AGENTS.md`](../AGENTS.md) | Repository policy and agent constraints |
 | [`content/`](../content/) | Compiled public documentation site (Oliver-rendered) |
 | [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) | Where `src/` clusters live. Not a function catalog. |
+| [`docs/tools-registry.md`](tools-registry.md) | One-table map of every `tools/` member: wiring, coupling, CI lane, audience |
 | [`docs/archived/capability-matrix-v0.8.md`](archived/capability-matrix-v0.8.md) | Archived v0.8 capability snapshot (pre-slim) |
 | [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md) | Archived pre-0.8 changelog (pre-slim, not standing context) |
 | [`docs/archived/audits/`](archived/audits/) | Archived completed audits (see `archived/audits/README.md`; fixtures remain in `docs/audits/`) |

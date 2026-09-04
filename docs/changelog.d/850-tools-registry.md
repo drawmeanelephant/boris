@@ -1,0 +1,3 @@
+### Docs
+
+- Added a [tools registry](/docs/tools-registry.md): one table mapping every `tools/` member (content-audit, docs-maintenance, github-pages-audit, scale-smoke, search-index, source-rag, testdata-generator) to its build wiring (root vs own `build.zig`), coupling class (product CLI / in-process product-module import / product-binary black-box / fully standalone), CI lane, audience, and reason for existing — plus a split-vs-keep reading of the seams. Linked from the [documentation map](/docs/SOURCE-MAP.md) beside the `src/` source map. Implements [#836](https://github.com/drawmeanelephant/boris/issues/836).
