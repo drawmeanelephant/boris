@@ -20,6 +20,55 @@ const publication_touches = @import("publication_touches.zig");
 
 pub const SourceFile = source_provider.File;
 
+/// Content-class HTML faults: author-fixable failures that the native path
+/// reports as structured diagnostics (layout/theme family, content scan and
+/// parse faults), so the embed surface completes the compile with status 1
+/// and diagnostics instead of an unexpected-error ABI code (#909). Anything
+/// outside this closed set stays an embed ABI error, fail-closed.
+fn isEmbedContentFault(err: anyerror) bool {
+    return switch (err) {
+        error.LayoutMissingMarker,
+        error.LayoutDuplicateMarker,
+        error.LayoutUnknownMarker,
+        error.LayoutInvalidNavMarker,
+        error.LayoutTooManySegments,
+        error.LayoutInvalidAssetUrl,
+        error.LayoutTooManyAssetUrls,
+        error.LayoutInvalidUtf8,
+        error.InvalidLayoutPath,
+        error.LayoutSelectionFailed,
+        error.AmbiguousGlob,
+        error.DuplicateSelector,
+        error.EmptySelector,
+        error.InvalidSelector,
+        error.UnknownSelectorKind,
+        error.RuleLimitExceeded,
+        error.InvalidSiteUrl,
+        error.InvalidSitemapPath,
+        error.SitemapOutputCollision,
+        error.SitemapSiteUrlRequired,
+        error.ThemeRootMissing,
+        error.ThemeSymlink,
+        error.InvalidThemePath,
+        error.AssetNotFound,
+        error.AssetCollision,
+        error.AssetSymlink,
+        error.AssetPathEscape,
+        error.FooterSymlink,
+        error.FooterInvalidUtf8,
+        error.ParseFailed,
+        error.InvalidPath,
+        error.InputFormatMismatch,
+        error.ContentDirMissing,
+        error.FileNotFound,
+        // The embed layout is read through the memory source provider, so a
+        // layout missing from the bundle surfaces as SourceMissing (#909).
+        error.SourceMissing,
+        => true,
+        else => false,
+    };
+}
+
 /// Closed embed profile. First cut is Markdown IR; `html` adds Oliver HTML
 /// through the same graph freeze and assemble splice. `evidence` adds the
 /// target-local artifacts/checks/claims/touches chain after successful HTML.
@@ -72,6 +121,9 @@ pub fn compileBundle(
     });
     if (result.ok and config.html) {
         var html_result = result;
+        var html_diag = diag.Collector.init(gpa, io);
+        var content_fault = false;
+        var fault_err: anyerror = error.NoError;
         _ = compile_mod.compileHtmlToSink(io, gpa, .{
             .content_root = "",
             .dist_dir = "",
@@ -80,11 +132,62 @@ pub fn compileBundle(
             .input_format = config.input_format,
             .sources = .{ .memory = &sources },
             .sink = .{ .memory = &sink },
+            .diagnostics = &html_diag,
         }) catch |err| {
-            html_result.deinit();
-            sink.deinit();
-            return err;
+            // Embed misuse and system failures stay ABI errors. A
+            // content-class fault (missing/broken layout, scan or parse
+            // failure) is a completed compile with diagnostics (#909): it
+            // surfaces through the normal bundle result (embed status 1)
+            // with the mapped diagnostic, mirroring the native path, instead
+            // of the opaque "unexpected compile error" ABI code.
+            if (!isEmbedContentFault(err)) {
+                html_diag.deinit();
+                html_result.deinit();
+                // `sink` is owned by the errdefer above; deinit-ing it here
+                // as well would run the cleanup twice (#909).
+                return err;
+            }
+            fault_err = err;
+            content_fault = true;
         };
+        if (content_fault) {
+            html_result.ok = false;
+            html_result.failure = .content;
+            // A stage-level fault that carries no diagnostic of its own
+            // (e.g. a theme-root fault after layout load) gets the same
+            // mapping the native target path applies to every per-target
+            // failure.
+            if (html_diag.list.items.len == 0) {
+                html_diag.append(.{
+                    .severity = .error_,
+                    .code = compile_mod.layoutCodeFor(fault_err),
+                    .message = try std.fmt.allocPrint(gpa, "html compilation failed: {s}", .{@errorName(fault_err)}),
+                    .remediation = diag.Code.remediationForLayout(compile_mod.layoutCodeFor(fault_err)),
+                    .source_path = config.layout_path,
+                });
+            }
+        }
+        // Surface every diagnostic the HTML phase collected (warnings on
+        // success, the mapped failure on a content fault) in the bundle
+        // result; strings are copied into the result's arena because the
+        // collector owns its own copies.
+        const arena = html_result.arena.allocator();
+        for (html_diag.list.items) |d| {
+            html_result.diagnostics.append(gpa, .{
+                .severity = d.severity,
+                .code = d.code,
+                .message = arena.dupe(u8, d.message) catch break,
+                .remediation = arena.dupe(u8, d.remediation) catch break,
+                .source_path = arena.dupe(u8, d.source_path) catch break,
+                .line = d.line,
+                .column = d.column,
+                .id = arena.dupe(u8, d.id) catch break,
+            }) catch break;
+        }
+        html_diag.deinit();
+        if (content_fault) {
+            return .{ .result = html_result, .artifacts = sink };
+        }
         if (config.evidence) {
             embed_evidence.emit(gpa, &sink) catch |err| {
                 html_result.deinit();
@@ -117,6 +220,27 @@ const home_md =
 ;
 
 const tip_md = "a tip\n";
+
+test "missing layout completes the compile with a mapped diagnostic (#909)" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    const files = [_]SourceFile{
+        .{ .path = "index.md", .bytes = home_md },
+        .{ .path = "includes/tip.md", .bytes = tip_md },
+    };
+    // html:true with no layout in the bundle: an author-fixable content
+    // fault, not an unexpected embed ABI error — the compile completes with
+    // ok=false, a content failure, and the mapped ELAYOUT diagnostic.
+    var compilation = try compileBundle(io, gpa, &files, .{ .html = true });
+    defer compilation.deinit();
+    try testing.expect(!compilation.ok());
+    try testing.expectEqual(pipeline.FailureKind.content, compilation.result.failure);
+    var mapped = false;
+    for (compilation.diagnostics()) |d| {
+        if (d.code == .ELAYOUT) mapped = true;
+    }
+    try testing.expect(mapped);
+}
 
 test "compileBundle emits IR for a valid memory bundle" {
     const gpa = testing.allocator;

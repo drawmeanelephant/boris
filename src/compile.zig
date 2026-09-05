@@ -464,7 +464,22 @@ pub fn compileHtmlToSink(
 
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
-    const layout = try loadLayoutForOptions(io, Io.Dir.cwd(), options, layout_arena.allocator());
+    // Diagnostic parity with the native path below (#909): a missing or
+    // broken layout is an ordinary, author-fixable content fault, so it is
+    // mapped into the collector here instead of surfacing as an opaque
+    // embed ABI error.
+    const layout = loadLayoutForOptions(io, Io.Dir.cwd(), options, layout_arena.allocator()) catch |err| {
+        const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ options.layout_path, @errorName(err) });
+        defer gpa.free(msg);
+        appendHtmlDiagnostic(&options, .{
+            .severity = .error_,
+            .code = layoutCodeFor(err),
+            .message = msg,
+            .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+            .source_path = options.layout_path,
+        });
+        return err;
+    };
 
     var retain_arena = std.heap.ArenaAllocator.init(gpa);
     defer retain_arena.deinit();
@@ -1808,7 +1823,7 @@ fn appendHtmlDiagnostic(options: *const CompileOptions, d: diag.Diagnostic) void
 }
 
 /// Stable diagnostic code for layout/theme load failures.
-fn layoutCodeFor(err: anyerror) diag.Code {
+pub fn layoutCodeFor(err: anyerror) diag.Code {
     return switch (err) {
         error.LayoutMissingMarker => .ELAYOUTMISSINGMARKER,
         error.LayoutUnknownMarker => .ELAYOUTUNKNOWNMARKER,
