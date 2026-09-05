@@ -34,8 +34,8 @@
     },
     "touches": {
       "path": "_boris/proof/touches.json",
-      "bytes": 12097,
-      "sha256": "c4017d7b31bd98055adc2c3b6f6a3fb5c4303f8f0713cd5934b22fc3ec501c05",
+      "bytes": 12624,
+      "sha256": "aa5a53750655073feb9046097589c1fd2d9a1ab27ecd2670e6d4bb35e3c2a1f8",
       "format": "boris-publication-touches",
       "schema_version": 1,
       "target": "public",
@@ -58,7 +58,8 @@
         "rendered-search": 1,
         "sitemap": 0,
         "rss": 0,
-        "llms": 0
+        "llms": 0,
+        "static-file": 0
       }
     },
     "checks": {
@@ -93,7 +94,7 @@
     },
     "limitation_count": 6,
     "relationship_node_count": 21,
-    "relationship_edge_count": 36,
+    "relationship_edge_count": 40,
     "overall_presentation_status": "attention-required"
   },
   "artifacts": [
@@ -145,6 +146,7 @@
       "sha256": "092c63e3829dc1bfee21b86d85b0503a7d73013109cbe39095e0c0f32b1783ba",
       "related_check_ids": [
         "artifact-integrity",
+        "rendered-html",
         "rendered-search"
       ],
       "related_claim_ids": [
@@ -161,7 +163,8 @@
       "bytes": 5120,
       "sha256": "5631af46383b4f28912402d44dd1e95223eca7e94302665aafd25511cbdb2813",
       "related_check_ids": [
-        "artifact-integrity"
+        "artifact-integrity",
+        "rendered-html"
       ],
       "related_claim_ids": [
         "committed-artifacts-match-inventory"
@@ -223,7 +226,12 @@
         "artifact:index.html",
         "artifact:broken.html"
       ],
-      "supporting_artifact_ids": [],
+      "supporting_artifact_ids": [
+        "artifact:index.html",
+        "artifact:broken.html",
+        "artifact:_boris/search/search-index.json",
+        "artifact:assets/site.css"
+      ],
       "supported_claim_ids": [
         "claim:rendered-html-passed-declared-audit"
       ]
@@ -432,67 +440,191 @@
       {
         "edge_kind": "target-owns-artifact",
         "edges": [
-          { "from": "target", "to": "artifact:index.html" },
-          { "from": "target", "to": "artifact:broken.html" },
-          { "from": "target", "to": "artifact:_boris/search/search-index.json" },
-          { "from": "target", "to": "artifact:assets/site.css" },
-          { "from": "target", "to": "artifact:assets/legacy.css" }
+          {
+            "from": "target",
+            "to": "artifact:index.html"
+          },
+          {
+            "from": "target",
+            "to": "artifact:broken.html"
+          },
+          {
+            "from": "target",
+            "to": "artifact:_boris/search/search-index.json"
+          },
+          {
+            "from": "target",
+            "to": "artifact:assets/site.css"
+          },
+          {
+            "from": "target",
+            "to": "artifact:assets/legacy.css"
+          }
         ]
       },
       {
         "edge_kind": "artifact-subject-of-check",
         "edges": [
-          { "from": "artifact:index.html", "to": "check:artifact-integrity" },
-          { "from": "artifact:index.html", "to": "check:rendered-html" },
-          { "from": "artifact:broken.html", "to": "check:artifact-integrity" },
-          { "from": "artifact:broken.html", "to": "check:rendered-html" },
-          { "from": "artifact:_boris/search/search-index.json", "to": "check:artifact-integrity" },
-          { "from": "artifact:_boris/search/search-index.json", "to": "check:rendered-search" },
-          { "from": "artifact:assets/site.css", "to": "check:artifact-integrity" }
+          {
+            "from": "artifact:index.html",
+            "to": "check:artifact-integrity"
+          },
+          {
+            "from": "artifact:index.html",
+            "to": "check:rendered-html"
+          },
+          {
+            "from": "artifact:broken.html",
+            "to": "check:artifact-integrity"
+          },
+          {
+            "from": "artifact:broken.html",
+            "to": "check:rendered-html"
+          },
+          {
+            "from": "artifact:_boris/search/search-index.json",
+            "to": "check:artifact-integrity"
+          },
+          {
+            "from": "artifact:_boris/search/search-index.json",
+            "to": "check:rendered-search"
+          },
+          {
+            "from": "artifact:assets/site.css",
+            "to": "check:artifact-integrity"
+          }
         ]
       },
       {
         "edge_kind": "artifact-supports-check",
         "edges": [
-          { "from": "artifact:index.html", "to": "check:rendered-search" },
-          { "from": "artifact:broken.html", "to": "check:rendered-search" }
+          {
+            "from": "artifact:index.html",
+            "to": "check:rendered-html"
+          },
+          {
+            "from": "artifact:broken.html",
+            "to": "check:rendered-html"
+          },
+          {
+            "from": "artifact:_boris/search/search-index.json",
+            "to": "check:rendered-html"
+          },
+          {
+            "from": "artifact:assets/site.css",
+            "to": "check:rendered-html"
+          },
+          {
+            "from": "artifact:index.html",
+            "to": "check:rendered-search"
+          },
+          {
+            "from": "artifact:broken.html",
+            "to": "check:rendered-search"
+          }
         ]
       },
       {
         "edge_kind": "check-reported-finding",
         "edges": [
-          { "from": "check:artifact-integrity", "to": "finding:artifact-integrity:0" },
-          { "from": "check:rendered-html", "to": "finding:rendered-html:0" },
-          { "from": "check:rendered-search", "to": "finding:rendered-search:0" }
+          {
+            "from": "check:artifact-integrity",
+            "to": "finding:artifact-integrity:0"
+          },
+          {
+            "from": "check:rendered-html",
+            "to": "finding:rendered-html:0"
+          },
+          {
+            "from": "check:rendered-search",
+            "to": "finding:rendered-search:0"
+          }
         ]
       },
       {
         "edge_kind": "check-supports-claim",
         "edges": [
-          { "from": "check:artifact-integrity", "to": "claim:committed-artifacts-match-inventory" },
-          { "from": "check:rendered-html", "to": "claim:rendered-html-passed-declared-audit" },
-          { "from": "check:rendered-search", "to": "claim:rendered-search-matches-selected-html" }
+          {
+            "from": "check:artifact-integrity",
+            "to": "claim:committed-artifacts-match-inventory"
+          },
+          {
+            "from": "check:rendered-html",
+            "to": "claim:rendered-html-passed-declared-audit"
+          },
+          {
+            "from": "check:rendered-search",
+            "to": "claim:rendered-search-matches-selected-html"
+          }
         ]
       },
       {
         "edge_kind": "claim-limited-by",
         "edges": [
-          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:target-local-only" },
-          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:no-deployment-verification" },
-          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:no-accessibility-verification" },
-          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:no-prose-quality-verification" },
-          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:no-universal-reproducibility-claim" },
-          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:target-local-only" },
-          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:no-deployment-verification" },
-          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:no-accessibility-verification" },
-          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:no-prose-quality-verification" },
-          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:no-universal-reproducibility-claim" },
-          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:target-local-only" },
-          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:no-deployment-verification" },
-          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:no-accessibility-verification" },
-          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:no-prose-quality-verification" },
-          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:no-universal-reproducibility-claim" },
-          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:omitted-projections-not-certified" }
+          {
+            "from": "claim:committed-artifacts-match-inventory",
+            "to": "limitation:target-local-only"
+          },
+          {
+            "from": "claim:committed-artifacts-match-inventory",
+            "to": "limitation:no-deployment-verification"
+          },
+          {
+            "from": "claim:committed-artifacts-match-inventory",
+            "to": "limitation:no-accessibility-verification"
+          },
+          {
+            "from": "claim:committed-artifacts-match-inventory",
+            "to": "limitation:no-prose-quality-verification"
+          },
+          {
+            "from": "claim:committed-artifacts-match-inventory",
+            "to": "limitation:no-universal-reproducibility-claim"
+          },
+          {
+            "from": "claim:rendered-html-passed-declared-audit",
+            "to": "limitation:target-local-only"
+          },
+          {
+            "from": "claim:rendered-html-passed-declared-audit",
+            "to": "limitation:no-deployment-verification"
+          },
+          {
+            "from": "claim:rendered-html-passed-declared-audit",
+            "to": "limitation:no-accessibility-verification"
+          },
+          {
+            "from": "claim:rendered-html-passed-declared-audit",
+            "to": "limitation:no-prose-quality-verification"
+          },
+          {
+            "from": "claim:rendered-html-passed-declared-audit",
+            "to": "limitation:no-universal-reproducibility-claim"
+          },
+          {
+            "from": "claim:rendered-search-matches-selected-html",
+            "to": "limitation:target-local-only"
+          },
+          {
+            "from": "claim:rendered-search-matches-selected-html",
+            "to": "limitation:no-deployment-verification"
+          },
+          {
+            "from": "claim:rendered-search-matches-selected-html",
+            "to": "limitation:no-accessibility-verification"
+          },
+          {
+            "from": "claim:rendered-search-matches-selected-html",
+            "to": "limitation:no-prose-quality-verification"
+          },
+          {
+            "from": "claim:rendered-search-matches-selected-html",
+            "to": "limitation:no-universal-reproducibility-claim"
+          },
+          {
+            "from": "claim:rendered-search-matches-selected-html",
+            "to": "limitation:omitted-projections-not-certified"
+          }
         ]
       }
     ]
