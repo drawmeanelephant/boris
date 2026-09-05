@@ -378,8 +378,12 @@ pub fn parse(source: []const u8) ParseResult {
         if (scan >= source.len) break;
         const pl = readPhysicalLine(source, scan);
         if (std.mem.eql(u8, pl[0], "---")) {
+            // A complete line is newline-terminated, matching the opening
+            // fence and the "---\r"-at-EOF rule (#852): a final `---` with
+            // no trailing newline is unclosed frontmatter, not a close.
+            if (!pl[2]) break;
             close_line_start = scan;
-            close_after = pl[1]; // byte after the closing fence's newline (or EOF)
+            close_after = pl[1]; // byte after the closing fence's newline
             break;
         }
         if (!pl[2]) break; // last line without newline — cannot be a close fence line with body after
@@ -784,6 +788,16 @@ test "parse: EFRONTMATTER diagnostics retain category and non-empty detail" {
     defer gpa.free(oversized_source);
     @memset(oversized_source, 'a');
     try expectDiagnosticWithMessage(parse(oversized_source), .EFRONTMATTER);
+}
+
+test "parse: bare --- at EOF does not close frontmatter (#852)" {
+    // The closing fence must be a complete (newline-terminated) line, like
+    // the opening fence and the isolated-CR rule: "---" as the last line
+    // with no trailing newline is unclosed frontmatter.
+    const src = "---\ntitle: EOF bare close\n---";
+    const r = parse(src);
+    try std.testing.expect(!r.isOk());
+    try std.testing.expect(r.category().? == .EFRONTMATTER);
 }
 
 test "parse: bare CR at EOF does not close frontmatter" {
