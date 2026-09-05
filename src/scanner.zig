@@ -258,25 +258,37 @@ pub fn modeMismatchGuidance(
     };
 }
 
+/// Record the offending walk path on the page list before failing (#851): a
+/// bare InvalidPath names no file and leaves the author bisecting the tree.
+/// The path is duplicated into `retain` because walker views are invalidated
+/// by the next walk step. First failure wins, keeping the diagnostic
+/// deterministic for a given walk order.
+fn failInvalidPath(out: *PageList, walk_path: []const u8) ScanError {
+    if (out.invalid_path == null) {
+        out.invalid_path = out.retain.dupe(u8, walk_path) catch return error.OutOfMemory;
+    }
+    return error.InvalidPath;
+}
+
 pub fn registerDiscoveredPage(retain: std.mem.Allocator, out: *PageList, walk_path: []const u8) ScanError!void {
     // Canonicalize first so identity derivation sees a stable form.
     const source_path = identity.canonicalize(retain, walk_path) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidPath,
+        else => return failInvalidPath(out, walk_path),
     };
 
     // Single centralized derivation function.
     const entity_id = identity.canonicalEntityId(retain, source_path) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidPath,
+        else => return failInvalidPath(out, walk_path),
     };
 
     const output_path = identity.safeOutputRelativePath(retain, entity_id) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidPath,
+        else => return failInvalidPath(out, walk_path),
     };
 
-    const kind = identity.contentKind(source_path) catch return error.InvalidPath;
+    const kind = identity.contentKind(source_path) catch return failInvalidPath(out, walk_path);
 
     // Note: duplicate entity_ids are intentionally kept so a later graph stage
     // can emit EDUPLICATEID with both source paths. Discovery does not mask them.
@@ -293,6 +305,21 @@ pub fn registerDiscoveredPage(retain: std.mem.Allocator, out: *PageList, walk_pa
 // ---------------------------------------------------------------------------
 
 const testing = std.testing;
+
+test "registerDiscoveredPage carries the offending walk path (#851)" {
+    const gpa = std.testing.allocator;
+    // `retain` is an arena at every real call site; the derivation failures
+    // below intentionally abandon their intermediates to it.
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+    try std.testing.expectError(error.InvalidPath, registerDiscoveredPage(list.retain, &list, "content/my page.md"));
+    try std.testing.expectEqualStrings("content/my page.md", list.invalid_path.?);
+    // First failure wins, so the diagnostic is deterministic per walk order.
+    try std.testing.expectError(error.InvalidPath, registerDiscoveredPage(list.retain, &list, "content/other page.md"));
+    try std.testing.expectEqualStrings("content/my page.md", list.invalid_path.?);
+}
 
 fn tmpContentRoot(gpa: std.mem.Allocator, io: Io, tmp: *std.testing.TmpDir) ![]u8 {
     const cwd = Io.Dir.cwd();

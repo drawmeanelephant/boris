@@ -206,6 +206,11 @@ pub const PageList = struct {
     /// Long-lived allocator that owns every string on each `Page`.
     retain: std.mem.Allocator,
     pages: std.ArrayList(Page) = .empty,
+    /// Walk path of the page whose identity derivation failed (#851),
+    /// duplicated into `retain` and carried to the diagnostic boundary so
+    /// the EINVALIDPATH diagnostic can name the file. Arena-owned, so deinit
+    /// frees it with the rest of the retained strings.
+    invalid_path: ?[]const u8 = null,
 
     pub fn init(list_gpa: std.mem.Allocator, retain: std.mem.Allocator) PageList {
         return .{

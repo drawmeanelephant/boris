@@ -302,6 +302,16 @@ pub fn loadPageAssets(
         if (entry.kind == .sym_link) return error.AssetSymlink;
         if (entry.kind != .file) continue;
 
+        // A literal backslash in a walked file name is rejected, not
+        // reinterpreted as a nested path (#870): the normalized path would
+        // name a file that does not exist on disk.
+        if (std.mem.indexOfScalar(u8, entry.path, '\\') != null) {
+            const located = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ asset_root, entry.path });
+            defer gpa.free(located);
+            setAssetFail(fail_out, located, "file name contains a backslash");
+            return error.AssetPath;
+        }
+
         // Normalize separators from the walk.
         const within_buf = try gpa.dupe(u8, entry.path);
         errdefer gpa.free(within_buf);
@@ -1087,6 +1097,32 @@ fn writeTreeFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !v
         try cwd.createDirPath(io, parent);
     }
     try cwd.writeFile(io, .{ .sub_path = path, .data = data });
+}
+
+test "loadPageAssets rejects a backslash asset file name naming the file (#870)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-backslash", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "# hi\n");
+    // POSIX allows a literal backslash in a file name; the walked entry must
+    // be rejected with the file named instead of read through a normalized
+    // path that does not exist.
+    try writeTreeFile(io, work, "content/guides/intro.assets/weird\\name.css", "b");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var fail = FailInfo{};
+    try std.testing.expectError(error.AssetPath, loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", &fail));
+    try std.testing.expect(std.mem.indexOf(u8, fail.locus(), "guides/intro.assets/weird\\name.css") != null);
 }
 
 test "sourceStem and assetRootForSource" {
