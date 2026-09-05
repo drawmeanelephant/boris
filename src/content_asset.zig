@@ -416,17 +416,26 @@ fn svgViolationDetail(
 }
 
 /// Fail when a content-local asset path collides with a page HTML path or theme asset.
+/// On collision records the shared published path in `fail_out` (when given)
+/// so the caller can emit a located EASSET diagnostic (#868).
 pub fn checkCollisions(
     content_outputs: []const []const u8,
     page_outputs: []const []const u8,
     theme_outputs: []const []const u8,
+    fail_out: ?*FailInfo,
 ) AssetError!void {
     for (content_outputs) |c| {
         for (page_outputs) |p| {
-            if (std.mem.eql(u8, c, p)) return error.AssetCollision;
+            if (std.mem.eql(u8, c, p)) {
+                if (fail_out) |f| f.set(1, 1, c, "");
+                return error.AssetCollision;
+            }
         }
         for (theme_outputs) |t| {
-            if (std.mem.eql(u8, c, t)) return error.AssetCollision;
+            if (std.mem.eql(u8, c, t)) {
+                if (fail_out) |f| f.set(1, 1, c, "");
+                return error.AssetCollision;
+            }
         }
     }
     // Content-local paths must also be unique across pages.
@@ -434,7 +443,10 @@ pub fn checkCollisions(
     while (i < content_outputs.len) : (i += 1) {
         var j = i + 1;
         while (j < content_outputs.len) : (j += 1) {
-            if (std.mem.eql(u8, content_outputs[i], content_outputs[j])) return error.AssetCollision;
+            if (std.mem.eql(u8, content_outputs[i], content_outputs[j])) {
+                if (fail_out) |f| f.set(1, 1, content_outputs[i], "");
+                return error.AssetCollision;
+            }
         }
     }
 }
@@ -1559,15 +1571,17 @@ test "copyAssetsToOutput and scrub orphans" {
 }
 
 test "checkCollisions detects page and theme clashes" {
+    var fail: FailInfo = .{};
     try std.testing.expectError(
         error.AssetCollision,
-        checkCollisions(&.{"index.assets/x.svg"}, &.{"index.assets/x.svg"}, &.{}),
+        checkCollisions(&.{"index.assets/x.svg"}, &.{"index.assets/x.svg"}, &.{}, &fail),
     );
+    try std.testing.expectEqualStrings("index.assets/x.svg", fail.detail());
     try std.testing.expectError(
         error.AssetCollision,
-        checkCollisions(&.{"assets/css/docs.css"}, &.{}, &.{"assets/css/docs.css"}),
+        checkCollisions(&.{"assets/css/docs.css"}, &.{}, &.{"assets/css/docs.css"}, null),
     );
-    try checkCollisions(&.{"index.assets/x.svg"}, &.{"index.html"}, &.{"assets/css/docs.css"});
+    try checkCollisions(&.{"index.assets/x.svg"}, &.{"index.html"}, &.{"assets/css/docs.css"}, null);
 }
 
 test "id override rewrites to entity-scoped asset URL" {

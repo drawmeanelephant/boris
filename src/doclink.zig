@@ -8,6 +8,7 @@
 const std = @import("std");
 const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
+const include_mod = @import("include.zig");
 
 pub const Options = struct {
     nodes: []const graph_mod.Node,
@@ -75,6 +76,33 @@ fn isBlockHtmlTag(name: []const u8) bool {
     };
     for (tags) |tag| if (std.ascii.eqlIgnoreCase(tag, name)) return true;
     return false;
+}
+
+/// True when a line-start `<` opens a registered Boris component tag
+/// (`<Aside …>`, `</Aside>`, `<Details …>`, `</Details>`, exact case). Those
+/// are component syntax, not raw HTML, so they must not open the
+/// CommonMark HTML-block skip that would hide documentation links inside
+/// compact (blank-line-free) components (#861).
+fn componentTagAt(body: []const u8, index: usize) bool {
+    if (!atLineStart(body, index)) return false;
+    var i = index;
+    var spaces: usize = 0;
+    while (i < body.len and spaces < 4 and body[i] == ' ') : (i += 1) spaces += 1;
+    if (i >= body.len or body[i] != '<') return false;
+    i += 1;
+    if (i < body.len and body[i] == '/') i += 1;
+    var name: []const u8 = "";
+    if (std.mem.startsWith(u8, body[i..], "Aside")) {
+        name = "Aside";
+    } else if (std.mem.startsWith(u8, body[i..], "Details")) {
+        name = "Details";
+    } else {
+        return false;
+    }
+    const after = i + name.len;
+    if (after >= body.len) return true;
+    const c = body[after];
+    return c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == '/' or c == '>';
 }
 
 fn blockHtmlAt(body: []const u8, index: usize) bool {
@@ -370,7 +398,7 @@ pub fn rewriteWithSourceMap(
                 if (i < body.len) i += 1;
                 continue;
             }
-            if (fence_ch == 0 and blockHtmlAt(body, i)) {
+            if (fence_ch == 0 and blockHtmlAt(body, i) and !componentTagAt(body, i)) {
                 html_block = true;
                 i = lineEnd(body, i);
                 if (i < body.len) i += 1;
@@ -402,7 +430,15 @@ pub fn rewriteWithSourceMap(
         if (body[i] == '`') {
             var run: usize = 0;
             while (i + run < body.len and body[i + run] == '`') : (run += 1) {}
-            if (code_run == 0 or code_run == run) code_run = if (code_run == 0) run else 0;
+            if (code_run == 0) {
+                // Only enter code when a matching closer exists ahead; an
+                // unmatched run is literal text and must not suppress link
+                // rewriting for the rest of the page (#862, mirrors the
+                // include/aside scanners).
+                if (include_mod.inlineCodeSpanEnd(body, i) != null) code_run = run;
+            } else if (code_run == run) {
+                code_run = 0;
+            }
             i += run;
             continue;
         }
@@ -445,6 +481,32 @@ fn testNodes() [4]graph_mod.Node {
         .{ .id = "nested/index", .source_path = "nested/index.md" },
         .{ .id = "guide.mdx", .source_path = "guide.mdx" },
     };
+}
+
+test "documentation links rewrite inside compact asides (#861)" {
+    const gpa = std.testing.allocator;
+    const nodes = testNodes();
+    // No blank line after the open tag and none before the close tag: the
+    // component tags must not open the raw-HTML-block skip.
+    const result = try rewrite(gpa, "<Aside kind=\"tip\">\nSee the [guide](../guide.md) for details.\n</Aside>\nNext: [nested](../nested/index.md).\n", .{ .nodes = &nodes, .source_path = "docs/page.md", .output_path = "docs/page.html" });
+    defer gpa.free(result);
+    try std.testing.expectEqualStrings(
+        "<Aside kind=\"tip\">\nSee the [guide](../guide.html) for details.\n</Aside>\nNext: [nested](../nested/index.html).\n",
+        result,
+    );
+}
+
+test "documentation links rewrite after a stray backtick (#862)" {
+    const gpa = std.testing.allocator;
+    const nodes = testNodes();
+    // The unmatched run is literal text and must not suppress rewriting
+    // for the rest of the page.
+    const result = try rewrite(gpa, "Stray ` tick here with no closer\n\nLater paragraph: [guide](../guide.md).\n", .{ .nodes = &nodes, .source_path = "docs/page.md", .output_path = "docs/page.html" });
+    defer gpa.free(result);
+    try std.testing.expectEqualStrings(
+        "Stray ` tick here with no closer\n\nLater paragraph: [guide](../guide.html).\n",
+        result,
+    );
 }
 
 test "documentation links resolve relative and root paths with suffixes" {
