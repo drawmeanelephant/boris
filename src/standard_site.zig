@@ -1128,6 +1128,37 @@ test "publication and document payloads are canonical fixed-key-order JSON" {
     );
 }
 
+test "plan wire renders the hyphenated missing-date exclusion token (#896)" {
+    const gpa = std.testing.allocator;
+    var config = try testConfig(gpa);
+    defer config.deinit(gpa);
+    const pages = [_]PageInput{
+        .{ .entity_id = "notes/no-date", .output_path = "notes/no-date.html", .title = "No date", .status = .published },
+    };
+    var projection = try project(gpa, .{ .config = &config, .site_title = "Boris", .pages = &pages });
+    defer projection.deinit(gpa);
+    try std.testing.expectEqual(@as(usize, 1), projection.exclusions.len);
+    try std.testing.expectEqual(ExclusionReason.missing_date, projection.exclusions[0].reason);
+
+    const surfaces = try verificationSurfaces(gpa, &config, &projection);
+    defer {
+        gpa.free(surfaces.well_known.content);
+        gpa.free(surfaces.well_known.required_public_url);
+        if (surfaces.well_known.project_path) |path| gpa.free(path);
+        for (surfaces.document_links) |link| {
+            gpa.free(link.page);
+            gpa.free(link.href);
+        }
+        gpa.free(surfaces.document_links);
+    }
+    const plan_bytes = try renderPlan(gpa, &config, &projection, &surfaces);
+    defer gpa.free(plan_bytes);
+    // The exclusion reason is the closed wire vocabulary: the hyphenated
+    // `missing-date` token, per docs/contracts/standard-site.md (#896).
+    try std.testing.expect(std.mem.indexOf(u8, plan_bytes, "\"reason\": \"missing-date\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, plan_bytes, "missing_date") == null);
+}
+
 test "projection maps an eligible corpus deterministically with reasons" {
     const gpa = std.testing.allocator;
     var config = try testConfig(gpa);
