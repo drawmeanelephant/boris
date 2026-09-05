@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="proof-pack-sha256" content="f8aa2573ba1b62af9fe1de030d33c02b13abf32fa670a6745705067e3df43acb">
+<meta name="proof-pack-sha256" content="200844333b4afe6883c195291a8b13a4db5052f2bb55a87abf9391d8a2263188">
 <title>Publication Proof Pack — public (attention required)</title>
 <style>
   /* Embedded bounded CSS. No external fonts, scripts, images, or stylesheets. */
@@ -104,12 +104,12 @@
     <h2>Summary</h2>
     <table>
       <tbody>
-        <tr><th>Artifacts</th><td>5 total — committed 4, omitted-by-plan 1, not-applicable 0 (html-page 2, theme-asset 2, content-asset 0, rendered-search 1, sitemap 0, rss 0, llms 0)</td></tr>
+        <tr><th>Artifacts</th><td>5 total — committed 4, omitted-by-plan 1, not-applicable 0 (html-page 2, theme-asset 2, content-asset 0, rendered-search 1, sitemap 0, rss 0, llms 0, static-file 0)</td></tr>
         <tr><th>Checks</th><td>3 total — passed 0, failed 3, incomplete 0, not-applicable 0 (coverage complete 3, coverage incomplete 0, coverage not-applicable 0)</td></tr>
         <tr><th>Findings</th><td>3 total — error 3, warning 0, info 0</td></tr>
         <tr><th>Claims</th><td>3 total — verified 0, failed 3, not-verified 0</td></tr>
         <tr><th>Limitations</th><td>6</td></tr>
-        <tr><th>Relationship graph</th><td>21 nodes, 36 edges</td></tr>
+        <tr><th>Relationship graph</th><td>21 nodes, 40 edges</td></tr>
         <tr><th>Overall presentation status</th><td class="status-attention">attention-required</td></tr>
       </tbody>
     </table>
@@ -154,7 +154,7 @@
           <td>yes</td>
           <td>7890</td>
           <td class="mono">092c63e3829dc1bfee21b86d85b0503a7d73013109cbe39095e0c0f32b1783ba</td>
-          <td>artifact-integrity, rendered-search</td>
+          <td>artifact-integrity, rendered-html, rendered-search</td>
           <td>committed-artifacts-match-inventory, rendered-search-matches-selected-html</td>
         </tr>
         <tr>
@@ -165,7 +165,7 @@
           <td>yes</td>
           <td>5120</td>
           <td class="mono">5631af46383b4f28912402d44dd1e95223eca7e94302665aafd25511cbdb2813</td>
-          <td>artifact-integrity</td>
+          <td>artifact-integrity, rendered-html</td>
           <td>committed-artifacts-match-inventory</td>
         </tr>
         <tr>
@@ -213,7 +213,7 @@
           <td>yes</td>
           <td>2 / 2 / 1</td>
           <td>artifact:index.html, artifact:broken.html</td>
-          <td>—</td>
+          <td>artifact:index.html, artifact:broken.html, artifact:_boris/search/search-index.json, artifact:assets/site.css</td>
           <td>claim:rendered-html-passed-declared-audit</td>
         </tr>
         <tr>
@@ -361,8 +361,12 @@
       <li>artifact:_boris/search/search-index.json → check:rendered-search</li>
       <li>artifact:assets/site.css → check:artifact-integrity</li>
     </ul>
-    <h3>artifact-supports-check (2)</h3>
+    <h3>artifact-supports-check (6)</h3>
     <ul class="plain">
+      <li>artifact:index.html → check:rendered-html</li>
+      <li>artifact:broken.html → check:rendered-html</li>
+      <li>artifact:_boris/search/search-index.json → check:rendered-html</li>
+      <li>artifact:assets/site.css → check:rendered-html</li>
       <li>artifact:index.html → check:rendered-search</li>
       <li>artifact:broken.html → check:rendered-search</li>
     </ul>
