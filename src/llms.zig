@@ -93,6 +93,23 @@ fn utf8TruncateLen(bytes: []const u8, max_bytes: usize) usize {
     return end;
 }
 
+/// CommonMark thematic break: three or more matching `-`, `_`, or `*`
+/// characters, optionally separated by spaces or tabs. Decoration, not prose.
+fn isThematicBreak(trimmed: []const u8) bool {
+    if (trimmed.len < 3) return false;
+    const marker = trimmed[0];
+    if (marker != '-' and marker != '_' and marker != '*') return false;
+    var count: usize = 0;
+    for (trimmed) |ch| {
+        if (ch == marker) {
+            count += 1;
+        } else if (ch != ' ' and ch != '\t') {
+            return false;
+        }
+    }
+    return count >= 3;
+}
+
 fn summary(gpa: std.mem.Allocator, source: []const u8, fallback: []const u8) ![]u8 {
     const body = if (std.mem.startsWith(u8, source, "---\n"))
         if (std.mem.indexOfPos(u8, source, 4, "---\n")) |end| source[end + 4 ..] else source
@@ -113,6 +130,12 @@ fn summary(gpa: std.mem.Allocator, source: []const u8, fallback: []const u8) ![]
             continue;
         }
         if (trimmed[0] == '#') continue;
+        // A thematic break is not a paragraph (#879): skip it while hunting,
+        // and let it close a paragraph that already started.
+        if (isThematicBreak(trimmed)) {
+            if (saw_text) break;
+            continue;
+        }
         if (saw_text) try paragraph.append(gpa, ' ');
         try paragraph.appendSlice(gpa, trimmed);
         saw_text = true;
@@ -288,6 +311,31 @@ test "summary uses first body paragraph and falls back to title" {
     const fallback = try summary(gpa, "---\nid: x\n---\n\n# Heading\n", "Fallback");
     defer gpa.free(fallback);
     try std.testing.expectEqualStrings("Fallback", fallback);
+}
+
+test "summary skips thematic breaks instead of describing them (#879)" {
+    const gpa = std.testing.allocator;
+    const dashes = try summary(gpa, "---\nid: x\n---\n\n# Heading\n\n---\n\nNested body.", "Fallback");
+    defer gpa.free(dashes);
+    try std.testing.expectEqualStrings("Nested body.", dashes);
+    // Space-separated and alternative marker forms are thematic breaks too.
+    const spaced = try summary(gpa, "---\nid: x\n---\n\n# H\n\n- - -\n\nReal paragraph.", "Fallback");
+    defer gpa.free(spaced);
+    try std.testing.expectEqualStrings("Real paragraph.", spaced);
+    const stars = try summary(gpa, "---\nid: x\n---\n\n***\n\nReal paragraph.", "Fallback");
+    defer gpa.free(stars);
+    try std.testing.expectEqualStrings("Real paragraph.", stars);
+    // A break after prose closes that paragraph rather than joining it.
+    const closes = try summary(gpa, "---\nid: x\n---\n\nFirst paragraph.\n---\nSecond.", "Fallback");
+    defer gpa.free(closes);
+    try std.testing.expectEqualStrings("First paragraph.", closes);
+    // Lookalikes that are not thematic breaks still count as prose.
+    const two = try summary(gpa, "---\nid: x\n---\n\n--\nBody.", "Fallback");
+    defer gpa.free(two);
+    try std.testing.expectEqualStrings("-- Body.", two);
+    const mixed = try summary(gpa, "---\nid: x\n---\n\n- * -\nBody.", "Fallback");
+    defer gpa.free(mixed);
+    try std.testing.expectEqualStrings("- * - Body.", mixed);
 }
 
 test "summary truncates to the 240-byte contract on a UTF-8 scalar boundary" {

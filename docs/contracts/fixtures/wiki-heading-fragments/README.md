@@ -11,6 +11,7 @@ golden; HTML integration tests exercise the same patterns.
 | From satellite | `guides/from.md` → `[[index#home]]` |
 | Include-borne wiki | fragment in `includes/blurb.md` |
 | Unicode / punctuation ids | target page headings as rendered by Oliver |
+| UTF-8 entity id (#883) | `guides/café.md` linked from index as `[[guides/café]]` |
 | Duplicate heading id | `[[guides/target#dup]]` is valid (set membership) |
 
 Normative: `docs/contracts/heading-ids.md`.

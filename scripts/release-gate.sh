@@ -387,8 +387,9 @@ F9_BAD_OUT="${GATE_DIR}/html-f9-bad"
 rm -rf "${F9_OK_OUT}" "${F9_BAD_OUT}"
 if "${BORIS}" --input="${F9_OK_CONTENT}" --html-layout="${F9_LAYOUT}" --html-dir="${F9_OK_OUT}" --quiet; then
   if grep -q 'href="guides/target.html#section-one"' "${F9_OK_OUT}/index.html" \
-    && grep -q 'href="../index.html#home"' "${F9_OK_OUT}/guides/from.html"; then
-    pass "F9 success fixture: fragment hrefs present (trunk + satellite)"
+    && grep -q 'href="../index.html#home"' "${F9_OK_OUT}/guides/from.html" \
+    && grep -q 'href="guides/caf%C3%A9.html"' "${F9_OK_OUT}/index.html"; then
+    pass "F9 success fixture: fragment hrefs present (trunk + satellite + UTF-8 id)"
   else
     fail "F9 success fixture: missing expected fragment hrefs"
     head -20 "${F9_OK_OUT}/index.html" || true
