@@ -13,7 +13,8 @@
     "site": { "$ref": "#/$defs/site" },
     "publication": { "$ref": "#/$defs/publication" },
     "targets": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/target" } },
-    "editions": { "$ref": "#/$defs/editions" }
+    "editions": { "$ref": "#/$defs/editions" },
+    "nostr": { "$ref": "#/$defs/nostr" }
   },
   "$defs": {
     "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
@@ -160,6 +161,20 @@
         "ir": { "$ref": "#/$defs/ir" },
         "rag": { "$ref": "#/$defs/rag" },
         "context": { "$ref": "#/$defs/context" }
+      }
+    },
+    "nostr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "kind", "pubkey", "articles", "relays", "timeout_ms", "retries"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "kind": { "const": 30023 },
+        "pubkey": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "articles": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "type": "string", "minLength": 1 } },
+        "relays": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string", "minLength": 1 } },
+        "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 60000 },
+        "retries": { "type": "integer", "minimum": 0, "maximum": 5 }
       }
     }
   }

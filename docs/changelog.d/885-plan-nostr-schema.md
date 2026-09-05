@@ -1,0 +1,3 @@
+### Fixed
+
+- `boris plan` output now validates against its own published schema when the profile configures a Nostr surface: `publication-plan-1.schema.json` gains the closed conditional `nostr` object (emitted after `editions`, exactly the shape the renderer emits), and the [publication plan](/docs/contracts/publication-plan.md) and [publication profile](/docs/contracts/publication-profile.md) contracts document the ninth root field, its emitted position, and the offline-boundary transport-declaration exception, ending the three-way disagreement with [nostr-publication.md](/docs/contracts/nostr-publication.md) (#885). A new golden fixture (`fixtures/publication-plan/nostr/`) pins the emitted bytes and a schema-conformance test covers the nostr-bearing plan.
