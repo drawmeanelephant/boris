@@ -145,11 +145,18 @@ fn lineEndIndex(body: []const u8, i: usize) usize {
     return j;
 }
 
+/// Wiki-link target bytes: the ASCII entity-id alphabet plus any non-ASCII
+/// byte. Entity ids are normative UTF-8 (identity contract, ≤255 bytes) and
+/// the export surfaces already ship them, so the authoring grammar must be
+/// able to express `[[guides/café]]` (#883). The collected id is still
+/// validated by `identity.validateEntityId`, which rejects malformed UTF-8,
+/// whitespace, and URL-significant bytes.
 fn isEntityIdChar(c: u8) bool {
     return (c >= 'A' and c <= 'Z') or
         (c >= 'a' and c <= 'z') or
         (c >= '0' and c <= '9') or
-        c == '/' or c == '_' or c == '-' or c == '.';
+        c == '/' or c == '_' or c == '-' or c == '.' or
+        c >= 0x80;
 }
 
 fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail_s: []const u8, locus_s: []const u8) void {
@@ -965,6 +972,54 @@ test "scanWikiLinks fragment and label" {
     try std.testing.expectEqualStrings("section-one", list.items[0].fragment.?);
     try std.testing.expectEqualStrings("code-x-y", list.items[1].fragment.?);
     try std.testing.expectEqualStrings("Code", list.items[1].label.?);
+}
+
+test "scanWikiLinks accepts UTF-8 entity ids (#883)" {
+    const body = "See [[guides/café]] and [[notes/日本語#見出し|Notes]].";
+    var list: std.ArrayList(WikiHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanWikiLinks(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("guides/café", list.items[0].entity_id);
+    try std.testing.expectEqualStrings("notes/日本語", list.items[1].entity_id);
+    try std.testing.expectEqualStrings("見出し", list.items[1].fragment.?);
+    try std.testing.expectEqualStrings("Notes", list.items[1].label.?);
+}
+
+test "scanWikiLinks rejects malformed UTF-8 and Unicode whitespace in targets (#883)" {
+    var list: std.ArrayList(WikiHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    var fail: FailInfo = .{};
+    // A bare 3-byte lead without its continuations is not valid UTF-8: the id
+    // validator rejects it, so the scan stays fail-loud with the id named.
+    try std.testing.expectError(
+        error.ReferenceSyntax,
+        scanWikiLinks("bad [[guides/caf\xe9]]", std.testing.allocator, &list, &fail, "page.md"),
+    );
+    // NBSP inside a target is Unicode whitespace (#830), not a name byte.
+    list.clearRetainingCapacity();
+    try std.testing.expectError(
+        error.ReferenceSyntax,
+        scanWikiLinks("bad [[guides/caf\u{C2}\u{A0}e]]", std.testing.allocator, &list, &fail, "page.md"),
+    );
+}
+
+test "rewriteWikiLinks resolves UTF-8 entity ids (#883)" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{
+            .id = "guides/café",
+            .source_path = "guides/café.md",
+            .title = "Café",
+            .role = .trunk,
+            .index = 0,
+        },
+    };
+    const body = "Go to [[guides/café]] please.";
+    const out = try rewriteWikiLinks(gpa, body, &nodes, "index.html", null);
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "[Café](guides/café.html)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "[[") == null);
 }
 
 test "scanWikiLinks empty fragment is syntax" {
