@@ -602,6 +602,40 @@ pub fn loadAndPromoteFormat(
     if (recorder) |t| t.start(.scan);
     scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => return error.ContentDirMissing,
+        error.InvalidPath => {
+            // The scanner records the offending walk path on the page list
+            // (#851); name the file instead of failing with a bare
+            // InvalidPath that leaves the author bisecting the content tree.
+            if (!diag.text_suppressed.load(.unordered)) {
+                if (scan_list.invalid_path) |p| {
+                    std.debug.print("error: {s}: {s}/{s}: not a valid page path [{s}]\n", .{
+                        diag.Code.EINVALIDPATH.name(),
+                        content_root,
+                        p,
+                        "Rename the file; page paths cannot contain spaces, '..', or absolute segments",
+                    });
+                } else {
+                    std.debug.print("error: {s}: {s} [{s}]\n", .{
+                        diag.Code.EINVALIDPATH.name(),
+                        "content path or entity id cannot be canonicalized",
+                        "Rename paths so they have no empty, ., or .. segments",
+                    });
+                }
+            }
+            if (diagnostics) |collector| {
+                collector.append(.{
+                    .severity = .error_,
+                    .code = .EINVALIDPATH,
+                    .message = if (scan_list.invalid_path) |p|
+                        try std.fmt.allocPrint(gpa, "{s}/{s}: not a valid page path", .{ content_root, p })
+                    else
+                        try gpa.dupe(u8, "content path or entity id cannot be canonicalized"),
+                    .remediation = try gpa.dupe(u8, "Rename the file; page paths cannot contain spaces, '..', or absolute segments"),
+                    .source_path = if (scan_list.invalid_path) |p| p else content_root,
+                });
+            }
+            return error.InvalidPath;
+        },
         error.InputFormatMismatch => {
             if (!diag.text_suppressed.load(.unordered)) {
                 // Name the offending family so the fix (--cooklang /
