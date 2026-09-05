@@ -1335,6 +1335,7 @@ test "fixture: invalid invalid-utf8 → EINVALIDUTF8" {
 
 test "fixture: invalid invalid-path-id → EINVALIDPATH" {
     try expectFixtureCategory("content/invalid/invalid-path-id.md", .EINVALIDPATH);
+    try expectFixtureCategory("content/invalid/invalid-page-ext-id.md", .EINVALIDPATH);
 }
 
 test "fixture: graph-invalid files still parse (not parser errors)" {

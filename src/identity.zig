@@ -168,6 +168,10 @@ pub fn validateEntityId(id: []const u8) bool {
         const seg = id[start..i];
         if (seg.len == 0) return false;
         if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
+        // An id must not be spellable as a page source path: a final segment
+        // carrying a page extension can byte-equal another page's
+        // sourcePath and conflate the untyped cache keys (#854, #815).
+        if (i == id.len and isPageFile(seg)) return false;
         // Decode the segment as UTF-8: entity ids are valid UTF-8 per the
         // identity contract, so a non-UTF-8 segment is rejected rather than
         // partially checked. Reject the URL-significant bytes and every
@@ -571,6 +575,16 @@ test "validateEntityId shape" {
     try std.testing.expect(!validateEntityId("has#fragment"));
     try std.testing.expect(!validateEntityId("has?query"));
     try std.testing.expect(!validateEntityId("has%escape"));
+    // An id may not be spellable as a page source path (#854): the final
+    // segment must not carry a page extension, or it can byte-equal another
+    // page's sourcePath and conflate the untyped cache keys.
+    try std.testing.expect(!validateEntityId("guides/intro.md"));
+    try std.testing.expect(!validateEntityId("guides/intro.mdx"));
+    try std.testing.expect(!validateEntityId("intro.md"));
+    try std.testing.expect(!validateEntityId("recipes/carbonara.cook"));
+    try std.testing.expect(!validateEntityId("guides/intro.textile"));
+    try std.testing.expect(validateEntityId("guides/intro.md.bak"));
+    try std.testing.expect(validateEntityId("guides/intro.mdx.notes"));
     // Unicode whitespace is rejected like ASCII space (#830): `Zs` separators
     // and the remaining White_Space code points (VT, FF, NEL).
     try std.testing.expect(!validateEntityId("with_nbsp_\u{00A0}x"));

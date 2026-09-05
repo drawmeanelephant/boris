@@ -122,12 +122,17 @@ Letter case is **preserved**. Platform separators must not leak into graph keys.
    same footing, so a page path — including a `.cook` path in Cooklang
    mode — must not contain a space.
 3. Entity id length ≤ 255 UTF-8 bytes.
-4. Empty ID is forbidden (e.g. a file named only `.md` is invalid).
-5. ID uniqueness across the content root is **byte-exact** →
+4. An entity id never ends with a page extension (`.md`, `.mdx`,
+   `.textile`, `.cook`): an id whose final segment carries a page
+   extension can byte-equal another page's `sourcePath`, conflating the
+   incremental cache keys (#854). Violations surface as
+   [`EINVALIDPATH`](diagnostics.md).
+5. Empty ID is forbidden (e.g. a file named only `.md` is invalid).
+6. ID uniqueness across the content root is **byte-exact** →
    [`EDUPLICATEID`](diagnostics.md). Discovery **keeps** all colliding pages
    so the graph stage can name both sources.
-6. Do **not** silently lowercase ids.
-7. Frontmatter `id:` overrides path-derived id but must satisfy the **same**
+7. Do **not** silently lowercase ids.
+8. Frontmatter `id:` overrides path-derived id but must satisfy the **same**
    shape rules; violations → [`EINVALIDPATH`](diagnostics.md) (or
    [`EFRONTMATTER`](diagnostics.md) for empty/oversize values — prefer
    `EINVALIDPATH` when the value is a path/id shape violation). *(Override is
