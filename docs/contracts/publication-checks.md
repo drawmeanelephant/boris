@@ -215,10 +215,15 @@ coverage: not-applicable
 ```
 
 Search selection is not inferred from filesystem existence or the publication
-plan. Its supporting page set is every committed, advertised `html-page`
-record: a committed page recorded with `"advertised": false` (a `status:
-draft` page — emitted HTML that is deliberately unadvertised) is an ineligible
-subject, mirroring the search producer's own filtered slice (#752). The exact
+plan. The declared supporting scope is every committed `html-page` record: the
+scope-selector vocabulary carries statuses and kinds only, with no advertised
+dimension, so the `supporting_sha256` digest and the Touch Atlas
+`artifact-supports-check` edges cover draft pages too. The inspection set is
+narrower than the declared scope: a committed page recorded with
+`"advertised": false` (a `status: draft` page — emitted HTML that is
+deliberately unadvertised) is not an expected rendered-search subject,
+mirroring the search producer's own filtered slice (#752); inventories written
+before `advertised` existed parse as `null` and stay expected. The exact
 selected search bytes are read during integrity inspection and passed to the
 incremental Doctor analysis. It reuses:
 
