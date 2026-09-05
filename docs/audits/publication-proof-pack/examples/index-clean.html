@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="proof-pack-sha256" content="9c1ef855412e37089c5aee2ceacf8d914a4ea973a66759be07e44e86bd692498">
+<meta name="proof-pack-sha256" content="e50cdbc5122d38b1cb89b8c836aa59b5af794c0f99291e8317b3a441b8afb4c8">
 <title>Publication Proof Pack — public (clean)</title>
 <style>
   /* Embedded bounded CSS. No external fonts, scripts, images, or stylesheets. */
@@ -103,12 +103,12 @@
     <h2>Summary</h2>
     <table>
       <tbody>
-        <tr><th>Artifacts</th><td>2 total — committed 2, omitted-by-plan 0, not-applicable 0 (html-page 1, theme-asset 0, content-asset 0, rendered-search 1, sitemap 0, rss 0, llms 0)</td></tr>
+        <tr><th>Artifacts</th><td>2 total — committed 2, omitted-by-plan 0, not-applicable 0 (html-page 1, theme-asset 0, content-asset 0, rendered-search 1, sitemap 0, rss 0, llms 0, static-file 0)</td></tr>
         <tr><th>Checks</th><td>3 total — passed 3, failed 0, incomplete 0, not-applicable 0 (coverage complete 3, coverage incomplete 0, coverage not-applicable 0)</td></tr>
         <tr><th>Findings</th><td>0 total — error 0, warning 0, info 0</td></tr>
         <tr><th>Claims</th><td>3 total — verified 3, failed 0, not-verified 0</td></tr>
         <tr><th>Limitations</th><td>6</td></tr>
-        <tr><th>Relationship graph</th><td>15 nodes, 26 edges</td></tr>
+        <tr><th>Relationship graph</th><td>15 nodes, 28 edges</td></tr>
         <tr><th>Overall presentation status</th><td class="status-verified">verified</td></tr>
       </tbody>
     </table>
@@ -142,7 +142,7 @@
           <td>yes</td>
           <td>7890</td>
           <td class="mono">092c63e3829dc1bfee21b86d85b0503a7d73013109cbe39095e0c0f32b1783ba</td>
-          <td>artifact-integrity, rendered-search</td>
+          <td>artifact-integrity, rendered-html, rendered-search</td>
           <td>committed-artifacts-match-inventory, rendered-search-matches-selected-html</td>
         </tr>
       </tbody>
@@ -179,7 +179,7 @@
           <td>yes</td>
           <td>1 / 1 / 0</td>
           <td>artifact:index.html</td>
-          <td>—</td>
+          <td>artifact:index.html, artifact:_boris/search/search-index.json</td>
           <td>claim:rendered-html-passed-declared-audit</td>
         </tr>
         <tr>
@@ -284,8 +284,10 @@
       <li>artifact:_boris/search/search-index.json → check:artifact-integrity</li>
       <li>artifact:_boris/search/search-index.json → check:rendered-search</li>
     </ul>
-    <h3>artifact-supports-check (1)</h3>
+    <h3>artifact-supports-check (3)</h3>
     <ul class="plain">
+      <li>artifact:index.html → check:rendered-html</li>
+      <li>artifact:_boris/search/search-index.json → check:rendered-html</li>
       <li>artifact:index.html → check:rendered-search</li>
     </ul>
     <h3>check-reported-finding (0)</h3>

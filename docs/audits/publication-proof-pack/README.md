@@ -1,12 +1,12 @@
 # Publication Proof Pack examples
 
-**Status:** contract drafted, implementation not yet shipped
+**Status:** implemented and shipped — Boris emits `_boris/proof/proof-pack.json`
+and `_boris/proof/index.html` on every build.
 
-These files are hand-checkable examples for the future
+These files are hand-checkable examples for the
 [`publication-proof-pack.md`](../../contracts/publication-proof-pack.md)
 schema and its static HTML rendering. They are illustrative evidence
-snapshots, not compiler output. Boris does not currently emit
-`_boris/proof/proof-pack.json` or `_boris/proof/index.html`.
+snapshots, not compiler output.
 
 Each JSON example is a complete `proof-pack.json` model. Each HTML example is
 a static rendering derived exclusively from the corresponding model. The
@@ -19,9 +19,9 @@ bindings agree with the bindings the Touch Atlas example itself embeds.
 
 | Example | Presentation | Artifacts | Checks | Findings | Claims | Limitations | Nodes | Edges |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| [`clean.json`](examples/clean.json) | `verified` | 2 | 3 | 0 | 3 | 6 | 15 | 26 |
-| [`attention-required.json`](examples/attention-required.json) | `attention-required` | 5 | 3 | 3 | 3 | 6 | 21 | 36 |
-| [`search-not-applicable.json`](examples/search-not-applicable.json) | `attention-required` | 2 | 3 | 0 | 3 | 6 | 15 | 25 |
+| [`clean.json`](examples/clean.json) | `verified` | 2 | 3 | 0 | 3 | 6 | 15 | 28 |
+| [`attention-required.json`](examples/attention-required.json) | `attention-required` | 5 | 3 | 3 | 3 | 6 | 21 | 40 |
+| [`search-not-applicable.json`](examples/search-not-applicable.json) | `attention-required` | 2 | 3 | 0 | 3 | 6 | 15 | 27 |
 
 The HTML examples are derived from the JSON models of the same row:
 
@@ -31,6 +31,10 @@ The HTML examples are derived from the JSON models of the same row:
 | [`index-attention-required.html`](examples/index-attention-required.html) | `attention-required.json` | `attention-required` |
 
 ## Expected counts
+
+Supporting edges follow the shipped selector semantics: every committed
+artifact supports `rendered-html`, and committed `html-page` records support
+`rendered-search`.
 
 ### `clean.json` — all checks passed, all claims verified
 
@@ -48,13 +52,13 @@ The HTML examples are derived from the JSON models of the same row:
   copied from the claims contract. Limitations are visible even though all
   claims are verified — the clean case is the proof.
 - **Relationship bindings:** 15 nodes (1 target + 2 artifacts + 3 checks +
-  3 claims + 6 limitations); 26 edges = 2 owns + 4 subject + 1 supports +
+  3 claims + 6 limitations); 28 edges = 2 owns + 4 subject + 3 supports +
   0 findings + 3 claims + 16 limits. Every edge tuple exists in the matching
   Touch Atlas example.
 - **Summary totals:** artifacts `total 2`; checks `total 3, passed 3`;
   findings `total 0`; claims `total 3, verified 3`;
   `limitation_count 6`; `relationship_node_count 15`;
-  `relationship_edge_count 26`.
+  `relationship_edge_count 28`.
 - **Overall presentation status:** `verified`.
 
 ### `attention-required.json` — failed checks with visible findings and limitations
@@ -74,14 +78,14 @@ The HTML examples are derived from the JSON models of the same row:
 - **Claim rows (3):** all `failed`; statements copied exactly from claims
   evidence; `limitation_ids` unchanged.
 - **Limitation rows (6):** identical to the clean example.
-- **Relationship bindings:** 21 nodes (1 + 5 + 3 + 3 + 3 + 6); 36 edges =
-  5 owns + 7 subject + 2 supports + 3 findings + 3 claims + 16 limits.
+- **Relationship bindings:** 21 nodes (1 + 5 + 3 + 3 + 3 + 6); 40 edges =
+  5 owns + 7 subject + 6 supports + 3 findings + 3 claims + 16 limits.
   `legacy.css` receives a `target-owns-artifact` edge but no
   artifact-to-check edge.
 - **Summary totals:** artifacts `total 5, committed 4, omitted-by-plan 1`;
   checks `failed 3`; findings `total 3, error 3`; claims `failed 3`;
   `limitation_count 6`; `relationship_node_count 21`;
-  `relationship_edge_count 36`.
+  `relationship_edge_count 40`.
 - **Overall presentation status:** `attention-required`.
 
 ### `search-not-applicable.json` — rendered search not applicable
@@ -99,12 +103,12 @@ The HTML examples are derived from the JSON models of the same row:
   not upgraded by the Proof Pack.
 - **Limitation rows (6):** unchanged, including
   `omitted-projections-not-certified` for the search claim.
-- **Relationship bindings:** 15 nodes; 25 edges = 2 owns + 3 subject +
-  1 supports + 0 findings + 3 claims + 16 limits.
+- **Relationship bindings:** 15 nodes; 27 edges = 2 owns + 3 subject +
+  3 supports + 0 findings + 3 claims + 16 limits.
 - **Summary totals:** artifacts `total 2`; checks `passed 2,
   not-applicable 1`; findings `total 0`; claims `verified 2,
   not-verified 1`; `limitation_count 6`; `relationship_node_count 15`;
-  `relationship_edge_count 25`.
+  `relationship_edge_count 27`.
 - **Overall presentation status:** `attention-required` — a not-verified
   claim is enough to leave `verified`, even though every applicable check
   passed.
@@ -119,8 +123,8 @@ closed enums, digest syntax, stable node IDs, fixed registry counts, and the
 overall-status vocabulary. It does not prove exact report bytes, target
 equality, Touch Atlas binding agreement, canonical ordering, derived counts,
 selector-derived edge membership, finding offsets, the mechanical
-overall-status derivation, or summary totals; those are future runtime
-checks.
+overall-status derivation, or summary totals; the shipped runtime derives
+those, and its golden and parity tests pin them.
 
 Check the two HTML examples with the repository-compatible
 [`check-parity.py`](check-parity.py) script (Python standard library only,
