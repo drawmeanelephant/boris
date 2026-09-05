@@ -3516,6 +3516,111 @@ pub fn writePayload(io: Io, root: Io.Dir, path: []const u8, bytes: []const u8) !
     try root.writeFile(io, .{ .sub_path = path, .data = bytes });
 }
 
+/// Pluralized severity-count words for a verdict segment: non-zero counts
+/// only ("1 error, 2 warnings"), or "no findings" when all zero.
+fn appendSeverityCounts(gpa: std.mem.Allocator, out: *std.ArrayList(u8), errors: usize, warnings: usize, info: usize) !void {
+    var first = true;
+    const counts = [_]struct { n: usize, one: []const u8, many: []const u8 }{
+        .{ .n = errors, .one = "error", .many = "errors" },
+        .{ .n = warnings, .one = "warning", .many = "warnings" },
+        .{ .n = info, .one = "info", .many = "info" },
+    };
+    for (counts) |c| {
+        if (c.n == 0) continue;
+        if (!first) try out.appendSlice(gpa, ", ");
+        first = false;
+        try json_out.writeUsize(out, gpa, c.n);
+        try out.append(gpa, ' ');
+        try out.appendSlice(gpa, if (c.n == 1) c.one else c.many);
+    }
+    if (first) try out.appendSlice(gpa, "no findings");
+}
+
+/// One-line human verdict for a committed checks report (#840): the passed
+/// count over the fixed three-check registry, each failing or incomplete
+/// check with its severity counts, the not-applicable count, and the deploy
+/// consequence under the enforcement policy (error findings block; warnings
+/// stay visible and non-blocking).
+pub fn formatChecksVerdict(
+    gpa: std.mem.Allocator,
+    checks: []const ParsedCheck,
+    findings: []const ParsedFinding,
+) ![]u8 {
+    var passed: usize = 0;
+    var not_applicable: usize = 0;
+    var errors: usize = 0;
+    var failing: std.ArrayList(u8) = .empty;
+    defer failing.deinit(gpa);
+    for (checks) |check| {
+        if (std.mem.eql(u8, check.status, "passed")) {
+            passed += 1;
+            continue;
+        }
+        if (std.mem.eql(u8, check.status, "not-applicable")) {
+            not_applicable += 1;
+            continue;
+        }
+        var e: usize = 0;
+        var w: usize = 0;
+        var info: usize = 0;
+        for (findings[check.finding_offset..][0..check.counts_findings]) |f| {
+            if (std.mem.eql(u8, f.severity, "error")) {
+                e += 1;
+            } else if (std.mem.eql(u8, f.severity, "warning")) {
+                w += 1;
+            } else {
+                info += 1;
+            }
+        }
+        errors += e;
+        if (failing.items.len > 0) try failing.appendSlice(gpa, "; ");
+        try failing.appendSlice(gpa, check.id);
+        try failing.append(gpa, ' ');
+        try failing.appendSlice(gpa, check.status);
+        try failing.appendSlice(gpa, ": ");
+        try appendSeverityCounts(gpa, &failing, e, w, info);
+    }
+
+    var line: std.ArrayList(u8) = .empty;
+    try line.appendSlice(gpa, "checks: ");
+    try json_out.writeUsize(&line, gpa, passed);
+    try line.appendSlice(gpa, "/3");
+    if (not_applicable > 0) {
+        try line.appendSlice(gpa, " (");
+        try json_out.writeUsize(&line, gpa, not_applicable);
+        try line.appendSlice(gpa, " not-applicable)");
+    }
+    if (passed == checks.len) {
+        try line.appendSlice(gpa, " passed");
+        return line.toOwnedSlice(gpa);
+    }
+    if (failing.items.len > 0) {
+        try line.appendSlice(gpa, " — ");
+        try line.appendSlice(gpa, failing.items);
+    }
+    try line.appendSlice(gpa, if (errors > 0) " — deploy blocks" else " — deploy passes");
+    return line.toOwnedSlice(gpa);
+}
+
+/// Read `<output_dir>/_boris/proof/checks.json` for one target and compose
+/// the verdict line (#840). Best-effort presentation: null when the report
+/// is absent or unparsable — a chrome line never fails the build.
+pub fn checksVerdictLine(
+    gpa: std.mem.Allocator,
+    io: Io,
+    target_name: []const u8,
+    output_dir: []const u8,
+) ?[]u8 {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const path = std.mem.concat(a, u8, &.{ output_dir, "/_boris/proof/checks.json" }) catch return null;
+    const bytes = readPayload(io, Io.Dir.cwd(), a, path) catch return null;
+    var stream: std.Io.Reader = .fixed(bytes);
+    var parsed = parseChecksStream(a, &stream, target_name) catch return null;
+    return formatChecksVerdict(gpa, &parsed.checks, parsed.findings) catch null;
+}
+
 pub fn readPayload(io: Io, root: Io.Dir, gpa: std.mem.Allocator, path: []const u8) ![]u8 {
     var file = try root.openFile(io, path, .{});
     defer file.close(io);
@@ -4815,6 +4920,57 @@ fn expectJsonStrings(value: std.json.Value, expected: []const []const u8) !void 
     const items = value.array.items;
     try std.testing.expectEqual(expected.len, items.len);
     for (expected, 0..) |want, index| try std.testing.expectEqualStrings(want, items[index].string);
+}
+
+test "formatChecksVerdict composes the verdict shapes (#840)" {
+    const gpa = std.testing.allocator;
+    const passed_check = ParsedCheck{ .id = "artifact-integrity", .eligible = true, .ran = true, .status = "passed", .coverage = "complete", .scope = undefined, .counts_eligible = 1, .counts_checked = 1, .counts_findings = 0, .finding_offset = 0 };
+    const html_failed = ParsedCheck{ .id = "rendered-html", .eligible = true, .ran = true, .status = "failed", .coverage = "complete", .scope = undefined, .counts_eligible = 1, .counts_checked = 1, .counts_findings = 1, .finding_offset = 0 };
+    const search_incomplete = ParsedCheck{ .id = "rendered-search", .eligible = true, .ran = true, .status = "incomplete", .coverage = "incomplete", .scope = undefined, .counts_eligible = 1, .counts_checked = 0, .counts_findings = 2, .finding_offset = 1 };
+    const search_na = ParsedCheck{ .id = "rendered-search", .eligible = false, .ran = false, .status = "not-applicable", .coverage = "not-applicable", .scope = undefined, .counts_eligible = 0, .counts_checked = 0, .counts_findings = 0, .finding_offset = 0 };
+    const html_na = ParsedCheck{ .id = "rendered-html", .eligible = false, .ran = false, .status = "not-applicable", .coverage = "not-applicable", .scope = undefined, .counts_eligible = 0, .counts_checked = 0, .counts_findings = 0, .finding_offset = 0 };
+
+    const findings_none = [_]ParsedFinding{};
+
+    // All passed.
+    const all = [_]ParsedCheck{ passed_check, passed_check, passed_check };
+    const line_all = try formatChecksVerdict(gpa, &all, &findings_none);
+    defer gpa.free(line_all);
+    try std.testing.expectEqualStrings("checks: 3/3 passed", line_all);
+
+    // Warning-only failure: visible, deploy passes.
+    const warn_findings = [_]ParsedFinding{.{ .code = "HTML_DUPLICATE_ID", .severity = "warning", .subject = .{ .kind = "page", .id = "index", .target = null } }};
+    const warn_case = [_]ParsedCheck{ passed_check, html_failed, passed_check };
+    const line_warn = try formatChecksVerdict(gpa, &warn_case, &warn_findings);
+    defer gpa.free(line_warn);
+    try std.testing.expectEqualStrings(
+        "checks: 2/3 — rendered-html failed: 1 warning — deploy passes",
+        line_warn,
+    );
+
+    // Error failure: deploy blocks; an incomplete check is surfaced
+    // distinctly; not-applicable is counted, never silent.
+    const err_findings = [_]ParsedFinding{
+        .{ .code = "HTML_FRAGMENT_MISSING", .severity = "error", .subject = .{ .kind = "page", .id = "index", .target = null } },
+        .{ .code = "SEARCH_DOCUMENT_MISSING", .severity = "warning", .subject = .{ .kind = "page", .id = "guides/a", .target = null } },
+        .{ .code = "SEARCH_DOCUMENT_STALE", .severity = "warning", .subject = .{ .kind = "page", .id = "guides/b", .target = null } },
+    };
+    const mixed = [_]ParsedCheck{ html_failed, search_incomplete, search_na };
+    const line_mixed = try formatChecksVerdict(gpa, &mixed, &err_findings);
+    defer gpa.free(line_mixed);
+    try std.testing.expectEqualStrings(
+        "checks: 0/3 (1 not-applicable) — rendered-html failed: 1 error; rendered-search incomplete: 2 warnings — deploy blocks",
+        line_mixed,
+    );
+
+    // Not-applicable-only: the check is counted, never silent.
+    const na_case = [_]ParsedCheck{ passed_check, html_na, passed_check };
+    const line_na = try formatChecksVerdict(gpa, &na_case, &findings_none);
+    defer gpa.free(line_na);
+    try std.testing.expectEqualStrings(
+        "checks: 2/3 (1 not-applicable) — deploy passes",
+        line_na,
+    );
 }
 
 test "publication touches runtime vocabulary matches its draft 2020-12 schema" {

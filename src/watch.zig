@@ -12,6 +12,7 @@ const preview_server = @import("preview_server.zig");
 const html_report = @import("html_report.zig");
 const watch_json = @import("watch_json.zig");
 const timings = @import("timings.zig");
+const publication_touches_mod = @import("publication_touches.zig");
 
 /// Debounce window after the first change is observed (ms).
 pub const debounce_ms: i64 = 100;
@@ -879,6 +880,25 @@ pub const WatchCoordinator = struct {
         self.emitLine(line);
     }
 
+    /// Best-effort publication-check verdict line after a successful build
+    /// (#840): committed evidence read back as chrome; never fails the loop.
+    fn printChecksVerdict(self: *WatchCoordinator) void {
+        if (self.options.targets.items.len > 0) {
+            for (self.options.targets.items) |spec| {
+                if (publication_touches_mod.checksVerdictLine(self.gpa, self.io, spec.name, spec.output_dir)) |line| {
+                    defer self.gpa.free(line);
+                    std.debug.print("  {s}\n", .{line});
+                }
+            }
+            return;
+        }
+        // Raw single-target path: the default target against --html-dir.
+        if (publication_touches_mod.checksVerdictLine(self.gpa, self.io, "default", self.options.html_dir orelse "dist")) |line| {
+            defer self.gpa.free(line);
+            std.debug.print("  {s}\n", .{line});
+        }
+    }
+
     fn emitBuildSucceeded(self: *WatchCoordinator, phase: []const u8, targets: []const []const u8, changed: ?[]const []const u8, outcome: BuildOutcome) void {
         // Validate writes nothing, so it never reports pages_written (#647).
         const pages: ?usize = if (self.action == .validate) null else outcome.stats.pages_written;
@@ -1050,6 +1070,7 @@ pub const WatchCoordinator = struct {
             self.emitBuildSucceeded("rebuild", targets, paths.items, outcome);
         } else if (!self.options.quiet) {
             std.debug.print("watch: {s}.\n", .{rebuildSucceededLabel(self.action)});
+            self.printChecksVerdict();
         }
         if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, true);
         if (self.serve) |*s| s.notifyRebuild();
@@ -1103,6 +1124,7 @@ pub const WatchCoordinator = struct {
                     std.debug.print("watch: initial validation succeeded. Starting watcher...\n", .{});
                 } else {
                     std.debug.print("watch: initial build succeeded ({d} pages written). Starting watcher...\n", .{outcome.stats.pages_written});
+                    self.printChecksVerdict();
                 }
             }
             if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, true);
