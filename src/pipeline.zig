@@ -807,11 +807,17 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             return result;
         },
         error.InvalidPath => {
+            // The scanner records the offending walk path on the page list
+            // (#851); name it so the author need not bisect the content tree.
+            const message = if (scan_list.invalid_path) |p|
+                try std.fmt.allocPrint(retain, "{s}: not a valid page path", .{p})
+            else
+                try retain.dupe(u8, "content path or entity id cannot be canonicalized");
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EINVALIDPATH,
-                .message = try retain.dupe(u8, "content path or entity id cannot be canonicalized"),
-                .remediation = try retain.dupe(u8, "Rename paths so they have no empty, ., or .. segments"),
+                .message = message,
+                .remediation = try retain.dupe(u8, "Rename the file; page paths cannot contain spaces, '..', or absolute segments"),
             });
             result.failure = .content;
             diag.sortDiagnostics(result.diagnostics.items);
