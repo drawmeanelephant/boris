@@ -168,6 +168,10 @@ const ExtractError = error{
 pub fn validateArchivePath(name: []const u8) ExtractError![]const u8 {
     var n = name;
     if (std.mem.startsWith(u8, n, "./")) n = n[2..];
+    // Standard tar tools record directory members with a trailing slash
+    // (`content/`). Strip one so they validate as the directory path itself,
+    // mirroring the leading `./` strip above.
+    if (n.len > 0 and n[n.len - 1] == '/') n = n[0 .. n.len - 1];
     if (n.len == 0 or n.len > max_path_len) return error.PathTraversal;
     if (n[0] == '/' or n[0] == '\\') return error.PathTraversal;
     if (std.mem.indexOfScalar(u8, n, 0) != null) return error.PathTraversal;
@@ -1238,6 +1242,12 @@ test "validateArchivePath rejects traversal and accepts fixture paths" {
     try std.testing.expectError(error.PathTraversal, validateArchivePath("foo/../../x"));
     try std.testing.expectError(error.PathTraversal, validateArchivePath(""));
     try std.testing.expectError(error.PathTraversal, validateArchivePath("a//b"));
+    try std.testing.expectError(error.PathTraversal, validateArchivePath("content//x"));
+    try std.testing.expectError(error.PathTraversal, validateArchivePath("content/../x"));
+    try std.testing.expectError(error.PathTraversal, validateArchivePath("/"));
+    try std.testing.expectError(error.PathTraversal, validateArchivePath("./"));
+    try std.testing.expectEqualStrings("content", try validateArchivePath("content/"));
+    try std.testing.expectEqualStrings("content", try validateArchivePath("./content/"));
     try std.testing.expectEqualStrings("content/index.md", try validateArchivePath("content/index.md"));
     try std.testing.expectEqualStrings("content/guides/intro.md", try validateArchivePath("./content/guides/intro.md"));
 }
@@ -1284,6 +1294,39 @@ test "extractTar rejects symlink members" {
     // unsupported/corrupt header. A well-formed symlink member is
     // `.sym_link` and extractTar returns SymlinkRejected for that kind.
     try std.testing.expectError(error.UnsupportedType, extractTar(io, dest, mutated, .{}));
+}
+
+test "extractTar accepts bsdtar-style directory members" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    // bsdtar/GNU tar record directories with trailing-slash names
+    // (`content/`); file-only archives never exercise that shape.
+    var w = std.Io.Writer.Allocating.init(gpa);
+    defer w.deinit();
+    var tar_w: std.tar.Writer = .{ .underlying_writer = &w.writer };
+    const dir_opts: std.tar.Writer.Options = .{ .mode = 0o755, .mtime = 0 };
+    const file_opts: std.tar.Writer.Options = .{ .mode = 0o644, .mtime = 0 };
+    try tar_w.writeDir("content/", dir_opts);
+    try tar_w.writeFileBytes("content/index.md", "# hi\n", file_opts);
+    try tar_w.writeDir("content/guides/", dir_opts);
+    try tar_w.writeFileBytes("content/guides/intro.md", "# intro\n", file_opts);
+    try tar_w.finishPedantically();
+    const archive = try takeAllocating(&w, gpa);
+    defer gpa.free(archive);
+
+    var dest = try tmp.dir.createDirPathOpen(io, "ws", .{ .open_options = .{ .iterate = true } });
+    defer dest.close(io);
+    try extractTar(io, dest, archive, .{});
+
+    const index = try readFileAlloc(io, dest, "content/index.md", gpa);
+    defer gpa.free(index);
+    try std.testing.expectEqualStrings("# hi\n", index);
+    const intro = try readFileAlloc(io, dest, "content/guides/intro.md", gpa);
+    defer gpa.free(intro);
+    try std.testing.expectEqualStrings("# intro\n", intro);
 }
 
 test "runJob: valid fixture succeeds and removes workspace" {
