@@ -58,10 +58,14 @@ The source body is an uncompressed **ustar** archive. Gzip/zip/pax-only
 archives are rejected.
 
 The archive must contain a `content/` directory at the archive root.
-That directory is passed to `boris` as `--input`. Other top-level names
-(`theme/`, `layouts/`, a publication profile) are unpacked and visible
-to the compiler when the allowlisted flags name them. There is no
-automatic prefix-strip of a wrapping folder.
+That directory is passed to `boris` as `--input`. Only `content/` is
+visible to the compiler in `boris-job-1`: the fixed argv has no flag that
+names a theme root, layout path, or publication profile, so other
+top-level archive members are inert. Pages that need managed theme
+assets ship them as content-local `content/themes/...` trees; the
+default layout resolves against the runner process cwd (the official
+image provides `themes/boris` there). There is no automatic prefix-strip
+of a wrapping folder.
 
 Optional query (HTTP) or flag (`--once`):
 
