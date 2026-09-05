@@ -24,6 +24,7 @@ const theme_mod = @import("theme.zig");
 const watch = @import("watch.zig");
 const intelligence = @import("intelligence.zig");
 const publication_checks = @import("publication_checks.zig");
+const publication_touches = @import("publication_touches.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 const publication_plan = @import("publication_plan.zig");
@@ -2828,6 +2829,14 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             // Canonical order + effective paths (parse already sorts by name).
             std.debug.print("ok: wrote HTML for {d} target(s):\n", .{opts.targets.items.len});
             target.printTargetConfigLines(opts.targets.items, layout_path);
+            // Publication-check verdict per target (#840): committed evidence
+            // read back as a best-effort chrome line.
+            for (opts.targets.items) |spec| {
+                if (publication_touches.checksVerdictLine(gpa, io, spec.name, spec.output_dir)) |line| {
+                    defer gpa.free(line);
+                    std.debug.print("  {s}\n", .{line});
+                }
+            }
         }
     } else {
         const stats = compile.compileHtmlSite(io, gpa, .{
