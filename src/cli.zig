@@ -38,6 +38,7 @@ pub const ParseErrorDetail = struct {
 /// same grammar governs `--theme`, `--html-layout`, `--target-layout`, and
 /// `--layout-rule` paths.
 const layout_path_hint = "layout/theme paths are workspace-relative: no leading '/', drive prefix, '..' segments, or trailing separator";
+const site_url_hint = "expected an http(s) deployment URL";
 
 /// Build mode selected by flags.
 pub const Mode = enum {
@@ -817,6 +818,25 @@ fn failInvalidValue(st: *ParseState, flag: []const u8, hint: ?[]const u8) ParseE
     return error.InvalidValue;
 }
 
+/// User-typed spelling of a command for conflict diagnostics: commands bare,
+/// flags dashed (mirrors the #764 "check conflicts with --theme" shape).
+fn commandWord(command: Command) []const u8 {
+    return switch (command) {
+        .build => "build",
+        .validate => "validate",
+        .check => "check",
+        .impact => "impact",
+        .watch => "watch",
+        .plan => "plan",
+        .nostr_plan => "nostr plan",
+        .nostr_sign => "nostr sign",
+        .nostr_publish => "nostr publish",
+        .init => "init",
+        .standard_site => "standard-site",
+        .recipe_scale => "recipe-scale",
+    };
+}
+
 /// First explicit HTML-selector token present in this run, for naming
 /// analyzer×selector and selector×`--out` conflicts (#764). The order is a
 /// fixed list, so the named token is deterministic for any argv. Covers
@@ -1266,12 +1286,40 @@ fn parseTargetSpecs(
 }
 
 /// Session and credential flags for the `standard-site` family.
+/// Canonical dashed spelling of a standard-site session-family flag, if `a`
+/// is one (`--flag` or `--flag=value` form). The family is rejected outside
+/// `standard-site` rather than silently ignored (#872).
+fn sessionFlagName(a: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, a, "--prune")) return "--prune";
+    if (std.mem.eql(u8, a, "--app-password")) return "--app-password";
+    const valued = [_][]const u8{
+        "--source-commit",
+        "--did",
+        "--handle",
+        "--session-root",
+        "--dist",
+        "--namespace",
+        "--surface-url",
+        "--indexer",
+    };
+    for (valued) |name| {
+        if (std.mem.eql(u8, a, name)) return name;
+        if (std.mem.startsWith(u8, a, name) and a.len > name.len and a[name.len] == '=') return name;
+    }
+    return null;
+}
+
 fn parseSessionFlags(
     st: *ParseState,
     a: []const u8,
     args: []const []const u8,
     i: *usize,
 ) ParseError!bool {
+    // Session-family flags belong to `standard-site` only. Reject them
+    // anywhere else rather than parsing and silently ignoring them (#872).
+    if (sessionFlagName(a)) |flag| {
+        if (st.command != .standard_site) return failConflict(st, commandWord(st.command), flag);
+    }
     if (std.mem.eql(u8, a, "--prune")) {
         if (st.publish_prune) return error.DuplicateFlag;
         st.publish_prune = true;
@@ -1568,6 +1616,9 @@ fn buildNostrPlanOptions(st: *ParseState) ParseError!Options {
     // only configuration source. This command does scan content, so
     // `--input`/`--cooklang`/`--textile` overrides stay meaningful, but
     // stdout belongs to the single plan document — hence no `--timings`.
+    // Name the `--out` pair explicitly: it implies IR via wantsIr(), which
+    // would steal the plan's stdout (#905).
+    if (st.saw_out) return failConflict(st, commandWord(st.command), "--out");
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
         st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence)
@@ -1912,7 +1963,7 @@ fn validateProjectionConflicts(st: *ParseState) ParseError!void {
     if (wants_rss and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
     if (saw_pages_location and (wants_rag or wants_ir or wants_context)) return error.ConflictingFlags;
     if ((st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
-    if (st.saw_site_url and !(wants_rss or wants_sitemap)) return error.ConflictingFlags;
+    if (st.saw_site_url and !(wants_rss or wants_sitemap)) return failConflict(st, "--site-url", "--rss/--sitemap");
     if (wants_rss and (st.site_url == null or st.rss_title == null or st.rss_description == null)) return error.RSSMetadataRequired;
     if (wants_sitemap and st.site_url == null) return error.SitemapSiteUrlRequired;
     if (wants_sitemap and (wants_rag or wants_ir or wants_context or wants_llms or wants_rss)) return error.ConflictingFlags;
@@ -1981,7 +2032,10 @@ fn finalizePublicationIdentity(gpa: std.mem.Allocator, st: *ParseState) ParseErr
 
     if (st.site_url) |raw_url| {
         const normalized = site_url_mod.normalized(gpa, raw_url) catch |err| switch (err) {
-            error.InvalidSiteUrl => return error.InvalidValue,
+            // Blame this flag, not the first value-taking flag findBadArg
+            // scans (#761, #880): a bad --site-url previously surfaced as
+            // "invalid value for --input".
+            error.InvalidSiteUrl => return failInvalidValue(st, "--site-url", site_url_hint),
             error.OutOfMemory => return error.OutOfMemory,
         };
         gpa.free(normalized);
@@ -2070,7 +2124,13 @@ fn attachLayoutRules(gpa: std.mem.Allocator, st: *ParseState) ParseError!void {
             };
             filled += 1;
         }
-        layout_select.rejectDuplicateSelectors(rules) catch return error.DuplicateFlag;
+        layout_select.rejectDuplicateSelectors(rules) catch {
+            // Blame the repeated flag, never the argv scan's first
+            // value-taking flag: the duplicate is a --layout-rule selector,
+            // not a repeated occurrence of any other option (#867).
+            st.err_detail = .{ .blame_flag = "--layout-rule" };
+            return error.DuplicateFlag;
+        };
         layout_select.sortRulesCanonical(rules);
         t.layout_rules = rules;
     }
@@ -2383,6 +2443,11 @@ pub fn printUsage() void {
         \\  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, validate, check, or impact
         \\  --sitemap / --sitemap-path without --site-url, with non-HTML modes,
         \\  or with multiple targets sharing one ambiguous public URL
+        \\  --site-url without --rss or --sitemap
+        \\  --out with nostr plan (stdout carries the plan document)
+        \\  session flags (--did, --handle, --app-password, --prune,
+        \\  --source-commit, --dist, --namespace, --surface-url, --indexer,
+        \\  --session-root) outside standard-site
         \\  --static-dir with non-HTML modes or multiple targets
         \\  explicit --out with --rag or --rag-dir
         \\  --html / --html-dir / --html-layout / --theme / --target / --target-layout /
@@ -4566,4 +4631,60 @@ test "parse detail: channel stays empty on success and parseOptions is unchanged
     var plain = try parseOptions(std.testing.allocator, &.{ "boris", "--theme", "themes/boris" });
     defer plain.deinit(std.testing.allocator);
     try expectEqual(Mode.html, plain.mode);
+}
+
+test "parse detail: audit batch names flags instead of misattributing (#867, #872, #880, #905)" {
+    // #867: duplicate --layout-rule selectors blame --layout-rule, never a
+    // flag that occurs once (here --html-layout).
+    {
+        var d = ParseErrorDetail{};
+        try expectError(error.DuplicateFlag, parseOptionsWithDetail(std.testing.allocator, &.{
+            "boris",         "--quiet", "--html-layout",       "layouts/global.html",
+            "--layout-rule", "default", "id:reference/config", "layouts/exact.html",
+            "--layout-rule", "default", "id:reference/config", "layouts/exact.html",
+        }, &d));
+        try expectEqualStrings("--layout-rule", d.blame_flag.?);
+    }
+    // #872: session-family flags are rejected outside standard-site, naming
+    // the command and the flag.
+    {
+        const cases = [_]struct { argv: []const []const u8, a: []const u8, b: []const u8 }{
+            .{ .argv = &.{ "boris", "--quiet", "--did", "did:plc:x" }, .a = "build", .b = "--did" },
+            .{ .argv = &.{ "boris", "validate", "--dist", "d" }, .a = "validate", .b = "--dist" },
+            .{ .argv = &.{ "boris", "check", "--prune" }, .a = "check", .b = "--prune" },
+        };
+        for (cases) |c| {
+            var d = ParseErrorDetail{};
+            try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, c.argv, &d));
+            try expectEqualStrings(c.a, d.conflict_a.?);
+            try expectEqualStrings(c.b, d.conflict_b.?);
+        }
+    }
+    // #880: bad --site-url values blame --site-url, not --input.
+    {
+        var d = ParseErrorDetail{};
+        try expectError(error.InvalidValue, parseOptionsWithDetail(std.testing.allocator, &.{
+            "boris",       "--input", "content",           "--rss", "--site-url", "ftp://bad.example/",
+            "--rss-title", "t",       "--rss-description", "d",
+        }, &d));
+        try expectEqualStrings("--site-url", d.blame_flag.?);
+    }
+    // #905: --site-url without --rss/--sitemap and --out with nostr plan
+    // name their pairs.
+    {
+        var d = ParseErrorDetail{};
+        try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+            "boris", "--input", "content", "--html-dir", "out", "--site-url", "https://example.test/",
+        }, &d));
+        try expectEqualStrings("--site-url", d.conflict_a.?);
+        try expectEqualStrings("--rss/--sitemap", d.conflict_b.?);
+    }
+    {
+        var d = ParseErrorDetail{};
+        try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+            "boris", "nostr", "plan", "--profile", "p.json", "--out", "np.json",
+        }, &d));
+        try expectEqualStrings("nostr plan", d.conflict_a.?);
+        try expectEqualStrings("--out", d.conflict_b.?);
+    }
 }
