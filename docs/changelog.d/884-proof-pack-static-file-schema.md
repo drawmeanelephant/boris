@@ -1,0 +1,3 @@
+### Fixed
+
+- The publication Proof Pack schema now accepts its own builds: `publication-proof-pack-1.schema.json` adds `static-file` to the artifact-kind enum, so a `--static-dir` target's `_boris/proof/proof-pack.json` no longer fails the published schema it is bound to (the schema already required the `static-file` key in `summary.artifacts.by_kind`). A runtime-vs-schema parity test now pins the Proof Pack vocabularies to the emitter, mirroring the artifacts, checks, claims, and touches evidence modules. Links: [the Proof Pack contract](/docs/contracts/publication-proof-pack.md), [#884](https://github.com/drawmeanelephant/boris/issues/884).
