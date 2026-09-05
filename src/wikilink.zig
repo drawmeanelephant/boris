@@ -109,14 +109,34 @@ fn atLineStart(body: []const u8, i: usize) bool {
 }
 
 fn fenceAtLineStart(body: []const u8, i: usize) ?struct { u8, usize } {
-    if (i >= body.len) return null;
-    const ch = body[i];
+    if (!atLineStart(body, i)) return null;
+    var j = i;
+    // Optional indent up to 3 spaces (CommonMark).
+    var spaces: usize = 0;
+    while (j < body.len and body[j] == ' ' and spaces < 3) : ({
+        j += 1;
+        spaces += 1;
+    }) {}
+    if (j >= body.len) return null;
+    const ch = body[j];
     if (ch != '`' and ch != '~') return null;
     var run: usize = 0;
-    var j = i;
-    while (j < body.len and body[j] == ch) : (j += 1) run += 1;
+    while (j + run < body.len and body[j + run] == ch) : (run += 1) {}
     if (run < 3) return null;
+    // Info string may follow; we only need the marker.
     return .{ ch, run };
+}
+
+/// True when a line-start fence opener appears in body[from..to]. A
+/// would-be inline-code span must not cross one: the closer search would
+/// otherwise swallow the fence opener and let fenced content be scanned as
+/// real wiki-links.
+fn fenceOpenerInRange(body: []const u8, from: usize, to: usize) bool {
+    var j = from;
+    while (j < to) : (j += 1) {
+        if (atLineStart(body, j) and fenceAtLineStart(body, j) != null) return true;
+    }
+    return false;
 }
 
 fn lineEndIndex(body: []const u8, i: usize) usize {
@@ -202,7 +222,11 @@ pub fn scanWikiLinks(
 
         if (body[i] == '`') {
             if (include_mod.inlineCodeSpanEnd(body, i)) |end| {
-                i = end;
+                if (fenceOpenerInRange(body, i, end)) {
+                    i += include_mod.backtickRunLength(body, i);
+                } else {
+                    i = end;
+                }
             } else {
                 i += include_mod.backtickRunLength(body, i);
             }
@@ -870,12 +894,12 @@ test "scanWikiLinks basic and fence skip" {
     try std.testing.expectEqualStrings("Overview", list.items[1].label.?);
 }
 
-test "scanWikiLinks skips tilde fences" {
+test "scanWikiLinks skips CommonMark-indented fences" {
     const body =
         \\[[guides/a]]
-        \\~~~md
-        \\[[fenced/skip]]
-        \\~~~
+        \\   ```
+        \\   [[fenced/skip]]
+        \\   ```
         \\[[guides/b]]
         \\
     ;
@@ -885,6 +909,36 @@ test "scanWikiLinks skips tilde fences" {
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("guides/a", list.items[0].entity_id);
     try std.testing.expectEqualStrings("guides/b", list.items[1].entity_id);
+}
+
+test "scanWikiLinks unterminated indented fence extends to EOF" {
+    const body =
+        \\   ```
+        \\   [[fenced/skip]]
+        \\and this line is outside any span
+        \\
+    ;
+    var list: std.ArrayList(WikiHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanWikiLinks(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 0), list.items.len);
+}
+
+test "scanWikiLinks backtick span does not cross an indented fence" {
+    const body =
+        \\` open
+        \\   ```
+        \\   [[fenced/skip]]
+        \\   ```
+        \\close `
+        \\[[guides/after]]
+        \\
+    ;
+    var list: std.ArrayList(WikiHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanWikiLinks(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 1), list.items.len);
+    try std.testing.expectEqualStrings("guides/after", list.items[0].entity_id);
 }
 
 test "scanWikiLinks ignores matching inline code spans" {

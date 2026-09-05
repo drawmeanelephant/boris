@@ -165,14 +165,34 @@ fn isSpace(c: u8) bool {
 }
 
 fn fenceAtLineStart(body: []const u8, i: usize) ?struct { u8, usize } {
-    if (i >= body.len) return null;
-    const ch = body[i];
+    if (!atLineStart(body, i)) return null;
+    var j = i;
+    // Optional indent up to 3 spaces (CommonMark).
+    var spaces: usize = 0;
+    while (j < body.len and body[j] == ' ' and spaces < 3) : ({
+        j += 1;
+        spaces += 1;
+    }) {}
+    if (j >= body.len) return null;
+    const ch = body[j];
     if (ch != '`' and ch != '~') return null;
     var run: usize = 0;
-    var j = i;
-    while (j < body.len and body[j] == ch) : (j += 1) run += 1;
+    while (j + run < body.len and body[j + run] == ch) : (run += 1) {}
     if (run < 3) return null;
+    // Info string may follow; we only need the marker.
     return .{ ch, run };
+}
+
+/// True when a line-start fence opener appears in body[from..to]. A
+/// would-be inline-code span must not cross one: the closer search would
+/// otherwise swallow the fence opener and let fenced content be scanned as
+/// real directives.
+fn fenceOpenerInRange(body: []const u8, from: usize, to: usize) bool {
+    var j = from;
+    while (j < to) : (j += 1) {
+        if (atLineStart(body, j) and fenceAtLineStart(body, j) != null) return true;
+    }
+    return false;
 }
 
 fn lineEndIndex(body: []const u8, i: usize) usize {
@@ -379,7 +399,11 @@ pub fn scanIncludeDirectives(
 
         if (body[i] == '`') {
             if (inlineCodeSpanEnd(body, i)) |end| {
-                i = end;
+                if (fenceOpenerInRange(body, i, end)) {
+                    i += backtickRunLength(body, i);
+                } else {
+                    i = end;
+                }
             } else {
                 i += backtickRunLength(body, i);
             }
@@ -648,7 +672,11 @@ fn expandRecursive(
 
         if (body[i] == '`') {
             if (inlineCodeSpanEnd(body, i)) |end| {
-                i = end;
+                if (fenceOpenerInRange(body, i, end)) {
+                    i += backtickRunLength(body, i);
+                } else {
+                    i = end;
+                }
             } else {
                 i += backtickRunLength(body, i);
             }
@@ -874,6 +902,54 @@ test "scanIncludeDirectives skips tilde fences" {
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("includes/a.md", list.items[0].path);
     try std.testing.expectEqualStrings("includes/b.md", list.items[1].path);
+}
+
+test "scanIncludeDirectives skips CommonMark-indented fences" {
+    const body =
+        \\{{include includes/a.md}}
+        \\   ```
+        \\   {{include includes/skipped.md}}
+        \\   ```
+        \\{{include includes/b.md}}
+        \\
+    ;
+    var list: std.ArrayList(ScanHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanIncludeDirectives(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("includes/a.md", list.items[0].path);
+    try std.testing.expectEqualStrings("includes/b.md", list.items[1].path);
+}
+
+test "scanIncludeDirectives unterminated indented fence extends to EOF" {
+    const body =
+        \\{{include includes/a.md}}
+        \\  ```
+        \\  {{include includes/skipped.md}}
+        \\
+    ;
+    var list: std.ArrayList(ScanHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanIncludeDirectives(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 1), list.items.len);
+    try std.testing.expectEqualStrings("includes/a.md", list.items[0].path);
+}
+
+test "scanIncludeDirectives backtick span does not cross an indented fence" {
+    const body =
+        \\` open
+        \\   ```
+        \\   {{include includes/skipped.md}}
+        \\   ```
+        \\close `
+        \\{{include includes/after.md}}
+        \\
+    ;
+    var list: std.ArrayList(ScanHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanIncludeDirectives(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 1), list.items.len);
+    try std.testing.expectEqualStrings("includes/after.md", list.items[0].path);
 }
 
 test "scanIncludeDirectives ignores matching inline code spans" {
