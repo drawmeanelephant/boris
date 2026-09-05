@@ -17,12 +17,21 @@ const theme = @import("theme.zig");
 
 pub const max_profile_bytes: usize = 256 * 1024;
 pub const max_json_depth: usize = 16;
-pub const max_string_bytes: usize = 4 * 1024;
+/// Transport ceiling for one JSON string in a profile. Must exceed the
+/// largest semantic string bound (the 30000-byte Standard.site description,
+/// #895) including JSON escape overhead; semantic per-field caps still bound
+/// every value after parse.
+pub const max_string_bytes: usize = 64 * 1024;
 pub const max_path_bytes: usize = 1024;
 pub const max_targets: usize = 32;
 pub const max_array_items: usize = 256;
 pub const max_target_name_bytes: usize = 64;
 pub const max_site_text_bytes: usize = 1024;
+/// Standard.site profile text bounds (docs/contracts/standard-site.md): the
+/// payload-side 5000/30000 limits were unreachable while this parser's shared
+/// 1024-byte bound rejected contract-legal values first (#895).
+pub const max_standard_site_name_bytes: usize = 5000;
+pub const max_standard_site_description_bytes: usize = 30000;
 pub const max_nostr_articles: usize = 256;
 
 pub const Error = error{
@@ -519,11 +528,14 @@ fn parsePublication(allocator: std.mem.Allocator, value: std.json.Value) Error!P
         errdefer config.deinit(allocator);
         if (field(obj, "pds")) |v| {
             const pds = try boundedText(allocator, v);
-            if (!standard_site.validPdsOrigin(pds)) return error.InvalidPublication;
+            if (!standard_site.validPdsOrigin(pds)) {
+                allocator.free(pds);
+                return error.InvalidPublication;
+            }
             config.pds_origin = pds;
         }
-        if (field(obj, "name")) |v| config.name = try boundedText(allocator, v);
-        if (field(obj, "description")) |v| config.description = try boundedText(allocator, v);
+        if (field(obj, "name")) |v| config.name = try boundedTextMax(allocator, v, max_standard_site_name_bytes);
+        if (field(obj, "description")) |v| config.description = try boundedTextMax(allocator, v, max_standard_site_description_bytes);
         if (field(obj, "show_in_discover")) |v| config.show_in_discover = try boolean(v);
         if (field(obj, "include")) |v| config.include = try parseFilters(allocator, v);
         if (field(obj, "exclude")) |v| config.exclude = try parseFilters(allocator, v);
@@ -545,14 +557,25 @@ fn parseFilters(allocator: std.mem.Allocator, value: std.json.Value) Error![][]c
     for (values) |entry| {
         const text = try string(entry);
         if (text.len == 0) return error.InvalidPublication;
+        // Closed filter grammar (docs/contracts/standard-site.md): an exact
+        // entity id or a trailing-`*` prefix pattern. Any `*` that is not
+        // the sole final character would silently degrade to exact-match
+        // semantics on the wire, so it is rejected at parse (#899).
+        if (std.mem.indexOfScalar(u8, text, '*')) |star| {
+            if (star != text.len - 1) return error.InvalidPublication;
+        }
         filters[initialized] = try dup(allocator, text);
         initialized += 1;
     }
     return filters;
 }
 fn boundedText(allocator: std.mem.Allocator, value: std.json.Value) Error![]u8 {
+    return boundedTextMax(allocator, value, max_site_text_bytes);
+}
+
+fn boundedTextMax(allocator: std.mem.Allocator, value: std.json.Value, max: usize) Error![]u8 {
     const v = try string(value);
-    if (v.len == 0 or v.len > max_site_text_bytes) return error.InvalidSite;
+    if (v.len == 0 or v.len > max) return error.InvalidSite;
     return dup(allocator, v);
 }
 
@@ -897,6 +920,86 @@ test "GitHub Pages publication requires one public target and matching site URL"
         \\{"format":"boris-publication-profile","schema_version":1,"site":{"url":"https://owner.github.io/other"},"publication":{"target":"github-pages","base_url":"https://owner.github.io/boris","origin":"https://owner.github.io","base_path":"/boris"},"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}]}
     ;
     try std.testing.expectError(error.PublicationSiteMismatch, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, mismatched_site, .{}));
+}
+
+test "Standard.site publication metadata is normalized in the owned plan (#900)" {
+    const source =
+        \\{"format":"boris-publication-profile","schema_version":1,"site":{"url":"https://docs.example.com/"},"publication":{"target":"standard-site","base_url":"https://docs.example.com/","origin":"https://docs.example.com/","base_path":"","did":"did:plc:ewvi7nxzyoun6zhxrhs64oiz","pds":"https://pds.example.com","name":"Boris Docs","description":"Canonical docs.","show_in_discover":true,"include":["guides/*"],"exclude":["guides/private*"],"prune":false},"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}]}
+    ;
+    var request = try parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, .{});
+    defer request.deinit(std.testing.allocator);
+    const config = request.plan.publication.?.standard_site;
+    try std.testing.expectEqualStrings("did:plc:ewvi7nxzyoun6zhxrhs64oiz", config.did);
+    try std.testing.expectEqualStrings("https://pds.example.com", config.pds_origin.?);
+    try std.testing.expectEqualStrings("Boris Docs", config.name.?);
+    try std.testing.expectEqualStrings("Canonical docs.", config.description.?);
+    try std.testing.expect(config.show_in_discover);
+    try std.testing.expectEqual(@as(usize, 1), config.include.len);
+    try std.testing.expectEqualStrings("guides/*", config.include[0]);
+    try std.testing.expectEqualStrings("guides/private*", config.exclude[0]);
+    try std.testing.expect(!config.prune);
+}
+
+test "Standard.site publication fails closed on invalid did and pds origin (#900)" {
+    const bad_did =
+        \\{"format":"boris-publication-profile","schema_version":1,"publication":{"target":"standard-site","base_url":"https://docs.example.com/","origin":"https://docs.example.com/","base_path":"","did":"not-a-did"},"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}]}
+    ;
+    try std.testing.expectError(error.InvalidPublication, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, bad_did, .{}));
+
+    // validPdsOrigin rejects path/query/fragment/userinfo/port.
+    const pds_cases = [_][]const u8{
+        "https://pds.example.com/path",
+        "https://pds.example.com?x=1",
+        "https://user@pds.example.com",
+        "https://pds.example.com:8080",
+        "http://pds.example.com",
+    };
+    for (pds_cases) |pds| {
+        const source = try std.fmt.allocPrint(std.testing.allocator, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"pds\":\"{s}\"}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{pds});
+        defer std.testing.allocator.free(source);
+        try std.testing.expectError(error.InvalidPublication, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, .{}));
+    }
+}
+
+test "Standard.site name and description honor the contract bounds (#895)" {
+    const gpa = std.testing.allocator;
+    // 5000-byte name is contract-legal and now parses (was InvalidSite).
+    const name_ok = "N" ** 5000;
+    const source_ok = try std.fmt.allocPrint(gpa, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"name\":\"{s}\",\"description\":\"{s}\",\"show_in_discover\":true,\"include\":[\"guides/*\"],\"exclude\":[\"guides/private*\"],\"prune\":false}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{ name_ok, "D" ** 30000 });
+    defer gpa.free(source_ok);
+    var request = try parseBytes(gpa, .{ .root = try gpa.dupe(u8, "/work") }, source_ok, .{});
+    defer request.deinit(gpa);
+    const config = request.plan.publication.?.standard_site;
+    try std.testing.expectEqual(@as(usize, 5000), config.name.?.len);
+    try std.testing.expectEqual(@as(usize, 30000), config.description.?.len);
+
+    // One byte over each cap fails closed.
+    const name_over = "N" ** 5001;
+    const source_over = try std.fmt.allocPrint(gpa, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"name\":\"{s}\"}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{name_over});
+    defer gpa.free(source_over);
+    try std.testing.expectError(error.InvalidSite, parseBytes(gpa, .{ .root = try gpa.dupe(u8, "/work") }, source_over, .{}));
+
+    const description_over = "D" ** 30001;
+    const source_desc_over = try std.fmt.allocPrint(gpa, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"description\":\"{s}\"}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{description_over});
+    defer gpa.free(source_desc_over);
+    try std.testing.expectError(error.InvalidSite, parseBytes(gpa, .{ .root = try gpa.dupe(u8, "/work") }, source_desc_over, .{}));
+}
+
+test "Standard.site filters reject mid-glob patterns at parse (#899)" {
+    const gpa = std.testing.allocator;
+    const bad_filters = [_][]const u8{ "guides/*/x", "a**", "guides/*/mid", "ar*ticles" };
+    for (bad_filters) |filter| {
+        const source = try std.fmt.allocPrint(gpa, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"include\":[\"{s}\"]}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{filter});
+        defer gpa.free(source);
+        try std.testing.expectError(error.InvalidPublication, parseBytes(gpa, .{ .root = try gpa.dupe(u8, "/work") }, source, .{}));
+    }
+}
+
+test "unknown publication target fails closed (#900)" {
+    const source =
+        \\{"format":"boris-publication-profile","schema_version":1,"publication":{"target":"nostr","base_url":"https://example.com/","origin":"https://example.com/","base_path":""},"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}]}
+    ;
+    try std.testing.expectError(error.InvalidPublication, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, .{}));
 }
 
 test "profile workspace is selected parent and has no discovery" {

@@ -42,7 +42,7 @@ location values and these Standard.site fields:
 | `name` | Site name in the publication record | non-empty, ≤ 5000 bytes |
 | `description` | Optional site description | ≤ 30000 bytes |
 | `show_in_discover` | `preferences.showInDiscover` hint | boolean |
-| `include` / `exclude` | Page filters | glob patterns; filters apply to entity ids |
+| `include` / `exclude` | Page filters | closed grammar: an exact entity id or a trailing-`*` prefix pattern (`articles/*`); filters apply to entity ids. Any other `*` placement is rejected at parse (#899) |
 | `prune` | Delete records absent from the projection | boolean (write-command input) |
 | `pds` | Optional pin of the write PDS origin | omitted → publish binds to the PDS discovered from the DID document; if set, HTTPS origin that must match that discovery after parse |
 
@@ -71,14 +71,16 @@ A page becomes a planned document only when **all** of:
 1. Status is `published` or `archived` (drafts are excluded with reason
    `draft`);
 2. `published_at` is present and normalizes to the atproto datetime form
-   `YYYY-MM-DDTHH:MM:SS.000Z` (reason `missing_date` otherwise);
+   `YYYY-MM-DDTHH:MM:SS.000Z` (reason `missing-date` otherwise);
 3. The entity id passes the configured include/exclude filters (reason
    `filtered`);
 4. The output path is a safe relative `*.html` path (no leading slash,
    backslash, or `..`).
 
-Every exclusion is recorded with its entity id, reason (`draft`, `missing_date`,
-`filtered`, `unsupported`), and a human-readable detail. Rkey collisions across
+Every exclusion is recorded with its entity id, reason (`draft`, `missing-date`,
+`filtered`, `unsupported`), and a human-readable detail. The reason tokens are
+the closed wire vocabulary; the missing-date token is the hyphenated
+`missing-date` as rendered (#896). Rkey collisions across
 the planned collection fail closed.
 
 ### Document rkeys
