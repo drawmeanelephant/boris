@@ -1675,6 +1675,105 @@ fn notApplicableSpec() publication_touches.TestFixtureSpec {
     };
 }
 
+fn expectJsonStrings(value: std.json.Value, expected: []const []const u8) !void {
+    const items = value.array.items;
+    try std.testing.expectEqual(expected.len, items.len);
+    for (expected, 0..) |want, index| try std.testing.expectEqualStrings(want, items[index].string);
+}
+
+/// Runtime-visible wire names of an enum in declaration order, for the
+/// runtime-vs-schema parity test.
+fn enumWireNames(comptime E: type) [std.meta.fields(E).len][]const u8 {
+    comptime {
+        const fields = std.meta.fields(E);
+        var names: [fields.len][]const u8 = undefined;
+        for (fields, 0..) |field, index| names[index] = @field(E, field.name).name();
+        return names;
+    }
+}
+
+test "publication proof pack runtime vocabulary matches its draft 2020-12 schema" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const schema_bytes = try publication_touches.readPayload(io, Io.Dir.cwd(), gpa, "docs/contracts/schemas/publication-proof-pack-1.schema.json");
+    defer gpa.free(schema_bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, schema_bytes, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings("https://json-schema.org/draft/2020-12/schema", root.get("$schema").?.string);
+    try std.testing.expectEqualStrings(report_format, root.get("properties").?.object.get("format").?.object.get("const").?.string);
+    try std.testing.expectEqual(@as(i64, schema_version), root.get("properties").?.object.get("schema_version").?.object.get("const").?.integer);
+    try expectJsonStrings(root.get("required").?, &.{ "format", "schema_version", "target", "inputs", "summary", "artifacts", "checks", "findings", "claims", "limitations", "relationships", "presentation" });
+
+    const defs = root.get("$defs").?.object;
+
+    // The artifact kind vocabulary is owned by the inventory Kind enum; both
+    // the schema enum and the schema's own by_kind counter must track it
+    // exactly, in declaration order (#884).
+    const kind_names = comptime enumWireNames(artifact_inventory.Kind);
+    const schema_kinds = defs.get("artifact_kind").?.object.get("enum").?.array.items;
+    try std.testing.expectEqual(kind_names.len, schema_kinds.len);
+    const by_kind_required = defs.get("artifact_by_kind").?.object.get("required").?.array.items;
+    try std.testing.expectEqual(kind_names.len, by_kind_required.len);
+    for (kind_names, 0..) |kind_name, index| {
+        try std.testing.expectEqualStrings(kind_name, schema_kinds[index].string);
+        try std.testing.expectEqualStrings(kind_name, by_kind_required[index].string);
+    }
+
+    try expectJsonStrings(defs.get("artifact_status").?.object.get("enum").?, &.{ "committed", "omitted-by-plan", "not-applicable" });
+    try expectJsonStrings(defs.get("check_id").?.object.get("enum").?, &publication_touches.check_ids);
+    try expectJsonStrings(defs.get("check_status").?.object.get("enum").?, &.{ "passed", "failed", "incomplete", "not-applicable" });
+    try expectJsonStrings(defs.get("coverage").?.object.get("enum").?, &.{ "complete", "incomplete", "not-applicable" });
+    try expectJsonStrings(defs.get("finding_code").?.object.get("enum").?, &.{
+        "ARTIFACT_MISSING",         "ARTIFACT_SIZE_MISMATCH",  "ARTIFACT_DIGEST_MISMATCH",
+        "HTML_PAGE_MISSING",        "HTML_MALFORMED",          "HTML_URL_MALFORMED",
+        "HTML_LOCAL_ROUTE_MISSING", "HTML_LOCAL_ROUTE_ESCAPE", "HTML_FRAGMENT_MISSING",
+        "HTML_DUPLICATE_ID",        "SEARCH_MISSING",          "SEARCH_MALFORMED",
+        "SEARCH_DOCUMENT_MISSING",  "SEARCH_DOCUMENT_STALE",   "SEARCH_CONTENT_MISMATCH",
+    });
+    try expectJsonStrings(defs.get("severity").?.object.get("enum").?, &.{ "error", "warning", "info" });
+    try expectJsonStrings(defs.get("claim_id").?.object.get("enum").?, &publication_touches.claim_ids);
+    try expectJsonStrings(defs.get("claim_status").?.object.get("enum").?, &.{ "verified", "failed", "not-verified" });
+    try expectJsonStrings(defs.get("limitation_id").?.object.get("enum").?, &publication_touches.limitation_ids);
+    try expectJsonStrings(defs.get("overall_status").?.object.get("enum").?, &.{ "verified", "attention-required", "incomplete", "not-applicable" });
+
+    // Edge-kind names come from the Touch Atlas EdgeKind registry that the
+    // relationships section serializes.
+    const edge_kind_names = comptime enumWireNames(EdgeKind);
+    const schema_edge_kinds = defs.get("edge_kind").?.object.get("enum").?.array.items;
+    try std.testing.expectEqual(edge_kind_names.len, schema_edge_kinds.len);
+    for (edge_kind_names, schema_edge_kinds) |kind_name, got| {
+        try std.testing.expectEqualStrings(kind_name, got.string);
+    }
+
+    // The three checks, three claims, and six limitations are pinned to the
+    // runtime registries in position.
+    const properties = root.get("properties").?.object;
+    const check_prefix = properties.get("checks").?.object.get("prefixItems").?.array.items;
+    try std.testing.expectEqual(publication_touches.check_ids.len, check_prefix.len);
+    for (check_prefix, publication_touches.check_ids) |position, expected_id| {
+        try std.testing.expectEqualStrings(expected_id, position.object.get("properties").?.object.get("check_id").?.object.get("const").?.string);
+    }
+    const claim_prefix = properties.get("claims").?.object.get("prefixItems").?.array.items;
+    try std.testing.expectEqual(publication_touches.claim_ids.len, claim_prefix.len);
+    for (claim_prefix, publication_touches.claim_ids) |position, expected_id| {
+        try std.testing.expectEqualStrings(expected_id, position.object.get("properties").?.object.get("claim_id").?.object.get("const").?.string);
+    }
+    const limitation_prefix = properties.get("limitations").?.object.get("prefixItems").?.array.items;
+    try std.testing.expectEqual(publication_touches.limitation_ids.len, limitation_prefix.len);
+    for (limitation_prefix, publication_touches.limitation_ids) |position, expected_id| {
+        try std.testing.expectEqualStrings(expected_id, position.object.get("properties").?.object.get("limitation_id").?.object.get("const").?.string);
+    }
+
+    // The presentation section pins the overall-status vocabulary in order.
+    const presentation_prefix = defs.get("presentation").?.object.get("properties").?.object.get("status_vocabulary").?.object.get("prefixItems").?.array.items;
+    try std.testing.expectEqual(@as(usize, 4), presentation_prefix.len);
+    const overall_order = [_][]const u8{ "verified", "attention-required", "incomplete", "not-applicable" };
+    for (presentation_prefix, overall_order) |pin, expected| {
+        try std.testing.expectEqualStrings(expected, pin.object.get("const").?.string);
+    }
+}
+
 test "clean fixture derives the canonical verified Proof Pack" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
