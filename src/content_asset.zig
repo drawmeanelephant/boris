@@ -556,13 +556,21 @@ fn lineEndIndex(body: []const u8, i: usize) usize {
 }
 
 fn fenceAtLineStart(body: []const u8, i: usize) ?struct { u8, usize } {
-    if (i >= body.len) return null;
-    const ch = body[i];
+    if (!atLineStart(body, i)) return null;
+    var j = i;
+    // Optional indent up to 3 spaces (CommonMark).
+    var spaces: usize = 0;
+    while (j < body.len and body[j] == ' ' and spaces < 3) : ({
+        j += 1;
+        spaces += 1;
+    }) {}
+    if (j >= body.len) return null;
+    const ch = body[j];
     if (ch != '`' and ch != '~') return null;
     var run: usize = 0;
-    var j = i;
-    while (j < body.len and body[j] == ch) : (j += 1) run += 1;
+    while (j + run < body.len and body[j + run] == ch) : (run += 1) {}
     if (run < 3) return null;
+    // Info string may follow; we only need the marker.
     return .{ ch, run };
 }
 
@@ -598,6 +606,130 @@ fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail: []cons
     }
 }
 
+/// True when body[k..eol] is a CommonMark thematic break (≥3 of the same
+/// `-_*` marker, spaces allowed between).
+fn isThematicBreak(body: []const u8, k: usize) bool {
+    var m = k;
+    var dash: usize = 0;
+    var star: usize = 0;
+    var us: usize = 0;
+    while (m < body.len and body[m] != '\n' and body[m] != '\r') {
+        switch (body[m]) {
+            ' ' => {},
+            '-' => dash += 1,
+            '*' => star += 1,
+            '_' => us += 1,
+            else => return false,
+        }
+        m += 1;
+    }
+    const n = dash + star + us;
+    return n >= 3 and (dash == n or star == n or us == n);
+}
+
+/// True when body[k..] opens an ATX heading (`#{1,6}` + space/tab/EOL).
+fn isAtxHeading(body: []const u8, k: usize) bool {
+    var m = k;
+    var hashes: usize = 0;
+    while (m < body.len and body[m] == '#' and hashes < 7) : ({
+        m += 1;
+        hashes += 1;
+    }) {}
+    if (hashes == 0 or hashes > 6) return false;
+    return m >= body.len or body[m] == ' ' or body[m] == '\t' or
+        body[m] == '\n' or body[m] == '\r';
+}
+
+/// When body[k..] opens a list item, return the item content's absolute
+/// indent from `line_start` (marker end plus following spaces; a tab or
+/// ≥5 spaces after the marker counts as one, per CommonMark).
+fn listItemContent(body: []const u8, line_start: usize, k: usize) ?usize {
+    if (k >= body.len) return null;
+    var marker_end = k;
+    const c = body[k];
+    if (c == '-' or c == '+' or c == '*') {
+        marker_end = k + 1;
+    } else if (c >= '0' and c <= '9') {
+        var m = k;
+        var digits: usize = 0;
+        while (m < body.len and body[m] >= '0' and body[m] <= '9' and digits < 9) : ({
+            m += 1;
+            digits += 1;
+        }) {}
+        if (m >= body.len or (body[m] != '.' and body[m] != ')')) return null;
+        marker_end = m + 1;
+    } else {
+        return null;
+    }
+    var s = marker_end;
+    var gaps: usize = 0;
+    while (s < body.len and (body[s] == ' ' or body[s] == '\t')) : ({
+        s += 1;
+        gaps += 1;
+    }) {}
+    if (s >= body.len or body[s] == '\n' or body[s] == '\r') {
+        return marker_end - line_start + 1;
+    }
+    if (gaps == 0) return null;
+    if (gaps >= 5) return marker_end - line_start + 1;
+    return s - line_start;
+}
+
+/// Indented-code guard for image scanning. A line indented 4+ spaces (a
+/// leading tab counts as 4) outside any list item or blockquote is a
+/// CommonMark indented code block, so image-looking text on it stays
+/// literal: returns true and the caller skips the line. Otherwise updates
+/// the list/quote tracking and returns false. When in doubt the state
+/// claims "inside a container", which preserves the old behavior (scan)
+/// rather than skipping a possibly real image.
+fn scanIndentedCodeLine(
+    body: []const u8,
+    line_start: usize,
+    in_list: *bool,
+    list_content: *usize,
+    in_quote: *bool,
+) bool {
+    var j = line_start;
+    var spaces: usize = 0;
+    var saw_tab = false;
+    while (j < body.len and (body[j] == ' ' or body[j] == '\t')) {
+        if (body[j] == '\t') {
+            saw_tab = true;
+        } else {
+            spaces += 1;
+        }
+        j += 1;
+    }
+    if (j >= body.len or body[j] == '\n' or body[j] == '\r') {
+        // Blank lines end a blockquote; lists persist across blanks.
+        in_quote.* = false;
+        return false;
+    }
+    const indent = spaces + (if (saw_tab) @as(usize, 4) else 0);
+    if (indent >= 4 and !in_list.* and !in_quote.*) return true;
+
+    // Ordinary line: update container tracking. Only space-indented shapes
+    // at indent <= 3 can open containers; deeper or tabbed lines inside a
+    // container leave the state untouched (conservative: keep scanning).
+    if (saw_tab or spaces > 3) return false;
+    if (body[j] == '>') {
+        in_quote.* = true;
+        return false;
+    }
+    in_quote.* = false;
+    if (isThematicBreak(body, j) or isAtxHeading(body, j)) {
+        in_list.* = false;
+        return false;
+    }
+    if (listItemContent(body, line_start, j)) |content| {
+        in_list.* = true;
+        list_content.* = content;
+        return false;
+    }
+    if (in_list.* and spaces < list_content.*) in_list.* = false;
+    return false;
+}
+
 /// Scan for inline Markdown images outside fenced code and inline code spans.
 /// Views into `body`.
 fn scanImages(
@@ -608,6 +740,9 @@ fn scanImages(
     var i: usize = 0;
     var fence_ch: u8 = 0;
     var fence_run: usize = 0;
+    var in_list = false;
+    var list_content: usize = 0;
+    var in_quote = false;
 
     while (i < body.len) {
         if (atLineStart(body, i)) {
@@ -627,6 +762,11 @@ fn scanImages(
                     if (i < body.len and body[i] == '\n') i += 1;
                     continue;
                 }
+            }
+            if (fence_ch == 0 and scanIndentedCodeLine(body, i, &in_list, &list_content, &in_quote)) {
+                i = lineEndIndex(body, i);
+                if (i < body.len and body[i] == '\n') i += 1;
+                continue;
             }
         }
 
@@ -1152,6 +1292,101 @@ test "rewrite skips fenced image-looking text" {
     const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     // body unchanged (same slice or equal)
     try std.testing.expectEqualStrings(body, out);
+}
+
+test "rewrite skips CommonMark-indented fenced image-looking text" {
+    const gpa = std.testing.allocator;
+    var bundle: PageAssetBundle = .{ .gpa = gpa, .source_path = "guides/intro.md", .entity_id = "guides/intro" };
+    defer bundle.deinit();
+    const body =
+        \\   ```
+        \\   ![x](../escape.svg)
+        \\   ```
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    try std.testing.expectEqualStrings(body, out);
+}
+
+test "rewrite skips unterminated indented fence to EOF" {
+    const gpa = std.testing.allocator;
+    var bundle: PageAssetBundle = .{ .gpa = gpa, .source_path = "guides/intro.md", .entity_id = "guides/intro" };
+    defer bundle.deinit();
+    const body =
+        \\text
+        \\
+        \\  ```
+        \\  ![x](../escape.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    try std.testing.expectEqualStrings(body, out);
+}
+
+test "rewrite skips indented-code image-looking text" {
+    const gpa = std.testing.allocator;
+    var bundle: PageAssetBundle = .{ .gpa = gpa, .source_path = "guides/intro.md", .entity_id = "guides/intro" };
+    defer bundle.deinit();
+    const body =
+        \\Intro:
+        \\
+        \\    ![x](../escape.svg)
+        \\
+        \\After.
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    try std.testing.expectEqualStrings(body, out);
+}
+
+test "rewrite skips indented code after a blockquote" {
+    const gpa = std.testing.allocator;
+    var bundle: PageAssetBundle = .{ .gpa = gpa, .source_path = "guides/intro.md", .entity_id = "guides/intro" };
+    defer bundle.deinit();
+    // The blank line ends the quote; the 4-space line is top-level code.
+    const body =
+        \\> quoted
+        \\
+        \\    ![x](../escape.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    try std.testing.expectEqualStrings(body, out);
+}
+
+test "rewrite still validates list-nested images" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-list-nested", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    // 4-space image-looking text inside a list item is item content, not
+    // indented code: it must still resolve (proves the container tracking
+    // does not swallow real images).
+    const body =
+        \\- item
+        \\
+        \\    ![d](intro.assets/diagram.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "![d](intro.assets/diagram.svg)") != null);
 }
 
 test "rewrite skips inline-code image-looking text and still rewrites real images" {
