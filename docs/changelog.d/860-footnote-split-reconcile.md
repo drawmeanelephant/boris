@@ -1,0 +1,3 @@
+### Fixed
+
+- A footnote definition no longer disappears when an `<Aside>`/`<Details>` component sits between it and its reference: before rendering, definitions that a component split from their referencing segment are relocated (moved, never duplicated) to the first segment that references them, so the published page renders the `footnote-ref` link and the footnotes section instead of literal `[^1]` prose and silently dropped definitions. Unreferenced definitions stay where the author put them; scanning is fence- and inline-code-aware. Links: [the Oliver renderer contract](/docs/contracts/oliver-renderer.md), [#860](https://github.com/drawmeanelephant/boris/issues/860).
