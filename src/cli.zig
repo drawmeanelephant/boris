@@ -837,6 +837,30 @@ fn commandWord(command: Command) []const u8 {
     };
 }
 
+/// One leaf of a command's forbidden-selector set: the user-typed token to
+/// name and whether that selector triggered for this argv.
+const ConflictLeaf = struct { token: []const u8, triggered: bool };
+
+/// Result of scanning a forbidden set: how many leaves triggered and the
+/// single offender's token (meaningful only when exactly one triggered).
+const ConflictScan = struct { triggered: usize = 0, offender: []const u8 = "" };
+
+/// Count the triggered leaves of a forbidden set (#764, #874). Exactly one
+/// triggered leaf names both tokens as typed; several keep the generic
+/// `conflicting options` form. The leaf order is fixed, so the named token
+/// is deterministic. A leaf may carry a conditional token (e.g. the watch
+/// command itself versus the `--watch` flag) so the named spelling matches
+/// what the user typed.
+fn scanConflicts(leaves: []const ConflictLeaf) ConflictScan {
+    var scan: ConflictScan = .{};
+    for (leaves) |leaf| {
+        if (!leaf.triggered) continue;
+        scan.triggered += 1;
+        scan.offender = leaf.token;
+    }
+    return scan;
+}
+
 /// First explicit HTML-selector token present in this run, for naming
 /// analyzer×selector and selector×`--out` conflicts (#764). The order is a
 /// fixed list, so the named token is deterministic for any argv. Covers
@@ -1584,13 +1608,43 @@ fn buildPlanOptions(st: *ParseState) ParseError!Options {
     // `--timings` is rejected here too: `plan` owns stdout for its single
     // declaration JSON document, and it runs no compiler phase, so the
     // machine-readable timing report has nowhere to go without corrupting
-    // the plan stream.
-    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
-        st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings)
-    {
-        return error.ConflictingFlags;
-    }
+    // the plan stream. A single offending selector is named as typed
+    // (#764, #874); a multi-selector argv keeps the generic form.
+    const plan_scan = scanConflicts(&.{
+        .{ .token = "--html", .triggered = st.saw_html },
+        .{ .token = "--target", .triggered = st.hasExplicitTargets() },
+        .{ .token = "--html-layout", .triggered = st.saw_html_layout },
+        .{ .token = "--theme", .triggered = st.saw_theme },
+        .{ .token = "--target-layout", .triggered = st.hasTargetLayouts() },
+        .{ .token = "--target-profile", .triggered = st.hasTargetProfiles() },
+        .{ .token = "--layout-rule", .triggered = st.hasLayoutRules() },
+        .{ .token = "--sitemap", .triggered = st.saw_sitemap },
+        .{ .token = "--sitemap-path", .triggered = st.saw_sitemap_path },
+        .{ .token = "--static-dir", .triggered = st.saw_static_dir },
+        .{ .token = "--rag", .triggered = st.saw_rag },
+        .{ .token = "--rag-dir", .triggered = st.saw_rag_dir },
+        .{ .token = "--out", .triggered = st.saw_out },
+        .{ .token = "--no-rag", .triggered = st.saw_no_rag },
+        .{ .token = "--context", .triggered = st.saw_context },
+        .{ .token = "--context-dir", .triggered = st.saw_context_dir },
+        .{ .token = "--llms", .triggered = st.saw_llms },
+        .{ .token = "--llms-path", .triggered = st.saw_llms_path },
+        .{ .token = "--rss", .triggered = st.saw_rss },
+        .{ .token = "--rss-path", .triggered = st.saw_rss_path },
+        .{ .token = "--site-url", .triggered = st.saw_site_url },
+        .{ .token = "--pages-base-url", .triggered = st.saw_pages_base_url },
+        .{ .token = "--pages-origin", .triggered = st.saw_pages_origin },
+        .{ .token = "--pages-base-path", .triggered = st.saw_pages_base_path },
+        .{ .token = "--rss-title", .triggered = st.saw_rss_title },
+        .{ .token = "--rss-description", .triggered = st.saw_rss_description },
+        .{ .token = "--rss-limit", .triggered = st.saw_rss_limit },
+        .{ .token = "--format", .triggered = st.saw_format },
+        .{ .token = "--report", .triggered = st.saw_report },
+        .{ .token = "--watch", .triggered = st.saw_watch },
+        .{ .token = "--timings", .triggered = st.saw_timings },
+    });
+    if (plan_scan.triggered == 1) return failConflict(st, commandWord(st.command), plan_scan.offender);
+    if (plan_scan.triggered > 1) return error.ConflictingFlags;
     return .{
         .help = false,
         .quiet = st.quiet,
@@ -1870,14 +1924,30 @@ fn validateBuildConflicts(st: *ParseState) ParseError!void {
     // `--profile` on the HTML build is the Standard.site verification-emit
     // opt-in (#533) and the Nostr `nostr:naddr` alternate-link emit (#571).
     // Other modes already have their own profile commands (`plan`,
-    // `standard-site *`, `nostr plan`) or do not emit surfaces.
+    // `standard-site *`, `nostr plan`) or do not emit surfaces. A single
+    // conflicting mode/selector is named as typed (#764, #874); a
+    // multi-cause argv keeps the generic form.
     if (st.saw_profile) {
-        if (st.command == .watch or st.saw_watch or st.command == .validate or
-            st.command == .check or st.command == .impact or
-            st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss())
-        {
-            return error.ConflictingFlags;
-        }
+        const profile_scan = scanConflicts(&.{
+            .{ .token = if (st.command == .watch) "watch" else "--watch", .triggered = st.command == .watch or st.saw_watch },
+            .{ .token = "validate", .triggered = st.command == .validate },
+            .{ .token = "check", .triggered = st.command == .check },
+            .{ .token = "impact", .triggered = st.command == .impact },
+            .{ .token = "--rag", .triggered = st.saw_rag },
+            .{ .token = "--rag-dir", .triggered = st.saw_rag_dir },
+            .{ .token = "--out", .triggered = st.saw_out },
+            .{ .token = "--no-rag", .triggered = st.saw_no_rag },
+            .{ .token = "--context", .triggered = st.saw_context },
+            .{ .token = "--context-dir", .triggered = st.saw_context_dir },
+            .{ .token = "--llms", .triggered = st.saw_llms },
+            .{ .token = "--llms-path", .triggered = st.saw_llms_path },
+            .{ .token = "--rss", .triggered = st.saw_rss },
+            .{ .token = "--rss-path", .triggered = st.saw_rss_path },
+        });
+        // The typed offender is always `--profile`; the other side of the
+        // pair is the conflicting mode or selector token.
+        if (profile_scan.triggered == 1) return failConflict(st, profile_scan.offender, "--profile");
+        if (profile_scan.triggered > 1) return error.ConflictingFlags;
     }
     if (st.saw_fail_on_unreferenced and st.command != .check) return error.ConflictingFlags;
 
@@ -4617,6 +4687,53 @@ test "parse detail: conflicting pairs name both sides (#764)" {
         "boris", "validate", "--format", "json",
     }, &generic));
     try expect(generic.conflict_a == null and generic.conflict_b == null);
+}
+
+test "parse detail: single-cause mode conflicts name the pair (#874)" {
+    // plan --timings is named by the plan contract as a single pairing; the
+    // failing arm records it instead of the generic form.
+    var plan_timings = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "plan", "--profile", "p.json", "--timings",
+    }, &plan_timings));
+    try expectEqualStrings("plan", plan_timings.conflict_a.?);
+    try expectEqualStrings("--timings", plan_timings.conflict_b.?);
+
+    // Analyzer --profile: the mode is the other side of the pair.
+    var validate_profile = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "validate", "--profile", "p.json", "--quiet",
+    }, &validate_profile));
+    try expectEqualStrings("validate", validate_profile.conflict_a.?);
+    try expectEqualStrings("--profile", validate_profile.conflict_b.?);
+
+    var check_profile = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "check", "--profile", "p.json",
+    }, &check_profile));
+    try expectEqualStrings("check", check_profile.conflict_a.?);
+    try expectEqualStrings("--profile", check_profile.conflict_b.?);
+
+    // Flag × flag: watch mode against --profile on a build.
+    var watch_profile = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "build", "--watch", "--profile", "p.json",
+    }, &watch_profile));
+    try expectEqualStrings("--watch", watch_profile.conflict_a.?);
+    try expectEqualStrings("--profile", watch_profile.conflict_b.?);
+
+    // Multi-cause argv keeps the generic form rather than guessing a pair.
+    var multi = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "plan", "--profile", "p.json", "--rss", "--timings",
+    }, &multi));
+    try expect(multi.conflict_a == null and multi.conflict_b == null);
+
+    var multi_mode = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "validate", "--profile", "p.json", "--llms",
+    }, &multi_mode));
+    try expect(multi_mode.conflict_a == null and multi_mode.conflict_b == null);
 }
 
 test "parse detail: channel stays empty on success and parseOptions is unchanged" {
