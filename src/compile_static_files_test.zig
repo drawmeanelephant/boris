@@ -10,6 +10,7 @@ const compileHtmlSite = compile.compileHtmlSite;
 const kit = @import("compile_test_kit.zig");
 const target_mod = @import("target.zig");
 const static_files = @import("static_files.zig");
+const publication_checks = @import("publication_checks.zig");
 
 const gpa = std.testing.allocator;
 const io = std.testing.io;
@@ -199,6 +200,48 @@ test "static passthrough: stale file scrubbed on rebuild" {
     defer parsed.deinit();
     try std.testing.expect(kit.findArtifactRecord(parsed.value, "keep.txt") != null);
     try std.testing.expect(kit.findArtifactRecord(parsed.value, "stale.txt") == null);
+}
+
+test "static passthrough: declared .html survives full rebuilds (#866)" {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const aa = arena_state.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try std.fmt.allocPrint(aa, ".zig-cache/tmp/{s}/sp-html", .{tmp.sub_path});
+    const content = try std.fmt.allocPrint(aa, "{s}/content", .{base});
+    const static_dir = try std.fmt.allocPrint(aa, "{s}/static", .{base});
+    const dist = try std.fmt.allocPrint(aa, "{s}/dist", .{base});
+
+    try writeFile(try std.fmt.allocPrint(aa, "{s}/index.md", .{content}), index_md);
+    const embed_body = "<html><body>embed page</body></html>\n";
+    try writeFile(try std.fmt.allocPrint(aa, "{s}/robots.txt", .{static_dir}), "User-agent: *\n");
+    try writeFile(try std.fmt.allocPrint(aa, "{s}/embed.html", .{static_dir}), embed_body);
+
+    const options: compile.CompileOptions = .{
+        .content_root = content,
+        .dist_dir = dist,
+        .quiet = true,
+        .static_dir = static_dir,
+    };
+    _ = try compileHtmlSite(io, gpa, options);
+    _ = try compileHtmlSite(io, gpa, options);
+
+    // The declared passthrough file is still committed after the second
+    // full build (the stale-output walker must not delete it).
+    const embed = try readFileAlloc(try std.fmt.allocPrint(aa, "{s}/embed.html", .{dist}));
+    defer gpa.free(embed);
+    try std.testing.expectEqualStrings(embed_body, embed);
+    const inv_bytes = try kit.readArtifactInventory(io, gpa, dist);
+    defer gpa.free(inv_bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, inv_bytes, .{});
+    defer parsed.deinit();
+    try kit.expectArtifactRecord(parsed.value, "embed.html", "static-file", "static-files", embed_body);
+
+    const checks_bytes = try kit.readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(checks_bytes);
+    try kit.expectPublicationChecksShape(gpa, checks_bytes, "default");
 }
 
 test "static passthrough: empty declared directory commits no records" {

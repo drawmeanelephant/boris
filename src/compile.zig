@@ -3360,6 +3360,7 @@ fn cleanupStaleOutputs(
     content_assets: *const content_asset.SiteAssetInventory,
     theme_root: []const u8,
     parsed_manifest: ?std.json.Parsed(ParsedCacheManifest),
+    static_entries: []const static_files.Entry,
 ) !void {
     // Live page-output set for this build. Shared by stale cleanup AND the theme
     // scrub below, so a page published under `assets/` is never mistaken for an
@@ -3399,6 +3400,17 @@ fn cleanupStaleOutputs(
                 }
             }
         }
+        // Skip currently-declared static passthrough files (e.g. a root-level
+        // `.html` embed): they are committed generations, not stale page
+        // outputs. Stale (no-longer-declared) static files are already
+        // removed by scrubStaleStaticFiles before this walker runs.
+        var static_html_paths: std.StringHashMapUnmanaged(void) = .{};
+        defer static_html_paths.deinit(gpa);
+        for (static_entries) |entry| {
+            if (std.mem.endsWith(u8, entry.rel_path, ".html")) {
+                try static_html_paths.put(gpa, entry.rel_path, {});
+            }
+        }
         var walker = try dist_dir.walk(gpa);
         defer walker.deinit();
         while (try walker.next(io)) |entry| {
@@ -3407,6 +3419,7 @@ fn cleanupStaleOutputs(
             if (std.mem.startsWith(u8, entry.path, ".boris-cache")) continue;
             if (theme_html_assets.contains(entry.path)) continue;
             if (content_html_assets.contains(entry.path)) continue;
+            if (static_html_paths.contains(entry.path)) continue;
             if (content_asset.isContentLocalOutputPath(entry.path)) continue;
             // The Proof Pack presentation pair is a committed generation,
             // not a stale page output: the pair transaction snapshots the
@@ -3658,7 +3671,7 @@ fn compilePagesInner(
         try publishStandardSiteReport(io, gpa, db, dist_dir, page_layouts, ctx, &site_overlay.wke.?, site_overlay.prior_emitted);
     }
 
-    try cleanupStaleOutputs(io, gpa, dist_dir, db, options, &theme_bundle, &content_assets, theme_root, cache_state.parsed_manifest);
+    try cleanupStaleOutputs(io, gpa, dist_dir, db, options, &theme_bundle, &content_assets, theme_root, cache_state.parsed_manifest, static_entries);
 
     // Drop staging tree (errdefer also cleans on earlier failure).
     cwd.deleteTree(io, stage_rel) catch {};
