@@ -2771,6 +2771,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
         };
         defer coord.deinit();
+        coord.recorder = recorder;
 
         coord.run() catch |err| {
             return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
