@@ -2989,6 +2989,7 @@ fn mapHtmlError(
         error.AssetNotFile,
         error.ThemeRootMissing,
         error.InvalidThemePath,
+        error.AssetBackslashName,
         error.ThemeSymlink,
         error.FooterSymlink,
         error.FooterInvalidUtf8,

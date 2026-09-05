@@ -1810,6 +1810,7 @@ fn appendHtmlDiagnostic(options: *const CompileOptions, d: diag.Diagnostic) void
 /// Stable diagnostic code for layout/theme load failures.
 fn layoutCodeFor(err: anyerror) diag.Code {
     return switch (err) {
+        error.AssetBackslashName => .EASSET,
         error.LayoutMissingMarker => .ELAYOUTMISSINGMARKER,
         error.LayoutUnknownMarker => .ELAYOUTUNKNOWNMARKER,
         error.LayoutInvalidNavMarker, error.InvalidNavMarker => .ELAYOUTNAVDEPTH,
@@ -2213,7 +2214,7 @@ fn prepareThemeBundle(
             if (e.value_ptr.layout.has_asset_url and theme_root.len == 0) return error.ThemeRootMissing;
         }
     }
-    var theme_bundle = try theme_mod.loadThemeBundle(io, gpa, cwd, theme_root);
+    var theme_bundle = try theme_mod.loadThemeBundle(io, gpa, cwd, theme_root, options.diagnostics);
     errdefer theme_bundle.deinit();
     // Validate asset refs for every declared layout (stale rules cannot hide broken templates).
     {
