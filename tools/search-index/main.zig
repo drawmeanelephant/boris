@@ -70,7 +70,10 @@ fn parse(args: []const []const u8) CliError!Options {
     while (i < args.len) : (i += 1) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
-            usage();
+            // Side-effect-free: printing the usage text is the caller's job.
+            // The --help unit test exercises this path, and output here would
+            // leak onto stderr, which the Zig 0.16 build runner surfaces as a
+            // "failed command" block on green focused-gate runs (#882).
             return error.Help;
         }
         if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
@@ -236,7 +239,7 @@ fn run(allocator: std.mem.Allocator, io: Io, args: []const []const u8) !void {
             stdout_writer.interface.flush() catch {};
             return err;
         }
-        if (err != error.Help) usage();
+        usage();
         return err;
     };
     return runInner(allocator, io, options);
