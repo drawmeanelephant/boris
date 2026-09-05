@@ -196,6 +196,15 @@ untrusted-content service.
 started with `--allow-unauthenticated`. The token is `BORIS_JOB_TOKEN`.
 It is not written to the workspace, the result, or diagnostics.
 
+### Environment
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BORIS_BIN` | PATH lookup of `boris` | Native compiler binary when `--boris` is not given. The default layout resolves against the runner process working directory. |
+| `BORIS_WORK_ROOT` | `/tmp/boris-jobs` | Workspace parent when `--work-root` is not given. |
+| `BORIS_JOB_TOKEN` | (none) | Bearer token for `POST /v1/jobs*`; see above. |
+| `BORIS_IMAGE_DIGEST` | (none) | Recorded as `imageDigest` in `result.json`; see above. |
+
 The official image starts with `--allow-unauthenticated` because the
 Worker is the authenticated edge and the container port is not public.
 A listen process that is reachable from the internet must set

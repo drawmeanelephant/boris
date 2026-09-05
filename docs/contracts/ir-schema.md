@@ -291,12 +291,12 @@ cross-platform CI evidence.
 Implementation (`src/pipeline.zig`):
 
 1. Build and validate **entirely in memory** first.
-2. **Success:** write all three JSON files into a sibling staging directory
+2. **Success:** write all four JSON files into a sibling staging directory
    `{outDir}.boris-stage`, then **rename each file** into `outDir` (Zig
    `Dir.rename`, which replaces an existing file of the same name). Remove the
    staging directory afterward.
 3. **Content failure:** write only `build-report.json`; delete any existing
-   `manifest.json` / `graph.json` under `outDir`.
+   `manifest.json` / `graph.json` / `completion.json` under `outDir`.
 
 ### Platform limitations (documented, not over-claimed)
 
@@ -482,9 +482,10 @@ Key order: `from`, `to`, `kind`. Endpoint object key order is `type`, `value`.
 | `"include"` | `page` or `source` | `source` | Body directly contains an active include of target bytes |
 | `"reference"` | `page` or `source` | `page` | Body directly contains an active wiki-link to target entity |
 
-`layout` and `asset` may exist in internal dependency code, but are not valid
-IR v0.2 edge kinds. Adding an emitted kind requires a contract amendment and a
-schema compatibility decision.
+`layout` (test-only today), `asset` (reserved; produced nowhere), and
+`html-link` (active internal edge for incremental HTML invalidation) exist in
+internal dependency code, but are not valid IR v0.2 edge kinds. Adding an
+emitted kind requires a contract amendment and a schema compatibility decision.
 
 #### Edge production and order
 

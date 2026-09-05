@@ -88,8 +88,8 @@ preflight. See the normative [validation contract](validation.md).
 
 `validate` does not create HTML, IR, RAG, context, RSS, cache, search, or
 publication-evidence artifacts. It accepts applicable existing HTML options,
-including target/layout/theme and sitemap configuration, and rejects export
-selectors, `--incremental`, `--refresh-evidence`, `--jobs`, and `--format`; `--report PATH` writes
+including target/layout/theme and sitemap configuration, and rejects `--profile`,
+export selectors, `--incremental`, `--refresh-evidence`, `--jobs`, `--format`, and `--out`; `--report PATH` writes
 the shared `html-build-report-0.2.0` JSON (additive; see
 [Machine-readable reports](#machine-readable-reports)). With `--watch` it
 becomes the zero-write validation daemon described above. `check` and `impact`

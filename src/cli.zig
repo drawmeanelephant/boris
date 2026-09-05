@@ -2391,9 +2391,9 @@ pub fn printUsage() void {
         \\  --theme with --html-layout (both select the one global layout)
         \\  check / impact with any HTML selector (--html, --html-dir,
         \\  --html-layout, --theme, --target, --target-layout, --target-profile,
-        \\  --layout-rule, --sitemap / --sitemap-path, --static-dir)
+        \\  --layout-rule, --sitemap / --sitemap-path, --static-dir) or --profile
         \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
-        \\  validate with non-HTML exports, --incremental, --jobs, --format, or --out
+        \\  validate with --profile, non-HTML exports, --incremental, --refresh-evidence, --jobs, --format, or --out
         \\  validate --watch with --html-dir, --target, --serve/--port, --incremental, --jobs, or --format
         \\  Invalid target names, duplicate names, output collisions, workspace escape,
         \\  content/layout overlap, unknown --target-layout / --layout-rule target,
