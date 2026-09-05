@@ -7,3 +7,6 @@ surface. The expected files are canonical bytes emitted from the normalized
 - `minimal/` covers one public HTML target with the managed Boris theme.
 - `full/` covers canonical target and layout-rule ordering, public projections,
   and all three machine editions.
+- `nostr/` covers a profile with a configured `nostr` section: the emitted
+  declaration gains the closed conditional `nostr` object after `editions`
+  (#885).

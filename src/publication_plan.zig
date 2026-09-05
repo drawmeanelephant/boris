@@ -343,6 +343,13 @@ test "Standard.site publication plan matches the exact golden bytes" {
     );
 }
 
+test "nostr publication plan matches the exact golden bytes" {
+    try renderFixture(
+        "docs/contracts/fixtures/publication-plan/nostr/profile.json",
+        "docs/contracts/fixtures/publication-plan/nostr/expected/plan.json",
+    );
+}
+
 test "Standard.site profile adds the AT identity facts to the normalized plan" {
     const source =
         "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"site\":{\"url\":\"https://docs.example.com\",\"title\":\"Boris\"},\"publication\":{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com\",\"origin\":\"https://docs.example.com\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"name\":\"Boris on the Atmosphere\",\"show_in_discover\":true,\"prune\":true},\"targets\":[{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}]}";
@@ -498,6 +505,27 @@ test "Standard.site rendered plan conforms to its published schema" {
     defer request.deinit(std.testing.allocator);
     const plan_bytes = try render(std.testing.allocator, &request.plan);
     defer std.testing.allocator.free(plan_bytes);
+
+    var schema = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, schema_bytes, .{});
+    defer schema.deinit();
+    var document = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, plan_bytes, .{});
+    defer document.deinit();
+    const validator: SchemaValidator = .{ .root = schema.value };
+    try validator.validate(schema.value, document.value);
+}
+
+test "nostr-bearing rendered plan conforms to its published schema" {
+    const source = try readFixture("docs/contracts/fixtures/publication-plan/nostr/profile.json");
+    defer std.testing.allocator.free(source);
+    const schema_bytes = try readFixture("docs/contracts/schemas/publication-plan-1.schema.json");
+    defer std.testing.allocator.free(schema_bytes);
+    var request = try parseProfile(source, .{});
+    defer request.deinit(std.testing.allocator);
+    const plan_bytes = try render(std.testing.allocator, &request.plan);
+    defer std.testing.allocator.free(plan_bytes);
+    // The configured surface must actually reach the declaration; otherwise
+    // this test would pass vacuously against a schema without the key.
+    try std.testing.expect(std.mem.indexOf(u8, plan_bytes, "\"nostr\"") != null);
 
     var schema = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, schema_bytes, .{});
     defer schema.deinit();

@@ -46,7 +46,9 @@ The JSON format is `boris-publication-plan`, schema version `1`. The published
 machine-readable schema is
 [`publication-plan-1.schema.json`](schemas/publication-plan-1.schema.json).
 All root, target, projection, and edition keys are emitted in the fixed order
-shown below; object-key order in the source profile has no effect.
+shown below, with the optional `nostr` object emitted after `editions` when the
+selected profile configures the Nostr surface; object-key order in the source
+profile has no effect.
 
 ```json
 {
@@ -90,6 +92,34 @@ and the same location triple). See
 The schema `oneOf` is additive; this document does not reshape
 `schema_version`.
 
+A profile that configures the Nostr surface emits one closed `"nostr"` object
+after `editions`, exactly as [`nostr-publication.md`](nostr-publication.md)
+requires; an unconfigured profile omits the key entirely, so unconfigured plan
+bytes are unchanged:
+
+```json
+"nostr": {
+  "enabled": true,
+  "kind": 30023,
+  "pubkey": "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919",
+  "articles": ["articles/first", "articles/second"],
+  "relays": ["wss://a.relay.example.com", "wss://relay.example.com"],
+  "timeout_ms": 10000,
+  "retries": 0
+}
+```
+
+The key set is closed: `enabled`, `kind`, `pubkey`, `articles`, `relays`,
+`timeout_ms`, and `retries`, always all present. `kind` is always the NIP-23
+long-form kind `30023`; `pubkey` is the normalized 64-character lowercase hex
+author key (a configured `npub` never reaches the plan); the article allowlist
+and relay endpoints are canonically sorted and deduped, with relays normalized
+to their canonical `wss://` form (default port and trailing slash stripped);
+and `timeout_ms` / `retries` carry the declared
+transport controls with defaults established during profile normalization.
+These are reviewable declarations — planning never probes a relay, and only
+`nostr publish` reads the transport controls for behavior.
+
 The location is normalized and cross-checked by the profile parser; it is not
 a deployment result. A target is
 an HTML target (`projections.html` is always `true`) and carries normalized
@@ -116,8 +146,9 @@ escaping through Boris's shared `json_out` helper. No timestamps, host data,
 usernames, process IDs, environment values, absolute paths, temporary names,
 Git revisions, or publication-success claims are emitted.
 
-The declaration contains publication identity and selected projection
-configuration only. It excludes `jobs`, `quiet`, `incremental`, temporary
+The declaration contains publication identity, selected projection
+configuration, and the optionally declared Nostr surface only. It excludes
+`jobs`, `quiet`, `incremental`, temporary
 staging names, and runtime worker decisions. It also excludes content scan
 results, graph compilation, artifact inventories, file digests, checks, claims,
 limitations, touch maps, quality scores, deployment status, environment URLs,

@@ -1,0 +1,55 @@
+{
+  "format": "boris-publication-plan",
+  "schema_version": 1,
+  "input": "content",
+  "input_format": "markdown",
+  "site": {
+    "url": "https://example.github.io/docs",
+    "title": "Fixture site",
+    "description": "A fixture."
+  },
+  "publication": {
+    "target": "github-pages",
+    "base_url": "https://example.github.io/docs",
+    "origin": "https://example.github.io",
+    "base_path": "/docs",
+    "site_kind": "project-site"
+  },
+  "targets": [
+    {
+      "name": "public",
+      "output": "dist",
+      "public": true,
+      "theme": "themes/boris",
+      "layout": null,
+      "layout_rules": [],
+      "projections": {
+        "html": true,
+        "sitemap": null,
+        "rss": null,
+        "llms": null,
+        "static": null
+      }
+    }
+  ],
+  "editions": {
+    "ir": null,
+    "rag": null,
+    "context": null
+  },
+  "nostr": {
+    "enabled": true,
+    "kind": 30023,
+    "pubkey": "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919",
+    "articles": [
+      "articles/first",
+      "articles/second"
+    ],
+    "relays": [
+      "wss://a.relay.example.com",
+      "wss://relay.example.com"
+    ],
+    "timeout_ms": 10000,
+    "retries": 0
+  }
+}

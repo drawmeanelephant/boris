@@ -58,6 +58,7 @@ The root has exactly these fields:
 | `publication` | no | Closed publication-target declaration; `github-pages` or `standard-site` |
 | `targets` | no | Closed HTML-target array |
 | `editions` | no | Closed `ir`, `rag`, `context` object |
+| `nostr` | no | Closed Nostr publication-surface declaration; see [nostr-publication.md](nostr-publication.md) |
 
 When present, `publication` requires exactly one `public` HTML target. Its
 closed fields are:
@@ -104,7 +105,8 @@ namespace protections. At least one HTML target or machine edition is required.
 ## Normalization, ownership, and overrides
 
 `PublicationPlan` is owned immutable-semantic publication intent: input,
-format, metadata, canonical targets/rules, and selected editions. It owns every
+format, metadata, canonical targets/rules, selected editions, and the
+optionally declared Nostr surface. It owns every
 string and rule slice; no raw JSON node, JSON key slice, or argv view crosses
 the parser boundary. `PublicationExecution` separately contains `jobs`,
 `incremental`, and `quiet`; those controls are deliberately absent from plan
@@ -144,7 +146,11 @@ Profile parsing is local, deterministic, and offline. URLs are strings to
 validate, never endpoints to probe. There are no includes, aliases,
 expressions, environment substitution, network access, plugins, deployment
 settings, secrets, watch configuration, source-RAG, migration labs, or generic
-tasks in schema v1. The plan CLI is intentionally a declaration surface rather
+tasks in schema v1. The one exception is the closed `nostr` section: it
+declares relay endpoints, `timeout_ms`, and `retries` as reviewable transport
+declarations ([nostr-publication.md](nostr-publication.md)) — parsing never
+probes a relay, and only `nostr publish` reads those controls for behavior.
+The plan CLI is intentionally a declaration surface rather
 than a publication coordinator. Full profile execution remains deferred until
 a coordinator can execute every configured entry without silently ignoring any
 of them.
