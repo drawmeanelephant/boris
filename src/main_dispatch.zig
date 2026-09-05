@@ -52,6 +52,7 @@ pub const Handlers = struct {
     nostr_publish: Handler,
     init: Handler,
     recipe_scale: Handler,
+    proof_verify: Handler,
     validate: Handler,
     validate_watch: Handler,
     intelligence: Handler,
@@ -68,7 +69,7 @@ pub const Handlers = struct {
 /// codes.
 pub fn commandLabel(opts: Options) []const u8 {
     return switch (opts.command) {
-        .validate, .check, .impact, .plan, .nostr_plan => @tagName(opts.command),
+        .validate, .check, .impact, .plan, .nostr_plan, .proof_verify => @tagName(opts.command),
         else => @tagName(opts.mode),
     };
 }
@@ -123,6 +124,8 @@ pub fn dispatchCommand(
         return handlers.init(io, gpa, opts, recorder, environ);
     } else if (opts.command == .recipe_scale) {
         return handlers.recipe_scale(io, gpa, opts, recorder, environ);
+    } else if (opts.command == .proof_verify) {
+        return handlers.proof_verify(io, gpa, opts, recorder, environ);
     } else if (opts.command == .validate) {
         if (opts.watch) return handlers.validate_watch(io, gpa, opts, recorder, environ);
         return handlers.validate(io, gpa, opts, recorder, environ);

@@ -107,6 +107,12 @@ jobs:
             --site-url "$PAGES_BASE_URL" \
             --quiet
 
+      # #840: the committed publication-check evidence gates the deploy.
+      # Error findings block; warnings are counted and reported (non-blocking
+      # by default — tighten with --max-warnings 0 if wanted).
+      - name: Verify the publication-check policy
+        run: ./zig-out/bin/boris proof verify --html-dir dist
+
       # The Pages upload contains only exact committed inventory records.
       # _boris/proof is copied into the retained evidence artifact below.
       - name: Prepare the public Pages tree

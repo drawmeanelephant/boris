@@ -237,6 +237,9 @@ const modules = [_]Module{
     .{ .name = "layout_select_hostile_test.zig", .class = .other },
     .{ .name = "link_audit.zig", .class = .other },
     .{ .name = "main.zig", .class = .other },
+    // `boris proof verify`: stderr chrome for the enforcement gate; no
+    // artifact or page emission.
+    .{ .name = "proof_verify.zig", .class = .other },
     .{ .name = "main_dispatch.zig", .class = .other },
     .{ .name = "main_profile_loader.zig", .class = .other },
     .{ .name = "nostr.zig", .class = .other },

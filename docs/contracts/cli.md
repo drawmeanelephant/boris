@@ -32,6 +32,7 @@ boris recipe-scale --input DIR --id PAGE (--factor TEXT | --servings N) [--cookl
 | `nostr sign` | Sign a plan artifact into a signed-event bundle; the key is read once from stdin (hex or nsec) and never from argv/profile/env | Nothing; bundle JSON on stdout or `--out PATH` |
 | `nostr publish` | Send the exact signed events from a bundle to the plan's relays over RFC-6455 WebSocket (no key; the bundle was signed offline). Every relay interaction is bounded and produces per-relay evidence; the run always reaches a `complete`/`partial`/`failed`/`incomplete` verdict | Nothing; the report JSON on stdout or `--out PATH` |
 | `recipe-scale` | Compile the selected tree and print a derived Cooklang scale view for one page | Nothing; view JSON on stdout or `--out PATH`. Never rewrites `.cook` or `graph.json` |
+| `proof verify` | Apply the publication-check severity policy to the committed `checks.json` of one target (the #840 enforcement surface) | Nothing; verdict report on stderr |
 
 `boris standard-site` with no subcommand is a usage error (exit 2) that
 prints the family list, not the full compiler help. `boris standard-site
@@ -122,7 +123,7 @@ touches the network. `boris init --help` / `-h` prints init-specific help
 | Code | Meaning |
 |-----:|---------|
 | `0` | Successful build, validation, plan, watch shutdown, valid impact query, or check with no enabled policy failure |
-| `1` | Content/graph failure, or an opted-in `check` policy finding such as an unreferenced page |
+| `1` | Content/graph failure, an opted-in `check` policy finding such as an unreferenced page, or `proof verify` policy failure (findings exceed the configured caps) |
 | `2` | Usage error: unknown command/flag, missing value, invalid ID, or conflicting mode |
 | `3` | I/O or system failure |
 
@@ -472,6 +473,30 @@ system failure. See the normative
 [`nostr-publication` contract](nostr-publication.md) for the plan, signed
 bundle, and report artifacts, the `created_at` update-ordering rules, and
 the hostile mock-relay conformance matrix.
+
+## Proof verify (`boris proof verify`)
+
+`boris proof verify [--html-dir DIR] [--max-errors N] [--max-warnings N] [--block-code CODE]... [--quiet]`
+is the #840 enforcement surface: it reads the committed publication-check
+report at `DIR/_boris/proof/checks.json` (`DIR` defaults to `dist`) and
+applies an explicit severity policy. The report is target-bound — the
+command verifies against the target name the committed bytes declare.
+
+- `--max-errors N` (default `0`): more than `N` error findings fail.
+- `--max-warnings N` (default unlimited): more than `N` warning findings
+  fail; warnings are always counted and reported. Tightening to `0` is
+  explicit operator intent.
+- `--block-code CODE` (repeatable): any finding with that code fails the
+  verification regardless of severity or count.
+
+`incomplete` check verdicts and not-applicable checks are always reported
+(never silent, never conflated with errors). The command mutates nothing.
+
+Exit codes: `0` when the policy passes; `1` when findings exceed the
+configured caps or a blocked code is present; `2` for usage errors; `3`
+when the proof report is missing or unparsable — missing evidence never
+passes (fail-closed). `--quiet` suppresses the report but a nonzero exit
+still names the breached policy.
 
 ## HTML sitemap flags
 

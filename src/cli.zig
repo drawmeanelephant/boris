@@ -81,6 +81,10 @@ pub const Command = enum {
     /// `boris recipe-scale` — derived Cooklang scale view. Never rewrites
     /// `.cook` or `graph.json`.
     recipe_scale,
+    /// `boris proof verify` — publication-check enforcement gate (#840):
+    /// reads the committed checks report and applies an explicit severity
+    /// policy. Never mutates the target.
+    proof_verify,
 };
 
 /// The subcommand selected under the `standard-site` family. Every member is
@@ -276,8 +280,16 @@ pub const Options = struct {
     recipe_scale_factor: ?[]const u8 = null,
     recipe_scale_servings: ?[]const u8 = null,
     recipe_scale_out: ?[]const u8 = null,
+    /// `boris proof verify`: the target root whose `_boris/proof/` is
+    /// verified, and the severity policy (#840). Warning cap null = counted,
+    /// reported, never fatal.
+    proof_dir: []const u8 = default_html_dir,
+    proof_max_errors: usize = 0,
+    proof_max_warnings: ?usize = null,
+    proof_block_codes: std.ArrayList([]const u8) = .empty,
 
     pub fn deinit(self: *Options, gpa: std.mem.Allocator) void {
+        self.proof_block_codes.deinit(gpa);
         if (self.publication_location) |*location| location.deinit(gpa);
         if (self.owned_html_layout) {
             gpa.free(self.html_layout);
@@ -312,6 +324,8 @@ pub const ParseError = error{
     // Named separately so the message can list what does exist rather than
     // reporting a bare unknown positional.
     UnknownNostrSubcommand,
+    // `boris proof <x>` where `<x>` is not a subcommand this build implements.
+    UnknownProofSubcommand,
     // `boris standard-site` with no subcommand: print the family list, not
     // "unexpected argument: standard-site".
     MissingStandardSiteSubcommand,
@@ -360,6 +374,7 @@ pub fn parseOptionsWithDetail(
 ) ParseError!Options {
     var st = ParseState{};
     errdefer freeTargetList(gpa, &st.targets);
+    errdefer st.block_codes.deinit(gpa);
     errdefer if (st.publication_location) |*location| location.deinit(gpa);
     // Pending --target-layout / --target-profile / --layout-rule entries hold
     // argv views only; they are joined to targets after the loop.
@@ -424,6 +439,7 @@ fn parseOptionsAccumulate(gpa: std.mem.Allocator, args: []const []const u8, st: 
         if (try parseProfileAndPlanFlags(st, a, args, &i)) continue;
         if (try parseNostrFlags(st, a, args, &i)) continue;
         if (try parseRecipeScaleFlags(st, a, args, &i)) continue;
+        if (try parseProofVerifyFlags(gpa, st, a, args, &i)) continue;
         if (try parseModeFlags(st, a, args, &i)) continue;
         if (try parseAnalysisFlags(st, a, args, &i)) continue;
         if (try parseTargetSpecs(gpa, st, a, args, &i)) continue;
@@ -453,6 +469,7 @@ fn parseOptionsAccumulate(gpa: std.mem.Allocator, args: []const []const u8, st: 
         .nostr_publish => return try buildNostrPublishOptions(st),
         .init => return try buildInitOptions(st),
         .recipe_scale => return try buildRecipeScaleOptions(st),
+        .proof_verify => return try buildProofVerifyOptions(st),
         .standard_site => return try buildStandardSiteOptions(st),
         .build, .validate, .check, .impact, .watch => {},
     }
@@ -649,6 +666,14 @@ const ParseState = struct {
     nostr_created_at: ?i64 = null,
     saw_nostr_created_at: bool = false,
 
+    // `proof verify` family state (#840).
+    proof_max_errors: ?usize = null,
+    saw_proof_max_errors: bool = false,
+    proof_max_warnings: ?usize = null,
+    saw_proof_max_warnings: bool = false,
+    block_codes: std.ArrayList([]const u8) = .empty,
+    saw_block_code: bool = false,
+
     // `recipe-scale` family state.
     recipe_scale_id: ?[]const u8 = null,
     saw_recipe_scale_id: bool = false,
@@ -758,6 +783,12 @@ const nostr_subcommands = [_]struct { name: []const u8, command: Command }{
     .{ .name = "publish", .command = .nostr_publish },
 };
 
+/// Exactly the `proof` subcommands this build implements. An unknown one is
+/// a usage error rather than a stub.
+const proof_subcommands = [_]struct { name: []const u8, command: Command }{
+    .{ .name = "verify", .command = .proof_verify },
+};
+
 const ModeBoolFlag = enum {
     textile,
     cooklang,
@@ -834,6 +865,7 @@ fn commandWord(command: Command) []const u8 {
         .init => "init",
         .standard_site => "standard-site",
         .recipe_scale => "recipe-scale",
+        .proof_verify => "proof verify",
     };
 }
 
@@ -947,6 +979,22 @@ fn parseCommandPrefix(args: []const []const u8, i: *usize, st: *ParseState) Pars
     if (std.mem.eql(u8, args[i.*], "standard-site")) {
         return parseStandardSiteFamily(args, i, st);
     }
+    if (std.mem.eql(u8, args[i.*], "proof")) {
+        return parseProofFamily(args, i, &st.command);
+    }
+}
+
+fn parseProofFamily(args: []const []const u8, i: *usize, command: *Command) ParseError!void {
+    i.* += 1;
+    if (i.* >= args.len) return error.UnknownProofSubcommand;
+    for (proof_subcommands) |sub| {
+        if (std.mem.eql(u8, args[i.*], sub.name)) {
+            command.* = sub.command;
+            i.* += 1;
+            return;
+        }
+    }
+    return error.UnknownProofSubcommand;
 }
 
 fn parseNostrFamily(args: []const []const u8, i: *usize, command: *Command) ParseError!void {
@@ -1094,6 +1142,41 @@ fn parseNostrFlags(
     {
         try markSaw(&st.saw_nostr_out);
         st.nostr_out_path = try takeValue(args, i, a, "--out");
+        return true;
+    }
+    return false;
+}
+
+/// `proof verify` family flags (#840): the severity policy. Foreign use is a
+/// conflict, never a silently accepted flag.
+fn parseProofVerifyFlags(
+    gpa: std.mem.Allocator,
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--max-errors") or std.mem.startsWith(u8, a, "--max-errors=")) {
+        if (st.command != .proof_verify) return error.ConflictingFlags;
+        try markSaw(&st.saw_proof_max_errors);
+        const val = try takeValue(args, i, a, "--max-errors");
+        st.proof_max_errors = std.fmt.parseInt(usize, val, 10) catch
+            return failInvalidValue(st, "--max-errors", "expected a non-negative integer");
+        return true;
+    }
+    if (std.mem.eql(u8, a, "--max-warnings") or std.mem.startsWith(u8, a, "--max-warnings=")) {
+        if (st.command != .proof_verify) return error.ConflictingFlags;
+        try markSaw(&st.saw_proof_max_warnings);
+        const val = try takeValue(args, i, a, "--max-warnings");
+        st.proof_max_warnings = std.fmt.parseInt(usize, val, 10) catch
+            return failInvalidValue(st, "--max-warnings", "expected a non-negative integer");
+        return true;
+    }
+    if (std.mem.eql(u8, a, "--block-code") or std.mem.startsWith(u8, a, "--block-code=")) {
+        if (st.command != .proof_verify) return error.ConflictingFlags;
+        try markSaw(&st.saw_block_code);
+        const val = try takeValue(args, i, a, "--block-code");
+        try st.block_codes.append(gpa, val);
         return true;
     }
     return false;
@@ -1760,6 +1843,72 @@ fn buildNostrPublishOptions(st: *ParseState) ParseError!Options {
     };
 }
 
+fn buildProofVerifyOptions(st: *ParseState) ParseError!Options {
+    // The gate reads committed evidence and nothing else: every compiler,
+    // projection, analysis, and execution selector is foreign here. A single
+    // offending selector is named as typed (#764, #874).
+    const scan = scanConflicts(&.{
+        .{ .token = "--html", .triggered = st.saw_html },
+        .{ .token = "--target", .triggered = st.hasExplicitTargets() },
+        .{ .token = "--html-layout", .triggered = st.saw_html_layout },
+        .{ .token = "--theme", .triggered = st.saw_theme },
+        .{ .token = "--target-layout", .triggered = st.hasTargetLayouts() },
+        .{ .token = "--target-profile", .triggered = st.hasTargetProfiles() },
+        .{ .token = "--layout-rule", .triggered = st.hasLayoutRules() },
+        .{ .token = "--sitemap", .triggered = st.saw_sitemap },
+        .{ .token = "--sitemap-path", .triggered = st.saw_sitemap_path },
+        .{ .token = "--static-dir", .triggered = st.saw_static_dir },
+        .{ .token = "--rag", .triggered = st.saw_rag },
+        .{ .token = "--rag-dir", .triggered = st.saw_rag_dir },
+        .{ .token = "--out", .triggered = st.saw_out },
+        .{ .token = "--no-rag", .triggered = st.saw_no_rag },
+        .{ .token = "--context", .triggered = st.saw_context },
+        .{ .token = "--context-dir", .triggered = st.saw_context_dir },
+        .{ .token = "--llms", .triggered = st.saw_llms },
+        .{ .token = "--llms-path", .triggered = st.saw_llms_path },
+        .{ .token = "--rss", .triggered = st.saw_rss },
+        .{ .token = "--rss-path", .triggered = st.saw_rss_path },
+        .{ .token = "--site-url", .triggered = st.saw_site_url },
+        .{ .token = "--pages-base-url", .triggered = st.saw_pages_base_url },
+        .{ .token = "--pages-origin", .triggered = st.saw_pages_origin },
+        .{ .token = "--pages-base-path", .triggered = st.saw_pages_base_path },
+        .{ .token = "--rss-title", .triggered = st.saw_rss_title },
+        .{ .token = "--rss-description", .triggered = st.saw_rss_description },
+        .{ .token = "--rss-limit", .triggered = st.saw_rss_limit },
+        .{ .token = "--format", .triggered = st.saw_format },
+        .{ .token = "--report", .triggered = st.saw_report },
+        .{ .token = "--watch", .triggered = st.saw_watch or st.saw_serve or st.serve_port != null or st.saw_watch_json },
+        .{ .token = "--timings", .triggered = st.saw_timings },
+        .{ .token = "--profile", .triggered = st.saw_profile },
+        .{ .token = "--input", .triggered = st.saw_input },
+        .{ .token = "--textile", .triggered = st.saw_textile or st.saw_cooklang },
+        .{ .token = "--incremental", .triggered = st.saw_incremental },
+        .{ .token = "--refresh-evidence", .triggered = st.saw_refresh_evidence },
+        .{ .token = "--jobs", .triggered = st.saw_jobs },
+        .{ .token = "--scope", .triggered = st.saw_scope },
+        .{ .token = "--split-size", .triggered = st.saw_split_size },
+        .{ .token = "--bundles-only", .triggered = st.saw_bundles_only },
+        .{ .token = "--complete", .triggered = st.saw_complete },
+        .{ .token = "--fail-on-unreferenced", .triggered = st.saw_fail_on_unreferenced },
+    });
+    if (scan.triggered == 1) return failConflict(st, commandWord(st.command), scan.offender);
+    if (scan.triggered > 1) return error.ConflictingFlags;
+
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = false,
+        .command = .proof_verify,
+        .mode = .html,
+        .proof_dir = st.html_dir,
+        .proof_max_errors = st.proof_max_errors orelse 0,
+        .proof_max_warnings = st.proof_max_warnings,
+        .proof_block_codes = st.block_codes,
+        .input_dir = st.input_dir,
+        .targets = st.targets,
+    };
+}
+
 fn buildInitOptions(st: *ParseState) ParseError!Options {
     // `init` writes a deterministic starter tree into one positional
     // target directory. Compiler modes, output selectors, publication
@@ -2362,7 +2511,8 @@ pub fn printUsage() void {
         \\  check               Read-only graph health report (findings do not fail by default)
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
-        \\  recipe-scale        Print a derived Cooklang scale view (no rewrite)
+        \\  \\  recipe-scale        Print a derived Cooklang scale view (no rewrite)
+        \\  proof verify        Fail when committed publication-check findings exceed policy
         \\  standard-site publish  One-shot Standard.site publish (stored session + reconcile; never implicit)
         \\  standard-site plan    Emit the deterministic Standard.site plan offline (no network)
         \\  standard-site records Dump the full canonical record payloads offline (no network)
@@ -2704,6 +2854,9 @@ pub fn printParseErrorDetail(err: ParseError, bad_arg: ?[]const u8, detail: ?*co
         },
         error.UnknownNostrSubcommand => {
             std.debug.print("error: unknown nostr subcommand (available: plan, sign, publish)\n", .{});
+        },
+        error.UnknownProofSubcommand => {
+            std.debug.print("error: unknown proof subcommand (available: verify)\n", .{});
         },
         error.MissingStandardSiteSubcommand => {
             std.debug.print("error: standard-site requires a subcommand (try: plan, records, verify, login, sessions, logout, publish, smoke)\n", .{});
@@ -3428,6 +3581,30 @@ test "parse: nostr subcommands are exactly plan, sign, and publish" {
     try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr" }));
     try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "--profile", "a" }));
     try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "upload" }));
+
+    // proof verify family (#840): defaults, policy flags, foreign-flag conflicts.
+    var pv = try parseOptions(std.testing.allocator, &.{ "boris", "proof", "verify" });
+    defer pv.deinit(std.testing.allocator);
+    try expect(pv.command == .proof_verify);
+    try expectEqualStrings("dist", pv.proof_dir);
+    try expectEqual(@as(usize, 0), pv.proof_max_errors);
+    try expect(pv.proof_max_warnings == null);
+    try expectEqual(@as(usize, 0), pv.proof_block_codes.items.len);
+
+    var pv2 = try parseOptions(std.testing.allocator, &.{
+        "boris",          "proof", "verify",       "--html-dir",        "site", "--max-errors", "1",
+        "--max-warnings", "3",     "--block-code", "HTML_DUPLICATE_ID",
+    });
+    defer pv2.deinit(std.testing.allocator);
+    try expectEqualStrings("site", pv2.proof_dir);
+    try expectEqual(@as(usize, 1), pv2.proof_max_errors);
+    try expectEqual(@as(usize, 3), pv2.proof_max_warnings.?);
+    try expectEqualStrings("HTML_DUPLICATE_ID", pv2.proof_block_codes.items[0]);
+
+    try expectError(error.UnknownProofSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "proof", "upload" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "proof", "verify", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--max-errors", "1" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "proof", "verify", "--max-errors", "x" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "plan.json" }));
