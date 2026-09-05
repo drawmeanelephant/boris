@@ -87,7 +87,7 @@ Every first-slice record has these fields, in this order (the `dimensions`, `sem
 | `sha256` | Lowercase hexadecimal SHA-256 of those exact bytes. |
 | `format_version` | A known producer format/schema version, or explicit `null` when the payload has no such version. |
 | `dimensions` | Pixel `{width, height}` for image assets where determinable from the payload header (PNG, GIF, WebP, JPEG, SVG); `null` for non-images, unsupported formats, and malformed headers. |
-| `semantics` | Explicit asset ownership semantics: `static` for theme-owned `assets/` files copied verbatim, `content-reference` for content-local `.assets/` trees owned by page content and pointed at by rewritten Markdown destinations, or `null` for non-asset records such as rendered pages and projections. |
+| `semantics` | Explicit asset ownership semantics: `static` for theme-owned `assets/` files and declared `static.dir` passthrough files copied verbatim, `content-reference` for content-local `.assets/` trees owned by page content and pointed at by rewritten Markdown destinations, or `null` for non-asset records such as rendered pages and projections. |
 | `advertised` | Publication-surface eligibility (#752): `false` marks an emitted `html-page` that is deliberately unadvertised (`status: draft`) — committed HTML excluded from public projections such as search and sitemap; `true` for every other rendered page; `null` for non-page records. |
 
 Records sort by target-relative `path` using bytewise ordering, then by `kind`

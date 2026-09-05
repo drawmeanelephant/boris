@@ -135,6 +135,12 @@ well-known path, so it **does not** emit a decoy: it records the exact required
 bytes as a sideband artifact (`_boris/proof/standard-site-well-known.txt`) and
 reports the limitation.
 
+The build also stages a compiler-owned ownership marker
+(`_boris/proof/standard-site.owner`, bytes `emitted\n` or `limited\n`) so a
+later limited build removes only the decoy well-known file it emitted itself;
+a corrupt marker fails closed. The marker carries no identity, timestamp, or
+host data.
+
 ### Verification report
 
 `_boris/proof/standard-site.json` (`boris-standard-site-verification`, schema

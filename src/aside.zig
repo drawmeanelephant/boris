@@ -20,8 +20,10 @@
 //!
 //! ## RAG export representation
 //!
-//! Parsed asides may be emitted as `:::kind` / `:::kind{id="…"}` blocks for
-//! retrieval. That form is **export-only** and **not** round-trippable source.
+//! There is no `:::kind` projection: Markdown input exports the parsed
+//! `<Aside>` / `<Details>` authoring syntax verbatim (authoring fidelity).
+//! The v1 `:::kind` export representation was removed because it is not
+//! round-trippable Boris input (see `docs/contracts/components.md`).
 
 const std = @import("std");
 const render = @import("render.zig");

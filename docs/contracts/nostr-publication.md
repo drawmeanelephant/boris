@@ -406,7 +406,7 @@ all-or-nothing, and an error diagnostic means no bundle at all.
 ### Secret key boundary
 
 - The key is read **once from stdin** (`--key-stdin`, required), as 64
-  lowercase hex digits or a NIP-19 `nsec`. It is bounded (128 bytes), trimmed
+  hex digits (either case) or a NIP-19 `nsec`. It is bounded (128 bytes), trimmed
   of surrounding whitespace, and zeroed best-effort after use.
 - The key never enters argv, the profile, the environment, the plan, the
   bundle, diagnostics, logs, or git history. There is no key file and no key
