@@ -11,6 +11,7 @@ const target_mod = @import("target.zig");
 const preview_server = @import("preview_server.zig");
 const html_report = @import("html_report.zig");
 const watch_json = @import("watch_json.zig");
+const timings = @import("timings.zig");
 
 /// Debounce window after the first change is observed (ms).
 pub const debounce_ms: i64 = 100;
@@ -174,6 +175,7 @@ pub const PollingWatcher = struct {
                     new_map.deinit();
                 }
 
+                var scan_failed = false;
                 for (self.roots.items) |r| {
                     scanFiles(self.io, self.allocator, r, &new_map) catch |err| switch (err) {
                         // Transient FS errors: keep the previous snapshot; do not kill watch.
@@ -182,9 +184,25 @@ pub const PollingWatcher = struct {
                         error.ProcessFdQuotaExceeded,
                         error.NameTooLong,
                         error.Unexpected,
-                        => continue,
+                        => {
+                            scan_failed = true;
+                            continue;
+                        },
                         else => return err,
                     };
+                }
+
+                if (scan_failed) {
+                    // A root failed transiently: new_map is partial, so diffing
+                    // against it would emit mass delete events and poison the
+                    // next poll. Discard it, keep the previous snapshot, and
+                    // emit no events for this poll.
+                    var partial = new_map.iterator();
+                    while (partial.next()) |entry| {
+                        self.allocator.free(entry.key_ptr.*);
+                    }
+                    new_map.deinit();
+                    return;
                 }
 
                 // creations & modifications
@@ -590,6 +608,9 @@ pub const WatchCoordinator = struct {
     /// Loopback preview server (`watch --serve`); bound at init so port
     /// errors fail fast, started after the initial build in `run`.
     serve: ?preview_server.Server = null,
+    /// Opt-in phase timing/counter recorder (`--timings`); threaded into
+    /// every initial + rebuild compile so the shutdown report carries data.
+    recorder: ?*timings.Recorder = null,
 
     /// Build the ignore-root list once for the coordinator lifetime
     /// (final outs + sibling `.boris-stage` trees).
@@ -759,6 +780,7 @@ pub const WatchCoordinator = struct {
                 .publication_location = if (self.options.publication_location) |*location| location else null,
                 .allow_markdown_literals = self.options.allow_markdown_links,
                 .diagnostics = collector,
+                .timings = self.recorder,
             })) {
                 outcome.ok = true;
             } else |err| {
@@ -784,6 +806,7 @@ pub const WatchCoordinator = struct {
                 .publication_location = if (self.options.publication_location) |*location| location else null,
                 .vcs_revision = self.vcs_revision,
                 .diagnostics = collector,
+                .timings = self.recorder,
             })) |stats| {
                 outcome.ok = true;
                 outcome.stats = stats;
@@ -808,6 +831,7 @@ pub const WatchCoordinator = struct {
                 .publication_location = if (self.options.publication_location) |*location| location else null,
                 .vcs_revision = self.vcs_revision,
                 .diagnostics = collector,
+                .timings = self.recorder,
             })) |stats| {
                 outcome.ok = true;
                 outcome.stats = stats;
@@ -1306,6 +1330,98 @@ test "FakeWatcher and Coordinator Event Coalescing" {
     try std.testing.expectEqual(@as(usize, 2), coord.pending_changes.count());
     try std.testing.expect(coord.pending_changes.contains("guides/intro.md"));
     try std.testing.expect(coord.pending_changes.contains("index.md"));
+}
+
+test "poll keeps snapshot on transient root scan failure" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/watch-flap/root", .{tmp.sub_path});
+    defer gpa.free(root);
+    try cwd.createDirPath(io, root);
+    const a_path = try std.fmt.allocPrint(gpa, "{s}/a.md", .{root});
+    defer gpa.free(a_path);
+    const b_path = try std.fmt.allocPrint(gpa, "{s}/b.md", .{root});
+    defer gpa.free(b_path);
+    try cwd.writeFile(io, .{ .sub_path = a_path, .data = "a" });
+    try cwd.writeFile(io, .{ .sub_path = b_path, .data = "b" });
+
+    var pw = PollingWatcher.init(gpa, io);
+    defer pw.deinit();
+    try pw.addRoot(root);
+    const w = pw.watcher();
+
+    var events: std.ArrayList(Event) = .empty;
+    defer {
+        for (events.items) |e| gpa.free(e.path);
+        events.deinit(gpa);
+    }
+    // No changes since addRoot scanned: quiet.
+    try w.poll(&events);
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+
+    // Transient unreadable-root moment: no mass delete events.
+    try cwd.setFilePermissions(io, root, @enumFromInt(0), .{});
+    defer cwd.setFilePermissions(io, root, std.Io.File.Permissions.fromMode(0o755), .{}) catch {};
+    try w.poll(&events);
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+
+    // After recovery the preserved snapshot diffs clean: no create storm
+    // from a poisoned intermediate map either.
+    try cwd.setFilePermissions(io, root, std.Io.File.Permissions.fromMode(0o755), .{});
+    try w.poll(&events);
+    try std.testing.expectEqual(@as(usize, 0), events.items.len);
+}
+
+test "watch rebuild records timings phases and counters (#877)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/watch-timings", .{tmp.sub_path});
+    defer gpa.free(work);
+
+    try writeWatchTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\Hello.
+        \\
+    );
+    try writeWatchTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const options = cli.Options{
+        .command = .build,
+        .mode = .html,
+        .input_dir = content,
+        .html_dir = dist,
+        .html_layout = layout,
+        .quiet = true,
+        .watch = true,
+    };
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher(), "");
+    defer coord.deinit();
+
+    var recorder = timings.Recorder.init(io);
+    coord.recorder = &recorder;
+    try coord.triggerRebuild();
+
+    // Without the recorder threading this stays an all-zero report (#877).
+    try std.testing.expect(recorder.ever_started[@intFromEnum(timings.Phase.render)]);
+    try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.page_reads)] > 0);
 }
 
 test "processEvents ignores output and staging paths" {
