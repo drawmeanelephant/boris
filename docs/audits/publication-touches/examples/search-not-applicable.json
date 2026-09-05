@@ -204,6 +204,16 @@
     {
       "kind": "artifact-supports-check",
       "from": "artifact:index.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:assets/site.css",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.html",
       "to": "check:rendered-search"
     },
     {

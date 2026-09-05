@@ -209,6 +209,16 @@
     {
       "kind": "artifact-supports-check",
       "from": "artifact:index.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:_boris/search/search-index.json",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.html",
       "to": "check:rendered-search"
     },
     {

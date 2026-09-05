@@ -1,0 +1,3 @@
+### Fixed
+
+- Refreshed the [publication-touches](/docs/audits/publication-touches/README.md) and [publication-proof-pack](/docs/audits/publication-proof-pack/README.md) audit examples and READMEs to shipped behavior: the "not yet shipped" status lines are replaced with the shipped story, all three proof-pack examples gain the schema-required `static-file: 0` counter, and the supporting-scope edges, `supporting_artifact_ids` rows, relationship counts, and README tables now model the shipped selector semantics (every committed artifact supports `rendered-html`; committed `html-page` records support `rendered-search`). All six examples validate against their published schemas and the HTML↔JSON parity check passes (#887).
