@@ -25,6 +25,7 @@ const watch = @import("watch.zig");
 const intelligence = @import("intelligence.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_touches = @import("publication_touches.zig");
+const proof_verify = @import("proof_verify.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 const publication_plan = @import("publication_plan.zig");
@@ -258,6 +259,11 @@ fn handleRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*
     _ = environ;
     return runRecipeScale(io, gpa, opts);
 }
+fn handleProofVerify(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = recorder;
+    _ = environ;
+    return proof_verify.run(io, gpa, opts);
+}
 fn handleValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
     _ = environ;
     return runValidate(io, gpa, opts, recorder);
@@ -325,6 +331,7 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
         .nostr_publish = handleNostrPublish,
         .init = handleInit,
         .recipe_scale = handleRecipeScale,
+        .proof_verify = handleProofVerify,
         .validate = handleValidate,
         .validate_watch = handleValidateWatch,
         .intelligence = handleIntelligence,
