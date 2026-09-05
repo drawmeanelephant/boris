@@ -9,6 +9,7 @@
 const std = @import("std");
 const Io = std.Io;
 const assemble = @import("assemble.zig");
+const diag = @import("diag.zig");
 
 pub const ThemeError = error{
     ThemeRootMissing,
@@ -18,6 +19,8 @@ pub const ThemeError = error{
     AssetPathEscape,
     AssetCollision,
     InvalidThemePath,
+    /// A walked theme asset file name contains a literal backslash (#870).
+    AssetBackslashName,
     FooterSymlink,
     /// `footer.html` failed the same UTF-8 gate as layout files (F9.2 parity / #62).
     FooterInvalidUtf8,
@@ -125,11 +128,34 @@ fn rejectIfSymlink(io: Io, dir: Io.Dir, rel: []const u8) !void {
 
 /// Load optional footer + full `assets/` tree for `theme_root`.
 /// When `theme_root` is empty, returns an empty bundle (legacy layouts).
+/// Located EASSET for a walked theme asset whose file name contains a
+/// literal backslash (#870): the normalized inventory path would name a
+/// file that does not exist on disk, so the entry is rejected naming the
+/// actual file instead of failing later with a bare FileNotFound.
+fn emitBackslashNameDiagnostic(gpa: std.mem.Allocator, theme_root: []const u8, entry_path: []const u8, sink: ?*diag.Collector) void {
+    const located = std.fmt.allocPrint(gpa, "{s}/assets/{s}", .{ theme_root, entry_path }) catch return;
+    defer gpa.free(located);
+    const message = std.fmt.allocPrint(gpa, "theme asset file name contains a backslash: {s}", .{located}) catch return;
+    defer gpa.free(message);
+    const d = diag.Diagnostic{
+        .severity = .error_,
+        .code = .EASSET,
+        .message = message,
+        .remediation = "Rename the asset: theme-relative paths reject backslashes",
+        .source_path = located,
+        .line = 1,
+        .column = 1,
+    };
+    if (sink) |collector| collector.append(d);
+    diag.printText(d, gpa);
+}
+
 pub fn loadThemeBundle(
     io: Io,
     gpa: std.mem.Allocator,
     cwd: Io.Dir,
     theme_root: []const u8,
+    sink: ?*diag.Collector,
 ) !ThemeBundle {
     var bundle: ThemeBundle = .{ .gpa = gpa, .theme_root = theme_root };
     errdefer bundle.deinit();
@@ -188,6 +214,12 @@ pub fn loadThemeBundle(
             }
             if (entry.kind == .sym_link) return error.AssetSymlink;
             if (entry.kind != .file) continue;
+
+            // Reject before the separator normalization below (#870).
+            if (std.mem.indexOfScalar(u8, entry.path, '\\') != null) {
+                emitBackslashNameDiagnostic(gpa, theme_root, entry.path, sink);
+                return error.AssetBackslashName;
+            }
 
             // entry.path is relative to assets/; prefix with assets/
             const rel = try std.fmt.allocPrint(gpa, "assets/{s}", .{entry.path});
@@ -460,6 +492,31 @@ test "validateAssetUrlPath rejects escapes and non-ASCII" {
     try std.testing.expectError(error.InvalidAssetUrl, assemble.validateAssetUrlPath("assets/caf\xc3\xa9.css"));
 }
 
+test "loadThemeBundle rejects a backslash asset file name naming the file (#870)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-theme-backslash", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const assets_css = try std.fmt.allocPrint(gpa, "{s}/theme/assets/css", .{work});
+    defer gpa.free(assets_css);
+    try cwd.createDirPath(io, assets_css);
+    // A real file whose name contains a literal backslash (POSIX allows it).
+    const weird = try std.fmt.allocPrint(gpa, "{s}/weird\\name.css", .{assets_css});
+    defer gpa.free(weird);
+    try cwd.writeFile(io, .{ .sub_path = weird, .data = "body{}" });
+
+    const theme_root = try std.fmt.allocPrint(gpa, "{s}/theme", .{work});
+    defer gpa.free(theme_root);
+
+    try std.testing.expectError(error.AssetBackslashName, loadThemeBundle(io, gpa, cwd, theme_root, null));
+}
+
 test "loadThemeBundle and copy with collision detection" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -486,7 +543,7 @@ test "loadThemeBundle and copy with collision detection" {
     const theme_root = try std.fmt.allocPrint(gpa, "{s}/theme", .{work});
     defer gpa.free(theme_root);
 
-    var bundle = try loadThemeBundle(io, gpa, cwd, theme_root);
+    var bundle = try loadThemeBundle(io, gpa, cwd, theme_root, null);
     defer bundle.deinit();
 
     try std.testing.expectEqualStrings("<p>foot</p>", bundle.footer());
@@ -527,7 +584,7 @@ test "empty theme root yields empty bundle" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    var bundle = try loadThemeBundle(io, gpa, cwd, "");
+    var bundle = try loadThemeBundle(io, gpa, cwd, "", null);
     defer bundle.deinit();
     try std.testing.expectEqual(@as(usize, 0), bundle.assets.len);
     try std.testing.expectEqual(@as(usize, 0), bundle.footer().len);
@@ -555,11 +612,11 @@ test "loadThemeBundle rejects invalid UTF-8 in footer.html" {
     defer gpa.free(bad_footer);
     try cwd.writeFile(io, .{ .sub_path = bad_footer, .data = "ok\xc3" });
 
-    try std.testing.expectError(error.FooterInvalidUtf8, loadThemeBundle(io, gpa, cwd, theme_root));
+    try std.testing.expectError(error.FooterInvalidUtf8, loadThemeBundle(io, gpa, cwd, theme_root, null));
 
     // Valid UTF-8 still loads.
     try cwd.writeFile(io, .{ .sub_path = bad_footer, .data = "<p>café</p>" });
-    var bundle = try loadThemeBundle(io, gpa, cwd, theme_root);
+    var bundle = try loadThemeBundle(io, gpa, cwd, theme_root, null);
     defer bundle.deinit();
     try std.testing.expectEqualStrings("<p>café</p>", bundle.footer());
 }
@@ -684,5 +741,5 @@ test "loadThemeBundle rejects asset file symlink when host allows" {
 
     const theme_root = try std.fmt.allocPrint(gpa, "{s}/theme", .{work});
     defer gpa.free(theme_root);
-    try std.testing.expectError(error.AssetSymlink, loadThemeBundle(io, gpa, cwd, theme_root));
+    try std.testing.expectError(error.AssetSymlink, loadThemeBundle(io, gpa, cwd, theme_root, null));
 }

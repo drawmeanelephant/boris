@@ -1248,6 +1248,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // theme.zig emits diagnostics via diag.zig, whose test closure reaches
+    // the Oliver dependency; link it so the focused theme test compiles.
+    linkOliver(theme_mod, oliver_mod);
     const theme_tests = b.addTest(.{
         .root_module = theme_mod,
     });
