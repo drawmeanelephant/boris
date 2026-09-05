@@ -29,7 +29,10 @@ Boris owns everything outside the seam, exactly as before:
 - graph semantics, layout/template assembly, publication paths, routing
 - evidence/provenance, diagnostics, site-level policy
 
-`src/render.zig` is the **only** place Boris touches Oliver's API. Production
+`src/render.zig` is the **only** place Boris touches Oliver's Markdown
+rendering API. The Cooklang seam (`src/cooklang_seam.zig`,
+`src/recipe_scale.zig`) consumes the same pin for `.cook` parsing — see
+[`cooklang-compatibility.md`](cooklang-compatibility.md). Production
 Markdown bodies go through `render.render(md, arena)` with the same Whiteboard
 arena lifetime contract the previous renderer's `Html` view had: returned bytes
 are valid until `arena.reset(.free_all)`. The same typed document also feeds

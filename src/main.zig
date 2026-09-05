@@ -3119,6 +3119,7 @@ test "ExitCode contract surface" {
     try std.testing.expectEqual(@as(u8, 6), ExitCode.compatibility.int());
     try std.testing.expectEqual(@as(u8, 7), ExitCode.partial_publication.int());
     try std.testing.expectEqual(@as(u8, 8), ExitCode.verification.int());
+    try std.testing.expectEqual(@as(u8, 9), ExitCode.session.int());
 }
 
 test "classifyPublishError: verification bindings fail closed with exit 8" {

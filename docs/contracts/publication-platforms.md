@@ -108,8 +108,9 @@ Status vocabulary: **shipped and verified**, **deliberate but waiting**,
 ## Target registry boundary
 
 `publication.target` is a small **target registry**: the closed vocabulary is
-`"github-pages"` and `"standard-site"`, validated by
-`isValidTargetName` in the profile parser, and each name maps to its adapters
+`"github-pages"` and `"standard-site"`, validated by closed name equality in
+`parsePublication` in the profile parser (the separate `targets` name field is
+the `isValidTargetName` surface), and each name maps to its adapters
 (location provider, deployer, packaging rules). See
 [`standard-site.md`](standard-site.md) for the second target's profile and
 plan shape.

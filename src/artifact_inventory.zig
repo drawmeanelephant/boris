@@ -89,7 +89,6 @@ pub const Kind = enum {
             .{ "rss", Kind.rss },
             .{ "llms", Kind.llms },
             .{ "static-file", Kind.static_file },
-            .{ "static-file", Kind.static_file },
         }) |entry| {
             if (std.mem.eql(u8, value, entry[0])) return entry[1];
         }
