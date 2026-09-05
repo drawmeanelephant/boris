@@ -4639,7 +4639,7 @@ test "parse detail: audit batch names flags instead of misattributing (#867, #87
     {
         var d = ParseErrorDetail{};
         try expectError(error.DuplicateFlag, parseOptionsWithDetail(std.testing.allocator, &.{
-            "boris", "--quiet", "--html-layout", "layouts/global.html",
+            "boris",         "--quiet", "--html-layout",       "layouts/global.html",
             "--layout-rule", "default", "id:reference/config", "layouts/exact.html",
             "--layout-rule", "default", "id:reference/config", "layouts/exact.html",
         }, &d));
@@ -4664,8 +4664,8 @@ test "parse detail: audit batch names flags instead of misattributing (#867, #87
     {
         var d = ParseErrorDetail{};
         try expectError(error.InvalidValue, parseOptionsWithDetail(std.testing.allocator, &.{
-            "boris", "--input", "content", "--rss", "--site-url", "ftp://bad.example/",
-            "--rss-title", "t", "--rss-description", "d",
+            "boris",       "--input", "content",           "--rss", "--site-url", "ftp://bad.example/",
+            "--rss-title", "t",       "--rss-description", "d",
         }, &d));
         try expectEqualStrings("--site-url", d.blame_flag.?);
     }
