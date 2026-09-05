@@ -2232,6 +2232,54 @@ fn prepareThemeBundle(
     return theme_bundle;
 }
 
+/// Located EASSET diagnostic for a published-path collision (#868): names the
+/// shared output path and the page/entity (or theme asset) it collides with.
+/// `fail` carries the colliding path recorded by checkCollisions.
+fn reportPublishedPathCollision(
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    content_assets: *const content_asset.SiteAssetInventory,
+    theme_outs: []const []const u8,
+    fail: *content_asset.FailInfo,
+    sink: ?*diag.Collector,
+) void {
+    const path = fail.detail();
+    if (path.len == 0) {
+        content_asset.printDiagnostic(gpa, error.AssetCollision, "", fail.*, sink);
+        return;
+    }
+    var asset_owner: []const u8 = "";
+    for (content_assets.pages) |bundle| {
+        for (bundle.entries) |e| {
+            if (std.mem.eql(u8, e.output_rel, path)) {
+                asset_owner = bundle.source_path;
+                break;
+            }
+        }
+        if (asset_owner.len > 0) break;
+    }
+    var buf: [2048]u8 = undefined;
+    for (db.items()) |p| {
+        if (std.mem.eql(u8, p.output_path, path)) {
+            const detail = std.fmt.bufPrint(&buf, "\"{s}\" from \"{s}\" collides with page \"{s}\" ({s})", .{ path, asset_owner, p.entity_id, p.source_path }) catch path;
+            fail.set(1, 1, detail, p.source_path);
+            content_asset.printDiagnostic(gpa, error.AssetCollision, "", fail.*, sink);
+            return;
+        }
+    }
+    for (theme_outs) |t| {
+        if (std.mem.eql(u8, t, path)) {
+            const detail = std.fmt.bufPrint(&buf, "\"{s}\" from \"{s}\" collides with theme output", .{ path, asset_owner }) catch path;
+            fail.set(1, 1, detail, asset_owner);
+            content_asset.printDiagnostic(gpa, error.AssetCollision, "", fail.*, sink);
+            return;
+        }
+    }
+    const detail = std.fmt.bufPrint(&buf, "\"{s}\" from \"{s}\" collides with another content-local asset", .{ path, asset_owner }) catch path;
+    fail.set(1, 1, detail, asset_owner);
+    content_asset.printDiagnostic(gpa, error.AssetCollision, "", fail.*, sink);
+}
+
 fn discoverContentAssets(
     io: Io,
     gpa: std.mem.Allocator,
@@ -2271,7 +2319,13 @@ fn discoverContentAssets(
         defer theme_outs.deinit(gpa);
         try theme_outs.ensureTotalCapacity(gpa, theme_bundle.assets.len);
         for (theme_bundle.assets) |a| try theme_outs.append(gpa, a.rel_path);
-        try content_asset.checkCollisions(content_outs, page_outs.items, theme_outs.items);
+        var collision_fail: content_asset.FailInfo = .{};
+        content_asset.checkCollisions(content_outs, page_outs.items, theme_outs.items, &collision_fail) catch |err| {
+            if (err == error.AssetCollision) {
+                reportPublishedPathCollision(gpa, db, &content_assets, theme_outs.items, &collision_fail, options.diagnostics);
+            }
+            return err;
+        };
 
         var inventory_owned_paths: std.ArrayList([]const u8) = .empty;
         defer inventory_owned_paths.deinit(gpa);
