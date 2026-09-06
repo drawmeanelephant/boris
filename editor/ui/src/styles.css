@@ -91,6 +91,11 @@ h1 { margin-bottom: 0; font-size: var(--text-xl); letter-spacing: -0.03em; }
 /* #941 B: scrollspy active pill mirrors the file-tree active treatment. */
 .section-nav a[aria-current='true'] { color: var(--color-on-accent); background: var(--color-accent); }
 .section-nav a[aria-current='true']:hover { text-decoration: underline; }
+/* #944: an unavailable target (pane absent) reads as disabled — muted ink,
+   no hover affordance, honest cursor. The link stays focusable so its
+   title and activation feedback remain discoverable. */
+.section-nav a[aria-disabled='true'] { color: var(--color-text-faint); background: none; }
+.section-nav a[aria-disabled='true']:hover { background: none; text-decoration: none; }
 /* #941 E: edge affordance for the scrollable mobile pill row — the edge
    hint is a visible bar, not a silent clip. Bars are positioned against the
    non-scrolling nav (the row inside is the scroller), come up only on the
