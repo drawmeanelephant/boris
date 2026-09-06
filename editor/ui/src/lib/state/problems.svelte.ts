@@ -37,7 +37,6 @@ export function problemGroups(): ProblemGroup[] {
 // problem list. `clean` marks a claim about a completed report, which is
 // what earns the dirty-buffer caveat.
 export function problemsNotice(): { text: string; clean: boolean } {
-  return (() => {
   const results = problems.result?.problems ?? [];
   if (results.length > 0) return { text: '', clean: false };
   if (problems.result && problems.result.mode !== 'validate') return { text: '', clean: false };
@@ -59,7 +58,6 @@ export function problemsNotice(): { text: string; clean: boolean } {
     return { text: 'No validation report yet. Run Validate project to check the tree.', clean: false };
   }
   return { text: '', clean: false };
-})();
 }
 
 export function activeProblems(): Problem[] {
@@ -81,7 +79,6 @@ export function activeProblems(): Problem[] {
 // and the mark clears on caret move or save; identical-line insertion above
 // stays ambiguous from text alone.
 export function staleProblems(): Set<Problem> {
-  return (() => {
   const set = new Set<Problem>();
   if (!dirty() || !buffer.activePath || buffer.content === buffer.baseline) return set;
   const savedLines = buffer.baseline.split('\n');
@@ -108,7 +105,6 @@ export function staleProblems(): Set<Problem> {
     if (lineCountChanged && firstDiff >= 0 && firstDiff < problem.line - 1) set.add(problem);
   }
   return set;
-})();
 }
 
 export function layoutSelections(): Problem[] {

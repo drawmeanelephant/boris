@@ -17,14 +17,12 @@ export const dialogs = $state({
 });
 
 export function resolutionPrompt(): string {
-  return (() => {
   const pending = dialogs.pendingResolution;
   if (!pending) return '';
   if (pending.action === 'open') return `Save or discard the changes before opening ${pending.target}?`;
   if (pending.action === 'command') return `Boris commands read repository files from disk. Save or discard the changes before running ${commandLabel(pending.mode)}?`;
   if (pending.action === 'restore') return `Save or discard the changes before restoring ${pending.snapshot.path}?`;
   return 'Save or discard the changes before rebuilding the preview?';
-})();
 }
 
 export function resolutionVerb(): string {
