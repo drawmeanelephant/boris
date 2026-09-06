@@ -13,6 +13,8 @@ set -euo pipefail
 #     is refused with a distinct state; stopping re-enables rebuild;
 #   - the validation daemon coexists with the watch daemon (write-disjoint);
 #   - a kill -9'd daemon is reaped and recovered with bounded backoff;
+#   - a crash's stale last_error does not survive an explicit stop: the
+#     post-stop state reads idle with no crash messaging;
 #   - POST /api/watch/stop SIGTERM-reaps the daemon (no orphan), as does
 #     SIGTERM to the editor itself.
 #
@@ -274,6 +276,42 @@ node -e '
   const events = s.events.map((x) => x.event.event);
   if (!events.includes("hello")) throw Error("restarted daemon did not re-handshake with hello: " + JSON.stringify(events));
 ' "$work/events-restart.json"
+
+# Crash residue must not survive an explicit stop: a fresh kill -9 marks the
+# state stale with the "stopped unexpectedly" last_error, and stopping while
+# that residue is present must read idle with last_error cleared — the user's
+# stop, not the crash, is the last thing that happened.
+kill -9 "$(watch_pids | head -1)" 2>/dev/null || true
+crash_state=""
+for _ in $(seq 1 10); do
+  get_api "$work/state-crash.json" '/api/watch/state'
+  crash_state="$(watch_state_field state "$work/state-crash.json")"
+  [[ "$crash_state" == "stale" ]] && break
+  sleep 0.1
+done
+[[ "$crash_state" == "stale" ]] || { echo "expected stale after kill -9, got $crash_state" >&2; exit 1; }
+node -e '
+  const s = require(process.argv[1]);
+  if (typeof s.last_error !== "string" || !s.last_error.includes("stopped unexpectedly")) {
+    throw Error("stale state carried no crash last_error: " + JSON.stringify(s));
+  }
+' "$work/state-crash.json"
+post_api "$work/stop-after-crash.json" '/api/watch/stop'
+node -e '
+  const s = require(process.argv[1]);
+  if (s.state.state !== "idle") throw Error("stop after crash did not read idle: " + JSON.stringify(s));
+  if (s.state.last_error !== null) throw Error("crash last_error survived an explicit stop: " + JSON.stringify(s));
+' "$work/stop-after-crash.json"
+
+# A start after that explicit stop must not inherit the crashed generation's
+# backoff window.
+post_api "$work/restart-after-crash-stop.json" '/api/watch/start'
+node -e 'const s = require(process.argv[1]); if (s.status !== "started") throw Error("restart after the crash-stop not started: " + JSON.stringify(s));' "$work/restart-after-crash-stop.json"
+for _ in $(seq 1 50); do
+  [[ "$(watch_count)" == "1" ]] && break
+  sleep 0.1
+done
+[[ "$(watch_count)" == "1" ]] || { echo "expected exactly one daemon after the crash-stop restart, found $(watch_count)" >&2; exit 1; }
 
 # Explicit stop: graceful SIGTERM + reap, no orphan, honest idle state, and
 # the dist/ writer seat returns to the preview rebuild path.

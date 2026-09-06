@@ -321,12 +321,23 @@ pub const Daemon = struct {
     /// SIGINT/SIGTERM (docs/contracts/watch-mode.md §6), so `Child.kill`
     /// (SIGTERM then block-until-exit on POSIX) is the correct reaper and
     /// leaves no orphan behind. The daemon's final `watch-stopped` event is
-    /// drained into the log before returning.
+    /// drained into the log before returning, and an explicit stop clears
+    /// stale-crash residue (`last_error`, the backoff window) so the
+    /// post-stop state reads idle.
     pub fn stop(self: *Daemon) void {
         if (self.child) |*child| child.kill(self.io);
         self.child = null;
         self.explicitly_stopped = true;
         self.state = .idle;
+        // An explicit stop is the user's decision, not a crash: park honestly
+        // idle with no stale "stopped unexpectedly" messaging and no
+        // inherited backoff window (a later start must not be refused for a
+        // crash the stop already ended). The stale/crash path itself keeps
+        // `last_error` until this transition; anything the final drain
+        // surfaces still lands after the clear.
+        self.failures = 0;
+        self.next_spawn_allowed = 0;
+        self.setLastError("");
         self.drain();
     }
 
@@ -761,6 +772,36 @@ test "cooklang projects append the compiler selector" {
     const argv = try daemon.daemonArgv();
     defer gpa.free(argv);
     try std.testing.expectEqualStrings("--cooklang", argv[argv.len - 1]);
+}
+
+test "explicit stop clears crash residue so the post-stop state reads idle" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var daemon: Daemon = .init(gpa, io, .{
+        .project_root = "/private/project",
+        .boris_path = "boris",
+        .state_root = "/cache/state",
+        .input_mode = .markdown,
+    });
+    defer daemon.deinit();
+
+    // An unexpected death marks the daemon stale with the "stopped
+    // unexpectedly" error and an active backoff window.
+    daemon.noteUnexpectedDeath(null);
+    try std.testing.expectEqual(State.stale, daemon.state);
+    try std.testing.expect(daemon.last_error != null);
+    try std.testing.expect(daemon.failures > 0);
+    try std.testing.expect(daemon.next_spawn_allowed != 0);
+
+    // The user's explicit stop — not the crash — is the last transition, so
+    // the post-stop state reads idle with no crash messaging left behind and
+    // the next start is not refused by the inherited backoff.
+    daemon.stop();
+    try std.testing.expectEqual(State.idle, daemon.state);
+    try std.testing.expect(daemon.explicitly_stopped);
+    try std.testing.expect(daemon.last_error == null);
+    try std.testing.expectEqual(@as(u32, 0), daemon.failures);
+    try std.testing.expectEqual(@as(i96, 0), daemon.next_spawn_allowed);
 }
 
 test "event log classifies compiler events and counts build cycles" {
