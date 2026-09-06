@@ -8,7 +8,12 @@ import { expect, test, type Page } from '@playwright/test';
 // stays visible and operable at any scroll depth and links keep their
 // roles/names, which safe-editing.spec.ts pins).
 
-async function installApi(page: Page) {
+type InstallOptions = {
+  /** Launch `open=` param: a cold-launch URL opens this file at connect. */
+  open?: string;
+};
+
+async function installApi(page: Page, options: InstallOptions = {}) {
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
@@ -97,7 +102,11 @@ async function installApi(page: Page) {
     })
   }));
   await page.route('https://preview.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Compiler output</h1>' }));
-  await page.goto('/#token=test-session-token');
+  // Launch fragment: token always present; open= exercises the consumed
+  // launch-open path (#943).
+  const launchParams = new URLSearchParams({ token: 'test-session-token' });
+  if (options.open) launchParams.set('open', options.open);
+  await page.goto(`/#${launchParams.toString()}`);
 }
 
 function navLink(page: Page, name: string) {
@@ -113,8 +122,11 @@ test('nav click jumps, focuses the target section, and pulses the arrival highli
 
   // Highlight is transient.
   await expect(problems).not.toHaveClass(/arrived/, { timeout: 3_000 });
-  // The URL reflects the section without a native hash navigation.
-  expect(new URL(page.url()).hash).toBe('#problems');
+  // The URL reflects the section without a native hash navigation, and the
+  // launch token rides along (#943).
+  const params = new URLSearchParams(new URL(page.url()).hash.slice(1));
+  expect(params.get('section')).toBe('problems');
+  expect(params.get('token')).toBe('test-session-token');
   // Focus hand-off: the next Tab continues from the landed section.
   await page.keyboard.press('Tab');
   await expect(page.locator('#problems').getByRole('button').first()).toBeFocused();
@@ -261,6 +273,42 @@ test('nav target ids are unique in both pane states', async ({ page }) => {
   expect(duplicates).toEqual([]);
   await expect(page.locator('#graph')).toHaveCount(1);
   await expect(page.locator('#graph-empty')).toHaveCount(0);
+});
+
+test('nav click preserves the token and drops the consumed open param (#943)', async ({ page }) => {
+  await installApi(page);
+  await navLink(page, 'Problems').click();
+  await expect(page.locator('#problems')).toHaveClass(/arrived/, { timeout: 2_000 });
+
+  // The fragment keeps the session token and records the live section;
+  // the section id must be the fragment's last param.
+  const params = new URLSearchParams(new URL(page.url()).hash.slice(1));
+  expect(params.get('token')).toBe('test-session-token');
+  expect(params.get('section')).toBe('problems');
+  const keys = Array.from(params.keys());
+  expect(keys[keys.length - 1]).toBe('section');
+
+  // Reload lands in an authenticated editor (the native guard for a
+  // token-wiping URL write), and the section jump is NOT reapplied — the
+  // component's spy handles positioning, not launch parsing.
+  await page.reload();
+  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
+});
+
+test('the open= launch param is consumed and not resurrected by nav clicks', async ({ page }) => {
+  await installApi(page, { open: 'content/index.md' });
+  // Cold launch: the host-open request carried the launch path.
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+
+  await navLink(page, 'Problems').click();
+  const params = new URLSearchParams(new URL(page.url()).hash.slice(1));
+  expect(params.get('open')).toBeNull();
+  expect(params.get('token')).toBe('test-session-token');
+
+  // Reload: no surprise reopen — the editor comes up with no file loaded.
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: /Source for/ })).toHaveCount(0);
+  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
 });
 
 test('modifier-click keeps the native hash-link behavior', async ({ page }) => {

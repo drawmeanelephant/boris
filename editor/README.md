@@ -607,6 +607,11 @@ layers feedback on top:
 - **Focus hand-off.** Every nav target is a programmatic focus target
   (`tabindex="-1"`); after a jump, the next Tab continues from the landed
   section. Modifier-clicks keep native hash-link behavior.
+- **Launch fragment is preserved.** The fragment is the editor's launch
+  channel (the session token rides in it), so a nav click rewrites it as
+  `#token=…&section=<id>` instead of a bare `#<id>` — reloading after a
+  jump stays authenticated. The consumed `open=` launch path is dropped,
+  not carried forward, so a reload never re-opens the file.
 
 The Source pane's graph empty-state section is `id="graph-empty"`, distinct
 from the real GraphPane's `id="graph"` (they never render at the same
