@@ -160,7 +160,10 @@ compares the open-time fingerprint (mtime, size, and content hash), writes a
 temporary file in the destination directory, flushes and fsyncs it, and then
 atomically renames it. A changed, deleted, or read-only disk file is reported
 without replacing it. The conflict dialog keeps both the unsaved editor buffer
-and current disk version visible and requires an explicit choice.
+and current disk version visible and requires an explicit choice. The Create
+and Rename dialogs disable their submit action while the path field is empty,
+so a cleared field and Enter state the condition (native form invalidity)
+instead of failing silently.
 
 Dirty buffers are periodically snapshotted to the disposable OS user-cache
 state root. A later editor process labels them as recovered and requires an
