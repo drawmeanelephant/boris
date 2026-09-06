@@ -507,35 +507,11 @@ export function paletteItemKey(item: PaletteItem): string {
   return item.kind;
 }
 
-export function paletteItemEnabledPure(
-  item: PaletteItem,
-  ctx: {
-    commandRunning: boolean;
-    dirty: boolean;
-    readOnly: boolean;
-    saveInFlight: boolean;
-    activePath: string;
-    activeNode: unknown | null;
-    parentNode: unknown | null;
-    previewPhase?: string;
-    watchSupported?: boolean | null;
-    watchInFlight?: boolean;
-    watchActive?: boolean;
-  },
-): boolean {
-  if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity' || item.kind === 'focus-enter' || item.kind === 'focus-exit') return true;
-  if (item.kind === 'parent') return ctx.parentNode !== null;
-  if (item.kind === 'impact-here') return ctx.activeNode !== null && !ctx.commandRunning;
-  if (item.kind === 'save') return ctx.dirty && !ctx.readOnly && !ctx.saveInFlight;
-  if (item.kind === 'preview') return ctx.previewPhase !== 'running';
-  if (item.kind === 'command') return !ctx.commandRunning;
-  if (item.kind === 'watch-start') return ctx.watchSupported === true && ctx.watchInFlight !== true && ctx.watchActive !== true;
-  if (item.kind === 'watch-stop') return ctx.watchSupported === true && ctx.watchInFlight !== true && ctx.watchActive === true;
-  if (item.kind === 'watch-go') return true;
-  if (ctx.dirty) return false;
-  return item.kind === 'create' || ctx.activePath !== '';
-}
-
+// Palette gating lives in ONE place: `paletteEnabled` in
+// `lib/state/palette.svelte.ts`. The former `paletteItemEnabledPure` twin in
+// this file was deleted: it had drifted (focus-enter/exit returned true
+// unconditionally) and had no callers. `App.svelte` consumes the state
+// module's map; new palette kinds must extend `paletteEnabled`.
 export function fileTreeAnnouncement(total: number, matched: number, shown: number, query: string): string {
   if (total === 0) return '';
   const needle = query.trim();

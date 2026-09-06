@@ -772,10 +772,19 @@
   }
 
   function enterFocusMode(trigger: HTMLElement | null = null) {
+    // aria-modal promises the background is inert; enforce it here, not in a
+    // component effect, so the ordering with focus return is explicit. The
+    // workspace (and surrounding chrome) becomes non-interactive while the
+    // overlay is open — Tab cannot walk into visually hidden controls. Host
+    // dialogs (conflict/resolution) sit outside #workspace and stay live.
+    document.getElementById('workspace')?.setAttribute('inert', '');
     openFocusMode(trigger);
   }
 
   function exitFocusMode() {
+    // Lift inertness BEFORE returning focus: an inert element cannot take
+    // focus, so the restore would silently no-op if it ran first.
+    document.getElementById('workspace')?.removeAttribute('inert');
     const returnTo = focusReturnElement;
     closeFocusMode();
     setFocusReturn(null);

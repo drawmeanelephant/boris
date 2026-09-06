@@ -14,8 +14,11 @@
 // an HTML string, and only `http(s):` link targets become real anchors —
 // wiki links and relative references render as styled, non-navigable spans,
 // because the aid has no compiled route graph to resolve them against. The
-// result is assigned via innerHTML only inside a sandboxed iframe (no
-// allow-scripts), same posture as the compiler-output preview frame.
+// result is assigned via innerHTML into a div in the top document, NOT a
+// sandboxed iframe; the invariant that makes that sound is total escaping
+// plus the http(s)-only anchor policy (pinned by e2e assertions), not frame
+// sandboxing. If a future change wants to relax either half of that policy,
+// move the reading surface into a sandboxed iframe first.
 
 const ASIDE_VARIANTS = new Set(['note', 'warning', 'tip', 'danger']);
 
@@ -97,12 +100,36 @@ function emphasis(escaped: string): string {
 
 /**
  * Renders the bounded Markdown subset to an HTML string. Every text run is
- * escaped; the output is safe to assign via innerHTML inside the sandboxed
- * focus-mode reading frame.
+ * escaped and only http(s) targets become anchors (see the safety model
+ * above); e2e tests pin both halves of that invariant.
  */
 export function renderMarkdown(source: string): string {
   const lines = source.replaceAll('\r\n', '\n').split('\n');
   const blocks: string[] = [];
+
+  // Frontmatter: nearly every Boris page opens with a YAML block, and left
+  // in place it renders as thematic-break noise plus stray paragraphs. The
+  // reading aid is a prose preview, so the block renders once as a muted,
+  // collapsed band instead of body text.
+  if (lines[0]?.trim() === '---') {
+    let end = 1;
+    while (end < lines.length && lines[end].trim() !== '---') end += 1;
+    if (end < lines.length) {
+      const entries = lines.slice(1, end).filter(l => l.trim() !== '');
+      const summary = entries.length > 0
+        ? `frontmatter · ${entries.length} ${entries.length === 1 ? 'key' : 'keys'}`
+        : 'frontmatter';
+      blocks.push(
+        `<details class="focus-frontmatter"><summary>${escapeHtml(summary)}</summary><pre><code>${escapeHtml(lines.slice(1, end).join('\n'))}</code></pre></details>`
+      );
+      return renderBody(blocks, lines.slice(end + 1));
+    }
+  }
+
+  return renderBody(blocks, lines);
+}
+
+function renderBody(blocks: string[], lines: string[]): string {
 
   let i = 0;
   let paragraph: string[] = [];
@@ -183,6 +210,16 @@ export function renderMarkdown(source: string): string {
       continue;
     }
 
+    // Thematic break. Checked before lists: CommonMark gives the break
+    // precedence when a line could parse as either, and the break may be
+    // spaced (`* * *`, `- - -`).
+    if (/^\s*(?:-{3,}|\*{3,}|-\s*-\s*-|\*\s*\*\s*\*)\s*$/.test(trimmed)) {
+      flushParagraph();
+      blocks.push('<hr>');
+      i += 1;
+      continue;
+    }
+
     // Unordered list (one level; nesting is beyond the reading aid).
     if (/^\s*[-*]\s+/.test(line)) {
       flushParagraph();
@@ -204,14 +241,6 @@ export function renderMarkdown(source: string): string {
         i += 1;
       }
       blocks.push(`<ol>${items.join('')}</ol>`);
-      continue;
-    }
-
-    // Thematic break.
-    if (/^\s*(-{3,}|\*{3,})\s*$/.test(trimmed)) {
-      flushParagraph();
-      blocks.push('<hr>');
-      i += 1;
       continue;
     }
 

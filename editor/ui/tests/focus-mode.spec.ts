@@ -9,10 +9,12 @@ import { expect, test, type Page } from '@playwright/test';
 
 type FocusMockOptions = {
   layout?: string;
+  /** Initial disk content served by /api/files/open. */
+  disk?: string;
 };
 
 async function installApi(page: Page, options: FocusMockOptions = {}) {
-  let disk = '# Home\n';
+  let disk = options.disk ?? '# Home\n';
   let fingerprint = 'a'.repeat(64);
 
   await page.route('**/api/health', route => route.fulfill({
@@ -129,9 +131,9 @@ async function installApi(page: Page, options: FocusMockOptions = {}) {
   return { saveCountRef: () => saveCount, rebuildCountRef: () => rebuildCount };
 }
 
-async function openFileAndEnterFocus(page: Page) {
+async function openFileAndEnterFocus(page: Page, expected = '# Home\n') {
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Home\n');
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue(expected);
   await page.getByRole('button', { name: 'Focus', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Focus writing mode' })).toBeVisible();
   return page.getByRole('textbox', { name: /Focus writing surface for content\/index\.md/ });
@@ -258,6 +260,9 @@ test('the command palette enters and exits focus mode', async ({ page }) => {
   await expect(palette.getByRole('option', { name: /Exit focus writing mode/ })).toHaveAttribute('aria-disabled', 'false');
   await palette.getByRole('option', { name: /Exit focus writing mode/ }).click();
   await expect(focus).toBeHidden();
+  // Palette entry has no durable trigger (the option unmounts), so the
+  // keyboard returns to the workspace editor instead of stranding on <body>.
+  await expect(page.locator('#source-editor')).toBeFocused();
 });
 
 test('rebuild preview works from focus mode', async ({ page }) => {
@@ -353,7 +358,7 @@ test('typewriter scrolling keeps the caret line centered while typing', async ({
   const manyLines = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of sixty.`).join('\n\n');
   await editor.fill(manyLines);
   await editor.press('Control+End');
-  await editor.type(' and more typing here');
+  await editor.pressSequentially(' and more typing here');
 
   // The caret sits near the vertical center of the visible box, within a
   // line-height of tolerance. The caret rect comes from the mirror element
@@ -367,7 +372,7 @@ test('typewriter scrolling keeps the caret line centered while typing', async ({
   await editor.evaluate((node, len) => {
     (node as HTMLTextAreaElement).setSelectionRange(Math.floor(len / 2), Math.floor(len / 2));
   }, contentLen);
-  await editor.type(' typing in the middle');
+  await editor.pressSequentially(' typing in the middle');
 
   const scrollTop = await editor.evaluate(node => node.scrollTop);
   expect(scrollTop).toBeGreaterThan(0);
@@ -425,6 +430,93 @@ test('paragraph dimming veils the surface and follows the caret paragraph', asyn
   const cleared = await underlay.evaluate(node => getComputedStyle(node).webkitMaskImage || getComputedStyle(node).maskImage);
   expect(cleared).not.toContain('linear-gradient');
   expect(cleared).not.toContain('rgba(0, 0, 0, 0)');
+});
+
+test('arrows do nothing harmful when focus mode opens with no file', async ({ page }) => {
+  // No file is opened, so the overlay renders the honest empty state and
+  // there is no writing surface. The arrow rescue must not throw or swallow
+  // the keys without a target (regression: non-null assertion on a missing
+  // textarea).
+  const pageErrors: string[] = [];
+  page.on('pageerror', err => pageErrors.push(err.message));
+  await installApi(page);
+  await page.getByRole('button', { name: 'Focus', exact: true }).click();
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  await expect(focus).toBeVisible();
+  await expect(page.locator('.focus-editor')).toHaveCount(0);
+  await focus.click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowLeft');
+  expect(pageErrors).toEqual([]);
+});
+
+test('background workspace is inert while the overlay is open', async ({ page }) => {
+  await installApi(page);
+  await openFileAndEnterFocus(page);
+  const workspace = page.locator('#workspace');
+  await expect(workspace).toHaveAttribute('inert', '');
+  await page.getByRole('button', { name: 'Exit focus', exact: true }).click();
+  await expect(page.locator('#workspace')).not.toHaveAttribute('inert', '');
+});
+
+test('reading aid renders frontmatter as a collapsed muted band, not body text', async ({ page }) => {
+  await installApi(page, {
+    disk: '---\ntitle: Front matter demo\ndraft: false\n---\n\n# Real body\n\nProse lives here.\n'
+  });
+  await openFileAndEnterFocus(page, '---\ntitle: Front matter demo\ndraft: false\n---\n\n# Real body\n\nProse lives here.\n');
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  await focus.getByRole('radio', { name: 'Preview', exact: true }).check();
+  const reading = page.locator('.focus-reading');
+  const band = reading.locator('details.focus-frontmatter');
+  await expect(band).toBeVisible();
+  await expect(band.locator('summary')).toHaveText('frontmatter · 2 keys');
+  // The YAML lives inside the collapsed band (escaped text), and the body
+  // renders — but no paragraph anywhere carries the frontmatter values.
+  await expect(band.locator('code')).toContainText('title: Front matter demo');
+  await expect(reading.locator('h1')).toHaveText('Real body');
+  await expect(reading.locator('p', { hasText: 'Front matter demo' })).toHaveCount(0);
+  await expect(reading.locator('p', { hasText: 'draft: false' })).toHaveCount(0);
+});
+
+test('reading aid never produces executable content (escape + anchor policy)', async ({ page }) => {
+  await installApi(page, {
+    disk: '# Home\n\n<img src=x onerror="window.__pwned=1"> [x](javascript:alert(1)) [ok](https://example.com/a)\n'
+  });
+  await openFileAndEnterFocus(page, '# Home\n\n<img src=x onerror="window.__pwned=1"> [x](javascript:alert(1)) [ok](https://example.com/a)\n');
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  await focus.getByRole('radio', { name: 'Preview', exact: true }).check();
+  const reading = page.locator('.focus-reading');
+  await expect(reading.getByRole('link', { name: 'ok' })).toHaveAttribute('href', 'https://example.com/a');
+  const audit = await reading.evaluate((node) => {
+    const anchors = [...node.querySelectorAll('a')];
+    return {
+      pwned: (window as unknown as { __pwned?: number }).__pwned ?? 0,
+      anchors: anchors.length,
+      scriptNodes: node.querySelectorAll('script, iframe, img').length,
+      badHrefs: anchors.filter(a => /\s*(javascript|data|vbscript):/i.test(a.getAttribute('href') ?? '')).length,
+      text: node.textContent ?? ''
+    };
+  });
+  expect(audit.pwned).toBe(0);
+  expect(audit.scriptNodes).toBe(0);
+  expect(audit.badHrefs).toBe(0);
+  // Exactly one anchor (the https target); the blocked javascript: link
+  // renders as its bare label. The img tag surfaces as fully escaped inert
+  // text — present in textContent, never as an element, never executed.
+  expect(audit.anchors).toBe(1);
+  expect(audit.text).toContain('<img src=x onerror="window.__pwned=1">');
+});
+
+test('spaced thematic breaks render as rules, not list items', async ({ page }) => {
+  await installApi(page, {
+    disk: '# Home\n\n* * *\n\n- - -\n\nAfter the rules.\n'
+  });
+  await openFileAndEnterFocus(page, '# Home\n\n* * *\n\n- - -\n\nAfter the rules.\n');
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  await focus.getByRole('radio', { name: 'Preview', exact: true }).check();
+  const reading = page.locator('.focus-reading');
+  await expect(reading.locator('hr')).toHaveCount(2);
+  await expect(reading.locator('ul li')).toHaveCount(0);
 });
 
 test('writing aids persist across reloads', async ({ page }) => {

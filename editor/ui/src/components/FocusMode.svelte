@@ -262,8 +262,11 @@
       && (['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)
         || active.isContentEditable
         || active.getAttribute('role') === 'option');
+    const area = textarea;
     if (
       showEditor() &&
+      hasBuffer &&
+      area !== undefined &&
       !interactive &&
       !event.metaKey &&
       !event.ctrlKey &&
@@ -273,10 +276,10 @@
       event.preventDefault();
       const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
       const pos = step < 0
-        ? Math.max(0, textarea!.selectionStart - 1)
-        : Math.min(buffer.content.length, textarea!.selectionEnd + 1);
-      textarea!.setSelectionRange(pos, pos);
-      textarea!.focus();
+        ? Math.max(0, area.selectionStart - 1)
+        : Math.min(buffer.content.length, area.selectionEnd + 1);
+      area.setSelectionRange(pos, pos);
+      area.focus();
       updateLocalCursor();
     }
   }

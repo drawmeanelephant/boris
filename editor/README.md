@@ -566,15 +566,21 @@ button that opened it.
 - **The reading aid is a reading aid.** Split/Preview render a bounded,
   dependency-free subset of the authoring grammar — ATX headings,
   paragraphs, emphasis, inline code, fenced code blocks, block quotes,
-  flat lists, thematic breaks, wiki links, and the Aside tokens — so the
-  page takes shape while typing. It never claims to be the compiled page:
+  flat lists, thematic breaks (including the spaced `* * *` and `- - -`
+  forms), wiki links, and the Aside tokens — so the page takes shape
+  while typing. A leading frontmatter block renders once as a muted,
+  collapsed band instead of leaking YAML into the prose. It never claims
+  to be the compiled page:
   wiki links render as non-navigable spans (the aid has no route graph),
   and the honest compiled preview stays in the workspace Preview pane (the
   overlay's Rebuild preview button runs the same rebuild and reports the
   build phase in its status bar).
-- **Safety.** All rendered text is escaped; only `http(s)` link targets
-  become real anchors; the output is assigned inside the same
-  scriptless posture as the preview frame.
+- **Safety.** All rendered text is escaped and only `http(s)` link targets
+  become real anchors — both halves pinned by e2e assertions. The aid
+  renders into the top document, not a sandboxed iframe: the invariant
+  that makes that sound is total escaping plus the anchor policy, so any
+  future change that relaxes either half must move the reading surface
+  into a sandboxed frame first.
 - **Empty state.** With no file open the overlay says so honestly instead
   of showing an editor bound to nothing.
 

@@ -161,7 +161,13 @@ export function setFocusReturn(element: HTMLElement | null) {
 }
 
 export function openFocusMode(trigger: HTMLElement | null) {
-  focusReturnElement = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  // Return target: the trigger when given (the Source pane's Focus button).
+  // When entered from the command palette there is no durable trigger — the
+  // palette option unmounts on selection — so the keyboard returns to the
+  // workspace Source pane editor instead of stranding on <body>.
+  const fallback = document.getElementById('source-editor');
+  focusReturnElement = trigger
+    ?? (fallback instanceof HTMLElement ? fallback : null);
   focusMode.open = true;
 }
 

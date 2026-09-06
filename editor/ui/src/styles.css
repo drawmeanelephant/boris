@@ -469,6 +469,31 @@ footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
 }
 .focus-reading:focus-visible { outline-offset: 0; }
 .focus-reading > :first-child { margin-top: 0; }
+/* Frontmatter renders once as a muted, collapsed band — a prose preview has
+   no business displaying YAML as body text. */
+.focus-frontmatter {
+  margin: 0 0 1rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+}
+.focus-frontmatter summary {
+  cursor: pointer;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+}
+.focus-frontmatter pre {
+  margin: 0;
+  padding: 0.25rem 0.75rem 0.6rem;
+  border-top: 1px solid var(--color-border-soft);
+  background: transparent;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  font-size: 0.85em;
+  overflow-x: auto;
+}
 .focus-reading h1, .focus-reading h2, .focus-reading h3,
 .focus-reading h4, .focus-reading h5, .focus-reading h6 { line-height: 1.25; letter-spacing: -0.01em; }
 .focus-reading h1 { font-size: 1.6rem; margin: 1.4rem 0 0.6rem; }
