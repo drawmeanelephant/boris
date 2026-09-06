@@ -13,6 +13,7 @@ const recovery = @import("recovery.zig");
 const runner = @import("runner.zig");
 const security = @import("security.zig");
 const validation_daemon = @import("validation_daemon.zig");
+const watch_daemon = @import("watch_daemon.zig");
 
 pub const editor_id = "boris-editor/0.1.0";
 
@@ -25,6 +26,7 @@ pub const Config = struct {
     token: [32]u8,
     preview: *preview.Manager,
     daemon: *validation_daemon.Daemon,
+    watch: *watch_daemon.Daemon,
 };
 
 /// Async-signal-visible shutdown latch for SIGINT/SIGTERM (same contract as
@@ -174,6 +176,22 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
             if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
             return serveValidateState(allocator, request, config);
         }
+        if (std.mem.eql(u8, target, "/api/watch/start")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveWatchStart(allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/watch/stop")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveWatchStop(allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/watch/state")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            return serveWatchState(allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/watch/events")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            return serveWatchEvents(allocator, request, config);
+        }
         if (std.mem.eql(u8, target, "/api/authoring")) {
             if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
             const bytes = authoring.render(allocator, io, config.project_root) catch |err| return respondApiError(request, err);
@@ -198,6 +216,14 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         }
         if (std.mem.eql(u8, target, "/api/preview/rebuild")) {
             if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            // Dist-writer mutual exclusion: while the managed watch daemon
+            // owns `dist/` (including its backoff-restart window), a
+            // competing one-shot `boris build` would race it. Refuse with a
+            // distinct, honest state; stopping the watch daemon re-enables
+            // rebuild.
+            if (config.watch.distOwned()) {
+                return respondJson(request, .conflict, "{\"error\":\"watch_daemon_active\"}");
+            }
             config.preview.rebuild(allocator, io) catch |err| return respondApiError(request, err);
             return servePreviewState(allocator, request, config);
         }
@@ -220,7 +246,7 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
 }
 
 fn servePreviewState(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
-    const bytes = try config.preview.renderState(allocator, &config.token);
+    const bytes = try config.preview.renderState(allocator, &config.token, config.watch.distOwned());
     defer allocator.free(bytes);
     return respondJson(request, .ok, bytes);
 }
@@ -434,6 +460,62 @@ fn serveValidateState(allocator: std.mem.Allocator, request: *http.Server.Reques
     return respondJson(request, .ok, bytes);
 }
 
+/// Managed `boris watch --watch-json` daemon admin surface. Mutations wrap
+/// the same state object `/api/watch/state` returns with an honest outcome;
+/// the daemon is never lazy-started, so only `POST /api/watch/start` spawns
+/// it.
+fn serveWatchStart(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    if (config.watch.startRefusal()) |code| {
+        var buffer: [64]u8 = undefined;
+        const body = std.fmt.bufPrint(&buffer, "{{\"error\":\"{s}\"}}", .{code}) catch unreachable;
+        return respondJson(request, .conflict, body);
+    }
+    const bytes = try config.watch.startJson(allocator);
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
+fn serveWatchStop(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const bytes = try config.watch.stopJson(allocator);
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
+fn serveWatchState(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const bytes = try config.watch.stateJson(allocator);
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
+fn serveWatchEvents(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const after = parseAfterQuery(request.head.target) catch |err| return respondApiError(request, err);
+    const bytes = try config.watch.eventsJson(allocator, after orelse 0);
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
+/// Extract the bounded `after` cursor from `/api/watch/events?after=<seq>`.
+/// A missing parameter reads as 0 (the beginning of what is still buffered);
+/// anything malformed is a bad request, never silently truncated.
+fn parseAfterQuery(target: []const u8) !?u64 {
+    const query_start = std.mem.indexOfScalar(u8, target, '?') orelse return null;
+    var query = target[query_start + 1 ..];
+    if (query.len == 0) return null;
+    if (std.mem.endsWith(u8, query, "&")) query = query[0 .. query.len - 1];
+    var pairs = std.mem.splitScalar(u8, query, '&');
+    while (pairs.next()) |pair| {
+        const marker = "after=";
+        if (!std.mem.startsWith(u8, pair, marker)) continue;
+        const value = pair[marker.len..];
+        if (value.len == 0 or value.len > 20) return error.InvalidQuery;
+        for (value) |byte| {
+            if (byte < '0' or byte > '9') return error.InvalidQuery;
+        }
+        return std.fmt.parseInt(u64, value, 10) catch return error.InvalidQuery;
+    }
+    return null;
+}
+
 fn respondBuffer(
     allocator: std.mem.Allocator,
     request: *http.Server.Request,
@@ -471,6 +553,7 @@ fn readJsonBody(allocator: std.mem.Allocator, request: *http.Server.Request) ![]
 fn respondApiError(request: *http.Server.Request, err: anyerror) !void {
     const result: struct { status: http.Status, code: []const u8 } = switch (err) {
         error.InvalidJson => .{ .status = .bad_request, .code = "invalid_json" },
+        error.InvalidQuery => .{ .status = .bad_request, .code = "invalid_query" },
         error.InvalidPath => .{ .status = .bad_request, .code = "invalid_path" },
         error.PathNotAuthorOwned => .{ .status = .forbidden, .code = "path_not_author_owned" },
         error.FileNotFound => .{ .status = .not_found, .code = "file_not_found" },
@@ -512,8 +595,11 @@ fn methodNotAllowed(request: *http.Server.Request, allow: []const u8) !void {
 
 fn serveHealth(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
     // Cheap piggyback: the shell polls health every few seconds, so this keeps
-    // unexpected daemon deaths reaped without extra host traffic.
+    // unexpected daemon deaths reaped without extra host traffic. The watch
+    // daemon is only reaped here — recovery waits for a supervised
+    // /api/watch request so health never spawns a compiler process.
     config.daemon.poll();
+    config.watch.poll();
     const found = project.discover(io, config.project_root) catch project.Discovery{
         .content = false,
         .default_layout = false,
@@ -560,6 +646,7 @@ fn serveVersion(io: Io, allocator: std.mem.Allocator, request: *http.Server.Requ
             .publication_plan = [_]u8{1},
             .frontmatter = [_]u8{1},
             .validate_watch = config.daemon.watchSupported(),
+            .watch_json = config.watch.watchSupported(),
         },
     };
     const bytes = try std.json.Stringify.valueAlloc(allocator, response, .{});

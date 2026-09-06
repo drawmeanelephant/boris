@@ -452,8 +452,9 @@ pub const Daemon = struct {
 
 /// Bounded exponential backoff: 1s, 2s, 4s, … capped at 30s. The counter is
 /// reset on a fully parsed report cycle, so a healthy daemon never delays a
-/// restart.
-fn backoffDelay(failures: u32) i96 {
+/// restart. Shared with the managed watch daemon, which applies the same
+/// lifecycle to `boris watch --watch-json`.
+pub fn backoffDelay(failures: u32) i96 {
     if (failures == 0) return 0;
     var delay_ns: i96 = std.time.ns_per_s;
     var i: u32 = 1;
@@ -468,7 +469,7 @@ fn reportAgeMs(now: i96, report_mtime: i96) u64 {
     return @intCast(@divTrunc(now - report_mtime, std.time.ns_per_ms));
 }
 
-fn termFromStatus(status: u32) std.process.Child.Term {
+pub fn termFromStatus(status: u32) std.process.Child.Term {
     return if (std.posix.W.IFEXITED(status))
         .{ .exited = @intCast(std.posix.W.EXITSTATUS(status)) }
     else if (std.posix.W.IFSIGNALED(status))

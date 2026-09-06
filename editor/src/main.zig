@@ -12,6 +12,7 @@ const security = @import("security.zig");
 const server = @import("server.zig");
 const state_root = @import("state_root.zig");
 const validation_daemon = @import("validation_daemon.zig");
+const watch_daemon = @import("watch_daemon.zig");
 
 pub const editor_version = server.editor_id;
 
@@ -87,6 +88,17 @@ pub fn main(init: std.process.Init) u8 {
     });
     defer validation.deinit();
 
+    // One managed `boris watch --watch-json` daemon per project, started only
+    // by an explicit POST /api/watch/start; deinit applies the same
+    // SIGTERM-and-reap shutdown contract so no orphan survives the host.
+    var watch = watch_daemon.Daemon.init(allocator, init.io, .{
+        .project_root = canonical_project,
+        .boris_path = boris_path,
+        .state_root = cache_path,
+        .input_mode = found.input_mode,
+    });
+    defer watch.deinit();
+
     server.serve(init.io, allocator, .{
         .project_root = canonical_project,
         .ui_dir = options.ui_dir,
@@ -96,6 +108,7 @@ pub fn main(init: std.process.Init) u8 {
         .token = token,
         .preview = &preview_manager,
         .daemon = &validation,
+        .watch = &watch,
     }) catch |err| {
         std.debug.print("boris-editor: host failed: {s}\n", .{@errorName(err)});
         return 3;
@@ -193,4 +206,5 @@ test {
     _ = runner;
     _ = security;
     _ = validation_daemon;
+    _ = watch_daemon;
 }

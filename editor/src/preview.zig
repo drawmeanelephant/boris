@@ -74,7 +74,7 @@ pub const Manager = struct {
         }
     }
 
-    pub fn renderState(self: *const Manager, allocator: std.mem.Allocator, token: *const [32]u8) ![]u8 {
+    pub fn renderState(self: *const Manager, allocator: std.mem.Allocator, token: *const [32]u8, watch_active: bool) ![]u8 {
         const url = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}/?token={s}", .{ self.port, token });
         defer allocator.free(url);
         return std.json.Stringify.valueAlloc(allocator, .{
@@ -84,6 +84,11 @@ pub const Manager = struct {
             .used_stderr_fallback = self.used_stderr_fallback,
             .message = self.message[0..self.message_len],
             .preview_url = url,
+            // Honest coexistence signal: while a managed watch daemon owns
+            // the dist/ writer seat, rebuild requests are refused with
+            // `watch_daemon_active` and the tree refreshes come from the
+            // daemon's own cycles.
+            .watch_active = watch_active,
         }, .{});
     }
 
