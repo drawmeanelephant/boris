@@ -586,3 +586,29 @@ button that opened it.
 
 The overlay is presentation-only: no new endpoints, no parallel pipeline,
 and no second buffer.
+
+## Section navigation feedback
+
+The section nav under the header stays reachable and tells you where you
+landed. Links remain plain hash anchors (no-JS fallback); the component
+layers feedback on top:
+
+- **Sticky.** The nav pins below the viewport top; landed sections sit just
+  under it via a `scroll-margin-top` sized from the measured nav height
+  (`--section-nav-h`), not a hardcoded offset.
+- **Arrival highlight.** Activating a link focuses the target section and
+  pulses it briefly. Under `prefers-reduced-motion` the pulse collapses to
+  a static highlight.
+- **Scrollspy.** The link for the section at the reading top carries
+  `aria-current="true"` and an active pill; a bottom rule keeps the last
+  section current where the page clamps at max scroll. On narrow viewports
+  the active pill scrolls into the visible strip of the pill row, and edge
+  bars hint content beyond the clip.
+- **Focus hand-off.** Every nav target is a programmatic focus target
+  (`tabindex="-1"`); after a jump, the next Tab continues from the landed
+  section. Modifier-clicks keep native hash-link behavior.
+
+The Source pane's graph empty-state section is `id="graph-empty"`, distinct
+from the real GraphPane's `id="graph"` (they never render at the same
+time, but the ids no longer collide in queries). Presentation-only: no new
+endpoints, no pipeline changes.

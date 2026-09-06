@@ -29,7 +29,7 @@
   }
 </script>
 
-<section id="graph" class="graph-pane" aria-labelledby="graph-heading">
+<section id="graph" class="graph-pane" tabindex="-1" aria-labelledby="graph-heading">
   <div class="problems-heading">
     <div>
       <h3 id="graph-heading">Graph</h3>

@@ -102,7 +102,7 @@
     {/if}
   {:else}
     <p>Choose a file from Project files. Generated output and editor state are intentionally excluded.</p>
-    <section id="graph" class="graph-pane" aria-labelledby="graph-heading-empty">
+    <section id="graph-empty" class="graph-pane" tabindex="-1" aria-labelledby="graph-heading-empty">
       <h3 id="graph-heading-empty">Graph</h3>
       <p role="status" aria-label="Graph status" aria-live="polite">{graph.status}</p>
     </section>
