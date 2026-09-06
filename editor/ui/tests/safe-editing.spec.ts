@@ -269,6 +269,20 @@ async function installApi(page: Page, options: MockOptions = {}) {
     contentType: 'application/json',
     body: JSON.stringify(options.validateState ?? { supported: false, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 })
   }));
+  // Watch daemon endpoints (additive, #938): the default mock answers 404 —
+  // the shape of a host whose backend does not exist yet — so the shell's
+  // honest `supported: false` path is exercised in every test.
+  await page.route('**/api/watch/state', route => route.fulfill({
+    status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not_found' })
+  }));
+  await page.route('**/api/watch/events?*', route => route.fulfill({
+    status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not_found' })
+  }));
+  for (const endpoint of ['start', 'stop']) {
+    await page.route(`**/api/watch/${endpoint}`, route => route.fulfill({
+      status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not_found' })
+    }));
+  }
   await page.route('**/api/authoring', route => {
     const sequence = options.authoring ?? [authoringPayload()];
     const body = sequence[Math.min(authoringRequest, sequence.length - 1)];

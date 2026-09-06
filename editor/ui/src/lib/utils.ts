@@ -22,6 +22,7 @@ import type {
   RecipeScaleQuantity,
   Suggestion,
   ValidateState,
+  WatchStatePayload,
 } from './types';
 import { visibleFileLimit } from './types';
 
@@ -322,6 +323,108 @@ export function validationCycleLabel(state: ValidateState | null): string {
   return `Cycle ${state.cycle} · ${reportAgeLabel(state.report_age_ms)}`;
 }
 
+// --- watch daemon helpers (honest event + state naming) ---
+
+export type WatchEventTone = 'ok' | 'failure' | 'info';
+
+// Summarizes one compiler --watch-json NDJSON object for the bounded feed.
+// Shapes come from docs/contracts/watch-mode.md §8; unknown future events pass
+// through honestly named instead of being dropped or guessed.
+export function watchEventSummary(event: Record<string, unknown>): { kind: string; label: string; tone: WatchEventTone } {
+  const kind = typeof event.event === 'string' ? event.event : 'unknown';
+  if (kind === 'hello') {
+    const compiler = typeof event.compiler === 'string' ? event.compiler : 'unknown compiler';
+    return {
+      kind,
+      label: `Handshake: ${compiler} speaks watch events schema ${String(event.watch_events_schema ?? '?')}.`,
+      tone: 'info'
+    };
+  }
+  if (kind === 'build-started') {
+    return { kind, label: `Build started (${String(event.phase ?? 'build')}).`, tone: 'info' };
+  }
+  if (kind === 'build-succeeded') {
+    const pages = event.pages_written;
+    const pagesLabel = typeof pages === 'number'
+      ? `${pages} page${pages === 1 ? '' : 's'} written`
+      : 'no page count reported';
+    const duration = event.duration_ms;
+    const durationLabel = typeof duration === 'number' ? `${duration} ms` : 'duration not reported';
+    const changed = Array.isArray(event.changed) && event.changed.length > 0
+      ? ` Changed: ${(event.changed as unknown[]).map(String).join(', ')}.`
+      : '';
+    return { kind, label: `Build succeeded: ${pagesLabel} in ${durationLabel}.${changed}`, tone: 'ok' };
+  }
+  if (kind === 'build-failed') {
+    const errors = typeof event.errors === 'number' ? event.errors : null;
+    const count = errors !== null ? `${errors} error${errors === 1 ? '' : 's'}` : 'errors reported';
+    const first = firstWatchDiagnostic(event.diagnostics);
+    const recovery = event.recoverable === false
+      ? ' Not recoverable; supervision restarts the daemon.'
+      : '';
+    return { kind, label: `Build failed: ${count}${first ? ` — ${first}` : ''}.${recovery}`, tone: 'failure' };
+  }
+  if (kind === 'watcher-started') {
+    return { kind, label: 'Watcher is polling for changes.', tone: 'info' };
+  }
+  if (kind === 'serve-started') {
+    return { kind, label: `Watch serve bound ${String(event.url ?? 'a loopback port')}.`, tone: 'info' };
+  }
+  if (kind === 'watch-error') {
+    return { kind, label: `Watch error: ${String(event.message ?? 'unknown error')}.`, tone: 'failure' };
+  }
+  if (kind === 'watch-stopped') {
+    return { kind, label: `Watch stopped (${String(event.reason ?? 'shutdown')}).`, tone: 'info' };
+  }
+  return { kind, label: `Unrecognized watch event “${kind}” passed through by the compiler.`, tone: 'info' };
+}
+
+// First diagnostic line of a build-failed event: code + source + message,
+// byte-faithful to the build-report diagnostic shape (sourcePath, line).
+function firstWatchDiagnostic(diagnostics: unknown): string {
+  if (!Array.isArray(diagnostics)) return '';
+  const first = diagnostics.find(entry => typeof entry === 'object' && entry !== null) as Record<string, unknown> | undefined;
+  if (!first) return '';
+  const code = typeof first.code === 'string' ? first.code : '';
+  const line = typeof first.line === 'number' ? `:${first.line}` : '';
+  const source = typeof first.sourcePath === 'string' ? `${first.sourcePath}${line}` : '';
+  const message = typeof first.message === 'string' ? first.message : '';
+  return [code, source, message].filter(part => part !== '').join(' ');
+}
+
+export function watchUnsupportedLabel(): string {
+  return 'This Boris build does not support the watch daemon.';
+}
+
+export function watchStatusLabel(state: WatchStatePayload | null, supported: boolean | null): string {
+  if (supported === false) return watchUnsupportedLabel();
+  if (supported === null) return 'Checking whether this Boris build supports the watch daemon…';
+  if (!state) return 'Waiting for the watch daemon state…';
+  switch (state.state) {
+    case 'idle':
+      return 'Watch daemon is idle. Start it to build on change.';
+    case 'running':
+      return 'Watch daemon is running.';
+    case 'success':
+      return `Watch build succeeded (cycle ${state.cycle ?? 0}).`;
+    case 'failed':
+      return `Watch build failed (cycle ${state.cycle ?? 0}).`;
+    case 'stale':
+      return 'Watch daemon is restarting with backoff.';
+    default:
+      return 'Waiting for the watch daemon state…';
+  }
+}
+
+export function watchMetaLabel(state: WatchStatePayload | null): string {
+  if (!state) return '';
+  const parts = [`Compiler: ${state.compiler_id ?? '—'}`, `Cycle: ${state.cycle ?? '—'}`];
+  if (typeof state.dropped_lines === 'number' && state.dropped_lines > 0) {
+    parts.push(`Dropped lines: ${state.dropped_lines}`);
+  }
+  return parts.join(' · ');
+}
+
 // --- palette helpers ---
 
 export function paletteItemMatches(item: PaletteItem, needle: string): boolean {
@@ -343,6 +446,9 @@ export function paletteItemLabel(item: PaletteItem): string {
   if (item.kind === 'source') return 'Focus source pane';
   if (item.kind === 'parent') return 'Go to parent';
   if (item.kind === 'impact-here') return 'Run impact on this page';
+  if (item.kind === 'watch-start') return 'Start watch daemon';
+  if (item.kind === 'watch-stop') return 'Stop watch daemon';
+  if (item.kind === 'watch-go') return 'Go to watch';
   if (item.kind === 'entity') return `Go to ${item.id}`;
   return 'Open file';
 }
@@ -367,6 +473,9 @@ export function paletteItemDetailPure(
   if (item.kind === 'parent')
     return ctx?.parentNode ? `${ctx.parentNode.id}${ctx.parentNode.title ? ` · ${ctx.parentNode.title}` : ''}` : 'No parent in the Boris graph';
   if (item.kind === 'impact-here') return ctx?.activeNode ? ctx.activeNode.id : 'No graph page is open';
+  if (item.kind === 'watch-start') return 'Managed boris watch daemon';
+  if (item.kind === 'watch-stop') return 'Stop the managed watch daemon';
+  if (item.kind === 'watch-go') return 'Open the Watch pane';
   if (item.kind === 'entity') {
     const node = ctx?.graphPayload?.graph ? nodeForId(ctx.graphPayload.graph, item.id) : null;
     return node?.title ?? 'Boris graph entity';
@@ -405,6 +514,9 @@ export function paletteItemEnabledPure(
     activeNode: unknown | null;
     parentNode: unknown | null;
     previewPhase?: string;
+    watchSupported?: boolean | null;
+    watchInFlight?: boolean;
+    watchActive?: boolean;
   },
 ): boolean {
   if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return true;
@@ -413,6 +525,9 @@ export function paletteItemEnabledPure(
   if (item.kind === 'save') return ctx.dirty && !ctx.readOnly && !ctx.saveInFlight;
   if (item.kind === 'preview') return ctx.previewPhase !== 'running';
   if (item.kind === 'command') return !ctx.commandRunning;
+  if (item.kind === 'watch-start') return ctx.watchSupported === true && ctx.watchInFlight !== true && ctx.watchActive !== true;
+  if (item.kind === 'watch-stop') return ctx.watchSupported === true && ctx.watchInFlight !== true && ctx.watchActive === true;
+  if (item.kind === 'watch-go') return true;
   if (ctx.dirty) return false;
   return item.kind === 'create' || ctx.activePath !== '';
 }
