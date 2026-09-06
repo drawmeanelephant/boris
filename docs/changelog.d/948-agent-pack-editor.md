@@ -1,5 +1,5 @@
 <!--
-Filename: agent-pack-editor.md (placeholder; the orchestrator renames it to the PR number)
+Filename: 948-agent-pack-editor.md
 Keep exactly one category heading.
 -->
 
