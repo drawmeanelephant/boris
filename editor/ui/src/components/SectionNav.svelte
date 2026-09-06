@@ -52,6 +52,7 @@
   let canScrollEnd = $state(false);
 
   let arrivedTimer: ReturnType<typeof setTimeout> | undefined;
+  let resyncTimer: ReturnType<typeof setTimeout> | undefined;
   let arrivedElement: HTMLElement | undefined;
 
   function sectionFor(id: string): HTMLElement | null {
@@ -127,7 +128,8 @@
     // target now, and the scroll listener re-asserts viewport truth as the
     // (smooth) jump settles — or as soon as the author scrolls again.
     current = id;
-    setTimeout(syncCurrent, 600);
+    clearTimeout(resyncTimer);
+    resyncTimer = setTimeout(syncCurrent, 600);
   }
 
   function updateEdges() {
@@ -229,7 +231,10 @@
     updateEdges();
   });
 
-  $effect(() => () => clearTimeout(arrivedTimer));
+  $effect(() => () => {
+    clearTimeout(arrivedTimer);
+    clearTimeout(resyncTimer);
+  });
 </script>
 
 <nav
