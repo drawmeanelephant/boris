@@ -239,15 +239,17 @@ test('mobile pill row scrolls and the active pill stays reachable', async ({ pag
   expect(await row.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
   await navLink(page, 'Watch').click();
   await expect(page.locator('#watch')).toHaveClass(/arrived/, { timeout: 2_000 });
-  // The active pill was auto-scrolled into the visible strip.
-  const visible = await row.evaluate(el => {
+  // The active pill was auto-scrolled into the visible strip. Polled: the
+  // arrival class lands instantly, but the smooth jump is still animating
+  // and currency (hence the row's scroll position) settles only at the
+  // end of the scroll — poll for the end state, not a mid-flight frame.
+  await expect.poll(async () => row.evaluate(el => {
     const link = el.querySelector('a[href="#watch"]');
     if (!link) return false;
     const a = link.getBoundingClientRect();
     const r = el.getBoundingClientRect();
     return a.left >= r.left - 1 && a.right <= r.right + 1;
-  });
-  expect(visible).toBe(true);
+  })).toBe(true);
   // An edge bar shows on the untouched side; the worked-through side clears.
   await expect(nav.locator('.section-nav-fade-start')).toHaveCSS('opacity', '1');
 });
@@ -309,6 +311,40 @@ test('the open= launch param is consumed and not resurrected by nav clicks', asy
   await page.reload();
   await expect(page.getByRole('textbox', { name: /Source for/ })).toHaveCount(0);
   await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
+});
+
+test('the Graph nav link is honestly disabled while no file is open (#944)', async ({ page }) => {
+  await installApi(page);
+  const graph = navLink(page, 'Graph');
+  await expect(graph).toHaveAttribute('aria-disabled', 'true');
+  await expect(graph).toHaveAttribute('title', 'Graph is available once a file is open.');
+  // An absent section can never be current.
+  await expect(graph).not.toHaveAttribute('aria-current');
+
+  // Activation is a no-op that explains itself via the editing status —
+  // no jump, no arrival pulse, no URL write. force: because Playwright's
+  // actionability check refuses aria-disabled elements, while a real
+  // user's click still fires the handler.
+  await graph.click({ force: true });
+  await expect(page.locator('#graph')).toHaveCount(0);
+  await expect(page.locator('#graph-empty')).toBeVisible();
+  await expect(page.locator('.section-nav')).toHaveAttribute('data-arrived', '');
+  expect(new URL(page.url()).hash).not.toContain('section=graph');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Graph is available once a file is open.');
+});
+
+test('the Graph nav link returns to full behavior once a file is open', async ({ page }) => {
+  await installApi(page);
+  await expect(navLink(page, 'Graph')).toHaveAttribute('aria-disabled', 'true');
+
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+  const graph = navLink(page, 'Graph');
+  await expect(graph).not.toHaveAttribute('aria-disabled');
+
+  await graph.click();
+  await expect(page.locator('#graph')).toHaveClass(/arrived/, { timeout: 2_000 });
+  await expect(graph).toHaveAttribute('aria-current', 'true');
 });
 
 test('modifier-click keeps the native hash-link behavior', async ({ page }) => {

@@ -652,6 +652,20 @@
     document.getElementById('watch')?.focus();
   }
 
+  // Nav targets whose pane is absent right now (#944): Graph exists only
+  // once a file is open — with none, the Source pane shows its graph-empty
+  // status band instead, so there is nothing to jump to. The reason is
+  // routed to the editing-status live region so a click on the disabled
+  // link says why instead of failing silently.
+  function navUnavailable(): Record<string, string> {
+    if (buffer.activePath) return {};
+    return { graph: 'Graph is available once a file is open.' };
+  }
+
+  function reportBlockedNav(reason: string) {
+    buffer.editorStatus = reason;
+  }
+
   async function renameFile() {
     const newPath = dialogs.renamePath.trim();
     if (!buffer.activePath || !newPath) return;
@@ -827,7 +841,7 @@
 
 <Header connection={connection.status} />
 
-<SectionNav />
+<SectionNav unavailable={navUnavailable()} onBlockedNav={reportBlockedNav} />
 
 <RecoveryBanner onRestore={restoreSnapshot} onDiscard={clearRecovery} />
 

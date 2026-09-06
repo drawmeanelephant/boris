@@ -612,6 +612,11 @@ layers feedback on top:
   `#token=…&section=<id>` instead of a bare `#<id>` — reloading after a
   jump stays authenticated. The consumed `open=` launch path is dropped,
   not carried forward, so a reload never re-opens the file.
+- **Unavailable targets say so.** Graph exists only once a file is open;
+  until then its nav link is presented disabled (`aria-disabled`, muted
+  style, tooltip) and activating it reports the reason through the
+  editing status instead of silently doing nothing. The link re-enables
+  automatically when a file opens.
 
 The Source pane's graph empty-state section is `id="graph-empty"`, distinct
 from the real GraphPane's `id="graph"` (they never render at the same

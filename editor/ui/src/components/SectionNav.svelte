@@ -13,7 +13,22 @@
   //    viewports, and the active pill scrolls into view. The bars are
   //    siblings of the scrollable row (not children) so they never scroll
   //    away or clip with the content.
+  //  - unavailable targets: a nav link whose pane is absent (Graph only
+  //    exists once a file is open) is presented disabled and explains
+  //    itself on activation instead of silently doing nothing (#944).
   type SectionLink = { id: string; label: string };
+
+  type Props = {
+    // Section ids whose target pane is currently absent, mapped to a short
+    // human reason. Absent targets render aria-disabled with the reason as
+    // their title; activation is a no-op that reports the reason.
+    unavailable?: Record<string, string>;
+    // Receives the reason for a click on an unavailable target; App routes
+    // it to the editing-status live region.
+    onBlockedNav?: (reason: string) => void;
+  };
+
+  let { unavailable = {}, onBlockedNav }: Props = $props();
 
   const links: SectionLink[] = [
     { id: 'project', label: 'Project' },
@@ -89,6 +104,15 @@
   // URL and behavior in one place; href remains the no-JS fallback.
   function handleNav(event: MouseEvent, id: string) {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    // An absent target never jumps and never touches the URL (#944); the
+    // reason goes to the App's live region so the no-op says why. Enter on
+    // a focused link lands here too.
+    const reason = unavailable[id];
+    if (reason) {
+      event.preventDefault();
+      onBlockedNav?.(reason);
+      return;
+    }
     const section = sectionFor(id);
     if (!section) return;
     event.preventDefault();
@@ -99,6 +123,11 @@
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     section.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
     announceArrival(id);
+    // Activation feedback is instant: currency points at the intended
+    // target now, and the scroll listener re-asserts viewport truth as the
+    // (smooth) jump settles — or as soon as the author scrolls again.
+    current = id;
+    setTimeout(syncCurrent, 600);
   }
 
   function updateEdges() {
@@ -137,7 +166,10 @@
       const section = sectionFor(id);
       if (!section) continue;
       const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
-      if (section.getBoundingClientRect().top <= navHeight + margin) best = id;
+      // 1px tolerance: a landed section can rest a subpixel below the line
+      // after scrollIntoView rounding, which must not hand currency back to
+      // the section behind it.
+      if (section.getBoundingClientRect().top <= navHeight + margin + 1) best = id;
     }
     current = best ?? links[0].id;
   }
@@ -214,6 +246,8 @@
         href="#{id}"
         onclick={(event) => handleNav(event, id)}
         aria-current={current === id ? 'true' : undefined}
+        aria-disabled={unavailable[id] ? 'true' : undefined}
+        title={unavailable[id]}
       >{label}</a>
     {/each}
   </div>
