@@ -5,4 +5,5 @@
   <a href="#publication">Publication</a>
   <a href="#problems">Problems</a>
   <a href="#preview">Preview</a>
+  <a href="#watch">Watch</a>
 </nav>

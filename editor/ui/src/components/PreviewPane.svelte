@@ -52,6 +52,9 @@
       <strong>{preview.data?.phase ?? 'idle'}:</strong> {preview.status}
     </p>
   {/key}
+  {#if preview.data?.watch_active || preview.watchRefusal}
+    <p class="warning-text" role="status" aria-label="Watch daemon active note">The watch daemon is active: Boris builds run on the daemon's cycle and manual rebuild is refused. Stop the watch daemon in the Watch pane to rebuild by hand.</p>
+  {/if}
   {#if preview.data?.used_stderr_fallback}
     <p class="fallback-notice">Rich HTML diagnostics are unavailable; this failure message comes from bounded Boris stderr.</p>
   {/if}

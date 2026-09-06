@@ -12,6 +12,7 @@ import { graph, activeNode, parentNode } from './graph.svelte';
 import { problems } from './problems.svelte';
 import { project } from './project.svelte';
 import { preview } from './preview.svelte';
+import { watch, watchStartEnabled, watchStopEnabled } from './watch.svelte';
 
 export const palette = $state({
   query: '',
@@ -55,6 +56,14 @@ export function paletteItems(): PaletteItem[] {
   for (const item of commands) {
     if (matches(item)) items.push(item);
   }
+  // Watch daemon commands exist only when the host answered the state probe;
+  // against a pre-#938 host the palette stays exactly as it was.
+  if (watch.supported === true) {
+    const watchCommands: PaletteItem[] = [{ kind: 'watch-start' }, { kind: 'watch-stop' }, { kind: 'watch-go' }];
+    for (const item of watchCommands) {
+      if (matches(item)) items.push(item);
+    }
+  }
   const entryCap = needle ? visibleFileLimit : unfilteredPaletteEntryLimit;
   let entities = 0;
   for (const node of graph.payload?.graph?.nodes ?? []) {
@@ -84,6 +93,9 @@ export function paletteEnabled(): Map<string, boolean> {
       if (item.kind === 'save') return [paletteItemKey(item), dirty() && !buffer.readOnly && !buffer.saveInFlight] as const;
       if (item.kind === 'preview') return [paletteItemKey(item), preview.data?.phase !== 'running'] as const;
       if (item.kind === 'command') return [paletteItemKey(item), !problems.running] as const;
+      if (item.kind === 'watch-start') return [paletteItemKey(item), watchStartEnabled()] as const;
+      if (item.kind === 'watch-stop') return [paletteItemKey(item), watchStopEnabled()] as const;
+      if (item.kind === 'watch-go') return [paletteItemKey(item), true] as const;
       if (dirty()) return [paletteItemKey(item), false] as const;
       return [paletteItemKey(item), item.kind === 'create' || buffer.activePath !== ''] as const;
     })

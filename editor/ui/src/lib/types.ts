@@ -17,6 +17,7 @@ export type Version = {
     publication_plan?: number[];
     frontmatter?: number[];
     validate_watch?: boolean;
+    watch_json?: boolean;
   };
 };
 
@@ -27,6 +28,50 @@ export type ValidateState = {
   failure_class?: FailureClass | null;
   problems_count?: number;
   report_age_ms?: number | null;
+};
+
+// --- managed watch daemon (editor host watch-admin backend) ---
+
+// Daemon state names mirror /api/validate-state exactly: idle (no managed
+// daemon), running (process alive or a build in flight), success/failed (the
+// last completed build's outcome), stale (dead; supervision restarts it with
+// bounded backoff). Never fabricated into a mid-cycle state.
+export type WatchStateName = 'idle' | 'running' | 'success' | 'failed' | 'stale';
+
+// `event` is the compiler's exact --watch-json NDJSON object (the contracted
+// stream keyed off the `event` field); unknown future events pass through.
+export type WatchEventRecord = { seq: number; event: Record<string, unknown> };
+
+export type WatchStatePayload = {
+  supported?: boolean;
+  state?: WatchStateName;
+  seq?: number;
+  cycle?: number;
+  events_count?: number;
+  oldest_seq?: number | null;
+  dropped_lines?: number;
+  last_event?: Record<string, unknown> | null;
+  compiler_id?: string | null;
+  hello_schema?: string | null;
+  last_error?: string | null;
+};
+
+export type WatchStartResponse = {
+  status: 'started' | 'already-running' | 'backing-off';
+  state?: WatchStatePayload;
+};
+
+export type WatchStopResponse = {
+  status: 'stopped' | 'not-running';
+  state?: WatchStatePayload;
+};
+
+export type WatchEventsResponse = {
+  supported?: boolean;
+  seq?: number;
+  oldest_seq?: number | null;
+  gap?: boolean;
+  events?: WatchEventRecord[];
 };
 
 export type FileEntry = { path: string };
@@ -73,6 +118,9 @@ export type PaletteItem =
   | { kind: 'source' }
   | { kind: 'parent' }
   | { kind: 'impact-here' }
+  | { kind: 'watch-start' }
+  | { kind: 'watch-stop' }
+  | { kind: 'watch-go' }
   | { kind: 'entity'; id: string }
   | { kind: 'open'; path: string };
 
@@ -222,6 +270,7 @@ export type PreviewState = {
   used_stderr_fallback: boolean;
   message: string;
   preview_url: string;
+  watch_active?: boolean;
 };
 
 export type GraphEndpoint = { type: 'page' | 'source'; value: string };

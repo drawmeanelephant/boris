@@ -37,8 +37,15 @@
   import { authoring, suggestions, refreshAuthoring, setAuthoring } from './lib/state/authoring.svelte';
   import { graph, activeNode, parentNode, refreshGraph, setGraph } from './lib/state/graph.svelte';
   import { publication, refreshPublication, setPublication } from './lib/state/publication.svelte';
-  import { preview, setPreview } from './lib/state/preview.svelte';
+  import { preview, setPreview, noteWatchRefusal } from './lib/state/preview.svelte';
   import { problems, copyDiagnosticPacket, scheduleValidateRefresh, startValidateWatch } from './lib/state/problems.svelte';
+  import {
+    startWatchStateWatch,
+    startWatchDaemon,
+    stopWatchDaemon,
+    watchStartEnabled,
+    watchStopEnabled
+  } from './lib/state/watch.svelte';
   import { palette, paletteItems, paletteEnabled } from './lib/state/palette.svelte';
   import { dialogs, resolutionPrompt, resolutionVerb, openModal, restoreDialogFocus } from './lib/state/dialogs.svelte';
   import Header from './components/Header.svelte';
@@ -48,6 +55,7 @@
   import SourcePane from './components/SourcePane.svelte';
   import ProblemsPane from './components/ProblemsPane.svelte';
   import PreviewPane from './components/PreviewPane.svelte';
+  import WatchPane from './components/WatchPane.svelte';
   import ConflictDialog from './dialogs/ConflictDialog.svelte';
   import ResolutionDialog from './dialogs/ResolutionDialog.svelte';
   import CreateDialog from './dialogs/CreateDialog.svelte';
@@ -135,6 +143,7 @@
       startHostWatch();
       startDiskWatch();
       if (connection.validateDaemon) startValidateWatch();
+      startWatchStateWatch();
     } catch {
       noteHostUnavailable();
       markConnectFailed();
@@ -233,6 +242,7 @@
       await requestResolution({ action: 'preview', reason });
       return;
     }
+    const previousData = preview.data;
     if (preview.data) preview.data = { ...preview.data, phase: 'running' };
     const started = Date.now();
     preview.status = reason === 'save' ? 'Saved. Boris preview build is running…' : 'Boris preview build is running…';
@@ -240,6 +250,12 @@
     if (result.response.ok) {
       setPreview(result.data as PreviewState);
       preview.status = `${preview.status} (${elapsedLabel(started)})`;
+    } else if ((result.data as ErrorResponse).error === 'watch_daemon_active') {
+      // The managed watch daemon owns the dist/ writer seat: undo the
+      // optimistic running phase and surface the refusal with a pointer to
+      // the Watch pane instead of a generic host failure.
+      if (previousData) preview.data = previousData;
+      noteWatchRefusal();
     } else preview.status = `Preview host failed: ${(result.data as ErrorResponse).error ?? 'request failed'}. Existing output is not current.`;
   }
 
@@ -546,6 +562,9 @@
     if (item.kind === 'save') return dirty() && !buffer.readOnly && !buffer.saveInFlight;
     if (item.kind === 'preview') return preview.data?.phase !== 'running';
     if (item.kind === 'command') return !problems.running;
+    if (item.kind === 'watch-start') return watchStartEnabled();
+    if (item.kind === 'watch-stop') return watchStopEnabled();
+    if (item.kind === 'watch-go') return true;
     if (dirty()) return false;
     return item.kind === 'create' || buffer.activePath !== '';
   }
@@ -601,6 +620,9 @@
     else if (item.kind === 'command') void runCommand(item.mode);
     else if (item.kind === 'preview') void rebuildPreview('manual');
     else if (item.kind === 'source') focusSourcePane();
+    else if (item.kind === 'watch-start') void startWatchDaemon();
+    else if (item.kind === 'watch-stop') void stopWatchDaemon();
+    else if (item.kind === 'watch-go') focusWatchPane();
     else if (item.kind === 'parent') void openGraphNode(parentNode());
     else if (item.kind === 'impact-here') void runImpactOnCurrent();
     else if (item.kind === 'entity') void openGraphNode(nodeForId(graph.payload?.graph ?? null, item.id));
@@ -614,6 +636,10 @@
       return;
     }
     document.getElementById('source')?.focus();
+  }
+
+  function focusWatchPane() {
+    document.getElementById('watch')?.focus();
   }
 
   async function renameFile() {
@@ -781,6 +807,7 @@
       onNavigate={navigateToProblem}
     />
     <PreviewPane onRebuild={() => rebuildPreview('manual')} />
+    <WatchPane />
   </div>
 </main>
 
