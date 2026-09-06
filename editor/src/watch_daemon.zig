@@ -564,6 +564,13 @@ pub const Daemon = struct {
 
     fn ingestLine(self: *Daemon, raw_line: []const u8) void {
         const ingest = self.log.ingestLine(raw_line);
+        // After an explicit stop the daemon is parked idle by contract. The
+        // dying process may still flush trailing spool lines — a build
+        // boundary that raced the SIGTERM — so late events land in the log
+        // as factual history (seq, cycle, ring) but must not resurrect the
+        // lifecycle state of a parked daemon. `start()` clears the flag
+        // before spawning, so a fresh daemon's events apply normally.
+        if (self.explicitly_stopped) return;
         switch (ingest.kind) {
             .hello => {
                 if (ingest.schema_mismatch) {
@@ -772,6 +779,41 @@ test "cooklang projects append the compiler selector" {
     const argv = try daemon.daemonArgv();
     defer gpa.free(argv);
     try std.testing.expectEqualStrings("--cooklang", argv[argv.len - 1]);
+}
+
+test "a late build-started in the spool cannot resurrect a parked daemon" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try temp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root);
+    const state_root = try std.fmt.allocPrint(gpa, "{s}/state", .{root});
+    defer gpa.free(state_root);
+    try temp.dir.createDirPath(io, "state");
+    try temp.dir.writeFile(io, .{
+        .sub_path = "state/watch-events.ndjson",
+        .data = "{\"event\":\"build-started\",\"phase\":\"initial\"}\n",
+    });
+
+    var daemon: Daemon = .init(gpa, io, .{
+        .project_root = "/private/project",
+        .boris_path = "boris",
+        .state_root = state_root,
+        .input_mode = .markdown,
+    });
+    defer daemon.deinit();
+
+    // The CI race, pinned: a build boundary event from the dying process is
+    // still unconsumed in the spool when the explicit stop lands. The stop
+    // parks idle and then drains one last time; that final drain must record
+    // the late event as history (seq consumed, cycle counted) without
+    // flipping the lifecycle state out of idle.
+    daemon.state = .running;
+    daemon.stop();
+    try std.testing.expectEqual(State.idle, daemon.state);
+    try std.testing.expectEqual(@as(u64, 1), daemon.log.seq);
+    try std.testing.expectEqualStrings("build-started", daemon.log.last_name.?);
 }
 
 test "explicit stop clears crash residue so the post-stop state reads idle" {

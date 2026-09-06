@@ -316,7 +316,18 @@ done
 # Explicit stop: graceful SIGTERM + reap, no orphan, honest idle state, and
 # the dist/ writer seat returns to the preview rebuild path.
 post_api "$work/stop.json" '/api/watch/stop'
-node -e 'const s = require(process.argv[1]); if (s.status !== "stopped" || s.state.state !== "idle") throw Error("stop did not park the daemon: " + JSON.stringify(s));' "$work/stop.json"
+node -e 'const s = require(process.argv[1]); if (s.status !== "stopped") throw Error("stop did not park the daemon: " + JSON.stringify(s));' "$work/stop.json"
+# The stop response may embed the final state snapshot taken while the
+# daemon's last spool bytes drain; the parked state must read idle on the
+# next read regardless of what the dying process flushed. (The state
+# endpoint returns the state object directly: `state` is the string.)
+for _ in $(seq 1 50); do
+  get_api "$work/stop-state.json" '/api/watch/state'
+  s=$(node -e 'const s = require(process.argv[1]); process.stdout.write(s.state);' "$work/stop-state.json")
+  [[ "$s" == "idle" ]] && break
+  sleep 0.1
+done
+[[ "$(node -e 'const s = require(process.argv[1]); process.stdout.write(s.state);' "$work/stop-state.json")" == "idle" ]] || { echo "watch state never settled to idle after stop" >&2; exit 1; }
 for _ in $(seq 1 50); do
   [[ "$(watch_count)" == "0" ]] && break
   sleep 0.1
