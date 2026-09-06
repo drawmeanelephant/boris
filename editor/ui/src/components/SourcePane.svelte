@@ -18,7 +18,8 @@
     onImpact,
     onScale,
     onReset,
-    onRunPlan
+    onRunPlan,
+    onEnterFocus
   }: {
     onSave: () => void;
     onNavigate: (problem: Problem) => void;
@@ -28,7 +29,10 @@
     onScale: () => void;
     onReset: () => void;
     onRunPlan: () => void;
+    onEnterFocus: (trigger: HTMLElement | null) => void;
   } = $props();
+
+  let focusEntry = $state() as HTMLButtonElement | undefined;
 </script>
 
 <section id="source" class="source-pane" tabindex="-1" aria-labelledby="source-heading">
@@ -38,6 +42,12 @@
       <p class="path">{buffer.activePath || 'No file selected'}</p>
     </div>
     <div class="source-actions" aria-label="Editing actions">
+      <button
+        type="button"
+        bind:this={focusEntry}
+        onclick={() => onEnterFocus(focusEntry ?? null)}
+        title="Expand to a full-screen writing surface (Esc returns)"
+      >Focus</button>
       <button type="button" disabled={buffer.undoStack.length === 0 || buffer.readOnly} onclick={undo}>Undo</button>
       <button type="button" disabled={buffer.redoStack.length === 0 || buffer.readOnly} onclick={redo}>Redo</button>
       <button type="button" class="primary" disabled={!dirty() || buffer.readOnly || buffer.saveInFlight} onclick={onSave}>Save file</button>

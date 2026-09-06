@@ -444,6 +444,8 @@ export function paletteItemLabel(item: PaletteItem): string {
   if (item.kind === 'command') return commandLabel(item.mode);
   if (item.kind === 'preview') return 'Rebuild preview';
   if (item.kind === 'source') return 'Focus source pane';
+  if (item.kind === 'focus-enter') return 'Enter focus writing mode';
+  if (item.kind === 'focus-exit') return 'Exit focus writing mode';
   if (item.kind === 'parent') return 'Go to parent';
   if (item.kind === 'impact-here') return 'Run impact on this page';
   if (item.kind === 'watch-start') return 'Start watch daemon';
@@ -470,6 +472,8 @@ export function paletteItemDetailPure(
   if (item.kind === 'command') return 'Boris command';
   if (item.kind === 'preview') return 'Rebuild the published output';
   if (item.kind === 'source') return 'Jump to the editor';
+  if (item.kind === 'focus-enter') return 'Full-screen writing surface';
+  if (item.kind === 'focus-exit') return 'Back to the workspace';
   if (item.kind === 'parent')
     return ctx?.parentNode ? `${ctx.parentNode.id}${ctx.parentNode.title ? ` · ${ctx.parentNode.title}` : ''}` : 'No parent in the Boris graph';
   if (item.kind === 'impact-here') return ctx?.activeNode ? ctx.activeNode.id : 'No graph page is open';
@@ -503,35 +507,11 @@ export function paletteItemKey(item: PaletteItem): string {
   return item.kind;
 }
 
-export function paletteItemEnabledPure(
-  item: PaletteItem,
-  ctx: {
-    commandRunning: boolean;
-    dirty: boolean;
-    readOnly: boolean;
-    saveInFlight: boolean;
-    activePath: string;
-    activeNode: unknown | null;
-    parentNode: unknown | null;
-    previewPhase?: string;
-    watchSupported?: boolean | null;
-    watchInFlight?: boolean;
-    watchActive?: boolean;
-  },
-): boolean {
-  if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return true;
-  if (item.kind === 'parent') return ctx.parentNode !== null;
-  if (item.kind === 'impact-here') return ctx.activeNode !== null && !ctx.commandRunning;
-  if (item.kind === 'save') return ctx.dirty && !ctx.readOnly && !ctx.saveInFlight;
-  if (item.kind === 'preview') return ctx.previewPhase !== 'running';
-  if (item.kind === 'command') return !ctx.commandRunning;
-  if (item.kind === 'watch-start') return ctx.watchSupported === true && ctx.watchInFlight !== true && ctx.watchActive !== true;
-  if (item.kind === 'watch-stop') return ctx.watchSupported === true && ctx.watchInFlight !== true && ctx.watchActive === true;
-  if (item.kind === 'watch-go') return true;
-  if (ctx.dirty) return false;
-  return item.kind === 'create' || ctx.activePath !== '';
-}
-
+// Palette gating lives in ONE place: `paletteEnabled` in
+// `lib/state/palette.svelte.ts`. The former `paletteItemEnabledPure` twin in
+// this file was deleted: it had drifted (focus-enter/exit returned true
+// unconditionally) and had no callers. `App.svelte` consumes the state
+// module's map; new palette kinds must extend `paletteEnabled`.
 export function fileTreeAnnouncement(total: number, matched: number, shown: number, query: string): string {
   if (total === 0) return '';
   const needle = query.trim();

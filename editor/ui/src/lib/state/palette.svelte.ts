@@ -8,6 +8,7 @@ import { unfilteredPaletteEntryLimit, visibleFileLimit } from '../types';
 import { paletteItemDetailPure, paletteItemKey, paletteItemLabel } from '../utils';
 import type { PaletteItem } from '../types';
 import { buffer, dirty } from './buffer.svelte';
+import { focusMode } from './focus.svelte';
 import { graph, activeNode, parentNode } from './graph.svelte';
 import { problems } from './problems.svelte';
 import { project } from './project.svelte';
@@ -50,6 +51,8 @@ export function paletteItems(): PaletteItem[] {
     { kind: 'command', mode: 'plan' },
     { kind: 'preview' },
     { kind: 'source' },
+    { kind: 'focus-enter' },
+    { kind: 'focus-exit' },
     { kind: 'parent' },
     { kind: 'impact-here' }
   ];
@@ -88,6 +91,8 @@ export function paletteEnabled(): Map<string, boolean> {
   return new Map<string, boolean>(
     paletteItems().map(item => {
       if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return [paletteItemKey(item), true] as const;
+      if (item.kind === 'focus-enter') return [paletteItemKey(item), !focusMode.open] as const;
+      if (item.kind === 'focus-exit') return [paletteItemKey(item), focusMode.open] as const;
       if (item.kind === 'parent') return [paletteItemKey(item), parentNode() !== null] as const;
       if (item.kind === 'impact-here') return [paletteItemKey(item), activeNode() !== null && !problems.running] as const;
       if (item.kind === 'save') return [paletteItemKey(item), dirty() && !buffer.readOnly && !buffer.saveInFlight] as const;
