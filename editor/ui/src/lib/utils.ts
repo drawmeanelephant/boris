@@ -444,6 +444,8 @@ export function paletteItemLabel(item: PaletteItem): string {
   if (item.kind === 'command') return commandLabel(item.mode);
   if (item.kind === 'preview') return 'Rebuild preview';
   if (item.kind === 'source') return 'Focus source pane';
+  if (item.kind === 'focus-enter') return 'Enter focus writing mode';
+  if (item.kind === 'focus-exit') return 'Exit focus writing mode';
   if (item.kind === 'parent') return 'Go to parent';
   if (item.kind === 'impact-here') return 'Run impact on this page';
   if (item.kind === 'watch-start') return 'Start watch daemon';
@@ -470,6 +472,8 @@ export function paletteItemDetailPure(
   if (item.kind === 'command') return 'Boris command';
   if (item.kind === 'preview') return 'Rebuild the published output';
   if (item.kind === 'source') return 'Jump to the editor';
+  if (item.kind === 'focus-enter') return 'Full-screen writing surface';
+  if (item.kind === 'focus-exit') return 'Back to the workspace';
   if (item.kind === 'parent')
     return ctx?.parentNode ? `${ctx.parentNode.id}${ctx.parentNode.title ? ` · ${ctx.parentNode.title}` : ''}` : 'No parent in the Boris graph';
   if (item.kind === 'impact-here') return ctx?.activeNode ? ctx.activeNode.id : 'No graph page is open';
@@ -519,7 +523,7 @@ export function paletteItemEnabledPure(
     watchActive?: boolean;
   },
 ): boolean {
-  if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return true;
+  if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity' || item.kind === 'focus-enter' || item.kind === 'focus-exit') return true;
   if (item.kind === 'parent') return ctx.parentNode !== null;
   if (item.kind === 'impact-here') return ctx.activeNode !== null && !ctx.commandRunning;
   if (item.kind === 'save') return ctx.dirty && !ctx.readOnly && !ctx.saveInFlight;

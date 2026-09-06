@@ -267,6 +267,289 @@ button.primary kbd { background: var(--kbd-on-accent-bg); }
 .comparison textarea, dialog > textarea { min-height: 13rem; }
 footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
 
+.visually-hidden-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- Focus writing mode --------------------------------------------------
+   The full-screen writing overlay. Reuses the shared buffer state, so the
+   layout is new but every interaction (undo/redo/save/recovery) is the
+   shell's existing machinery. Geometry is honest: the overlay pins to the
+   viewport, the writing surface takes the remaining height, and both
+   surfaces scroll independently. */
+.focus-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-canvas);
+}
+.focus-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-header);
+  color: var(--color-header-text);
+  border-bottom: 0.2rem solid var(--color-accent);
+}
+.focus-title { display: flex; align-items: baseline; gap: var(--space-4); min-width: 0; }
+.focus-title h2 { margin: 0; font-size: var(--text-lg); letter-spacing: -0.01em; }
+.focus-title .path { margin: 0; color: var(--color-header-text); opacity: 0.8; }
+.focus-layouts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--header-chip-border);
+  border-radius: var(--radius-md);
+}
+.focus-layouts legend { padding: 0 0.3rem; font-size: var(--text-xs); font-weight: 700; }
+.focus-layouts label { display: inline-flex; align-items: center; gap: 0.3rem; margin: 0; font-weight: 500; }
+.focus-layouts input { width: auto; }
+.focus-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
+.focus-type { min-width: 0; }
+.focus-type summary {
+  align-self: center;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--header-chip-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-header-text);
+  background: var(--header-chip-bg);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.focus-type summary::-webkit-details-marker { display: none; }
+.focus-type summary:hover { background: var(--header-chip-bg-hover); }
+.focus-type[open] summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.focus-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(9rem, auto));
+  gap: var(--space-4);
+  padding: 0.75rem 0.9rem 0.9rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  border-top-left-radius: 0;
+  box-shadow: var(--shadow-3);
+}
+.focus-type-group { display: flex; flex-wrap: wrap; gap: 0.35rem 0.8rem; margin: 0; padding: 0; border: 0; }
+.focus-type-group legend { padding: 0 0 0.35rem; font-size: var(--text-xs); font-weight: 700; color: var(--color-text-muted); }
+.focus-type-group label { display: inline-flex; align-items: center; gap: 0.25rem; margin: 0; font-weight: 500; }
+.focus-type-group input { width: auto; }
+.focus-actions button {
+  min-height: 2.1rem;
+  padding: 0.3rem 0.75rem;
+  color: var(--color-header-text);
+  background: var(--header-chip-bg);
+  border: 1px solid var(--header-chip-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.focus-actions button:hover:not(:disabled) { background: var(--header-chip-bg-hover); border-color: var(--header-chip-border); }
+.focus-actions button.primary { color: var(--color-on-accent); background: var(--color-accent); border-color: var(--color-accent); }
+.focus-actions button.primary:hover:not(:disabled) { background: var(--color-accent-strong); border-color: var(--color-accent-strong); }
+.focus-surface { display: flex; flex: 1; min-height: 0; gap: var(--space-4); padding: var(--space-4) var(--space-5); }
+/* Typography preferences land here as data attributes and resolve into the
+   custom properties both focus surfaces consume. Measures are em-based so
+   they scale with the chosen text size; `wide` removes the cap entirely and
+   lets the reading surface's paragraph guard (72ch) keep prose honest. */
+.focus-surface {
+  --focus-font: var(--font-reading);
+  --focus-size: 1.05rem;
+  --focus-measure: 44em;
+}
+.focus-surface[data-face='sans'] { --focus-font: var(--font-sans); }
+.focus-surface[data-size='s'] { --focus-size: 0.95rem; }
+.focus-surface[data-size='m'] { --focus-size: 1.05rem; }
+.focus-surface[data-size='l'] { --focus-size: 1.2rem; }
+.focus-surface[data-size='xl'] { --focus-size: 1.35rem; }
+.focus-surface[data-measure='narrow'] { --focus-measure: 34em; }
+.focus-surface[data-measure='medium'] { --focus-measure: 44em; }
+.focus-surface[data-measure='wide'] { --focus-measure: none; }
+/* The editor surface is a shell: a dimming veil under the textarea (revealed
+   through a mask anchored to the caret's paragraph) and a hidden mirror that
+   measures caret/paragraph geometry for both writing aids. */
+.focus-editor-shell {
+  --zen-underlay: 0;
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.focus-editor-shell .focus-editor { position: relative; z-index: 1; }
+.zen-underlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  opacity: var(--zen-underlay);
+  pointer-events: none;
+  border-radius: var(--radius-lg);
+  background: var(--focus-zen-underlay);
+  transition: opacity var(--motion-base) var(--ease-out);
+}
+.focus-mirror {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  /* opacity instead of visibility: Chrome returns empty client rects for
+     ranges inside visibility:hidden subtrees, which would blind both aids. */
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  scrollbar-gutter: stable;
+  padding: var(--space-6) var(--space-7);
+  border: 1px solid transparent;
+  font: var(--focus-size)/1.7 var(--focus-font);
+  letter-spacing: 0.005em;
+}
+.focus-surface:not([data-measure='wide']) .focus-mirror {
+  max-width: var(--focus-measure);
+  margin-inline: auto;
+}
+.focus-editor {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  resize: none;
+  padding: var(--space-6) var(--space-7);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: var(--focus-size)/1.7 var(--focus-font);
+  letter-spacing: 0.005em;
+  /* Keep the mirror's line breaking identical to the textarea's across
+     platforms: reserved scrollbar gutter (Linux scrollbars consume width)
+     and identical long-word wrapping. */
+  scrollbar-gutter: stable;
+  overflow-wrap: break-word;
+}
+.focus-surface:not([data-measure='wide']) .focus-editor {
+  max-width: var(--focus-measure);
+  margin-inline: auto;
+}
+.focus-editor:focus-visible { outline-offset: 0; }
+.focus-reading {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-6) var(--space-7);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: var(--focus-size)/1.7 var(--focus-font);
+  letter-spacing: 0.005em;
+}
+.focus-surface:not([data-measure='wide']) .focus-reading {
+  max-width: var(--focus-measure);
+  margin-inline: auto;
+}
+.focus-reading:focus-visible { outline-offset: 0; }
+.focus-reading > :first-child { margin-top: 0; }
+.focus-reading h1, .focus-reading h2, .focus-reading h3,
+.focus-reading h4, .focus-reading h5, .focus-reading h6 { line-height: 1.25; letter-spacing: -0.01em; }
+.focus-reading h1 { font-size: 1.6rem; margin: 1.4rem 0 0.6rem; }
+.focus-reading h2 { font-size: 1.3rem; margin: 1.3rem 0 0.55rem; }
+.focus-reading h3 { font-size: 1.12rem; margin: 1.1rem 0 0.5rem; }
+.focus-reading h4, .focus-reading h5, .focus-reading h6 { font-size: 1rem; margin: 1rem 0 0.45rem; }
+.focus-reading p { margin: 0 0 0.9rem; }
+.focus-surface[data-measure='wide'] .focus-reading p { max-width: 72ch; }
+.focus-reading ul, .focus-reading ol { margin: 0 0 0.9rem; padding-left: 1.6rem; }
+.focus-reading li { margin-bottom: 0.3rem; }
+.focus-reading blockquote {
+  margin: 0 0 0.9rem;
+  padding: 0.2rem 0 0.2rem 1rem;
+  border-left: 0.3rem solid var(--color-accent-border);
+  color: var(--color-text-muted);
+}
+.focus-reading pre {
+  margin: 0 0 0.9rem;
+  padding: 0.85rem 1rem;
+  overflow: auto;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-sunken);
+}
+.focus-reading code { font: 0.92em/1.5 var(--font-mono); }
+.focus-reading pre code { font-size: 0.88rem; }
+.focus-reading hr { margin: 1.2rem 0; border: 0; border-top: 1px solid var(--color-border-soft); }
+.focus-reading a { color: var(--color-link); }
+.focus-wikilink {
+  padding: 0 0.2em;
+  border-bottom: 1px dashed var(--color-accent-border);
+  color: var(--color-link);
+}
+.focus-aside {
+  margin: 0 0 0.9rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-accent-border);
+  border-left-width: 0.3rem;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+}
+.focus-aside-title {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.focus-aside p:last-child { margin-bottom: 0; }
+.focus-aside-warning { border-color: var(--color-warn-border); background: var(--color-warn-soft); }
+.focus-aside-danger { border-color: var(--color-danger-border); background: var(--color-danger-soft); }
+.focus-aside-tip { border-color: var(--color-ok-border); background: var(--color-ok-soft); }
+.focus-aside-note { border-color: var(--color-accent-border); background: var(--color-accent-soft); }
+.focus-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.focus-status .warning { color: var(--color-danger); font-weight: 700; }
+.focus-words, .focus-caret { font-variant-numeric: tabular-nums; }
+.focus-editor-status { margin: 0; overflow-wrap: anywhere; }
+.focus-live { color: var(--color-text-faint); }
+
+@media (max-width: 52rem) {
+  .focus-surface[data-layout='split'] { flex-direction: column; }
+  .focus-editor, .focus-reading { padding: var(--space-4); }
+  .focus-type-grid { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-overlay { transition: none; }
+  .zen-underlay { transition: none; }
+}
+
 @media (max-width: 52rem) {
   header, .recovery-banner { display: block; }
   .connection, .recovery-banner ul { margin-top: var(--space-4); }

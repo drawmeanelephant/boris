@@ -528,3 +528,55 @@ SIGTERM reaping on both the explicit stop and editor shutdown (no orphan).
 Deliberate non-goals in this slice: no `--serve` (the host's own preview
 origin stays), no editor UI — the endpoints are the backend contract for a
 follow-up admin surface.
+
+## Focus writing mode
+
+The editor's full-page writing experience. The **Focus** button in the Source
+pane header (or `Enter focus writing mode` in the Ctrl+K command palette)
+expands the open buffer into a full-screen, word-processor style overlay;
+**Esc** (or `Exit focus`) returns to the workspace, restoring focus to the
+button that opened it.
+
+- **One buffer, one truth.** The overlay binds the same buffer state as the
+  Source pane: edits made in focus mode are the workspace's edits, undo/redo
+  and recovery snapshots are the shell's existing machinery, and saving
+  goes through the same fingerprinted save path (external-change conflicts
+  still route through the same dialogs).
+- **Layouts.** Write (writing surface only), Split (writing and reading side
+  by side), and Preview (reading only). The choice persists in
+  `localStorage` and is restored on the next session.
+- **Typography.** A disclosure in the overlay header controls the writing
+  surface's text size (S/M/L/XL), reading measure (Narrow/Medium/Wide —
+  Wide removes the cap and keeps prose honest with a per-paragraph guard),
+  and typeface (Serif/Sans). Choices persist per browser, are validated
+  field-by-field on load (a stale or corrupted entry falls back to the
+  default for that field), and apply identically to the writing and
+  reading surfaces.
+- **Writing aids.** Two opt-in aids under a second disclosure, both
+  persisted and validated on load. **Typewriter scrolling** keeps the
+  line being typed vertically centered (clamped honestly at the document
+  start and end, where centering is impossible). **Paragraph dimming**
+  veils the surface and keeps a bright window over the paragraph holding
+  the caret, driven by a hidden mirror element that measures paragraph
+  bands with identical wrapping metrics to the writing surface. The veil
+  is a masked overlay on the writing surface only — it never intercepts
+  clicks, and it lifts entirely when the caret's paragraph fills the
+  view. Both aids pause by construction in Preview layout (no writing
+  surface to assist) and honor the reduced-motion posture.
+- **The reading aid is a reading aid.** Split/Preview render a bounded,
+  dependency-free subset of the authoring grammar — ATX headings,
+  paragraphs, emphasis, inline code, fenced code blocks, block quotes,
+  flat lists, thematic breaks, wiki links, and the Aside tokens — so the
+  page takes shape while typing. It never claims to be the compiled page:
+  wiki links render as non-navigable spans (the aid has no route graph),
+  and the honest compiled preview stays in the workspace Preview pane (the
+  overlay's Rebuild preview button runs the same rebuild and reports the
+  build phase in its status bar).
+- **Safety.** All rendered text is escaped; only `http(s)` link targets
+  become real anchors; the output is assigned inside the same
+  scriptless posture as the preview frame.
+- **Empty state.** With no file open the overlay says so honestly instead
+  of showing an editor bound to nothing.
+
+The overlay is presentation-only: no new endpoints, no parallel pipeline,
+and no second buffer.

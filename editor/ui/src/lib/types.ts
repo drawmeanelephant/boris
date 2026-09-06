@@ -116,6 +116,8 @@ export type PaletteItem =
   | { kind: 'command'; mode: CommandMode }
   | { kind: 'preview' }
   | { kind: 'source' }
+  | { kind: 'focus-enter' }
+  | { kind: 'focus-exit' }
   | { kind: 'parent' }
   | { kind: 'impact-here' }
   | { kind: 'watch-start' }

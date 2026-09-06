@@ -37,7 +37,8 @@
   import { authoring, suggestions, refreshAuthoring, setAuthoring } from './lib/state/authoring.svelte';
   import { graph, activeNode, parentNode, refreshGraph, setGraph } from './lib/state/graph.svelte';
   import { publication, refreshPublication, setPublication } from './lib/state/publication.svelte';
-  import { preview, setPreview, noteWatchRefusal } from './lib/state/preview.svelte';
+  import { preview, setPreview, noteWatchRefusal, refreshPreviewState } from './lib/state/preview.svelte';
+  import { focusMode, openFocusMode, closeFocusMode, initFocusLayout, initFocusType, initFocusZen, focusReturnElement, setFocusReturn } from './lib/state/focus.svelte';
   import { problems, copyDiagnosticPacket, scheduleValidateRefresh, startValidateWatch } from './lib/state/problems.svelte';
   import {
     startWatchStateWatch,
@@ -49,6 +50,7 @@
   import { palette, paletteItems, paletteEnabled } from './lib/state/palette.svelte';
   import { dialogs, resolutionPrompt, resolutionVerb, openModal, restoreDialogFocus } from './lib/state/dialogs.svelte';
   import Header from './components/Header.svelte';
+  import FocusMode from './components/FocusMode.svelte';
   import SectionNav from './components/SectionNav.svelte';
   import RecoveryBanner from './components/RecoveryBanner.svelte';
   import ProjectPane from './components/ProjectPane.svelte';
@@ -557,6 +559,8 @@
 
   function paletteItemEnabled(item: PaletteItem): boolean {
     if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return true;
+    if (item.kind === 'focus-enter') return !focusMode.open;
+    if (item.kind === 'focus-exit') return focusMode.open;
     if (item.kind === 'parent') return parentNode() !== null;
     if (item.kind === 'impact-here') return activeNode() !== null && !problems.running;
     if (item.kind === 'save') return dirty() && !buffer.readOnly && !buffer.saveInFlight;
@@ -620,6 +624,8 @@
     else if (item.kind === 'command') void runCommand(item.mode);
     else if (item.kind === 'preview') void rebuildPreview('manual');
     else if (item.kind === 'source') focusSourcePane();
+    else if (item.kind === 'focus-enter') enterFocusMode();
+    else if (item.kind === 'focus-exit') exitFocusMode();
     else if (item.kind === 'watch-start') void startWatchDaemon();
     else if (item.kind === 'watch-stop') void stopWatchDaemon();
     else if (item.kind === 'watch-go') focusWatchPane();
@@ -630,6 +636,10 @@
   }
 
   function focusSourcePane() {
+    if (focusMode.open) {
+      document.getElementById('focus-editor')?.focus();
+      return;
+    }
     const editor = document.getElementById('source-editor') as HTMLTextAreaElement | null;
     if (editor) {
       editor.focus();
@@ -761,6 +771,20 @@
     else void probeDisk();
   }
 
+  function enterFocusMode(trigger: HTMLElement | null = null) {
+    openFocusMode(trigger);
+  }
+
+  function exitFocusMode() {
+    const returnTo = focusReturnElement;
+    closeFocusMode();
+    setFocusReturn(null);
+    returnTo?.focus();
+  }
+
+  initFocusLayout();
+  initFocusType();
+  initFocusZen();
   connect();
 </script>
 
@@ -799,6 +823,7 @@
     onScale={() => runCommand('recipe_scale')}
     onReset={resetScale}
     onRunPlan={() => runCommand('plan')}
+    onEnterFocus={enterFocusMode}
   />
 
   <div class="workspace-rail">
@@ -868,3 +893,11 @@
   <p class="key-hint"><kbd>Ctrl</kbd>+<kbd>K</kbd> opens commands</p>
   <p>Boris owns meaning. Oliver owns markup semantics. The editor owns interaction.</p>
 </footer>
+
+{#if focusMode.open}
+  <FocusMode
+    onSave={() => void saveFile()}
+    onRebuild={() => void rebuildPreview('manual')}
+    onExit={exitFocusMode}
+  />
+{/if}
