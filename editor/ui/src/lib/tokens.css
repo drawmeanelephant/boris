@@ -1,0 +1,164 @@
+/*
+ * Boris Editor design tokens.
+ *
+ * The palette derives from the existing editor identity: deep green header
+ * #173f34, primary green #176247, rust focus ring #bf4f24 (an a11y signature —
+ * keep it recognizably rust in both themes), and warm green-gray neutrals.
+ *
+ * Raw values live only in this file. Component styles in styles.css consume
+ * semantic custom properties so the dark theme (`:root[data-theme='dark']`,
+ * driven by lib/theme.svelte.ts) re-skins the whole surface without touching
+ * component rules. Every text token below holds WCAG AA contrast against its
+ * intended background in both themes.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* --- semantic colors (light) --- */
+  --color-canvas: #eef2ed;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-sunken: #f3f5f3;
+  --color-border: #ccd6cf;
+  --color-border-soft: #dde5df;
+  --color-border-strong: #82958b;
+  --color-text: #17201d;
+  --color-text-muted: #53625c;
+  --color-text-faint: #5c6863;
+  --color-text-invert: #f9fff8;
+  --color-header: #173f34;
+  --color-header-text: #f9fff8;
+
+  --color-accent: #176247;
+  --color-accent-strong: #114b37;
+  --color-accent-soft: #e1f1e8;
+  --color-accent-border: #9ab8aa;
+  --color-on-accent: #ffffff;
+  --color-link: #174f3a;
+
+  --color-ok: #13563e;
+  --color-ok-soft: #dff1e8;
+  --color-ok-border: #b5dcc9;
+
+  --color-warn: #4b2f00;
+  --color-warn-soft: #fff2c9;
+  --color-warn-border: #dfbf61;
+  --color-warn-accent: #bd7020;
+
+  --color-danger: #842a1f;
+  --color-danger-soft: #fff0ed;
+  --color-danger-border: #ad584d;
+  --color-danger-strong: #7d241b;
+  --color-danger-soft-strong: #ffe6e1;
+
+  /* The a11y signature: the focus ring stays rust in both themes. */
+  --color-focus: #bf4f24;
+
+  /* Tinted sub-panes and chrome aliases. */
+  --color-surface-tint: #f4faf6;
+  --color-surface-tint-neutral: #f4f6f5;
+  --color-backdrop: rgba(16, 37, 29, 0.78);
+  --kbd-on-accent-bg: #eaf3ee;
+  --header-chip-border: rgba(249, 255, 248, 0.45);
+  --header-chip-bg: transparent;
+  --header-chip-bg-hover: rgba(249, 255, 248, 0.14);
+
+  /* --- spacing scale (0.25rem base) --- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 2rem;
+  --space-8: 3rem;
+
+  /* --- radius scale --- */
+  --radius-sm: 0.3rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-pill: 999px;
+
+  /* --- elevation tiers --- */
+  --shadow-1: 0 1px 2px rgba(23, 32, 29, 0.05), 0 2px 4px rgba(23, 32, 29, 0.06);
+  --shadow-2: 0 2px 4px rgba(23, 32, 29, 0.08), 0 6px 18px rgba(23, 32, 29, 0.1);
+  --shadow-3: 0 8px 20px rgba(16, 35, 29, 0.16), 0 24px 64px rgba(16, 35, 29, 0.3);
+  --kbd-inset: inset 0 -1px 0 rgba(23, 32, 29, 0.12);
+
+  /* --- type scale --- */
+  --text-xs: 0.75rem;
+  --text-sm: 0.85rem;
+  --text-md: 1rem;
+  --text-lg: 1.15rem;
+  --text-xl: clamp(1.45rem, 2.4vw, 1.9rem);
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  /* --- motion durations (all gated by prefers-reduced-motion in styles.css) --- */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  /* --- component-facing aliases --- */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --content-pad: clamp(1rem, 4vw, 3rem);
+  --focus-ring-width: 0.2rem;
+  --focus-ring-offset: 0.15rem;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-canvas: #111a15;
+  --color-surface: #19241d;
+  --color-surface-raised: #1c2820;
+  --color-sunken: #141d17;
+  --color-border: #2f4038;
+  --color-border-soft: #26362e;
+  --color-border-strong: #55685e;
+  --color-text: #e7efe9;
+  --color-text-muted: #a5b6ab;
+  --color-text-faint: #97a89d;
+  --color-text-invert: #f9fff8;
+  --color-header: #122e26;
+  --color-header-text: #f9fff8;
+
+  --color-accent: #34a874;
+  --color-accent-strong: #4cc28d;
+  --color-accent-soft: #1b382c;
+  --color-accent-border: #3d5c4d;
+  --color-on-accent: #081510;
+  --color-link: #7ed3a8;
+
+  --color-ok: #8fd6b0;
+  --color-ok-soft: #163326;
+  --color-ok-border: #2c5643;
+
+  --color-warn: #ffd489;
+  --color-warn-soft: #33290f;
+  --color-warn-border: #6b5a25;
+  --color-warn-accent: #e5a44e;
+
+  --color-danger: #ffaba0;
+  --color-danger-soft: #37201b;
+  --color-danger-border: #7c4238;
+  --color-danger-strong: #ffaba0;
+  --color-danger-soft-strong: #452420;
+
+  --color-focus: #ff9d6b;
+
+  --color-surface-tint: #1b2a21;
+  --color-surface-tint-neutral: #1d2721;
+  --color-backdrop: rgba(4, 10, 7, 0.82);
+  --kbd-on-accent-bg: #8fd0ac;
+  --header-chip-border: rgba(249, 255, 248, 0.4);
+  --header-chip-bg: transparent;
+  --header-chip-bg-hover: rgba(249, 255, 248, 0.12);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 2px 4px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.42);
+  --shadow-3: 0 8px 20px rgba(0, 0, 0, 0.5), 0 24px 64px rgba(0, 0, 0, 0.62);
+  --kbd-inset: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+}

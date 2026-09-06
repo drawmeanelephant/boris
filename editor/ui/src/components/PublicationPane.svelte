@@ -1,21 +1,10 @@
 <script lang="ts">
-  import type { PublicationPayload, PublicationPlan } from '../lib/types';
+  import { publication } from '../lib/state/publication.svelte';
+  import { problems } from '../lib/state/problems.svelte';
 
   let {
-    publicationPayload,
-    publicationStatus,
-    selectedProfile,
-    lastPublicationPlan,
-    commandRunning,
-    onSelectProfile,
     onRunPlan
   }: {
-    publicationPayload: PublicationPayload | null;
-    publicationStatus: string;
-    selectedProfile: string;
-    lastPublicationPlan: PublicationPlan | null;
-    commandRunning: boolean;
-    onSelectProfile: (value: string) => void;
     onRunPlan: () => void;
   } = $props();
 </script>
@@ -27,24 +16,24 @@
       <p>The editor runs <code>boris plan --profile</code> and shows the normalized declaration. It does not deploy or store secrets.</p>
     </div>
   </div>
-  <p role="status" aria-label="Publication status" aria-live="polite">{publicationStatus}</p>
-  {#if (publicationPayload?.profiles.length ?? 0) > 0}
+  <p role="status" aria-label="Publication status" aria-live="polite">{publication.status}</p>
+  {#if (publication.payload?.profiles.length ?? 0) > 0}
     <label for="publication-profile">Publication profile</label>
     <div class="impact-command">
       <div>
-        <select id="publication-profile" value={selectedProfile} disabled={commandRunning} onchange={(e) => onSelectProfile((e.currentTarget as HTMLSelectElement).value)}>
-          {#each publicationPayload?.profiles ?? [] as profile (profile.path)}
+        <select id="publication-profile" value={publication.selectedProfile} disabled={problems.running} onchange={(e) => (publication.selectedProfile = (e.currentTarget as HTMLSelectElement).value)}>
+          {#each publication.payload?.profiles ?? [] as profile (profile.path)}
             <option value={profile.path}>{profile.path}</option>
           {/each}
         </select>
-        <button type="button" disabled={commandRunning || !selectedProfile} onclick={onRunPlan}>Run publication plan</button>
+        <button type="button" disabled={problems.running || !publication.selectedProfile} onclick={onRunPlan}>Run publication plan</button>
       </div>
     </div>
   {:else}
     <p>Add a <code>boris-publication-profile</code> file such as <code>boris.json</code> at the project root. The compiler does not invent profiles.</p>
   {/if}
-  {#if lastPublicationPlan}
-    {@const plan = lastPublicationPlan}
+  {#if publication.lastPlan}
+    {@const plan = publication.lastPlan}
     <h3>Normalized plan</h3>
     <p>This JSON is a static declaration. Success here means only that Boris validated the profile. It is not proof, evidence, or a deployed site.</p>
     <dl>
@@ -75,8 +64,8 @@
       <p class="fallback-notice">{plan.publication.target} is declared in the plan. The editor does not add a platform adapter or treat this as a verified deploy.</p>
     {/if}
   {/if}
-  {#if publicationPayload?.proof}
-    {@const proof = publicationPayload.proof}
+  {#if publication.payload?.proof}
+    {@const proof = publication.payload.proof}
     <h3>Local evidence</h3>
     <p>The Proof Pack at <code>{proof.path}</code> is target-local presentation of committed artifacts, checks, and claims. It does not verify a deployed site.</p>
     <dl>

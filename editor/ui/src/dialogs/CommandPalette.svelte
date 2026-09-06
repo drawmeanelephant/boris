@@ -1,23 +1,14 @@
 <script lang="ts">
+  import { fly } from 'svelte/transition';
+  import { prefersReducedMotion } from 'svelte/motion';
   import type { PaletteItem } from '../lib/types';
-  import { paletteItemKey, paletteItemLabel, paletteItemDetailWrapper, paletteItemEnabledPure } from '../lib/utils';
+  import { paletteItemKey, paletteItemLabel, paletteItemDetailWrapper } from '../lib/utils';
+  import { palette, paletteItems, paletteEnabled } from '../lib/state/palette.svelte';
+  import { buffer } from '../lib/state/buffer.svelte';
+  import { graph, activeNode, parentNode } from '../lib/state/graph.svelte';
 
   let {
     dialog = $bindable(),
-    paletteItems,
-    paletteEnabled,
-    paletteQuery,
-    paletteSelection,
-    activePath,
-    parentNode,
-    activeNode,
-    graphPayload,
-    commandRunning,
-    dirty,
-    readOnly,
-    saveInFlight,
-    previewPhase,
-    onQueryChange,
     onKeydown,
     onBackdropClick,
     onDialogClose,
@@ -25,20 +16,6 @@
     onExecute
   }: {
     dialog: HTMLDialogElement | undefined;
-    paletteItems: PaletteItem[];
-    paletteEnabled: Map<string, boolean>;
-    paletteQuery: string;
-    paletteSelection: number;
-    activePath: string;
-    parentNode: unknown | null;
-    activeNode: unknown | null;
-    graphPayload: unknown | null;
-    commandRunning: boolean;
-    dirty: boolean;
-    readOnly: boolean;
-    saveInFlight: boolean;
-    previewPhase?: string;
-    onQueryChange: (value: string) => void;
     onKeydown: (event: KeyboardEvent) => void;
     onBackdropClick: (event: MouseEvent) => void;
     onDialogClose: () => void;
@@ -50,15 +27,15 @@
     // Use the pure wrapper that takes explicit ctx so the palette detail stays honest
     return paletteItemDetailWrapper(
       item,
-      activePath,
-      parentNode as any,
-      activeNode as any,
-      graphPayload as any
+      buffer.activePath,
+      parentNode(),
+      activeNode(),
+      graph.payload
     );
   }
 
   function isEnabled(item: PaletteItem): boolean {
-    return paletteEnabled.get(paletteItemKey(item)) ?? false;
+    return paletteEnabled().get(paletteItemKey(item)) ?? false;
   }
 </script>
 
@@ -77,23 +54,24 @@
     id="palette-query"
     role="combobox"
     aria-autocomplete="list"
-    aria-expanded={paletteItems.length > 0}
+    aria-expanded={paletteItems().length > 0}
     aria-controls="palette-options"
-    aria-activedescendant={paletteItems.length ? `palette-option-${paletteSelection}` : undefined}
-    value={paletteQuery}
-    oninput={(e) => onQueryChange((e.currentTarget as HTMLInputElement).value)}
+    aria-activedescendant={paletteItems().length ? `palette-option-${palette.selection}` : undefined}
+    value={palette.query}
+    oninput={(e) => (palette.query = (e.currentTarget as HTMLInputElement).value)}
   />
-  {#if paletteItems.length > 0}
+  {#if paletteItems().length > 0}
     <ul id="palette-options" role="listbox" aria-label="Boris commands">
-      {#each paletteItems as item, itemIndex (paletteItemKey(item))}
+      {#each paletteItems() as item, itemIndex (paletteItemKey(item))}
         <li
           id="palette-option-{itemIndex}"
           role="option"
           tabindex="-1"
-          aria-selected={itemIndex === paletteSelection}
+          aria-selected={itemIndex === palette.selection}
           aria-disabled={isEnabled(item) ? 'false' : 'true'}
-          class:selected={itemIndex === paletteSelection}
+          class:selected={itemIndex === palette.selection}
           class:disabled={!isEnabled(item)}
+          in:fly={{ duration: prefersReducedMotion.current ? 0 : 150, y: prefersReducedMotion.current ? 0 : 4 }}
           onclick={() => { if (isEnabled(item)) onExecute(item); }}
           onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (isEnabled(item)) onExecute(item); } }}
         >
@@ -102,7 +80,7 @@
       {/each}
     </ul>
   {:else}
-    <p>No commands match “{paletteQuery}”.</p>
+    <p>No commands match “{palette.query}”.</p>
   {/if}
   <div class="dialog-actions">
     <button type="button" onclick={onCancel}>Cancel<kbd>Esc</kbd></button>

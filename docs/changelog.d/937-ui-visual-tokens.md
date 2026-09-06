@@ -1,0 +1,3 @@
+### Added
+
+- The Boris Editor UI ships a design-token system with a dark mode: semantic color/spacing/radius/elevation tokens derived from the existing green-and-rust identity, a persisted `Theme: dark` / `Theme: light` header toggle that defaults to `prefers-color-scheme`, WCAG AA contrast in both themes, and the rust focus ring kept as the a11y signature; the Svelte app is migrated to runes mode with typed state modules under `editor/ui/src/lib/state/` and reduced-motion-gated motion (dialog fade/scale, problem-group and palette transitions, preview width tween) that only reflects real state changes ([editor/README.md](/editor/README.md)).

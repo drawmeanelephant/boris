@@ -1,19 +1,21 @@
 <script lang="ts">
-  import type { PreviewState } from '../lib/types';
+  import { Tween, prefersReducedMotion } from 'svelte/motion';
+  import { cubicOut } from 'svelte/easing';
+  import { fade } from 'svelte/transition';
+  import { preview } from '../lib/state/preview.svelte';
 
   let {
-    previewData,
-    previewState,
-    previewWidth,
-    onRebuild,
-    onWidthChange
+    onRebuild
   }: {
-    previewData: PreviewState | null;
-    previewState: string;
-    previewWidth: 'full' | '375' | '768' | '1440';
     onRebuild: () => void;
-    onWidthChange: (width: 'full' | '375' | '768' | '1440') => void;
   } = $props();
+
+  // The constrained viewport width tweens between the author-selected widths;
+  // under prefers-reduced-motion it jumps straight to the target.
+  const frameWidth = Tween.of(() => (preview.width === 'full' ? 0 : Number(preview.width)), {
+    duration: () => (prefersReducedMotion.current ? 0 : 180),
+    easing: cubicOut
+  });
 </script>
 
 <section id="preview" aria-labelledby="preview-heading">
@@ -23,18 +25,18 @@
       <p>The frame serves unchanged files from Boris's committed <code>dist/</code> output.</p>
     </div>
     <div class="preview-actions" aria-label="Preview actions">
-      <button type="button" disabled={previewData?.phase === 'running'} onclick={onRebuild}>Rebuild preview</button>
-      {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
-        <a class="button-link" href={previewData.preview_url} target="_blank" rel="noreferrer">Open preview in new tab</a>
+      <button type="button" disabled={preview.data?.phase === 'running'} onclick={onRebuild}>Rebuild preview</button>
+      {#if preview.data && (preview.data.phase === 'success' || preview.data.phase === 'stale')}
+        <a class="button-link" href={preview.data.preview_url} target="_blank" rel="noreferrer">Open preview in new tab</a>
       {/if}
     </div>
   </div>
   <fieldset class="preview-viewports" aria-label="Preview width">
     <legend>Preview width</legend>
-    <label><input type="radio" name="preview-width" value="full" checked={previewWidth === 'full'} onchange={() => onWidthChange('full')} /> Full pane</label>
-    <label><input type="radio" name="preview-width" value="375" checked={previewWidth === '375'} onchange={() => onWidthChange('375')} /> 375px</label>
-    <label><input type="radio" name="preview-width" value="768" checked={previewWidth === '768'} onchange={() => onWidthChange('768')} /> 768px</label>
-    <label><input type="radio" name="preview-width" value="1440" checked={previewWidth === '1440'} onchange={() => onWidthChange('1440')} /> 1440px</label>
+    <label><input type="radio" name="preview-width" value="full" checked={preview.width === 'full'} onchange={() => (preview.width = 'full')} /> Full pane</label>
+    <label><input type="radio" name="preview-width" value="375" checked={preview.width === '375'} onchange={() => (preview.width = '375')} /> 375px</label>
+    <label><input type="radio" name="preview-width" value="768" checked={preview.width === '768'} onchange={() => (preview.width = '768')} /> 768px</label>
+    <label><input type="radio" name="preview-width" value="1440" checked={preview.width === '1440'} onchange={() => (preview.width = '1440')} /> 1440px</label>
   </fieldset>
   <details class="preview-a11y">
     <summary>Accessibility review aid</summary>
@@ -45,17 +47,19 @@
       <li>Check that status is not color-only.</li>
     </ul>
   </details>
-  <p class="preview-state" class:current={previewData?.phase === 'success'} class:failure={previewData?.phase === 'failed' || previewData?.phase === 'stale'}>
-    <strong>{previewData?.phase ?? 'idle'}:</strong> {previewState}
-  </p>
-  {#if previewData?.used_stderr_fallback}
+  {#key preview.data?.phase ?? 'idle'}
+    <p class="preview-state" class:current={preview.data?.phase === 'success'} class:failure={preview.data?.phase === 'failed' || preview.data?.phase === 'stale'} in:fade={{ duration: prefersReducedMotion.current ? 0 : 150 }}>
+      <strong>{preview.data?.phase ?? 'idle'}:</strong> {preview.status}
+    </p>
+  {/key}
+  {#if preview.data?.used_stderr_fallback}
     <p class="fallback-notice">Rich HTML diagnostics are unavailable; this failure message comes from bounded Boris stderr.</p>
   {/if}
-  {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
-    <div class="preview-frame" class:constrained={previewWidth !== 'full'} style={previewWidth === 'full' ? undefined : `width:${previewWidth}px`}>
+  {#if preview.data && (preview.data.phase === 'success' || preview.data.phase === 'stale')}
+    <div class="preview-frame" class:constrained={preview.width !== 'full'} style={preview.width === 'full' ? undefined : `width:${frameWidth.current}px`}>
       <iframe
         title="Boris site preview"
-        src={`${previewData.preview_url}&generation=${previewData.generation}`}
+        src={`${preview.data.preview_url}&generation=${preview.data.generation}`}
         sandbox="allow-same-origin"
       ></iframe>
     </div>
