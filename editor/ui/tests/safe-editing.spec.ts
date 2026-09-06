@@ -548,6 +548,55 @@ test('Enter with an invalid Create path does not submit (#459)', async ({ page }
   expect(createRequests).toBe(0);
 });
 
+test('empty Create path disables the submit until a path appears', async ({ page }) => {
+  // Silent-failure sweep: createFile() early-returns on an empty path, so the
+  // honest fix is a natively disabled submitter — visible state, and the
+  // browser refuses implicit Enter submission while the only submitter is
+  // disabled. Assert the request never fires at all.
+  await installApi(page);
+  let createRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/create')) createRequests += 1;
+  });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await expect(dialog).toBeVisible();
+  const input = dialog.getByRole('textbox', { name: 'New file path' });
+  const submit = dialog.getByRole('button', { name: /Create file/ });
+  await expect(submit).toBeEnabled(); // dialog opens prefilled
+  await input.fill('');
+  await expect(submit).toBeDisabled();
+  await input.press('Enter');
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(200);
+  expect(createRequests).toBe(0);
+  await input.fill('content/posts/recovered.md');
+  await expect(submit).toBeEnabled();
+});
+
+test('empty Rename path disables the submit until a path appears', async ({ page }) => {
+  // Same silent failure in renameFile(): clearing the input and pressing
+  // Enter used to do nothing. The disabled submitter states why.
+  await installApi(page);
+  let renameRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/rename')) renameRequests += 1;
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Rename file' });
+  await expect(dialog).toBeVisible();
+  const input = dialog.getByRole('textbox', { name: 'New file path' });
+  const submit = dialog.getByRole('button', { name: /Rename file/ });
+  await expect(submit).toBeEnabled();
+  await input.fill('');
+  await expect(submit).toBeDisabled();
+  await input.press('Enter');
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(200);
+  expect(renameRequests).toBe(0);
+});
+
 test('the Create file primary button still submits the same action (#459)', async ({ page }) => {
   await installApi(page);
   let createRequests = 0;
