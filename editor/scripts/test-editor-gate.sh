@@ -122,6 +122,7 @@ run_stage "live integration: contract fixture" ./editor/scripts/test-contract-fi
 run_stage "live integration: host safe-editing" ./editor/scripts/test-host.sh "$boris_bin" "$editor_bin" "$ui_dir"
 run_stage "live integration: diagnostics" ./editor/scripts/test-diagnostics.sh "$boris_bin" "$editor_bin" "$ui_dir"
 run_stage "live integration: validation daemon" ./editor/scripts/test-validation-daemon.sh "$boris_bin" "$editor_bin" "$ui_dir"
+run_stage "live integration: watch daemon" ./editor/scripts/test-watch-daemon.sh "$boris_bin" "$editor_bin" "$ui_dir"
 run_stage "live integration: live preview" ./editor/scripts/test-preview.sh "$boris_bin" "$editor_bin" "$ui_dir"
 run_stage "live integration: publication" ./editor/scripts/test-publication.sh "$boris_bin" "$editor_bin" "$ui_dir"
 

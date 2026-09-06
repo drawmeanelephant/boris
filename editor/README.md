@@ -103,8 +103,8 @@ implies.
 whole editor acceptance surface against a product `boris` binary in one shot:
 editor-host Zig tests, UI static checks and build, the mocked Playwright e2e
 suite, and the live integration scripts (contract fixture, host safe-editing,
-diagnostics, validation daemon, live preview, publication) against the given
-binary. The CI `editor-test` lane invokes this same script (deps installed in
+diagnostics, validation daemon, watch daemon, live preview, publication)
+against the given binary. The CI `editor-test` lane invokes this same script (deps installed in
 the lane with the npm cache and `--with-deps` Chromium), so the local and CI
 editor validation cannot drift; the lane renders the gate's trailing NDJSON
 line as the job summary and uploads it (with the full log) as the
@@ -442,3 +442,85 @@ list is a review aid and says so.
 
 M8 deliberately does not invent layout-selection evidence, change the layout
 model, or claim a Voice Control certification.
+
+## Watch admin backend
+
+The host can supervise **one managed `boris watch` daemon per project** so a
+future admin UI can watch builds happen instead of spawning one-shot builds.
+The invocation is fixed by the host from project discovery — the UI never
+supplies argv or a working directory:
+
+```text
+boris watch --input content --html-dir dist --watch-json [--cooklang]
+```
+
+Under `--watch-json` the compiler streams
+[the contracted NDJSON build-event stream](/docs/contracts/watch-mode.md)
+(`hello` → `build-started` → `build-succeeded` / `build-failed` →
+`watcher-started`, then per-rebuild events) exclusively on stderr. The host
+redirects that stream to a spool file under the editor state root and parses
+appended lines on demand from request handlers — the same file-watch
+philosophy as the validation daemon's report file. Nothing in the
+single-request accept loop blocks on daemon output: `start` returns right
+after the spawn and events surface through polling. There is no thread.
+
+The authenticated endpoints (same session token, loopback `Host`, and
+`Origin` discipline as every other endpoint):
+
+- `POST /api/watch/start` — idempotent start; wraps the state object with
+  `"status": "started" | "already-running" | "backing-off"`. On a compiler
+  without `--watch-json` it refuses with `409 {"error":"watch_unsupported"}`;
+  after a refused schema handshake, with `watch_schema_unsupported`.
+- `POST /api/watch/stop` — graceful SIGTERM + reap (no orphan), mirroring the
+  validation daemon's shutdown contract; `"stopped"` or `"not-running"`.
+- `GET /api/watch/state` — `{supported, state, seq, cycle, events_count,
+  oldest_seq, dropped_lines, last_event, compiler_id, hello_schema,
+  last_error}`. `state` is named exactly like `/api/validate-state` and is
+  never fabricated into a mid-cycle state: `idle` (no managed daemon),
+  `running` (process alive or a build in flight per the daemon's own event),
+  `success` / `failed` (the last completed build's outcome), `stale` (the
+  daemon died unexpectedly; supervision restarts it with bounded backoff,
+  1s → 30s, reset on a completed build).
+- `GET /api/watch/events?after=<seq>` — the newest buffered events with
+  `seq > after`, each `{seq, event}` where `event` is the compiler's exact
+  NDJSON object. `seq` values are assigned by the host, strictly increasing
+  across daemon restarts for the host session; a cursor client never sees an
+  event twice and detects eviction through `gap: true` plus `oldest_seq`
+  (the ring keeps ~100 events / ~4 MiB, evicting the oldest first). Malformed
+  cursors are `400 invalid_query`; unparseable spool lines are counted in
+  `dropped_lines` and never consume a `seq`.
+
+Dist-writer mutual exclusion: while a watch daemon has been started (including
+its backoff-restart window), `POST /api/preview/rebuild` refuses with
+`409 {"error":"watch_daemon_active"}` instead of racing the daemon for the
+`dist/` writer seat; `/api/preview/state` carries an additive
+`watch_active` flag. Stopping the watch daemon re-enables rebuild.
+
+Validation-daemon coexistence: both daemons may run. The watch daemon (HTML
+mode) never writes `.boris/html-build-report.json` — `--report` is a usage
+error with the `watch` command — so the zero-write validation daemon remains
+the only thing keeping the Problems surface's report fresh, and the two are
+write-disjoint (the report file lives under `.boris/`, which the watch loop
+ignores). Neither replaces the other.
+
+`GET /api/version` advertises `supported.watch_json` alongside
+`supported.validate_watch`, probed once via `boris watch --help`. On Windows
+the probe reports unsupported and the daemon never spawns; every one-shot
+path (including preview rebuild) is unchanged.
+
+The watch daemon gate adds:
+
+```bash
+./editor/scripts/test-watch-daemon.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+The seeded black-box test pins one daemon across idempotent starts, the
+contracted event shapes with strictly increasing `seq`, the rebuild refusal
+and its re-enable after stop, validation-daemon coexistence, failure → fix →
+recovery without a restart, bounded-backoff recovery after `kill -9`, and
+SIGTERM reaping on both the explicit stop and editor shutdown (no orphan).
+
+Deliberate non-goals in this slice: no `--serve` (the host's own preview
+origin stays), no editor UI — the endpoints are the backend contract for a
+follow-up admin surface.
