@@ -488,7 +488,11 @@ The authenticated endpoints (same session token, loopback `Host`, and
   event twice and detects eviction through `gap: true` plus `oldest_seq`
   (the ring keeps ~100 events / ~4 MiB, evicting the oldest first). Malformed
   cursors are `400 invalid_query`; unparseable spool lines are counted in
-  `dropped_lines` and never consume a `seq`.
+  `dropped_lines` and never consume a `seq`. That counter is scoped to the
+  host session — it restarts at 0 with each editor process — so a client that
+  persists an `after` cursor across a host restart must resync from
+  `/api/watch/state`'s `seq` / `oldest_seq` instead of assuming one
+  monotonic stream across restarts.
 
 Dist-writer mutual exclusion: while a watch daemon has been started (including
 its backoff-restart window), `POST /api/preview/rebuild` refuses with
