@@ -112,6 +112,9 @@
         }
       }
     }
+    // Reading line: the last section whose top edge has reached it wins;
+    // above every section (page top), the journey starts at the first link
+    // so wayfinding never reads as "nowhere".
     const navHeight = nav?.offsetHeight ?? 64;
     let best: string | null = null;
     for (const { id } of links) {
@@ -136,13 +139,22 @@
     const onScroll = () => syncCurrent();
     const onRowScroll = () => updateEdges();
     const onResize = () => { setHeight(); onScroll(); };
+    // The workspace rail is a second scroll container at ≥80rem (overflow-y:
+    // auto): its inner scrolling moves Problems/Preview/Watch in viewport
+    // coordinates without any window scroll, so the spy must listen there
+    // too or aria-current goes stale. Queried live — the rail is App-owned
+    // chrome, not a component prop; at narrower widths it never scrolls, so
+    // the listener is simply quiet.
+    const rail = document.querySelector('.workspace-rail');
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onResize, { passive: true });
     rowEl.addEventListener('scroll', onRowScroll, { passive: true });
+    rail?.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
       rowEl.removeEventListener('scroll', onRowScroll);
+      rail?.removeEventListener('scroll', onScroll);
       document.documentElement.style.removeProperty('--section-nav-h');
     };
   });

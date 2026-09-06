@@ -140,9 +140,6 @@ test('scrollspy keeps aria-current on the section at the reading top', async ({ 
 
   // Jumping to the last section stays current even where the page clamps:
   // a short document can never park Watch under the nav, so the spy's
-  // bottom rule must hand currency over regardless of geometry.
-  // Jumping to the last section stays current even where the page clamps:
-  // a short document can never park Watch under the nav, so the spy's
   // bottom rule must hand currency over regardless of geometry. The smooth
   // scroll animates through intermediate sections, so this must poll.
   await navLink(page, 'Watch').click();
@@ -159,6 +156,28 @@ test('scrollspy keeps aria-current on the section at the reading top', async ({ 
     document.querySelector('.workspace-rail')?.scrollTo(0, 0);
   });
   await expect(nav.locator('a[aria-current="true"]')).toHaveAttribute('href', /#(project|source)/);
+});
+
+test('scrolling inside the workspace rail moves aria-current with no window scroll', async ({ page }) => {
+  await installApi(page);
+  // Wide viewport so the rail is its own scroll container (≥80rem rule).
+  await page.setViewportSize({ width: 1440, height: 720 });
+  const nav = page.getByRole('navigation', { name: 'Editor sections' });
+
+  // Page top, rail untouched: the leading section owns the reading line.
+  await expect(navLink(page, 'Project')).toHaveAttribute('aria-current', 'true');
+
+  // Rail-internal scroll alone brings a rail section onto the reading line;
+  // the spy must follow with zero window scroll (fails on a window-only
+  // listener — #942 review finding 1), then follow back on reset.
+  await page.evaluate(() => {
+    const rail = document.querySelector('.workspace-rail');
+    rail?.scrollTo(0, rail.scrollHeight);
+  });
+  await expect(nav.locator('a[aria-current="true"]')).toHaveAttribute('href', /#(preview|watch)/);
+  await page.evaluate(() => document.querySelector('.workspace-rail')?.scrollTo(0, 0));
+  await expect(navLink(page, 'Project')).toHaveAttribute('aria-current', 'true');
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
 });
 
 test('nav stays reachable while scrolled and keyboard activation works', async ({ page }) => {
