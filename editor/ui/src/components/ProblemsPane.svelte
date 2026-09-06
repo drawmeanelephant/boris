@@ -23,7 +23,7 @@
   } = $props();
 </script>
 
-<section id="problems" class="problems-pane" aria-labelledby="problems-heading">
+<section id="problems" class="problems-pane" tabindex="-1" aria-labelledby="problems-heading">
   <div class="problems-heading">
     <div>
       <h2 id="problems-heading">Problems</h2>

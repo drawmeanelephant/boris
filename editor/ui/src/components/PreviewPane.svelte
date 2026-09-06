@@ -18,7 +18,7 @@
   });
 </script>
 
-<section id="preview" aria-labelledby="preview-heading">
+<section id="preview" tabindex="-1" aria-labelledby="preview-heading">
   <div class="preview-heading">
     <div>
       <h2 id="preview-heading">Preview</h2>

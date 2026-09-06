@@ -16,7 +16,7 @@
   } = $props();
 </script>
 
-<section id="project" class="project-pane" aria-labelledby="project-heading">
+<section id="project" class="project-pane" tabindex="-1" aria-labelledby="project-heading">
   <div>
     <h2 id="project-heading">Project</h2>
     <p>{connection.project}</p>

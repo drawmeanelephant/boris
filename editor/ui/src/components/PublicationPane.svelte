@@ -9,7 +9,7 @@
   } = $props();
 </script>
 
-<section id="publication" class="publication-pane" aria-labelledby="publication-heading">
+<section id="publication" class="publication-pane" tabindex="-1" aria-labelledby="publication-heading">
   <div class="problems-heading">
     <div>
       <h2 id="publication-heading">Publication</h2>

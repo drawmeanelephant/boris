@@ -72,9 +72,58 @@ h1 { margin-bottom: 0; font-size: var(--text-xl); letter-spacing: -0.03em; }
 .theme-toggle:hover:not(:disabled) { background: var(--header-chip-bg-hover); border-color: var(--header-chip-border); }
 .theme-toggle:focus-visible { outline-color: var(--color-focus); }
 
-.section-nav { display: flex; gap: 0.4rem; align-items: center; padding: 0.7rem var(--content-pad); background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
-.section-nav a { padding: 0.32rem 0.8rem; border-radius: var(--radius-pill); font-weight: 600; text-decoration: none; transition: background-color var(--motion-fast) var(--ease-out); }
+.section-nav {
+  display: flex;
+  align-items: center;
+  padding: 0.7rem var(--content-pad);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+/* #941 C: the nav stays reachable after any jump. The header is not sticky,
+   so this sticks cleanly below the viewport top. */
+.section-nav { position: sticky; top: 0; z-index: 5; }
+/* The inner row is the scroller: flex 1 + min-width 0 let it shrink below
+   its content so overflow-x can engage on narrow viewports; the fade bars
+   stay anchored to the non-scrolling nav. */
+.section-nav-row { display: flex; gap: 0.4rem; align-items: center; flex: 1 1 auto; min-width: 0; }
+.section-nav a { padding: 0.32rem 0.8rem; border-radius: var(--radius-pill); font-weight: 600; text-decoration: none; transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out); }
 .section-nav a:hover { background: var(--color-accent-soft); text-decoration: underline; }
+/* #941 B: scrollspy active pill mirrors the file-tree active treatment. */
+.section-nav a[aria-current='true'] { color: var(--color-on-accent); background: var(--color-accent); }
+.section-nav a[aria-current='true']:hover { text-decoration: underline; }
+/* #941 E: edge affordance for the scrollable mobile pill row — the edge
+   hint is a visible bar, not a silent clip. Bars are positioned against the
+   non-scrolling nav (the row inside is the scroller), come up only on the
+   side that still has content to reach, and only exist ≤52rem. */
+.section-nav-fade {
+  display: none;
+  position: absolute;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  width: 0.15rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-border);
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--ease-out);
+  pointer-events: none;
+}
+.section-nav-fade-start { left: 0.35rem; }
+.section-nav-fade-end { right: 0.35rem; }
+.section-nav.scroll-start .section-nav-fade-start,
+.section-nav.scroll-end .section-nav-fade-end { opacity: 1; }
+
+/* #941 A: arrival highlight. The class is applied by SectionNav on nav
+   activation and removed after the pulse; keyframes collapse under the
+   global prefers-reduced-motion block below. */
+section.arrived {
+  animation: section-arrival 1.5s var(--ease-out);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 0.2rem var(--color-accent-soft), var(--shadow-1);
+}
+@keyframes section-arrival {
+  0% { box-shadow: 0 0 0 0.35rem var(--color-accent-border), var(--shadow-1); }
+  100% { box-shadow: 0 0 0 0.2rem var(--color-accent-soft), var(--shadow-1); }
+}
 
 .recovery-banner { display: flex; justify-content: space-between; gap: var(--space-7); padding: var(--space-4) var(--content-pad); color: var(--color-warn); background: var(--color-warn-soft); border-bottom: 1px solid var(--color-warn-border); }
 .recovery-banner h2 { margin-bottom: 0.25rem; font-size: var(--text-lg); }
@@ -90,6 +139,9 @@ section {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
+  /* #941 C: a landed section sits just below the sticky nav instead of
+     flush under it; the JS-measured var keeps the offset honest. */
+  scroll-margin-top: calc(var(--section-nav-h, 3.25rem) + 0.75rem);
 }
 h2 { font-size: var(--text-lg); letter-spacing: -0.01em; }
 .project-pane, .source-pane, .problems-pane { min-height: 32rem; }
@@ -573,12 +625,16 @@ footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
 @media (prefers-reduced-motion: reduce) {
   .focus-overlay { transition: none; }
   .zen-underlay { transition: none; }
+  /* #941 A: the arrival pulse reduces to a static highlight under
+     reduced motion — the attention cue stays, the motion goes. */
+  section.arrived { animation: none; }
 }
 
 @media (max-width: 52rem) {
   header, .recovery-banner { display: block; }
   .connection, .recovery-banner ul { margin-top: var(--space-4); }
-  .section-nav { overflow-x: auto; }
+  .section-nav-row { overflow-x: auto; }
+  .section-nav-fade { display: block; }
   main, .comparison { grid-template-columns: 1fr; }
   .project-pane, .source-pane, .problems-pane { min-height: auto; }
   .problems-heading, .analysis-results li { display: block; }
