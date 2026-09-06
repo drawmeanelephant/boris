@@ -1,26 +1,22 @@
 <script lang="ts">
-  import type { FileEntry, Problem } from '../lib/types';
+  import type { Problem } from '../lib/types';
   import { problemLocationLabel } from '../lib/utils';
+  import { buffer } from '../lib/state/buffer.svelte';
+  import { authoring, closedLayoutSlots } from '../lib/state/authoring.svelte';
+  import { project, themeAssets } from '../lib/state/project.svelte';
+  import { layoutSelections } from '../lib/state/problems.svelte';
 
   let {
-    themeLayoutOpen,
-    closedLayoutSlots,
-    layoutSlotsInBuffer,
-    layoutSlotsMissing,
-    themeAssets,
-    layoutSelections,
     onOpenFile,
     onNavigate
   }: {
-    themeLayoutOpen: boolean;
-    closedLayoutSlots: string[];
-    layoutSlotsInBuffer: string[];
-    layoutSlotsMissing: string[];
-    themeAssets: FileEntry[];
-    layoutSelections: Problem[];
     onOpenFile: (path: string) => void;
     onNavigate: (problem: Problem) => void;
   } = $props();
+
+  const themeLayoutOpen = $derived(buffer.activePath.startsWith('themes/') && buffer.activePath.endsWith('.html'));
+  const layoutSlotsInBuffer = $derived(closedLayoutSlots().filter(slot => buffer.content.includes(`{{${slot}}}`)));
+  const layoutSlotsMissing = $derived(closedLayoutSlots().filter(slot => !buffer.content.includes(`{{${slot}}}`)));
 </script>
 
 {#if themeLayoutOpen}
@@ -32,7 +28,7 @@
       </div>
     </div>
     <p class="fallback-notice">Layout winners appear as <code>ILAYOUTSELECTED</code> after Build HTML or Validate. Fallback winners appear when the target has layout rules.</p>
-    {#if closedLayoutSlots.length === 0}
+    {#if closedLayoutSlots().length === 0}
       <p>Build diagnostics to load the closed layout-slot vocabulary.</p>
     {:else}
       <h4>Slots in this layout</h4>
@@ -50,18 +46,18 @@
         </ul>
       {/if}
     {/if}
-    {#if themeAssets.length > 0}
+    {#if themeAssets().length > 0}
       <h4>Theme assets</h4>
       <ul class="graph-links">
-        {#each themeAssets as asset (asset.path)}
+        {#each themeAssets() as asset (asset.path)}
           <li><button type="button" onclick={() => onOpenFile(asset.path)}>Open {asset.path}</button></li>
         {/each}
       </ul>
     {/if}
-    {#if layoutSelections.length > 0}
+    {#if layoutSelections().length > 0}
       <h4>Layout selection from the last HTML report</h4>
       <ul class="graph-links">
-        {#each layoutSelections as problem}
+        {#each layoutSelections() as problem}
           <li>
             {#if problem.source_path}
               <button type="button" onclick={() => onNavigate(problem)}>

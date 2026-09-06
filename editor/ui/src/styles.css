@@ -226,6 +226,19 @@ dialog {
   box-shadow: var(--shadow-3);
 }
 dialog::backdrop { background: var(--color-backdrop); }
+/* Native showModal()/close() cannot drive Svelte in/out transitions on the
+   dialog element itself, so the fade/scale entrance is a CSS animation keyed
+   on [open]; the prefers-reduced-motion block in this file collapses it. */
+dialog[open] { animation: dialog-in var(--motion-base) var(--ease-out); }
+dialog::backdrop { animation: backdrop-in var(--motion-base) var(--ease-out); }
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(0.35rem) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 dialog.command-palette { width: min(36rem, calc(100% - 2rem)); padding: var(--space-4) var(--space-4) 0.85rem; margin: 12vh auto auto; }
 dialog.command-palette h2 { margin-bottom: 0.35rem; font-size: var(--text-lg); }
 dialog.command-palette > p { margin-bottom: 0.75rem; color: var(--color-text-muted); }

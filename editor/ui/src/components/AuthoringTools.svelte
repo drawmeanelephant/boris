@@ -1,57 +1,48 @@
 <script lang="ts">
-  import type { AuthoringPayload, CompletionKind, Suggestion } from '../lib/types';
+  import type { CompletionKind } from '../lib/types';
   import { schemaHint } from '../lib/utils';
+  import { authoring, suggestions, changeCompletionKind, refreshAuthoring } from '../lib/state/authoring.svelte';
+  import { buffer, insertSuggestion } from '../lib/state/buffer.svelte';
 
-  let {
-    authoring,
-    authoringStatus,
-    completionKind,
-    completionQuery,
-    suggestions,
-    selectedSuggestion,
-    completionOpen,
-    readOnly,
-    onKindChange,
-    onQueryChange,
-    onSelect,
-    onInsert,
-    onRefresh,
-    onCompletionKeydown,
-    onCompletionOpen
-  }: {
-    authoring: AuthoringPayload | null;
-    authoringStatus: string;
-    completionKind: CompletionKind;
-    completionQuery: string;
-    suggestions: Suggestion[];
-    selectedSuggestion: number;
-    completionOpen: boolean;
-    readOnly: boolean;
-    onKindChange: (kind: CompletionKind) => void;
-    onQueryChange: (query: string) => void;
-    onSelect: (index: number) => void;
-    onInsert: (suggestion: Suggestion | undefined) => void;
-    onRefresh: () => void;
-    onCompletionKeydown: (event: KeyboardEvent) => void;
-    onCompletionOpen: (open: boolean) => void;
-  } = $props();
+  // The completion combobox owns its keyboard behavior: Esc closes the list,
+  // the arrows move the active suggestion, Enter inserts it. Focus and input
+  // always reopen the list after an Esc close.
+  function completionKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      authoring.completionOpen = false;
+      return;
+    }
+    if (!suggestions().length || !authoring.completionOpen) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      authoring.selectedSuggestion = (authoring.selectedSuggestion + 1) % suggestions().length;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      authoring.selectedSuggestion = (authoring.selectedSuggestion + suggestions().length - 1) % suggestions().length;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void insertSuggestion(suggestions()[authoring.selectedSuggestion]);
+    }
+  }
 </script>
 
 <aside class="authoring-tools" aria-labelledby="authoring-heading">
   <div class="authoring-heading">
     <div>
       <h3 id="authoring-heading">Boris authoring hints</h3>
-      <p>{authoringStatus}</p>
+      <p>{authoring.status}</p>
     </div>
-    <button type="button" onclick={onRefresh}>Refresh Boris suggestions</button>
+    <button type="button" onclick={refreshAuthoring}>Refresh Boris suggestions</button>
   </div>
   <div class="completion-controls">
     <div>
       <label for="completion-kind">Completion category</label>
       <select
         id="completion-kind"
-        value={completionKind}
-        onchange={(e) => onKindChange((e.currentTarget as HTMLSelectElement).value as CompletionKind)}
+        value={authoring.completionKind}
+        onchange={(e) => { authoring.completionKind = (e.currentTarget as HTMLSelectElement).value as CompletionKind; void changeCompletionKind(); }}
       >
         <option value="frontmatter_key">Frontmatter key</option>
         <option value="status">Status value</option>
@@ -64,40 +55,40 @@
       </select>
     </div>
     <div class="combobox-wrap">
-      <label for="completion-query">Filter {completionKind.replaceAll('_', ' ')}</label>
+      <label for="completion-query">Filter {authoring.completionKind.replaceAll('_', ' ')}</label>
       <input
         id="completion-query"
         role="combobox"
         aria-autocomplete="list"
-        aria-expanded={completionOpen && suggestions.length > 0}
+        aria-expanded={authoring.completionOpen && suggestions().length > 0}
         aria-controls="completion-options"
-        aria-activedescendant={completionOpen && suggestions.length ? `completion-option-${selectedSuggestion}` : undefined}
-        value={completionQuery}
-        onfocus={() => onCompletionOpen(true)}
+        aria-activedescendant={authoring.completionOpen && suggestions().length ? `completion-option-${authoring.selectedSuggestion}` : undefined}
+        value={authoring.completionQuery}
+        onfocus={() => (authoring.completionOpen = true)}
         oninput={(e) => {
-          onQueryChange((e.currentTarget as HTMLInputElement).value);
-          onCompletionOpen(true);
+          authoring.completionQuery = (e.currentTarget as HTMLInputElement).value;
+          authoring.completionOpen = true;
         }}
-        onkeydown={onCompletionKeydown}
+        onkeydown={completionKeydown}
       />
       <p class="key-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> insert · <kbd>Esc</kbd> close</p>
     </div>
-    <button type="button" disabled={!suggestions.length || readOnly} onclick={() => onInsert(suggestions[selectedSuggestion])}>Insert selected completion</button>
+    <button type="button" disabled={!suggestions().length || buffer.readOnly} onclick={() => insertSuggestion(suggestions()[authoring.selectedSuggestion])}>Insert selected completion</button>
   </div>
-  {#if completionOpen && suggestions.length > 0}
-    <ul id="completion-options" role="listbox" aria-label="Boris completion suggestions">
-      {#each suggestions as suggestion, suggestionIndex (`${completionKind}-${suggestion.value}`)}
+  {#if authoring.completionOpen && suggestions().length > 0}
+    <ul id="completion-options" role="listbox" aria-label="Boris completion suggestions()">
+      {#each suggestions() as suggestion, suggestionIndex (`${authoring.completionKind}-${suggestion.value}`)}
         <li
           id="completion-option-{suggestionIndex}"
           role="option"
           tabindex="-1"
-          aria-selected={suggestionIndex === selectedSuggestion}
-          class:selected={suggestionIndex === selectedSuggestion}
-          onclick={() => onSelect(suggestionIndex)}
+          aria-selected={suggestionIndex === authoring.selectedSuggestion}
+          class:selected={suggestionIndex === authoring.selectedSuggestion}
+          onclick={() => (authoring.selectedSuggestion = suggestionIndex)}
           onkeydown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();
-              onInsert(suggestion);
+              void insertSuggestion(suggestion);
             }
           }}
         >
@@ -106,11 +97,11 @@
       {/each}
     </ul>
   {/if}
-  {#if authoring}
+  {#if authoring.payload}
     <details>
       <summary>Frontmatter field bounds from Boris schema</summary>
       <dl>
-        {#each Object.entries(authoring.frontmatter_schema.properties) as [field, property]}
+        {#each Object.entries(authoring.payload.frontmatter_schema.properties) as [field, property]}
           <div><dt>{field}</dt><dd>{schemaHint(property)}</dd></div>
         {/each}
       </dl>
