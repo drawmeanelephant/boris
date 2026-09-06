@@ -67,6 +67,22 @@
     arrivedTimer = setTimeout(clearArrival, ARRIVAL_MS);
   }
 
+  // The URL fragment is this editor's launch channel (#943): the session
+  // token rides in it (api.ts parses it once at startup), and `open` is
+  // consumed at launch. Writing the section id must preserve the
+  // still-relevant params, not swap the whole fragment — a bare `#${id}`
+  // would leave a reload token-missing. `open` is deliberately dropped:
+  // carrying it forward would re-open the file on every reload.
+  function sectionFragment(id: string): string {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const next = new URLSearchParams();
+    const token = params.get('token');
+    if (token) next.set('token', token);
+    // Section id last so the fragment reads as the live location.
+    next.set('section', id);
+    return next.toString();
+  }
+
   // Focus hand-off plus feedback on plain clicks: modifier-clicks fall
   // through to the browser (new tab/window), keyboard activation goes
   // through the same click event. preventDefault plus the manual jump keeps
@@ -76,7 +92,7 @@
     const section = sectionFor(id);
     if (!section) return;
     event.preventDefault();
-    history.replaceState(null, '', `#${id}`);
+    history.replaceState(null, '', `#${sectionFragment(id)}`);
     // Honor the reduced-motion contract in JS too: the CSS block collapses
     // transitions/animations, but scrollIntoView('smooth') is scripted and
     // would still animate.
