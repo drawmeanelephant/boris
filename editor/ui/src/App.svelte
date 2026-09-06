@@ -771,20 +771,36 @@
     else void probeDisk();
   }
 
+  // While the focus overlay is open, everything outside it must be inert —
+  // the promise `aria-modal="true"` makes. Enumerate #app's children (header,
+  // nav, recovery banner, workspace, footer): each is marked inert
+  // individually because the overlay itself is one of those children and
+  // inertness must not land on it. Enumerating (rather than listing specific
+  // ids) also covers future top-level chrome. Children hosting native
+  // <dialog> elements are exempt: dialogs manage their own modality through
+  // the top layer and MUST stay live above the overlay (the command palette,
+  // and conflict/resolution dialogs raised while the author is writing).
+  function setBackgroundInert(on: boolean) {
+    const app = document.getElementById('app');
+    if (!app) return;
+    for (const child of Array.from(app.children)) {
+      if (!(child instanceof HTMLElement) || child.id === 'focus-overlay-root') continue;
+      if (child.tagName === 'DIALOG' || child.querySelector('dialog') !== null) continue;
+      if (on) child.setAttribute('inert', '');
+      else child.removeAttribute('inert');
+    }
+  }
+
   function enterFocusMode(trigger: HTMLElement | null = null) {
-    // aria-modal promises the background is inert; enforce it here, not in a
-    // component effect, so the ordering with focus return is explicit. The
-    // workspace (and surrounding chrome) becomes non-interactive while the
-    // overlay is open — Tab cannot walk into visually hidden controls. Host
-    // dialogs (conflict/resolution) sit outside #workspace and stay live.
-    document.getElementById('workspace')?.setAttribute('inert', '');
+    // Set inertness BEFORE opening; exitFocusMode lifts it BEFORE returning
+    // focus — an inert element cannot take focus, so the restore would
+    // silently no-op if it ran first.
+    setBackgroundInert(true);
     openFocusMode(trigger);
   }
 
   function exitFocusMode() {
-    // Lift inertness BEFORE returning focus: an inert element cannot take
-    // focus, so the restore would silently no-op if it ran first.
-    document.getElementById('workspace')?.removeAttribute('inert');
+    setBackgroundInert(false);
     const returnTo = focusReturnElement;
     closeFocusMode();
     setFocusReturn(null);

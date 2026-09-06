@@ -450,13 +450,50 @@ test('arrows do nothing harmful when focus mode opens with no file', async ({ pa
   expect(pageErrors).toEqual([]);
 });
 
-test('background workspace is inert while the overlay is open', async ({ page }) => {
+test('background chrome is inert while the overlay is open', async ({ page }) => {
   await installApi(page);
   await openFileAndEnterFocus(page);
-  const workspace = page.locator('#workspace');
-  await expect(workspace).toHaveAttribute('inert', '');
+  // The whole background is inert — the workspace AND the surrounding
+  // chrome (header with its focusable theme button, nav, footer) — so Tab
+  // cannot leave the modal overlay. The overlay root itself stays live.
+  const state = await page.evaluate(() => ({
+    inertIds: [...(document.getElementById('app')?.children ?? [])]
+      .filter(child => child instanceof HTMLElement && child.hasAttribute('inert'))
+      .map(child => child.id || child.tagName.toLowerCase()),
+    overlayInert: document.getElementById('focus-overlay-root')?.hasAttribute('inert') ?? false,
+    headerInert: document.querySelector('header')?.hasAttribute('inert') ?? false
+  }));
+  expect(state.inertIds).toContain('workspace');
+  expect(state.inertIds).toContain('header');
+  expect(state.overlayInert).toBe(false);
+  expect(state.headerInert).toBe(true);
+  // Behaviorally: with the background inert, Tab either stays inside the
+  // overlay or falls through to <body> when the overlay's stops are
+  // exhausted (inert blocks background stops; wrapping is a focus-trap's
+  // job, not inert's). It can never land on background chrome — were inert
+  // broken, this walk would end on the header's theme button.
+  for (let i = 0; i < 15; i++) await page.keyboard.press('Tab');
+  const landed = await page.evaluate(() => {
+    const overlay = document.getElementById('focus-overlay-root');
+    const el = document.activeElement;
+    if (overlay && el instanceof Node && overlay.contains(el)) return 'overlay';
+    if (el === document.body) return 'body';
+    return `chrome:${el?.tagName.toLowerCase()}`;
+  });
+  expect(['overlay', 'body']).toContain(landed);
+  // Exiting restores the chrome. The generous ceiling rides out parallel-
+  // worker load (this is the heaviest focus test); a genuinely stuck
+  // overlay still fails it. The `leftover` check waits out the exit fade:
+  // Svelte marks outroing elements inert while they leave, which is fine —
+  // the assertion is about the surviving background.
+  const dialog = page.getByRole('dialog', { name: 'Focus writing mode' });
   await page.getByRole('button', { name: 'Exit focus', exact: true }).click();
+  await expect(dialog).toBeHidden({ timeout: 10_000 });
   await expect(page.locator('#workspace')).not.toHaveAttribute('inert', '');
+  const leftover = await page.evaluate(() =>
+    [...document.querySelectorAll('[inert]')].map(n => n.id || n.tagName.toLowerCase())
+  );
+  expect(leftover).toEqual([]);
 });
 
 test('reading aid renders frontmatter as a collapsed muted band, not body text', async ({ page }) => {
@@ -508,10 +545,9 @@ test('reading aid never produces executable content (escape + anchor policy)', a
 });
 
 test('spaced thematic breaks render as rules, not list items', async ({ page }) => {
-  await installApi(page, {
-    disk: '# Home\n\n* * *\n\n- - -\n\nAfter the rules.\n'
-  });
-  await openFileAndEnterFocus(page, '# Home\n\n* * *\n\n- - -\n\nAfter the rules.\n');
+  const spaced = '# Home\n\n* * *\n\n- - - -\n\nAfter the rules.\n';
+  await installApi(page, { disk: spaced });
+  await openFileAndEnterFocus(page, spaced);
   const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
   await focus.getByRole('radio', { name: 'Preview', exact: true }).check();
   const reading = page.locator('.focus-reading');

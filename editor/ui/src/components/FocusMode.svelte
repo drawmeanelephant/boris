@@ -289,6 +289,7 @@
 
 <div
   class="focus-overlay"
+  id="focus-overlay-root"
   role="dialog"
   aria-modal="true"
   aria-label="Focus writing mode"

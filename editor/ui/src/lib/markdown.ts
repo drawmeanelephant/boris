@@ -110,7 +110,10 @@ export function renderMarkdown(source: string): string {
   // Frontmatter: nearly every Boris page opens with a YAML block, and left
   // in place it renders as thematic-break noise plus stray paragraphs. The
   // reading aid is a prose preview, so the block renders once as a muted,
-  // collapsed band instead of body text.
+  // collapsed band instead of body text. Detection is a leading `---` line
+  // closed by the next `---`; a body that genuinely opens with two
+  // thematic breaks would be banded too — accepted (reading-aid-only
+  // cosmetics, and real pages always carry frontmatter).
   if (lines[0]?.trim() === '---') {
     let end = 1;
     while (end < lines.length && lines[end].trim() !== '---') end += 1;
@@ -211,9 +214,10 @@ function renderBody(blocks: string[], lines: string[]): string {
     }
 
     // Thematic break. Checked before lists: CommonMark gives the break
-    // precedence when a line could parse as either, and the break may be
-    // spaced (`* * *`, `- - -`).
-    if (/^\s*(?:-{3,}|\*{3,}|-\s*-\s*-|\*\s*\*\s*\*)\s*$/.test(trimmed)) {
+    // precedence when a line could parse as either. The break may be a run
+    // of the same symbol or spaced (`* * *`, `- - - -`); spaced and unspaced
+    // forms are both covered by the alternation below.
+    if (/^\s*(?:-{3,}|\*{3,}|(?:-[ \t]+){2,}-|(?:\*[ \t]+){2,}\*)\s*$/.test(trimmed)) {
       flushParagraph();
       blocks.push('<hr>');
       i += 1;
