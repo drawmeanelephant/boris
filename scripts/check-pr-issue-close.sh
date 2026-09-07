@@ -51,23 +51,21 @@ note() { printf '==> %s\n' "$*"; }
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 2; }
 
 # ---------------------------------------------------------------------------
-# Set helpers (bash 3.2: no associative arrays — membership via substring)
+# Set helpers (bash 3.2/5.x: no associative arrays, no indirect expansion —
+# membership via substring; sets are comma-wrapped strings)
 # ---------------------------------------------------------------------------
 
 # in_set <needle> <set>: set is a comma-separated string with leading and
-# trailing commas, e.g. ",912,913," — as produced by to_set / add_to_set.
+# trailing commas, e.g. ",912,913," — as produced by to_set / inline appends.
 in_set() {
   case "$2" in *",$1,"*) return 0 ;; esac
   return 1
 }
 
-# add_to_set <current-set-var-name> <value>: appends when absent. The
-# variable holds the wrapped comma form ("912," then "912,913,", ...).
-add_to_set() {
-  local __var="$1" __val="$2" __cur="${!__var:-}"
-  case ",$__cur," in *",$__val,"*) return ;; esac
-  printf -v "$__var" '%s%s,' "$__cur" "$__val"
-}
+# NOTE: do not use ${!var} indirection or declare-style combined locals that
+# expand a variable declared in the same statement — bash 5.x (CI runners)
+# rejects "${!__var:-}" evaluated in the same declaration command that
+# assigns __var ("invalid indirect expansion"), while bash 3.2 accepts it.
 
 # to_set <newline-separated-list>: wrap into the ",a,b," membership form.
 to_set() {
@@ -89,6 +87,13 @@ strip_bold() {
   printf '%s\n' "$1" | sed -E "s/$BOLD_SPAN_RE/ /g"
 }
 
+# strip_code <text>: remove inline code spans (`...`) so issue references the
+# way GitHub does not linkify them — inside backticks — do not trip the lint.
+# Mirrors GitHub's reference-linkify rules: no auto-close inside code spans.
+strip_code() {
+  printf '%s\n' "$1" | sed -E 's/`[^`]*`/ /g'
+}
+
 # ---------------------------------------------------------------------------
 # Body analysis (pure functions — exercised by --selftest)
 # ---------------------------------------------------------------------------
@@ -100,6 +105,7 @@ strip_bold() {
 classify_refs() {
   local body="$1"
   local norm bold refs all n norm_set bold_set refs_set
+  body="$(strip_code "$body")" # code spans are not linkified by GitHub
   norm="$(numbers_matching "$(strip_bold "$body")" "$CLOSING_RE")"
   bold="$(numbers_matching "$body" "$CLOSING_RE")"
   refs="$(numbers_matching "$body" "$NONCLOSING_RE")"
@@ -108,13 +114,14 @@ classify_refs() {
   refs_set="$(to_set "$refs")"
 
   # Keep only the bold-only captures (bold minus plain coverage).
-  local bold_only="" n2
+  local bold_only="," n2
   while IFS= read -r n2; do
     [[ -n "$n2" ]] || continue
     in_set "$n2" "$norm_set" && continue
-    add_to_set bold_only "$n2"
+    in_set "$n2" "$bold_only" || bold_only="${bold_only}${n2},"
   done < <(printf '%s\n' "$bold")
-  bold_set="${bold_only:+,$bold_only}" # membership form; "," when empty
+  # already in membership form: "," when empty, ",a,b," when populated
+  bold_set="$bold_only"
 
   while IFS= read -r n; do
     [[ -n "$n" ]] || continue
@@ -135,6 +142,7 @@ classify_refs() {
 # keyword and a Refs/Related-to form (contradictory intent).
 ambiguous_refs() {
   local body="$1" norm refs n norm_set
+  body="$(strip_code "$body")" # code spans are not linkified by GitHub
   norm="$(numbers_matching "$(strip_bold "$body")" "$CLOSING_RE")"
   refs="$(numbers_matching "$body" "$NONCLOSING_RE")"
   norm_set="$(to_set "$norm")"
@@ -356,6 +364,15 @@ Mentions #913" "913 NO-KEYWORD"
     "856 NO-KEYWORD"
   assert_classes "PR #917 shape: plain comma list" \
     "Closes #858, #859, #869" "869 NO-KEYWORD"
+
+  # Code spans: GitHub does not linkify references inside backticks, so a
+  # mention in inline code is documentation, not an actionable reference.
+  assert_classes "code-span mention is not a reference" \
+    "Closes #912
+Docs say use \`Refs #418\` or bare \`#454\` forms" ""
+  assert_ambiguous "code-span mention cannot be ambiguous" \
+    "Closes #912
+See \`Refs #912\` in the notes" ""
 
   note "selftest: ambiguous_refs"
   assert_ambiguous "closing + Refs for the same issue is ambiguous" \
