@@ -14,6 +14,7 @@ concurrency:
 permissions:
   contents: read
   pull-requests: read
+  issues: read
 
 jobs:
   changes:
@@ -118,6 +119,32 @@ jobs:
 
       - name: Run the key-hint conformance lint
         run: node editor/ui/scripts/check-key-hints.mjs
+
+  # The issue-close lint fails a PR whose body references open issues without
+  # per-issue closing keywords ("Closes #N" — one issue per keyword, any
+  # GitHub close synonym, no comma lists, no bold-wrapped keywords, no bare
+  # "Refs #N" for issues the merge must close), so multi-issue fixes cannot
+  # orphan issues at merge time. The 2026-09-05 paperwork batch had to close
+  # 23 issues by hand after such PRs landed. Zero-dependency bash + gh; the
+  # grammar self-test runs first so regressions fail offline on every push,
+  # while the live PR-body check only has a subject on pull_request events.
+  # Read-only: the workflow's issues/pull-requests read permissions suffice.
+  pr-issue-close-lint:
+    name: pr-issue-close lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run the issue-close grammar self-test
+        run: ./scripts/check-pr-issue-close.sh --selftest
+
+      - name: Lint the PR body for per-issue closing keywords
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/check-pr-issue-close.sh --pr ${{ github.event.pull_request.number }}
 
   editor-test:
     name: editor-test (Linux)
@@ -381,6 +408,7 @@ jobs:
       - build-and-test
       - editor-test
       - key-hint-lint
+      - pr-issue-close-lint
       - standalone_tools_test
       - testdata_generator_test
       - job-runner-image
@@ -394,6 +422,7 @@ jobs:
           build_and_test="${{ needs.build-and-test.result }}"
           editor_test="${{ needs.editor-test.result }}"
           key_hint_lint="${{ needs.key-hint-lint.result }}"
+          pr_issue_close_lint="${{ needs.pr-issue-close-lint.result }}"
           standalone_tools_test="${{ needs.standalone_tools_test.result }}"
           testdata_generator_test="${{ needs.testdata_generator_test.result }}"
           job_runner_image="${{ needs.job-runner-image.result }}"
@@ -402,6 +431,7 @@ jobs:
           echo "build-and-test result: ${build_and_test}"
           echo "editor-test result: ${editor_test}"
           echo "key-hint lint result: ${key_hint_lint}"
+          echo "pr-issue-close lint result: ${pr_issue_close_lint}"
           echo "standalone-tools-test result: ${standalone_tools_test}"
           echo "testdata-generator-test result: ${testdata_generator_test}"
           echo "job-runner-image result: ${job_runner_image}"
@@ -409,8 +439,9 @@ jobs:
           echo "release-html-smoke result: ${release_html_smoke}"
           test "${build_and_test}" = "success"
           test "${editor_test}" = "success"
-          # The lint lane must actually succeed: a skip must never read as green.
+          # The lint lanes must actually succeed: a skip must never read as green.
           test "${key_hint_lint}" = "success"
+          test "${pr_issue_close_lint}" = "success"
           test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
           test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"
           test "${job_runner_image}" = "success" || test "${job_runner_image}" = "skipped"
