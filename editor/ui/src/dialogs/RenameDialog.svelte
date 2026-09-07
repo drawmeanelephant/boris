@@ -15,6 +15,13 @@
     onRename: () => void;
     onCancel: () => void;
   } = $props();
+
+  // Same silent-failure guard as CreateDialog: renameFile() early-returns on
+  // an empty path, so clear the input and press Enter and nothing happens.
+  // The disabled submitter makes the invalid state visible and lets the
+  // browser refuse implicit Enter submission. (No active file is not
+  // reachable here — the dialog only opens from active-file affordances.)
+  const submitReady = $derived(dialogs.renamePath.trim().length > 0);
 </script>
 
 <dialog bind:this={dialog} onkeydown={onKeydown} onclose={onClose} aria-labelledby="rename-heading">
@@ -25,7 +32,7 @@
     <input id="rename-path" value={dialogs.renamePath} oninput={(e) => (dialogs.renamePath = (e.currentTarget as HTMLInputElement).value)} />
     <div class="dialog-actions">
       <button type="button" onclick={onCancel}>Cancel<kbd>Esc</kbd></button>
-      <button type="submit" class="primary">Rename file<kbd>Enter</kbd></button>
+      <button type="submit" class="primary" disabled={!submitReady}>Rename file<kbd>Enter</kbd></button>
     </div>
   </form>
 </dialog>
