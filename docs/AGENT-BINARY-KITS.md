@@ -36,6 +36,22 @@ and includes its installed executable(s) in `--all-tools` kits. The
 migration laboratory is no longer packaged here — it lives in its own
 repository ([`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab)) with its own kit story.
 
+The editor host is likewise opt-in. Pass `--with-editor` to also build
+`boris-editor` (via `editor/build.zig`) and bundle it with the prebuilt UI
+shell under `ui/dist/`:
+
+```bash
+cd editor/ui && npm ci && npm run build && cd ../..
+./scripts/agent-pack.sh --with-editor
+```
+
+The UI shell is built by Vite, not Zig, so the script requires a prebuilt
+`editor/ui/dist/` and fails loudly with the build command when it is
+missing. The kit records `"editor_ui": true` in `MANIFEST.json`, covers the
+UI files in `SHA256SUMS`, and its README carries the editor launch line
+(`boris-editor . --boris ./bin/boris --ui-dir ./ui/dist`). The
+`boris-editor-contract-probe` test helper is never packaged.
+
 The kit README names the built-in feedback loop for the recipient:
 `boris watch --serve` serves the built site on loopback with automatic
 browser reload, `boris watch --watch-json` streams machine-readable NDJSON

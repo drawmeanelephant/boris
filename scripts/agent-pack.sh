@@ -14,10 +14,15 @@ Build and archive the Boris binaries for handoff to another agent.
 The default kit contains the root product CLIs: boris, boris-package, and
 boris-source-rag. Standalone developer tools are not agent handoff material;
 pass --all-tools to also build and include every executable installed by a
-direct tools/*/build.zig file.
+direct tools/*/build.zig file. The editor host and its built UI shell are
+likewise opt-in; pass --with-editor to build boris-editor and bundle it with
+editor/ui/dist (the UI must be prebuilt with npm ci && npm run build in
+editor/ui).
 
 Options:
   --all-tools     Also build and include the standalone developer tools
+  --with-editor   Also build boris-editor and bundle it with the prebuilt
+                  editor UI shell under ui/dist/
   --out DIR       Output directory (default: boris-agent-kit)
   --no-build      Use already-installed binaries; do not run Zig builds
   --allow-dirty   Permit uncommitted changes; the manifest records this
@@ -36,10 +41,12 @@ out_dir="boris-agent-kit"
 do_build=1
 allow_dirty=0
 all_tools=0
+with_editor=0
 
 while (($# > 0)); do
   case "$1" in
     --all-tools) all_tools=1; shift ;;
+    --with-editor) with_editor=1; shift ;;
     --out)
       (($# >= 2)) || { echo "--out requires a directory" >&2; exit 2; }
       out_dir=$2
@@ -89,6 +96,10 @@ if (( do_build )); then
     echo "building standalone tool: ${build_file#tools/}"
     zig build --build-file "$build_file"
   done
+  if (( with_editor )); then
+    echo "building editor host..."
+    zig build --build-file editor/build.zig
+  fi
 fi
 
 declare -a names=(
@@ -126,6 +137,23 @@ for build_file in "${tool_build_files[@]}"; do
   fi
 done
 
+editor_ui_dir="editor/ui/dist"
+if (( with_editor )); then
+  if [[ ! -f "editor/zig-out/bin/boris-editor" || ! -x "editor/zig-out/bin/boris-editor" ]]; then
+    echo "missing executable: editor/zig-out/bin/boris-editor" >&2
+    echo "run without --no-build or build the editor host first" >&2
+    exit 1
+  fi
+  if [[ ! -f "$editor_ui_dir/index.html" ]]; then
+    echo "missing editor UI shell: $editor_ui_dir/index.html" >&2
+    echo "the editor UI is not built by Zig; build it first:" >&2
+    echo "  cd editor/ui && npm ci && npm run build" >&2
+    exit 1
+  fi
+  names+=("boris-editor")
+  sources+=("editor/zig-out/bin/boris-editor")
+fi
+
 for source in "${sources[@]}"; do
   if [[ ! -f "$source" || ! -x "$source" ]]; then
     echo "missing executable: $source" >&2
@@ -145,6 +173,11 @@ for i in "${!names[@]}"; do
   install -m 0755 "${sources[$i]}" "$root/bin/${names[$i]}"
 done
 
+if (( with_editor )); then
+  mkdir -p "$root/ui"
+  cp -R "$editor_ui_dir" "$root/ui/dist"
+fi
+
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g; s/\r/\\r/g; s/$/\\n/' | tr -d '\n' | sed 's/\\n$//'
 }
@@ -163,6 +196,7 @@ escaped_platform=$(json_escape "$platform")
   printf '  "dirty": %s,\n' "$([[ $dirty -eq 1 ]] && echo true || echo false)"
   printf '  "platform": "%s",\n' "$escaped_platform"
   printf '  "zig_version": "%s",\n' "$escaped_zig"
+  printf '  "editor_ui": %s,\n' "$([[ $with_editor -eq 1 ]] && echo true || echo false)"
   printf '  "binaries": [\n'
   for i in "${!names[@]}"; do
     digest=$(shasum -a 256 "${sources[$i]}" | awk '{print $1}')
@@ -196,12 +230,35 @@ This kit is a transport artifact for agent handoff. It is not the product
 IR/RAG package and does not replace the repository source checkout.
 EOF
 
+if (( with_editor )); then
+  cat >> "$root/README.md" <<'EOF'
+
+## Editor included
+
+This kit bundles the Boris Editor host (`bin/boris-editor`) with its
+prebuilt UI shell under `ui/dist/`. From a Boris project checkout, launch:
+
+  ./bin/boris-editor . --boris ./bin/boris --ui-dir ./ui/dist
+
+The host prints a loopback `BORIS_EDITOR_URL=` launch line carrying the
+session token. The host binds `127.0.0.1` only; open the printed URL in a
+browser on the same machine.
+EOF
+fi
+
 (
   cd "$root"
-  for file in bin/*; do
-    digest=$(shasum -a 256 "$file" | awk '{print $1}')
-    printf '%s  %s\n' "$digest" "$file"
-  done
+  if (( with_editor )); then
+    find bin ui -type f | LC_ALL=C sort | while IFS= read -r file; do
+      digest=$(shasum -a 256 "$file" | awk '{print $1}')
+      printf '%s  %s\n' "$digest" "$file"
+    done
+  else
+    for file in bin/*; do
+      digest=$(shasum -a 256 "$file" | awk '{print $1}')
+      printf '%s  %s\n' "$digest" "$file"
+    done
+  fi
 ) > "$root/SHA256SUMS"
 
 # Normalize every archive input. The explicit sorted file list plus fixed
