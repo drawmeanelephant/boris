@@ -24,8 +24,12 @@
 #
 # Boundary guards: the keyword must not be part of a longer word or hyphenated
 # compound, so prose like "Recloses #N" or "auto-closes #N" never satisfies
-# the rule. Numbers referenced in other PRs are skipped (the issues API marks
-# them), as are already-closed issues and PRs that are not open.
+# the rule, and a bare "#N" must not be glued to a word, path, or URL —
+# "owner/repo#N" and "page.html#N" are other-repository or anchor references
+# that GitHub will not auto-close against this repository, so demanding a
+# closing keyword for them would be wrong advice. Numbers referenced in other
+# PRs are skipped (the issues API marks them), as are already-closed issues
+# and PRs that are not open.
 #
 # Usage:
 #   scripts/check-pr-issue-close.sh --selftest            offline, no network
@@ -45,7 +49,10 @@ PROG="check-pr-issue-close"
 CLOSING_RE='(^|[^A-Za-z-])(Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve)[[:space:]]*:?[[:space:]]*#[0-9]+'
 NONCLOSING_RE='(^|[^A-Za-z-])(Refs|Related to)[[:space:]]*:?[[:space:]]*#[0-9]+'
 BOLD_SPAN_RE='\*\*[^*]+\*\*'
-ISSUE_REF_RE='#[0-9]+'
+# A same-repo issue reference is a bare "#N" not glued to a word, path, or URL
+# fragment: "owner/repo#N" and "page#N" are cross-repo or anchor forms GitHub
+# does not auto-close against this repository and are not references here.
+ISSUE_REF_RE='(^|[^A-Za-z0-9/._~-])#[0-9]+'
 
 note() { printf '==> %s\n' "$*"; }
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 2; }
@@ -373,6 +380,18 @@ Docs say use \`Refs #418\` or bare \`#454\` forms" ""
   assert_ambiguous "code-span mention cannot be ambiguous" \
     "Closes #912
 See \`Refs #912\` in the notes" ""
+
+  # Cross-repo and URL-attached references: GitHub links only bare "#N"
+  # forms against this repository, so "owner/repo#N" and page/URL fragments
+  # must not demand a closing keyword.
+  assert_classes "cross-repo owner/repo#N is not a reference" \
+    "See drawmeanelephant/boris-migration-lab#584 for the lab story." ""
+  assert_classes "URL fragment is not a reference" \
+    "Docs: https://github.com/drawmeanelephant/boris/wiki/page#584" ""
+  assert_classes "explicit same-repo form is not demanded (GitHub closes it)" \
+    "Closes drawmeanelephant/boris#912" ""
+  assert_classes "cross-repo mention does not mask a real same-repo flag" \
+    "See drawmeanelephant/lab#584 — also mentions #913 bare" "913 NO-KEYWORD"
 
   note "selftest: ambiguous_refs"
   assert_ambiguous "closing + Refs for the same issue is ambiguous" \
