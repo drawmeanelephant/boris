@@ -279,6 +279,7 @@ fn buildIntention(
         const remediation = switch (finding.defect) {
             .raw_html => "NIP-23 forbids HTML in long-form content; replace it with Markdown",
             .hard_wrapped_paragraph => "join the paragraph onto one line; NIP-23 forbids hard-wrapped prose",
+            .relative_url => "make the link or image destination absolute (scheme- or origin-qualified) so it resolves off-site",
         };
         try reject(gpa, result, .ENOSTRMARKDOWN, node.id, node.source_path, message.items, remediation);
         return error.Rejected;
@@ -591,14 +592,15 @@ test "plan: every unpublishable selection is refused with its own diagnostic" {
     }
     // draft, path-derived id, and a selection absent from the corpus.
     try testing.expectEqual(@as(usize, 3), eligibility);
-    // raw HTML and hard-wrapped prose.
-    try testing.expectEqual(@as(usize, 2), markdown);
+    // raw HTML, hard-wrapped prose, and an ordinary relative link.
+    try testing.expectEqual(@as(usize, 3), markdown);
 
     try expectRejection(result, "articles/draft", "draft-status");
     try expectRejection(result, "articles/derived", "derived-entity-id");
     try expectRejection(result, "articles/missing", "does not exist in the validated corpus");
     try expectRejection(result, "articles/raw", "raw-html");
     try expectRejection(result, "articles/wrapped", "hard-wrapped-paragraph");
+    try expectRejection(result, "articles/relative", "relative-url");
 }
 
 /// Asserts one rejection exists for `entity_id` naming `needle`.
