@@ -68,8 +68,8 @@ different value, the record is `failed` with the exact error name. A conflict
 
 ### Orphans and prune
 
-A remote record whose page is excluded from the plan (draft, missing date,
-filtered, or unsupported) is an **orphan**. Without explicit prune authority it
+A remote record whose page is excluded from the plan (draft, missing date, or
+filtered) is an **orphan**. Without explicit prune authority it
 is skipped and recorded as `skipped_orphan` — a missing local page never
 deletes a remote record. With explicit prune (both the plan's `prune` flag and
 the publish invocation must opt in), the orphan is deleted with

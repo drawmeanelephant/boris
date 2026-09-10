@@ -68,8 +68,9 @@ byte-identical plans.
 
 A page becomes a planned document only when **all** of:
 
-1. Status is `published` or `archived` (drafts are excluded with reason
-   `draft`);
+1. Status is omitted, `published`, or `archived` (drafts are excluded with
+   reason `draft`; an omitted status is eligible, mirroring RSS eligibility in
+   [`rss-2.0.md`](rss-2.0.md));
 2. `published_at` is present and normalizes to the atproto datetime form
    `YYYY-MM-DDTHH:MM:SS.000Z` (reason `missing-date` otherwise);
 3. The entity id passes the configured include/exclude filters (reason
@@ -78,10 +79,9 @@ A page becomes a planned document only when **all** of:
    backslash, or `..`).
 
 Every exclusion is recorded with its entity id, reason (`draft`, `missing-date`,
-`filtered`, `unsupported`), and a human-readable detail. The reason tokens are
-the closed wire vocabulary; the missing-date token is the hyphenated
-`missing-date` as rendered (#896). Rkey collisions across
-the planned collection fail closed.
+`filtered`), and a human-readable detail. The reason tokens are the closed wire
+vocabulary; the missing-date token is the hyphenated `missing-date` as rendered
+(#896). Rkey collisions across the planned collection fail closed.
 
 ### Document rkeys
 

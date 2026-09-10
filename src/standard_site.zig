@@ -207,7 +207,7 @@ pub const PageInput = struct {
     text_content: ?[]const u8 = null,
 };
 
-pub const ExclusionReason = enum { draft, missing_date, filtered, unsupported };
+pub const ExclusionReason = enum { draft, missing_date, filtered };
 
 pub const Exclusion = struct {
     entity_id: []u8,
@@ -373,16 +373,6 @@ pub fn normalizePublishedAt(gpa: std.mem.Allocator, raw: []const u8) Error![]u8 
 // ---------------------------------------------------------------------------
 // eligibility
 // ---------------------------------------------------------------------------
-
-/// Mirrors the RSS eligibility rule: a document is eligible when it has a
-/// `published_at` and its status is omitted / published / archived. Drafts
-/// and missing dates are excluded; profile filters are applied separately.
-fn isEligibleStatus(status: Status) bool {
-    return switch (status) {
-        .published, .archived, .none => true,
-        .draft => false,
-    };
-}
 
 fn filterAllows(config: *const TargetConfig, entity_id: []const u8) bool {
     var included = config.include.len == 0;
@@ -566,6 +556,9 @@ pub fn project(gpa: std.mem.Allocator, input: ProjectInput) Error!Projection {
     for (input.pages) |page| {
         if (page.entity_id.len == 0) return error.InvalidPage;
         if (!validateOutputPath(page.output_path)) return error.InvalidPage;
+        // Eligibility mirrors RSS: an omitted status is eligible, and only
+        // drafts are excluded. Missing dates and profile filters are separate
+        // recorded reasons.
         if (page.status == .draft) {
             try exclusions.append(gpa, .{
                 .entity_id = try gpa.dupe(u8, page.entity_id),
@@ -587,14 +580,6 @@ pub fn project(gpa: std.mem.Allocator, input: ProjectInput) Error!Projection {
                 .entity_id = try gpa.dupe(u8, page.entity_id),
                 .reason = .filtered,
                 .detail = try gpa.dupe(u8, "excluded by the configured include/exclude filters"),
-            });
-            continue;
-        }
-        if (!isEligibleStatus(page.status)) {
-            try exclusions.append(gpa, .{
-                .entity_id = try gpa.dupe(u8, page.entity_id),
-                .reason = .unsupported,
-                .detail = try gpa.dupe(u8, "status is not publishable"),
             });
             continue;
         }
@@ -1020,7 +1005,6 @@ fn exclusionReasonName(reason: ExclusionReason) []const u8 {
         .draft => "draft",
         .missing_date => "missing-date",
         .filtered => "filtered",
-        .unsupported => "unsupported",
     };
 }
 
@@ -1193,6 +1177,41 @@ test "projection maps an eligible corpus deterministically with reasons" {
     try std.testing.expectEqualStrings("https://example.com", projection.publication.url);
     try std.testing.expectEqualStrings("self", projection.publication.rkey);
     try std.testing.expectEqualStrings("at://did:plc:ewvi7nxzyoun6zhxrhs64oiz/site.standard.publication/self", projection.publication.at_uri);
+}
+
+test "omitted status is eligible and mirrors RSS (#892)" {
+    const gpa = std.testing.allocator;
+    var config = try testConfig(gpa);
+    defer config.deinit(gpa);
+    const pages = [_]PageInput{
+        .{ .entity_id = "articles/omitstatus", .output_path = "articles/omitstatus.html", .title = "Omit Status", .status = .none, .published_at = "2024-03-01T09:00:00Z" },
+    };
+    var projection = try project(gpa, .{ .config = &config, .site_title = "Boris", .pages = &pages });
+    defer projection.deinit(gpa);
+
+    // An omitted status passes the eligibility gate: the page is planned as a
+    // document (mirroring RSS), not recorded as an exclusion.
+    try std.testing.expectEqual(@as(usize, 0), projection.exclusions.len);
+    try std.testing.expectEqual(@as(usize, 1), projection.documents.len);
+    try std.testing.expectEqualStrings("articles:omitstatus", projection.documents[0].rkey);
+    try std.testing.expectEqual(Status.none, projection.documents[0].eligibility);
+
+    const surfaces = try verificationSurfaces(gpa, &config, &projection);
+    defer {
+        gpa.free(surfaces.well_known.content);
+        gpa.free(surfaces.well_known.required_public_url);
+        if (surfaces.well_known.project_path) |path| gpa.free(path);
+        for (surfaces.document_links) |link| {
+            gpa.free(link.page);
+            gpa.free(link.href);
+        }
+        gpa.free(surfaces.document_links);
+    }
+    const plan_bytes = try renderPlan(gpa, &config, &projection, &surfaces);
+    defer gpa.free(plan_bytes);
+    // The reconciled closed vocabulary has no `unsupported` token (#892).
+    try std.testing.expect(std.mem.indexOf(u8, plan_bytes, "unsupported") == null);
+    try std.testing.expect(std.mem.indexOf(u8, plan_bytes, "\"eligibility\": \"none\"") != null);
 }
 
 test "projected document tags outlive the page input slices" {
