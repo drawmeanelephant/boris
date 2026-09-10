@@ -92,8 +92,7 @@ pub const PriorOwnership = struct {
 // ---------------------------------------------------------------------------
 
 /// AT-URI for the eligible document matching `entity_id`, or null when the
-/// page has no document record (ineligible: draft, missing date, filtered,
-/// unsupported).
+/// page has no document record (ineligible: draft, missing date, or filtered).
 pub fn documentAtUri(gpa: std.mem.Allocator, surfaces: *const standard_site.VerificationSurfaces, entity_id: []const u8) ?[]const u8 {
     var wanted: std.ArrayList(u8) = .empty;
     defer wanted.deinit(gpa);
