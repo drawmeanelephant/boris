@@ -142,8 +142,10 @@ pub const PublicationTargetPlan = union(enum) {
 /// slice, reads from a dedicated channel, and is never a profile field.
 pub const NostrPlan = struct {
     enabled: bool = false,
-    /// Expected author x-only public key, 64 lowercase hex digits.
-    pubkey: []u8,
+    /// Expected author x-only public key, 64 lowercase hex digits. Empty only
+    /// for a disabled section that omits it; an enabled section always carries a
+    /// validated key.
+    pubkey: []u8 = &.{},
     /// Exact entity ids selected for publication, sorted ascending and
     /// deduplicated. Selection is an allowlist rather than a filter: putting an
     /// article on the network is not something a glob should be able to do by
@@ -156,7 +158,7 @@ pub const NostrPlan = struct {
     retries: usize = 0,
 
     fn deinit(self: *NostrPlan, allocator: std.mem.Allocator) void {
-        allocator.free(self.pubkey);
+        if (self.pubkey.len > 0) allocator.free(self.pubkey);
         for (self.articles) |v| allocator.free(v);
         if (self.articles.len > 0) allocator.free(self.articles);
         for (self.relays) |v| allocator.free(v);
@@ -393,15 +395,27 @@ fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPl
     const obj = try object(value);
     try only(obj, &.{ "enabled", "pubkey", "articles", "relays", "timeout_ms", "retries" });
 
-    const pubkey_raw = try string(try required(obj, "pubkey"));
-    const pubkey = nostr.parseAuthorPubkey(allocator, pubkey_raw) catch return error.InvalidNostr;
-
-    var out = NostrPlan{ .pubkey = pubkey };
+    var out = NostrPlan{};
     errdefer out.deinit(allocator);
 
     if (field(obj, "enabled")) |v| out.enabled = try boolean(v);
-    out.articles = try parseNostrArticles(allocator, try required(obj, "articles"));
-    out.relays = try parseNostrRelays(allocator, try required(obj, "relays"));
+
+    // The contract conditions identity, selection, and relays on an *enabled*
+    // section: a disabled (or absent) section changes no byte of any other
+    // artifact and need not carry stub data. Supplied values are still parsed
+    // and validated, so malformed configuration fails closed either way.
+    if (field(obj, "pubkey")) |v| {
+        out.pubkey = nostr.parseAuthorPubkey(allocator, try string(v)) catch return error.InvalidNostr;
+    } else if (out.enabled) return error.MissingField;
+
+    if (field(obj, "articles")) |v| {
+        out.articles = try parseNostrArticles(allocator, v);
+    } else if (out.enabled) return error.MissingField;
+
+    if (field(obj, "relays")) |v| {
+        out.relays = try parseNostrRelays(allocator, v);
+    } else if (out.enabled) return error.MissingField;
+
     if (field(obj, "timeout_ms")) |v| {
         const n = try integer(v);
         if (n < nostr.min_timeout_ms or n > nostr.max_timeout_ms) return error.InvalidNostr;
@@ -1090,16 +1104,39 @@ test "nostr section fails closed on identity, selection, and relay defects" {
 
 test "nostr section requires the closed key set and both required keys" {
     try std.testing.expectError(error.UnknownKey, parseNostrProfile(
-        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"],\"nsec\":\"x\"}",
+        "{\"enabled\":true,\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"],\"nsec\":\"x\"}",
     ));
     try std.testing.expectError(error.MissingField, parseNostrProfile(
-        "{\"pubkey\":" ++ valid_pubkey ++ ",\"relays\":[\"wss://r.example.com\"]}",
+        "{\"enabled\":true,\"pubkey\":" ++ valid_pubkey ++ ",\"relays\":[\"wss://r.example.com\"]}",
     ));
     try std.testing.expectError(error.MissingField, parseNostrProfile(
-        "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"]}",
+        "{\"enabled\":true,\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"]}",
     ));
     try std.testing.expectError(error.MissingField, parseNostrProfile(
-        "{\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+        "{\"enabled\":true,\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+    ));
+}
+
+test "a disabled nostr section needs no identity, selection, or relays (#894)" {
+    // The contract conditions the three requirements on an enabled section, so a
+    // staged-but-disabled surface may be just the flag.
+    var bare = try parseNostrProfile("{\"enabled\":false}");
+    defer bare.deinit(std.testing.allocator);
+    const bare_config = bare.plan.nostr.?;
+    try std.testing.expect(!bare_config.enabled);
+    try std.testing.expectEqual(@as(usize, 0), bare_config.pubkey.len);
+    try std.testing.expectEqual(@as(usize, 0), bare_config.articles.len);
+    try std.testing.expectEqual(@as(usize, 0), bare_config.relays.len);
+
+    // An absent `enabled` flag defaults to disabled and is equally exempt.
+    var defaulted = try parseNostrProfile("{}");
+    defer defaulted.deinit(std.testing.allocator);
+    try std.testing.expect(!defaulted.plan.nostr.?.enabled);
+
+    // Supplied values are still validated: a malformed disabled section fails
+    // closed rather than silently ignoring the data.
+    try std.testing.expectError(error.InvalidNostr, parseNostrProfile(
+        "{\"enabled\":false,\"pubkey\":\"abc\",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
     ));
 }
 
