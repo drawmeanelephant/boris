@@ -144,7 +144,7 @@ pub fn renderProfile(md: []const u8, arena: *std.heap.ArenaAllocator, profile: O
 
 /// A publication-safe-Markdown defect found by `inspectMarkdown`.
 ///
-/// These are the two structural conditions NIP-23 forbids a creating client
+/// These are the structural conditions NIP-23 forbids a creating client
 /// from publishing (`docs/contracts/nostr-publication.md`). They are reported
 /// from Oliver's typed document rather than by scanning bytes, so markup that
 /// merely *looks* like HTML inside a code span or fenced block cannot trip
@@ -160,11 +160,21 @@ pub const MarkdownDefect = enum {
     /// `hard_break`, not `soft_break`, and is deliberate authorial intent —
     /// it is preserved, not reported.
     hard_wrapped_paragraph,
+    /// A link or image destination that is neither scheme-qualified nor
+    /// origin-qualified (does not begin `//`). A relative reference has no
+    /// meaning outside the site that serves it: a relay reader client would
+    /// resolve it against the wrong origin. The Boris-mediated link classes
+    /// (doc-links, wiki-links, includes, content-local images) are absolutized
+    /// against the publication `base_url` before inspection, so a remaining
+    /// relative destination is an ordinary authored reference Boris cannot
+    /// resolve off-site.
+    relative_url,
 
     pub fn name(self: MarkdownDefect) []const u8 {
         return switch (self) {
             .raw_html => "raw-html",
             .hard_wrapped_paragraph => "hard-wrapped-paragraph",
+            .relative_url => "relative-url",
         };
     }
 };
@@ -185,6 +195,12 @@ pub const MarkdownFinding = struct {
 /// never inspects HTML. Boris owns the policy (which constructs are refused);
 /// Oliver keeps owning markup semantics, so the answer cannot drift from what
 /// Boris actually publishes.
+///
+/// Link and image destinations are inspected in their resolved typed form:
+/// the four Boris-mediated classes have already been rewritten against the
+/// publication `base_url` by the caller, so a destination that is still
+/// relative is an ordinary authored reference the reader's client cannot
+/// resolve.
 ///
 /// Determinism: Oliver's traversal is documented pre-order with children in
 /// append order, and only the first finding is returned, so identical input
@@ -212,6 +228,12 @@ pub fn inspectMarkdown(md: []const u8, arena: *std.heap.ArenaAllocator) RenderEr
             .soft_break => if (frame.in_paragraph) {
                 return finding(&result.document, node.span.start, .hard_wrapped_paragraph);
             },
+            .link => if (relativeDestination(node.data.link.href)) {
+                return finding(&result.document, node.span.start, .relative_url);
+            },
+            .image => if (relativeDestination(node.data.image.src)) {
+                return finding(&result.document, node.span.start, .relative_url);
+            },
             else => {},
         }
         const in_paragraph = frame.in_paragraph or node.tag == .paragraph;
@@ -227,6 +249,25 @@ pub fn inspectMarkdown(md: []const u8, arena: *std.heap.ArenaAllocator) RenderEr
 fn finding(doc: *const oliver.document.Document, offset: u32, defect: MarkdownDefect) MarkdownFinding {
     const at = doc.src.lineCol(offset);
     return .{ .defect = defect, .line = at.line, .column = at.column };
+}
+
+/// True when `dest` begins with a URI scheme (`https:`, `mailto:`, `nostr:`,
+/// `tel:`, `data:`, …), per RFC 3986: an ASCII letter followed by scheme
+/// characters and a colon.
+fn schemePrefix(dest: []const u8) bool {
+    if (dest.len == 0 or !std.ascii.isAlphabetic(dest[0])) return false;
+    var i: usize = 1;
+    while (i < dest.len and (std.ascii.isAlphanumeric(dest[i]) or dest[i] == '+' or dest[i] == '-' or dest[i] == '.')) : (i += 1) {}
+    return i < dest.len and dest[i] == ':';
+}
+
+/// True when a Markdown destination is relative: it is not origin-qualified
+/// (`//host/...`) and carries no URI scheme. A bare path, a root-relative
+/// path, a query-only reference, and a same-document fragment are all
+/// relative — none resolve against the site that serves the article.
+fn relativeDestination(dest: []const u8) bool {
+    if (std.mem.startsWith(u8, dest, "//")) return false;
+    return !schemePrefix(dest);
 }
 
 // =============================================================================
@@ -964,6 +1005,49 @@ test "inspect: raw HTML wins over a later wrap (first defect in document order)"
     )).?;
     try testing.expectEqual(MarkdownDefect.raw_html, found.defect);
     try testing.expectEqual(@as(u32, 1), found.line);
+}
+
+test "inspect: a relative link destination is reported" {
+    const found = (try inspect("See [the spec](vendor/spec.html).\n")).?;
+    try testing.expectEqual(MarkdownDefect.relative_url, found.defect);
+    try testing.expectEqual(@as(u32, 1), found.line);
+}
+
+test "inspect: a relative image destination is reported" {
+    const found = (try inspect("![diagram](images/flow.png)\n")).?;
+    try testing.expectEqual(MarkdownDefect.relative_url, found.defect);
+}
+
+test "inspect: root-relative, query-only, and fragment-only destinations are relative" {
+    // None of these resolve against the site that serves the article when the
+    // Markdown is read off-site by a relay client.
+    try testing.expectEqual(MarkdownDefect.relative_url, (try inspect("[spec](/spec.html)\n")).?.defect);
+    try testing.expectEqual(MarkdownDefect.relative_url, (try inspect("[more](?view=all)\n")).?.defect);
+    try testing.expectEqual(MarkdownDefect.relative_url, (try inspect("[setup](#setup)\n")).?.defect);
+}
+
+test "inspect: scheme- and origin-qualified destinations are publication safe" {
+    try testing.expectEqual(@as(?MarkdownFinding, null), try inspect(
+        \\[web](https://example.com/spec.html) [cdn](//cdn.example.com/x.js)
+        \\
+        \\[mail](mailto:docs@example.com) [tel](tel:+15551234567)
+        \\
+        \\[nostr](nostr:npub1example) [data](data:text/plain,hi)
+        \\
+        \\![img](https://example.com/a.png) ![cdn](//cdn.example.com/b.png)
+        \\
+    ));
+}
+
+test "inspect: a relative destination after a safe link is reported at its own line" {
+    const found = (try inspect(
+        \\[ok](https://example.com/a)
+        \\
+        \\[bad](guides/start.md)
+        \\
+    )).?;
+    try testing.expectEqual(MarkdownDefect.relative_url, found.defect);
+    try testing.expectEqual(@as(u32, 3), found.line);
 }
 
 test "inspect: repeated inspection of one payload is stable" {

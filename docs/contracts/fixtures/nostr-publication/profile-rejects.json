@@ -8,7 +8,7 @@
   "nostr": {
     "enabled": true,
     "pubkey": "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919",
-    "articles": ["articles/draft", "articles/raw", "articles/wrapped", "articles/derived", "articles/missing"],
+    "articles": ["articles/draft", "articles/raw", "articles/wrapped", "articles/relative", "articles/derived", "articles/missing"],
     "relays": ["wss://relay.example.com/", "wss://a.relay.example.com:443"]
   }
 }

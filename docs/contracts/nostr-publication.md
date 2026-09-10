@@ -263,6 +263,15 @@ article is refused rather than published with a defect a reader would see.
 | Boris-only component | A Boris component is rendered by Boris. Off-site it is either literal noise or missing content |
 | Unresolved relative URL or asset | A relative reference has no meaning outside the site that serves it, and would resolve against the reader's client, not the site |
 
+The relative-URL row covers every link and image destination in the
+publication-safe view, not only the four mediated classes. A destination is
+acceptable when it is scheme-qualified (`https:`, `mailto:`, `nostr:`, …) or
+origin-qualified (`//host/…`); a bare, root-relative, query-only, or
+fragment-only reference is refused, because none of them resolve against the
+site that serves the article. The mediated classes are rewritten against the
+publication `base_url` before this check, so a reference that remains relative
+is one Boris could not resolve off-site.
+
 Validation is **structural**, performed through the Oliver parsing seam over
 the typed document rather than by scanning bytes. A code span or fenced code
 block containing HTML-looking text is code, not raw HTML, and is never a
