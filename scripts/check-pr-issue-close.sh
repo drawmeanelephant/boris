@@ -51,6 +51,12 @@
 #   scripts/check-pr-issue-close.sh --body-file <path>    body from file, live
 #                                                         issue states via gh
 #
+#   ISSUE_CLOSE_LINT_FIXTURE=<path> ... --body-file <path>
+#     Take issue states from <path> ("<number> <open|closed|pr|missing>" per
+#     line) instead of the API, so the whole verdict runs offline with no gh.
+#     This is how --selftest drives this script as a real entry point; a number
+#     absent from the fixture is an error, not a skip.
+#
 # Zero dependencies beyond bash 3.2 + gh. macOS /bin/bash compatible by
 # design (no associative arrays, no bash-4+isms): a vacuous pass would defeat
 # the guard.
@@ -274,6 +280,9 @@ remediation() {
 # ---------------------------------------------------------------------------
 
 require_gh() {
+  # The fixture answers issue states without the API, so the verdict path stays
+  # runnable where gh is absent — an offline self-test or a sandboxed CI step.
+  [[ -n "${ISSUE_CLOSE_LINT_FIXTURE:-}" ]] && return 0
   command -v gh >/dev/null 2>&1 || die "gh is required but not installed"
 }
 
@@ -285,6 +294,24 @@ repo_slug() {
   fi
 }
 
+# ISSUE_CLOSE_LINT_FIXTURE=<path>: read issue states from this file instead of
+# the API, one "<number> <open|closed|pr|missing>" per line. It makes the whole
+# verdict — classification, state lookups, report, exit code — deterministic
+# and offline, which is what lets --selftest cover the reporting glue that CI
+# otherwise only exercises on a live pull request.
+#
+# A number the fixture does not mention is a harness error, never a silent
+# skip: a typo in a fixture must not turn a real violation into a passing test.
+fixture_state() {
+  local n="$1" state
+  state="$(awk -v n="$n" '$1 == n { print $2; exit }' "$ISSUE_CLOSE_LINT_FIXTURE")"
+  case "$state" in
+    open|closed|pr|missing) printf '%s\n' "$state" ;;
+    '') die "no fixture state for #$n in $ISSUE_CLOSE_LINT_FIXTURE" ;;
+    *) die "bad fixture state '$state' for #$n (want open|closed|pr|missing)" ;;
+  esac
+}
+
 # issue_kind <number>: echoes one of "open", "closed", "pr" (the number is a
 # pull request, not an issue), or "missing" (no such issue — a broken link,
 # not this lint's business). Transport failures retry once, then die.
@@ -293,6 +320,10 @@ repo_slug() {
 # 404 handling could run.
 issue_kind() {
   local n="$1" path out rc err
+  if [[ -n "${ISSUE_CLOSE_LINT_FIXTURE:-}" ]]; then
+    fixture_state "$n"
+    return 0
+  fi
   err="$(mktemp)"
   path="repos/$(repo_slug)/issues/$n"
   out="$(gh api "$path" --jq 'if has("pull_request") then "pr" else (.state // "missing") end' 2>"$err")" && rc=0 || rc=$?
@@ -331,21 +362,23 @@ pr_body() {
 }
 
 # ---------------------------------------------------------------------------
-# Live check
+# Verdict
 # ---------------------------------------------------------------------------
 
-check_pr() {
-  local pr="$1" body kind n cls
+# audit_body <body> <label>: judge one PR body, print the verdict, and return 0
+# when every open issue referenced declares an intent — 1 when one does not.
+#
+# Both entry points come through here: --pr hands it the live body with the
+# label "PR #N", --body-file hands it a local one. One implementation means the
+# offline harness covers the same class guard, report text, and exit code that
+# CI reaches on a live pull request.
+audit_body() {
+  local body="$1" label="$2"
+  local class_out ambiguous kind n cls open_count=0 report="" kept kept_note=""
 
-  body="$(pr_body "$pr")"
-  # Empty sentinel = PR not open (merged/closed): nothing to enforce.
-  [[ -n "$body" ]] || { note "PR #$pr is not open — skipping."; return 0; }
-
-  local class_out ambiguous
   class_out="$(classify_refs "$body")"
   ambiguous="$(ambiguous_refs "$body")"
 
-  local failures=0 open_count=0 report=""
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     n="${line%% *}"; cls="${line#* }"
@@ -356,9 +389,9 @@ check_pr() {
       *) die "unexpected issue kind '$kind' for #$n" ;;
     esac
     open_count=$((open_count + 1))
-    # Validate here rather than relying on remediation's own guard: check_pr is
-    # called under `set +e`, so a substitution that exits 2 would otherwise be
-    # swallowed and the class silently dropped from the report.
+    # Validate here rather than relying on remediation's own guard: audit_body
+    # is called under `set +e`, so a substitution that exits 2 would otherwise
+    # be swallowed and the class silently dropped from the report.
     case "$cls" in
       NO-KEYWORD|BOLD|INERT) ;;
       *) die "unexpected class '$cls'" ;;
@@ -369,15 +402,12 @@ check_pr() {
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     n="${line%% *}"
-    kind="$(issue_kind "$n")"
-    [[ "$kind" == "open" ]] || continue
+    [[ "$(issue_kind "$n")" == "open" ]] || continue
     open_count=$((open_count + 1))
     report+="  $(remediation "$n" AMBIGUOUS)$nl"
   done < <(printf '%s\n' "$ambiguous")
 
   if [[ $open_count -eq 0 ]]; then
-    local kept kept_note
-    kept_note=""
     kept="$(kept_open_refs "$body")"
     while IFS= read -r n; do
       [[ -n "$n" ]] || continue
@@ -385,15 +415,25 @@ check_pr() {
       kept_note+=" #$n"
     done < <(printf '%s\n' "$kept")
     if [[ -n "$kept_note" ]]; then
-      note "PR #$pr: clean (open issues declared kept open by Refs:$kept_note)"
+      note "$label: clean (open issues declared kept open by Refs:$kept_note)"
     else
-      note "PR #$pr: clean (every open issue reference declares its intent)"
+      note "$label: clean (every open issue reference declares its intent)"
     fi
     return 0
   fi
-  printf 'FAIL: PR #%s references %s open issue(s) without a declared close-or-keep-open intent:\n%s' \
-    "$pr" "$open_count" "$report"
+  printf 'FAIL: %s references %s open issue(s) without a declared close-or-keep-open intent:\n%s' \
+    "$label" "$open_count" "$report"
   return 1
+}
+
+# check_pr <number>: fetch an open PR's body and audit it. A merged or closed
+# PR has nothing left to enforce, so an empty body is a silent skip.
+check_pr() {
+  local pr="$1" body
+  body="$(pr_body "$pr")"
+  # Empty sentinel = PR not open (merged/closed): nothing to enforce.
+  [[ -n "$body" ]] || { note "PR #$pr is not open — skipping."; return 0; }
+  audit_body "$body" "PR #$pr"
 }
 
 # ---------------------------------------------------------------------------
@@ -401,7 +441,7 @@ check_pr() {
 # ---------------------------------------------------------------------------
 
 selftest() {
-  local failures=0 cases=0
+  local failures=0 cases=0 fixture_dir fixture
 
   # assert_classes <name> <body> <expected-substring-or-EMPTY>
   assert_classes() {
@@ -458,6 +498,30 @@ selftest() {
     if [[ "$got" != *"$want"* ]]; then return 0; fi
     printf '    FAIL selftest: %s\n        did not expect kept-open: %q\n        got:                     %q\n' \
       "$name" "$want" "$got" >&2
+    failures=$((failures + 1))
+  }
+
+  # assert_cli <name> <want-exit> <want-substring> <body>: run this script as a
+  # real entry point on <body> with the issue-state fixture active, so a single
+  # assertion covers classification, state lookup, report text, and exit code
+  # together. An empty <want-substring> asserts that nothing was printed at all.
+  # NOTE: $fixture, $cases, and $failures resolve through selftest's dynamic
+  # scope — this helper is nested inside selftest and reads its locals, like the
+  # other assert helpers above.
+  assert_cli() {
+    local name="$1" want_rc="$2" want_sub="$3" body="$4"
+    local f out rc=0
+    f="$(mktemp)"
+    printf '%s\n' "$body" > "$f"
+    out="$(ISSUE_CLOSE_LINT_FIXTURE="$fixture" "$0" --body-file "$f" 2>&1)" || rc=$?
+    rm -f "$f"
+    cases=$((cases + 1))
+    if [[ "$rc" == "$want_rc" ]]; then
+      [[ -n "$want_sub" && "$out" == *"$want_sub"* ]] && return 0
+      [[ -z "$want_sub" && -z "$out" ]] && return 0
+    fi
+    printf '    FAIL selftest: %s\n        want exit %s and output containing %q\n        got  exit %s and output %q\n' \
+      "$name" "$want_rc" "$want_sub" "$rc" "$out" >&2
     failures=$((failures + 1))
   }
 
@@ -606,6 +670,51 @@ Refs #900" ""
     "**Closes #912**
 Refs #912" ""
 
+  # ---------------------------------------------------------------------------
+  # Entry-point harness: drive --body-file as a subprocess against an
+  # issue-state fixture, so the verdict glue — report text, class guard, exit
+  # codes — is pinned offline instead of only by a live pull request. This is
+  # the committed inert-vs-live matrix, and it still needs no network and no gh.
+  # ---------------------------------------------------------------------------
+  note "selftest: --body-file against an issue-state fixture"
+
+  fixture_dir="$(mktemp -d)"
+  fixture="$fixture_dir/issues.txt"
+  cat > "$fixture" <<'FIXTURE'
+912 open
+913 open
+916 closed
+917 pr
+FIXTURE
+
+  assert_cli "bare closing keyword passes" 0 \
+    "clean (every open issue reference declares its intent)" "Closes #912"
+  assert_cli "bare keep-open keyword passes and is reported" 0 \
+    "declared kept open by Refs: #912" "Refs #912"
+  assert_cli "backticked declaration fails as INERT" 1 \
+    "inside backticks" "- \`Closes #912\`"
+  assert_cli "fenced declaration fails as INERT" 1 \
+    "inside backticks" "\`\`\`
+Closes #912
+\`\`\`"
+  assert_cli "backticked number fails as INERT" 1 \
+    "inside backticks" "Closes \`#912\`"
+  assert_cli "bare mention fails for declaring nothing" 1 \
+    "is referenced without a declared intent" "See #912"
+  assert_cli "bold-wrapped keyword fails" 1 \
+    "bold-wrapped keyword" "**Closes #912**"
+  assert_cli "hedged intent fails as ambiguous" 1 \
+    "pick one (ambiguous intent)" "Closes #912
+Refs #912"
+  assert_cli "a closed issue is not enforced" 0 \
+    "clean (every open issue reference declares its intent)" "See #916"
+  assert_cli "a pull request number is not enforced" 0 \
+    "clean (every open issue reference declares its intent)" "See #917"
+  assert_cli "a number missing from the fixture is an error, not a skip" 2 \
+    "no fixture state for #999" "See #999"
+
+  rm -rf "$fixture_dir"
+
   if [[ $failures -eq 0 ]]; then
     note "selftest: $cases cases pass"
     return 0
@@ -627,6 +736,8 @@ case "$mode" in
   --pr)
     shift
     [[ $# -ge 1 ]] || die "--pr requires at least one PR number"
+    [[ -z "${ISSUE_CLOSE_LINT_FIXTURE:-}" ]] || die \
+      "--pr reads the body from the API; ISSUE_CLOSE_LINT_FIXTURE is for --selftest and --body-file"
     require_gh
     rc_total=0
     for pr in "$@"; do
@@ -642,30 +753,14 @@ case "$mode" in
   --body-file)
     shift
     [[ -n "${1:-}" && -f "$1" ]] || die "--body-file requires a readable file path"
-    require_gh
+    require_gh # a no-op under ISSUE_CLOSE_LINT_FIXTURE
     body="$(cat "$1")"
-    rc_total=0
-    while IFS= read -r line; do
-      [[ -n "$line" ]] || continue
-      n="${line%% *}"; cls="${line#* }"
-      kind="$(issue_kind "$n")"
-      [[ "$kind" == "open" ]] || continue
-      printf 'FAIL: %s\n' "$(remediation "$n" "$cls")"
-      rc_total=1
-    done < <(classify_refs "$body")
-    while IFS= read -r n; do
-      [[ -n "$n" ]] || continue
-      [[ "$(issue_kind "$n")" == "open" ]] || continue
-      printf 'NOTE: open issue #%s is declared kept open (Refs/Related-to)\n' "$n"
-    done < <(kept_open_refs "$body")
-    while IFS= read -r line; do
-      [[ -n "$line" ]] || continue
-      n="${line%% *}"
-      [[ "$(issue_kind "$n")" == "open" ]] || continue
-      printf 'FAIL: %s\n' "$(remediation "$n" AMBIGUOUS)"
-      rc_total=1
-    done < <(ambiguous_refs "$body")
-    exit $rc_total
+    # audit_body returns 1 on violations; set +e keeps that from aborting here.
+    set +e
+    audit_body "$body" "$1"
+    rc=$?
+    set -e
+    exit "$rc"
     ;;
   -h|--help)
     sed -n '2,/^# Exit codes/p' "$0"

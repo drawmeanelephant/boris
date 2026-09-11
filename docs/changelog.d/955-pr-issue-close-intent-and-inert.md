@@ -9,7 +9,13 @@
   written inside backticks or a fenced block now fails as INERT instead of being
   stripped away as if it were not there: GitHub does not linkify those regions,
   so an inert `Closes #N` closes nothing while reading exactly like a working
-  one. This is the failure that orphaned issue #834 on 2026-09-11. The grammar
-  self-test grew from 29 to 50 cases. Links:
+  one. This is the failure that orphaned issue #834 on 2026-09-11. Links:
   [the lint](/scripts/check-pr-issue-close.sh),
   [the PR template](/.github/PULL_REQUEST_TEMPLATE.md).
+- That lint's verdict is now one implementation shared by `--pr` and
+  `--body-file`, and its grammar self-test drives it as a real subprocess
+  against an issue-state fixture, so the report text, class guard, and exit
+  codes are pinned offline — no live pull request, no network, no `gh`, and
+  under macOS `bash` 3.2. 61 cases. Links:
+  [the lint](/scripts/check-pr-issue-close.sh),
+  [the CI lane](/.github/workflows/ci.yml).
