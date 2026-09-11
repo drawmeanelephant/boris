@@ -17,13 +17,17 @@ labels: documentation
   - Commit: `<commit-hash-or-uncommitted>`
   - Target PR / Branch: `<pr-number-or-target-branch>`
 - **Linked Issues (auto-close convention)**:
-  - **`Closes #N, #M`** in the PR body when the merged change is the
-    authoritative fix — GitHub auto-closes those issues on merge.
+  - **`Closes #N`** when the merged change is the authoritative fix — GitHub
+    auto-closes the issue on merge. One issue per keyword: write a separate
+    line for every issue, because a comma list (`Closes #N, #M`) closes only
+    the first issue and fails the `pr-issue-close lint`.
   - **`Refs #N` / `Related to #N`** when an issue must stay open for manual
     verification after merge (e.g. an audit card the owner inspects before
     closing).
   - Be explicit about which is which; never leave the close-vs-reference
-    intent ambiguous.
+    intent ambiguous, and never wrap the keyword or the number in backticks or
+    a fenced block — GitHub does not linkify there, so the declaration is
+    inert and the lint fails it as INERT.
 - **Changed Files**:
   - `<file-path-1>`
   - `<file-path-2>`

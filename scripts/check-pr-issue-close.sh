@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Fail a PR when it references open issues without using per-issue closing
-# keywords, so multi-issue fixes cannot orphan issues at merge time.
+# Fail a PR that references an open issue without declaring, per issue,
+# whether the merge closes it or leaves it open — so multi-issue fixes cannot
+# orphan issues at merge time and a parent/umbrella issue is never force-closed
+# by a lint that cannot tell the two intents apart.
 #
 # Background (the 2026-09-05 paperwork incident): the morning batch of audit
 # PRs (#915-#932) landed while their referenced issues stayed open, because
@@ -13,14 +15,26 @@
 #   COVERED    "Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve
 #               #N" (case-insensitive, optional colon) — one issue per
 #              occurrence, the keyword immediately preceding the number.
+#   KEPT OPEN  "Refs #N" / "Related to #N" (optional colon) — an explicit
+#              declaration that the merge does NOT close the issue. This is
+#              valid intent, not a violation: it is how a parent/umbrella
+#              issue or an audit card is named without being force-closed, and
+#              the check reports it to the reviewer instead of failing.
 #   VIOLATION  (for every OPEN issue referenced in the body):
-#   NO-KEYWORD   bare "#N" mention — GitHub will not close it.
-#   NONCLOSING   only "Refs #N" / "Related to #N" — declared intent to keep
-#                it open; a merge that intends to close must say so.
+#   NO-KEYWORD   bare "#N" mention — neither intent declared, so the lint
+#                cannot tell closure from context and GitHub closes nothing.
 #   BOLD         keyword wrapped in **emphasis** — did not auto-close (#915).
 #   AMBIGUOUS    both a closing keyword and Refs/Related-to for the same
 #                issue — close-vs-reference intent is ambiguous (PR template
 #                forbids exactly this).
+#   INERT        the keyword, the number, or both sit inside an inline code
+#                span or fenced block. GitHub does not linkify there, so the
+#                declaration reads exactly like a working one and does
+#                nothing. Follow-up incident (2026-09-11): #834 was orphaned
+#                because the only close declaration in its PR body was
+#                "`Closes #834`" in backticks, and this lint waved it through
+#                — strip_inert removed the span, so the body looked like it
+#                referenced nothing at all.
 #
 # Boundary guards: the keyword must not be part of a longer word or hyphenated
 # compound, so prose like "Recloses #N" or "auto-closes #N" never satisfies
@@ -47,7 +61,7 @@ set -euo pipefail
 
 PROG="check-pr-issue-close"
 CLOSING_RE='(^|[^A-Za-z-])(Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve)[[:space:]]*:?[[:space:]]*#[0-9]+'
-NONCLOSING_RE='(^|[^A-Za-z-])(Refs|Related to)[[:space:]]*:?[[:space:]]*#[0-9]+'
+KEEP_OPEN_RE='(^|[^A-Za-z-])(Refs|Related to)[[:space:]]*:?[[:space:]]*#[0-9]+'
 BOLD_SPAN_RE='\*\*[^*]+\*\*'
 # A same-repo issue reference is a bare "#N" not glued to a word, path, or URL
 # fragment: "owner/repo#N" and "page#N" are cross-repo or anchor forms GitHub
@@ -94,11 +108,51 @@ strip_bold() {
   printf '%s\n' "$1" | sed -E "s/$BOLD_SPAN_RE/ /g"
 }
 
-# strip_code <text>: remove inline code spans (`...`) so issue references the
-# way GitHub does not linkify them — inside backticks — do not trip the lint.
-# Mirrors GitHub's reference-linkify rules: no auto-close inside code spans.
-strip_code() {
-  printf '%s\n' "$1" | sed -E 's/`[^`]*`/ /g'
+# GitHub does not linkify references inside a fenced code block or an inline
+# code span, so a keyword written in either is inert: the merge neither closes
+# the issue nor records the intent. strip_inert removes those regions from the
+# text being judged; inert_regions returns them for separate inspection. They
+# are exact complements, and must stay that way.
+
+# strip_inert <text>: drop the regions GitHub does not linkify — fenced blocks
+# and inline code spans — so a reference written there is not read as a live
+# declaration.
+strip_inert() {
+  printf '%s\n' "$1" \
+    | awk '/^[[:space:]]*```/ { inside = !inside; next } !inside { print }' \
+    | sed -E 's/`[^`]*`/ /g'
+}
+
+# A declaration whose keyword is live but whose number is inside backticks:
+# "Closes `#834`". The keyword must be immediately followed by the code span,
+# so "Closes #912 and see `#454`" is not a hit.
+INERT_SPLIT_RE='(^|[^A-Za-z-])(Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve|Refs|Related to)[[:space:]]*:?[[:space:]]*`+#[0-9]+'
+
+# inert_regions <text>: the text inside the regions GitHub does not linkify —
+# the complement of strip_inert, so the declarations it hides can be inspected.
+inert_regions() {
+  printf '%s\n' "$1" | { grep -oE '`[^`]*`' || true; }
+  printf '%s\n' "$1" | awk '/^[[:space:]]*```/ { inside = !inside; next } inside { print }'
+}
+
+# inert_keyword_refs <body>: numbers whose closing/keep-open keyword cannot
+# take effect because the declaration sits in an inert region. Two shapes, both
+# silent — each reads exactly like a working declaration and neither closes the
+# issue nor records the intent:
+#   1. the whole declaration is inside the region:   "`Closes #834`"
+#   2. the keyword is live but the number is not:    "Closes `#834`"
+inert_keyword_refs() {
+  local regions split
+  regions="$(inert_regions "$1")"
+  split="$(numbers_matching "$1" "$INERT_SPLIT_RE")"
+  {
+    if [[ -n "$regions" ]]; then
+      numbers_matching "$regions" "$CLOSING_RE"
+      numbers_matching "$regions" "$KEEP_OPEN_RE"
+    fi
+    printf '%s\n' "$split"
+  } | awk 'NF && !seen[$0]++'
+  return 0 # set -e leak guard: the group above can end in a no-match pipeline
 }
 
 # ---------------------------------------------------------------------------
@@ -106,19 +160,29 @@ strip_code() {
 # ---------------------------------------------------------------------------
 
 # classify_refs <body>: print one "<number> <CLASS>" line per referenced
-# number that is not covered by a valid per-issue closing keyword. Classes:
-# BOLD, NONCLOSING, NO-KEYWORD. Numbers covered by a plain closing keyword
-# are omitted here; the AMBIGUOUS class is reported separately (see below).
+# number that still needs a decision from the author. Classes: INERT, BOLD,
+# NO-KEYWORD. Numbers covered by a plain closing keyword are omitted (GitHub
+# closes them), as are numbers declared kept open by Refs/Related-to (see
+# kept_open_refs). The AMBIGUOUS class is reported separately (see below).
 classify_refs() {
-  local body="$1"
-  local norm bold refs all n norm_set bold_set refs_set
-  body="$(strip_code "$body")" # code spans are not linkified by GitHub
+  local raw="$1" body
+  local norm bold refs all n norm_set bold_set refs_set inert inert_set
+  body="$(strip_inert "$raw")" # code spans and fences are not linkified
+  # ...but that same silence can hide a declaration, so inspect what was cut.
+  inert="$(inert_keyword_refs "$raw")"
   norm="$(numbers_matching "$(strip_bold "$body")" "$CLOSING_RE")"
   bold="$(numbers_matching "$body" "$CLOSING_RE")"
-  refs="$(numbers_matching "$body" "$NONCLOSING_RE")"
-  all="$(numbers_matching "$body" "$ISSUE_REF_RE")"
+  refs="$(numbers_matching "$body" "$KEEP_OPEN_RE")"
+  # Union the inert numbers back in: strip_inert erased them from `body`, so a
+  # declaration that only ever appears inside backticks would otherwise be
+  # invisible here — the hole that let an inert close ship.
+  all="$({
+    numbers_matching "$body" "$ISSUE_REF_RE"
+    printf '%s\n' "$inert"
+  } | awk 'NF && !seen[$0]++')"
   norm_set="$(to_set "$norm")"
   refs_set="$(to_set "$refs")"
+  inert_set="$(to_set "$inert")"
 
   # Keep only the bold-only captures (bold minus plain coverage).
   local bold_only="," n2
@@ -134,10 +198,12 @@ classify_refs() {
     [[ -n "$n" ]] || continue
     if in_set "$n" "$norm_set"; then
       continue # covered by a plain per-issue closing keyword
+    elif in_set "$n" "$refs_set"; then
+      continue # explicit keep-open intent: valid, reported by kept_open_refs
+    elif in_set "$n" "$inert_set"; then
+      printf '%s INERT\n' "$n"
     elif in_set "$n" "$bold_set"; then
       printf '%s BOLD\n' "$n"
-    elif in_set "$n" "$refs_set"; then
-      printf '%s NONCLOSING\n' "$n"
     else
       printf '%s NO-KEYWORD\n' "$n"
     fi
@@ -145,19 +211,62 @@ classify_refs() {
   return 0 # loop bodies end in `in_set && ...` lists that may fail; never leak
 }
 
+# kept_open_refs <body>: print the numbers the body explicitly declares it
+# will NOT close (a Refs/Related-to form with no plain closing keyword).
+# Purely informational: the reviewer sees which open issues the merge leaves
+# open, and the author is never told to close an umbrella it must not close.
+kept_open_refs() {
+  local body="$1" norm refs n norm_set
+  body="$(strip_inert "$body")" # code spans and fences are not linkified
+  norm="$(numbers_matching "$(strip_bold "$body")" "$CLOSING_RE")"
+  refs="$(numbers_matching "$body" "$KEEP_OPEN_RE")"
+  norm_set="$(to_set "$norm")"
+  while IFS= read -r n; do
+    [[ -n "$n" ]] || continue
+    in_set "$n" "$norm_set" || printf '%s\n' "$n"
+  done < <(printf '%s\n' "$refs")
+  return 0 # same set -e leak guard as classify_refs
+}
+
 # ambiguous_refs <body>: print numbers referenced by BOTH a plain closing
 # keyword and a Refs/Related-to form (contradictory intent).
 ambiguous_refs() {
   local body="$1" norm refs n norm_set
-  body="$(strip_code "$body")" # code spans are not linkified by GitHub
+  body="$(strip_inert "$body")" # code spans and fences are not linkified
   norm="$(numbers_matching "$(strip_bold "$body")" "$CLOSING_RE")"
-  refs="$(numbers_matching "$body" "$NONCLOSING_RE")"
+  refs="$(numbers_matching "$body" "$KEEP_OPEN_RE")"
   norm_set="$(to_set "$norm")"
   while IFS= read -r n; do
     [[ -n "$n" ]] || continue
     in_set "$n" "$norm_set" && printf '%s AMBIGUOUS\n' "$n"
   done < <(printf '%s\n' "$refs")
   return 0 # same set -e leak guard as classify_refs
+}
+
+# ---------------------------------------------------------------------------
+# Author-facing remediation text
+# ---------------------------------------------------------------------------
+
+# remediation <number> <class>: the fix the author should apply for one
+# violation. Shared by the --pr and --body-file paths so their advice cannot
+# drift apart, and strict about the class set: an unknown class is a bug here,
+# not something to print.
+remediation() {
+  local n="$1" cls="$2"
+  case "$cls" in
+    NO-KEYWORD)
+      printf '#%s is referenced without a declared intent — add "Closes #%s" if the merge closes it, or "Refs #%s" if it must stay open' \
+        "$n" "$n" "$n" ;;
+    BOLD)
+      printf '#%s uses a bold-wrapped keyword (**Closes #%s**) which does not auto-close — unwrap it' "$n" "$n" ;;
+    INERT)
+      printf '#%s has its keyword or number inside backticks or a fenced block — GitHub does not linkify there, so the merge will neither close it nor record the intent; write the keyword and number bare, on their own line' \
+        "$n" ;;
+    AMBIGUOUS)
+      printf '#%s is referenced by both a closing keyword and Refs/Related-to — pick one (ambiguous intent)' "$n" ;;
+    *)
+      die "unexpected class '$cls' for #$n" ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -247,16 +356,14 @@ check_pr() {
       *) die "unexpected issue kind '$kind' for #$n" ;;
     esac
     open_count=$((open_count + 1))
+    # Validate here rather than relying on remediation's own guard: check_pr is
+    # called under `set +e`, so a substitution that exits 2 would otherwise be
+    # swallowed and the class silently dropped from the report.
     case "$cls" in
-      NO-KEYWORD)
-        report+="  #$n has no closing keyword — add a line \"Closes #$n\" (one issue per keyword)$nl" ;;
-      NONCLOSING)
-        report+="  #$n is only Refs/Related-to — if the merge must close it, add \"Closes #$n\"$nl" ;;
-      BOLD)
-        report+="  #$n uses a bold-wrapped keyword (**Closes #$n**) which does not auto-close — unwrap it$nl" ;;
-      *)
-        die "unexpected class '$cls'" ;;
+      NO-KEYWORD|BOLD|INERT) ;;
+      *) die "unexpected class '$cls'" ;;
     esac
+    report+="  $(remediation "$n" "$cls")$nl"
   done < <(printf '%s\n' "$class_out")
 
   while IFS= read -r line; do
@@ -265,14 +372,26 @@ check_pr() {
     kind="$(issue_kind "$n")"
     [[ "$kind" == "open" ]] || continue
     open_count=$((open_count + 1))
-    report+="  #$n is referenced by both a closing keyword and Refs/Related-to — pick one (ambiguous intent)$nl"
+    report+="  $(remediation "$n" AMBIGUOUS)$nl"
   done < <(printf '%s\n' "$ambiguous")
 
   if [[ $open_count -eq 0 ]]; then
-    note "PR #$pr: clean (no open issues referenced without per-issue closing keywords)"
+    local kept kept_note
+    kept_note=""
+    kept="$(kept_open_refs "$body")"
+    while IFS= read -r n; do
+      [[ -n "$n" ]] || continue
+      [[ "$(issue_kind "$n")" == "open" ]] || continue
+      kept_note+=" #$n"
+    done < <(printf '%s\n' "$kept")
+    if [[ -n "$kept_note" ]]; then
+      note "PR #$pr: clean (open issues declared kept open by Refs:$kept_note)"
+    else
+      note "PR #$pr: clean (every open issue reference declares its intent)"
+    fi
     return 0
   fi
-  printf 'FAIL: PR #%s references %s open issue(s) without per-issue closing keywords:\n%s' \
+  printf 'FAIL: PR #%s references %s open issue(s) without a declared close-or-keep-open intent:\n%s' \
     "$pr" "$open_count" "$report"
   return 1
 }
@@ -320,6 +439,28 @@ selftest() {
     failures=$((failures + 1))
   }
 
+  # assert_kept_open <name> <body> <needle>: the kept-open set must contain the
+  # needle. assert_kept_open_absent <name> <body> <needle>: it must not.
+  assert_kept_open() {
+    local name="$1" body="$2" want="$3" got
+    cases=$((cases + 1))
+    got="$(kept_open_refs "$body")"
+    if [[ "$got" == *"$want"* ]]; then return 0; fi
+    printf '    FAIL selftest: %s\n        want kept-open: %q\n        got:            %q\n' \
+      "$name" "$want" "$got" >&2
+    failures=$((failures + 1))
+  }
+
+  assert_kept_open_absent() {
+    local name="$1" body="$2" want="$3" got
+    cases=$((cases + 1))
+    got="$(kept_open_refs "$body")"
+    if [[ "$got" != *"$want"* ]]; then return 0; fi
+    printf '    FAIL selftest: %s\n        did not expect kept-open: %q\n        got:                     %q\n' \
+      "$name" "$want" "$got" >&2
+    failures=$((failures + 1))
+  }
+
   note "selftest: classify_refs"
 
   assert_classes "plain Closes covers the issue" \
@@ -353,10 +494,27 @@ Closes #912" ""
     "**Closes #912**" "912 BOLD"
   assert_classes "bold-wrapped list: head BOLD, tail NO-KEYWORD" \
     "**Closes #912, #913**" "913 NO-KEYWORD"
-  assert_classes "Refs only is NONCLOSING" \
-    "Refs #912" "912 NONCLOSING"
-  assert_classes "Related to only is NONCLOSING" \
-    "Related to #912" "912 NONCLOSING"
+  # A keep-open declaration is valid intent, not a violation: it is how a
+  # parent/umbrella issue is named without being force-closed by the merge.
+  assert_classes "Refs only declares keep-open intent" \
+    "Refs #912" ""
+  assert_classes "Related to only declares keep-open intent" \
+    "Related to #912" ""
+  assert_classes "colon Refs form declares keep-open intent" \
+    "Refs: #912" ""
+  assert_classes "bold Refs is still a keep-open declaration" \
+    "**Refs #912**" ""
+  assert_classes "a keep-open declaration also covers a bare repeat" \
+    "Refs #912
+See #912 again" ""
+  assert_classes "keep-open for one issue does not cover a bare other" \
+    "Refs #912
+Also mentions #913" "913 NO-KEYWORD"
+  assert_absent "the kept-open issue itself is not a violation" \
+    "Refs #912
+Also mentions #913" "912 "
+  assert_classes "boundary guard: Refers to is prose, not Refs" \
+    "Refers to #912" "912 NO-KEYWORD"
   assert_classes "boundary guard: Recloses is prose" \
     "Recloses #912" "912 NO-KEYWORD"
   assert_classes "boundary guard: auto-closes is prose" \
@@ -372,11 +530,39 @@ Mentions #913" "913 NO-KEYWORD"
   assert_classes "PR #917 shape: plain comma list" \
     "Closes #858, #859, #869" "869 NO-KEYWORD"
 
-  # Code spans: GitHub does not linkify references inside backticks, so a
-  # mention in inline code is documentation, not an actionable reference.
-  assert_classes "code-span mention is not a reference" \
+  # Code spans and fences: GitHub does not linkify there. A bare number in
+  # backticks is documentation, not a reference. But a keyword plus number in
+  # backticks is worse than a bare mention: it reads like a declaration and
+  # does nothing. #834 was orphaned exactly this way — the PR body's only close
+  # declaration was a backticked "Closes #834".
+  assert_classes "bare number in a code span is not a reference" \
     "Closes #912
-Docs say use \`Refs #418\` or bare \`#454\` forms" ""
+Forms: \`#454\` and \`owner/repo#455\`" ""
+  assert_classes "placeholder keyword in a code span is not a reference" \
+    "Closes #912
+Authors write \`Closes #N\` per the template" ""
+  assert_classes "code-span closing keyword is INERT" \
+    "Closes #912
+- \`Closes #913\`" "913 INERT"
+  assert_classes "code-span keep-open keyword is INERT" \
+    "Refs #912
+- \`Refs #913\`" "913 INERT"
+  assert_classes "fenced closing keyword is INERT" \
+    "Closes #912
+\`\`\`
+Closes #913
+\`\`\`" "913 INERT"
+  assert_classes "live keyword with a backticked number is INERT" \
+    "Closes #912
+Closes \`#913\`" "913 INERT"
+  assert_classes "an inert mention cannot stand in for a live declaration" \
+    "See #912
+Quoted: \`Closes #912\`" "912 INERT"
+  assert_absent "a live keyword rescues a redundant inert mention" \
+    "Closes #912
+Quoted: \`Closes #912\`" "912 INERT"
+  assert_absent "a live declaration does not make a later backticked number inert" \
+    "Closes #912 and see \`#454\`" "454 "
   assert_ambiguous "code-span mention cannot be ambiguous" \
     "Closes #912
 See \`Refs #912\` in the notes" ""
@@ -392,6 +578,22 @@ See \`Refs #912\` in the notes" ""
     "Closes drawmeanelephant/boris#912" ""
   assert_classes "cross-repo mention does not mask a real same-repo flag" \
     "See drawmeanelephant/lab#584 — also mentions #913 bare" "913 NO-KEYWORD"
+
+  note "selftest: kept_open_refs"
+  assert_kept_open "Refs declares the issue kept open" \
+    "Refs #912" "912"
+  assert_kept_open "Related to declares the issue kept open" \
+    "Related to #912" "912"
+  assert_kept_open "colon form declares the issue kept open" \
+    "Refs: #912" "912"
+  assert_kept_open_absent "a closing keyword is not kept open" \
+    "Closes #912" "912"
+  assert_kept_open_absent "a bare mention is not kept open" \
+    "See #912" "912"
+  assert_kept_open_absent "a code-span reference is not a declaration" \
+    "Docs say use \`Refs #912\` for that" "912"
+  assert_kept_open_absent "a different issue is not kept open" \
+    "Refs #900" "912"
 
   note "selftest: ambiguous_refs"
   assert_ambiguous "closing + Refs for the same issue is ambiguous" \
@@ -448,20 +650,25 @@ case "$mode" in
       n="${line%% *}"; cls="${line#* }"
       kind="$(issue_kind "$n")"
       [[ "$kind" == "open" ]] || continue
-      printf 'FAIL: open issue #%s: %s\n' "$n" "$cls"
+      printf 'FAIL: %s\n' "$(remediation "$n" "$cls")"
       rc_total=1
     done < <(classify_refs "$body")
+    while IFS= read -r n; do
+      [[ -n "$n" ]] || continue
+      [[ "$(issue_kind "$n")" == "open" ]] || continue
+      printf 'NOTE: open issue #%s is declared kept open (Refs/Related-to)\n' "$n"
+    done < <(kept_open_refs "$body")
     while IFS= read -r line; do
       [[ -n "$line" ]] || continue
       n="${line%% *}"
       [[ "$(issue_kind "$n")" == "open" ]] || continue
-      printf 'FAIL: open issue #%s: AMBIGUOUS\n' "$n"
+      printf 'FAIL: %s\n' "$(remediation "$n" AMBIGUOUS)"
       rc_total=1
     done < <(ambiguous_refs "$body")
     exit $rc_total
     ;;
   -h|--help)
-    sed -n '2,45p' "$0"
+    sed -n '2,/^# Exit codes/p' "$0"
     ;;
   *)
     die "usage: $PROG --selftest | --pr <number> [...] | --body-file <path>"
