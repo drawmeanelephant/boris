@@ -7,7 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
 //   * a row shows one path segment — that is what removes the mid-token wrap;
 //   * the full project-relative path stays each file row's accessible name
 //     (and its tooltip), so every name this pane has ever exposed to tests,
-//     keyboard users, and voice control still resolves;
+//     keyboard users, and screen readers still resolves;
 //   * folder rows are real named disclosure buttons (aria-expanded) whose
 //     accessible name is exactly their visible segment, and they never count
 //     against the bounded file budget;
@@ -135,7 +135,7 @@ test('folder rows are named disclosure controls, not labels', async ({ page }) =
   await expect(content).toBeVisible();
   await expect(content).toHaveAttribute('aria-expanded', 'true');
   // The accessible name is exactly the visible text: the caret is CSS-only, so
-  // it never leaks into the name a voice user has to speak.
+  // it never leaks into the label a screen reader announces.
   await expect(content).toHaveText('content/');
   // A folder and a file that share a name stay distinguishable by role+name.
   await expect(tree(page).getByRole('button', { name: 'content/', exact: true })).toHaveCount(1);

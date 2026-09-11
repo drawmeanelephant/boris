@@ -316,7 +316,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
   await page.goto(options.hash ?? '/#token=test-session-token');
 }
 
-test('semantic shell and file tree expose stable keyboard and voice names', async ({ page }) => {
+test('semantic shell and file tree expose stable keyboard and accessible names', async ({ page }) => {
   await installApi(page);
   await expect(page.getByRole('heading', { name: 'Boris Editor', level: 1 })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Editor sections' })).toBeVisible();
@@ -746,7 +746,7 @@ test('desktop viewports place Problems and Preview beside the editor without a d
   expect(previewBox!.y).toBeLessThan(900);
 });
 
-test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
+test('Boris commands expose visible accessible names and distinct exit classes', async ({ page }) => {
   await installApi(page, {
     commands: {
       validate: commandResult('validate', { exit_code: 2, failure_class: 'usage' }),
@@ -2213,8 +2213,8 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     await expect(create).toBeVisible();
     // Closed dialogs stay out of the tree: only the open dialog exposes Cancel.
     // The dialog primary is "Create file Enter", so it does not collide with the
-    // toolbar's exact name. Native showModal inerts the background for Voice
-    // Control; Playwright still lists the toolbar trigger.
+    // toolbar's exact name. Native showModal inerts the background for
+    // assistive tech; Playwright still lists the toolbar trigger.
     await expect(page.getByRole('button', { name: /Cancel/ })).toHaveCount(1);
     await expect(create.getByRole('button', { name: /Cancel/ })).toBeVisible();
     await expect(create.getByRole('button', { name: /Create file/ })).toHaveCount(1);
@@ -2625,7 +2625,7 @@ test('theme layouts list closed slots and preview widths are named (#418 M8)', a
   await expect(page.getByRole('radio', { name: '375px', exact: true })).toBeChecked();
   await expect(page.getByText('Accessibility review aid')).toBeVisible();
   await page.getByText('Accessibility review aid').click();
-  await expect(page.getByText(/does not replace Voice Control/)).toBeVisible();
+  await expect(page.getByText(/does not replace a screen reader/)).toBeVisible();
 });
 
 test('graph inspector refreshes after a successful diagnostics build (#418 M6)', async ({ page }) => {

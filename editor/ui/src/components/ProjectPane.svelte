@@ -78,7 +78,7 @@
                 {@const collapsed = isDirCollapsed(node.path)}
                 <!--
                   A folder toggle is a real named button, so it is reachable by
-                  pointer, keyboard, and voice alike; the caret is a CSS
+                  pointer, keyboard, and assistive tech alike; the caret is a CSS
                   pseudo-element, so it never pollutes the accessible name and
                   the name stays exactly the visible text. aria-expanded is the
                   state, and the folder's own segment is the label, so a folder
@@ -100,8 +100,8 @@
                   carries the rest of the path, which is what stops a long
                   path from breaking mid-word. The full project-relative path
                   stays the button's accessible name (aria-label) and its
-                  tooltip, so the names a voice or keyboard user speaks are
-                  exactly the names this pane has always exposed, and two
+                  tooltip, so the names a keyboard user or screen reader
+                  encounters are exactly the names this pane has always exposed, and two
                   files that share a basename in different directories stay
                   distinguishable.
                 -->

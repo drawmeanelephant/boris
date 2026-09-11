@@ -40,9 +40,9 @@
   </fieldset>
   <details class="preview-a11y">
     <summary>Accessibility review aid</summary>
-    <p>This list does not replace Voice Control, VoiceOver, or a real audit.</p>
+    <p>This list does not replace a screen reader or a real audit.</p>
     <ul>
-      <li>Open the preview in a new tab and run Voice Control “Show names”.</li>
+      <li>Open the preview in a new tab and read the page with your screen reader.</li>
       <li>Tab through the compiled page without a pointer.</li>
       <li>Check that status is not color-only.</li>
     </ul>

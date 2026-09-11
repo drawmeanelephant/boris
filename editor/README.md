@@ -6,6 +6,23 @@ operations, session state, and fixed Boris CLI invocations. Boris remains the
 only parser, graph, validation, completion, rendering, and publication
 authority; Oliver remains the markup authority.
 
+## Accessibility posture
+
+The editor's accessibility is a **keyboard-first, semantic-HTML** contract, and
+that is what CI certifies: Playwright asserts the accessibility tree, focus
+order, dialog trapping, and the absence of pointer-only core flows, while
+[`check-key-hints.mjs`](ui/scripts/check-key-hints.mjs) asserts that every
+rendered key hint is backed by a handler. The recorded 14-action matrix lives in
+[`accessibility-certification.md`](accessibility-certification.md).
+
+Spoken OS voice control (macOS Voice Control / Windows Voice Access) is
+**descoped from v1** — sub-issue #677 is closed as not planned. Every workflow
+already completes by keyboard and exposes stable accessible names, and no
+workflow was ever voice-only, so the descope removes no shipped capability. The
+semantic-HTML plus native-`<textarea>` foundation that makes spoken control
+reachable is deliberately unchanged, so re-opening it later is additive work
+rather than a rewrite.
+
 ## M0 scaffold
 
 Build the static Svelte UI and the independent Zig host:
@@ -199,7 +216,7 @@ The authenticated file API is intentionally small:
 
 The M2 gate remains the M0 gate list above. Its host integration now exercises
 the real filesystem failure paths and a host restart, while Playwright covers
-the semantic tree, keyboard shortcuts, visible voice-command names, native
+the semantic tree, keyboard shortcuts, visible accessible names, native
 dialogs, conflict comparison, and recovered-state labeling.
 
 M2 deliberately does not invoke Boris, parse frontmatter or Markdown, provide
@@ -237,7 +254,7 @@ The M3 gate adds:
 
 The seeded black-box test compares the host response with Boris's generated
 build report, exercises the stderr fallback, and preserves real CLI exits 1,
-2, and 3. Playwright covers keyboard invocation, visible voice names,
+2, and 3. Playwright covers keyboard invocation, visible accessible names,
 accessibility grouping, exact UTF-8 navigation, fallback labeling, and packet
 copying.
 
@@ -353,8 +370,8 @@ undoable, with no typing-time rewrite.
 
 The diagnostics integration gate deep-compares the authoring endpoint with the
 canonical schema and a real compiler-generated completion index. Playwright
-covers listbox/combobox semantics, arrow/Enter insertion, visible voice names,
-schema-only startup, and refresh after a successful graph build.
+covers listbox/combobox semantics, arrow/Enter insertion, visible accessible
+names, schema-only startup, and refresh after a successful graph build.
 
 M4 deliberately does not add a frontmatter grammar, Markdown parser, LSP,
 heading-fragment completion, typing-time autocomplete, or editor-owned graph.
@@ -409,8 +426,8 @@ The M5 gate adds:
 It verifies save/rebuild behavior, byte identity with a plain Boris build,
 last-good preservation, loopback/header/token/traversal defenses, real-browser
 frame rendering through the host CSP, and server shutdown with the editor.
-Playwright covers keyboard/voice names, reload generation, and honest
-stale/failure states.
+Playwright covers keyboard names and accessible names, reload generation, and
+honest stale/failure states.
 
 M5 deliberately does not add HMR, CSS injection, a watcher, a daemon, a second
 renderer, typing-triggered builds, or editor-side HTML transformation. Replace
@@ -476,7 +493,8 @@ Preview widths 375 / 768 / 1440 resize the iframe only. The accessibility
 list is a review aid and says so.
 
 M8 deliberately does not invent layout-selection evidence, change the layout
-model, or claim a Voice Control certification.
+model, or claim an accessibility certification beyond the review aid (see the
+[accessibility posture](#accessibility-posture)).
 
 ## Watch admin backend
 
@@ -695,7 +713,7 @@ under it, and filtering prunes the tree instead of leaving empty branches.
   than the old full-path rows.
 - **The full path is still the name.** Each file row's accessible name
   (`aria-label`) and tooltip are the complete project-relative path, so every
-  name this pane has ever exposed to tests, keyboard users, and voice control
+  name this pane has ever exposed to tests, keyboard users, and screen readers
   still resolves, and two files that share a basename in different directories
   stay distinguishable. Directory rows are ordinary labels, never controls, so
   the tree's control count equals its file count (the bounded-tree contract
@@ -705,9 +723,10 @@ under it, and filtering prunes the tree instead of leaving empty branches.
   its own rows, the active file's guaranteed presence no longer depends on it
   being pinned to the top of the list.
 - **Folder rows are disclosure buttons.** Each carries `aria-expanded` and a
-  CSS-only caret, so the accessible name is exactly the visible segment (a
-  caret in the name would make a voice user say it) and the row is reachable by
-  pointer, keyboard, and voice through native button behavior. Folder rows are
+  CSS-only caret, so the accessible name is exactly the visible segment (a caret
+  baked into the name would be read into the label a screen reader announces)
+  and the row is reachable by pointer, keyboard, and assistive tech through
+  native button behavior. Folder rows are
   counted separately from file rows: the 200-file budget applies to files.
 - **Alignment.** Folder names start after their caret, and file rows reserve the
   same gutter as padding, so a folder and a file at the same level begin their

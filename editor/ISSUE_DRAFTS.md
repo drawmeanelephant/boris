@@ -2,6 +2,12 @@
 
 This document contains drafted updates for existing issues and new proposed issues based on real-browser testing against `boris/0.8.1` and the `boris-editor` host.
 
+> **Superseded in part (2026-09-11).** The voice-control claims in the drafted
+> #418 comment below are stale: spoken OS voice control is descoped from v1
+> (#677 closed as not planned). The live posture is
+> [`accessibility-certification.md`](accessibility-certification.md); do not
+> paste the Voice Control compliance language below as a certification.
+
 ## 1. Progress Comment for Issue #418 (Boris Editor Epic)
 
 **Target Issue**: [drawmeanelephant/boris#418](https://github.com/drawmeanelephant/boris/issues/418)  
