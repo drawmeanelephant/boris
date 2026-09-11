@@ -30,11 +30,14 @@ agent handoff currency, so they are excluded by default. Pass `--all-tools`
 to also build and include every executable installed by a direct
 `tools/*/build.zig` file (currently `boris-search-index`,
 `boris-docs-maintenance`, `boris-scale-smoke`,
-`boris-testdata`, `boris-content-audit`, and `boris-github-pages-audit`).
+`boris-testdata`, and `boris-github-pages-audit`).
 Adding another direct `tools/<name>/build.zig` package automatically builds
 and includes its installed executable(s) in `--all-tools` kits. The
-migration laboratory is no longer packaged here — it lives in its own
-repository ([`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab)) with its own kit story.
+migration laboratory and `boris-content-audit` are no longer packaged here —
+they live in their own repositories
+([`boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab),
+[`boris-content-audit`](https://github.com/drawmeanelephant/boris-content-audit))
+with their own kit stories.
 
 The editor host is likewise opt-in. Pass `--with-editor` to also build
 `boris-editor` (via `editor/build.zig`) and bundle it with the prebuilt UI

@@ -1,6 +1,6 @@
 # Shared runner for one-shot gate scripts. Sourced (not executed) by each gate
 # (editor/scripts/test-editor-gate.sh, scripts/gate-standalone-tools.sh,
-# scripts/gate-content-audit.sh, scripts/gate-release-html-smoke.sh), which
+# scripts/gate-release-html-smoke.sh), which
 # then defines its stages with run_stage and ends every outcome with
 # emit_summary. Requires bash 3.2+ (macOS /bin/bash).
 #

@@ -396,7 +396,7 @@ Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase ban
 - [`docs/standard-site.md`](docs/standard-site.md) — Atmosphere target
 - [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) — release checks
 - [`tools/source-rag/`](tools/source-rag/) — source-code RAG exporter
-- [`tools/content-audit/`](tools/content-audit/) — standalone deterministic source-content audit tool
+- [`boris-content-audit`](https://github.com/drawmeanelephant/boris-content-audit) — standalone deterministic source-content audit tool (its own repository)
 - [`editor/`](editor/) — local compiler-backed editor
 - [`themes/`](themes/) — shipped first-class themes
 - [`examples/`](examples/) — sample sites and unfinished theme studies

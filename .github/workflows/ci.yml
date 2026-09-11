@@ -306,52 +306,6 @@ jobs:
       - name: Build image and diff artifacts vs native
         run: bash scripts/test-job-runner-image-parity.sh
 
-  # Dedicated content-audit lane covering tools/content-audit/** and the root
-  # build.zig content-audit wiring. Unlike the path-gated tool lanes above,
-  # this one runs unconditionally on both OSes: the audit parser is a
-  # standalone conformance surface of its own and its lane must never degrade
-  # into an unobserved skip (see the strict `ci` aggregate check below, which
-  # requires this lane to succeed rather than merely not-fail).
-  content-audit-test:
-    name: content-audit-test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      # The one-shot gate (scripts/gate-content-audit.sh) runs this lane's
-      # build + tests and ends with one machine-readable NDJSON line; the step
-      # surfaces it as the job summary (scripts/gate-summary.mjs) and the
-      # upload below keeps log + summary as an artifact.
-      - name: Content-audit gate
-        run: |
-          set +e
-          bash scripts/gate-content-audit.sh >"$RUNNER_TEMP/content-audit-gate.log" 2>&1
-          rc=$?
-          set -e
-          tail -1 "$RUNNER_TEMP/content-audit-gate.log" > "$RUNNER_TEMP/content-audit-gate.json"
-          node scripts/gate-summary.mjs "$RUNNER_TEMP/content-audit-gate.log" "$GITHUB_STEP_SUMMARY"
-          exit "$rc"
-
-      - name: Upload content-audit gate summary
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: content-audit-gate-summary-${{ matrix.os }}
-          path: |
-            ${{ runner.temp }}/content-audit-gate.json
-            ${{ runner.temp }}/content-audit-gate.log
-
   # The only lane that builds a release binary and then publishes real content.
   # Debug cannot substitute for it: every unit test allocates through
   # std.testing.allocator, a DebugAllocator, which tolerates an invalid free
@@ -412,7 +366,6 @@ jobs:
       - standalone_tools_test
       - testdata_generator_test
       - job-runner-image
-      - content-audit-test
       - release-html-smoke
     runs-on: ubuntu-latest
     if: always()
@@ -426,7 +379,6 @@ jobs:
           standalone_tools_test="${{ needs.standalone_tools_test.result }}"
           testdata_generator_test="${{ needs.testdata_generator_test.result }}"
           job_runner_image="${{ needs.job-runner-image.result }}"
-          content_audit_test="${{ needs.content-audit-test.result }}"
           release_html_smoke="${{ needs.release-html-smoke.result }}"
           echo "build-and-test result: ${build_and_test}"
           echo "editor-test result: ${editor_test}"
@@ -435,7 +387,6 @@ jobs:
           echo "standalone-tools-test result: ${standalone_tools_test}"
           echo "testdata-generator-test result: ${testdata_generator_test}"
           echo "job-runner-image result: ${job_runner_image}"
-          echo "content-audit-test result: ${content_audit_test}"
           echo "release-html-smoke result: ${release_html_smoke}"
           test "${build_and_test}" = "success"
           test "${editor_test}" = "success"
@@ -445,8 +396,6 @@ jobs:
           test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
           test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"
           test "${job_runner_image}" = "success" || test "${job_runner_image}" = "skipped"
-          # Content-audit must actually succeed: no skipped/unobserved escape.
-          test "${content_audit_test}" = "success"
           # Same for the release smoke: it is the only guard against a release-only
           # crash, so a skip must never read as green.
           test "${release_html_smoke}" = "success"
