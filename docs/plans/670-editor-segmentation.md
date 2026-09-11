@@ -46,7 +46,7 @@ Each slice keeps `styles.css` and stable ids; merges target `afterparty`, not `m
 |-------|--------|-------|------|
 | 1 | `codex/editor-component-split` (this PR) | lib/types+api+utils extract, App 2542→2188 (−354), svelte-check 0 errors, build succeeds, editor host tests green | `npm run check && npm run build && zig build --build-file editor/build.zig test` |
 | 2 | `codex/editor-header-nav-recovery` | Header, SectionNav, RecoveryBanner presentational move; props only, no state lift churn | same + `npm run test:e2e` 21/21, screenshot 375/768/1440 identical |
-| 3 | `codex/editor-project-source-authoring` | ProjectPane + SourcePane/AuthoringTools (biggest pile-on enabler); undo/redo/save callbacks via App, preserve `#source-editor` | same + voice-cert 14/14 + check-key-hints |
+| 3 | `codex/editor-project-source-authoring` | ProjectPane + SourcePane/AuthoringTools (biggest pile-on enabler); undo/redo/save callbacks via App, preserve `#source-editor` | same + accessibility-cert 14/14 + check-key-hints |
 | 4 | `codex/editor-rail-panes` | Graph\|Recipe\|Theme\|Publication\|Problems\|Preview into rail; keep `workspace-rail:styles.css:40` grid intact, problems-pane min-height fix #658 | same + preview contract probe |
 | 5 | `codex/editor-dialogs-palette` | Conflict/Resolution/Create/Rename/Delete + Palette; preserve focus-trap handleDialogKeydown:1400 and palette aria-activedescendant | same + focus-trap Playwright |
 | 6 | `codex/editor-orchestrator-cleanup` | App ∼250 lines, delete dead `$:`, final import-prune, no visual delta | full release gate: `./editor/scripts/test-contract-fixture.sh` + `test-host.sh` + `test-diagnostics.sh` + `test-preview.sh` + `test-validation-daemon.sh` + `test-cooklang.sh` + `test-publication.sh` |
@@ -65,7 +65,7 @@ zig build --build-file editor/build.zig test
 npm --prefix editor/ui run test:e2e  # 21/21, no a11y tree change
 ./editor/scripts/test-preview.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist # where applicable
 ```
-Screenshot diff of Project|Source|Problems|Preview at 375|768|1440 before/after must be identical (table-overflow fix #667 retained). `voice-certification.md` 14/14 and `check-key-hints.mjs` still passing.
+Screenshot diff of Project|Source|Problems|Preview at 375|768|1440 before/after must be identical (table-overflow fix #667 retained). `accessibility-certification.md` 14/14 and `check-key-hints.mjs` still passing.
 
 ## Risks & mitigations
 - **Prop-drill churn** if App lifts too much → keep derived (`activeNode|visibleFiles|staleProblems:286`) in orchestrator, pass read-only; next slices keep paletteEnabled map in App to preserve disabled states identical.
@@ -73,7 +73,7 @@ Screenshot diff of Project|Source|Problems|Preview at 375|768|1440 before/after 
 - **Palette enablement drift** → keep `paletteEnabled:440` derivation in orchestrator; components receive precomputed map.
 
 ## Future pile-on (separate issues after segmentation)
-- SourcePane → CodeMirror 6 wrapper (keep textarea fallback for Voice Control dictation `editor/README.md:Accessibility`)
+- SourcePane → CodeMirror 6 wrapper (the native `<textarea>` stays the authoring surface per the accessibility posture in `editor/README.md` and `accessibility-certification.md`; a richer widget may land only after it preserves that contract)
 - Find/replace + go-to-line + Cmd+F/G, tabs/split for multi-file
 - Inline squiggle + gutter from ProblemsPane `position_confidence:exact`
 - Virtualized ProjectPane `file-tree max-height 22rem` for 50k files

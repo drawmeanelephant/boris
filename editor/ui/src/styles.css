@@ -246,7 +246,7 @@ section {
 label { display: block; margin: 0.75rem 0 0.35rem; font-size: var(--text-sm); font-weight: 600; }
 /* The source field's label repeats the path the pane heading already shows in
    full strength right above it. It has to stay visible — it is the
-   textarea's accessible name, and the editor's voice-control contract keeps
+   textarea's accessible name, and the editor's accessibility contract keeps
    visible labels and accessible names identical — so it drops to the muted
    ink instead and reads as the field label it is. */
 label[for='source-editor'] { color: var(--color-text-muted); }
