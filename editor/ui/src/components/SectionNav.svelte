@@ -139,11 +139,11 @@
     canScrollEnd = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
   }
 
-  // Scrollspy, classic rule: the current section is the last one whose top
-  // edge has reached the reading line; re-read per scroll frame (cheap for
-  // seven sections). The line sits at nav height plus the section's own
-  // scroll-margin-top — exactly where scrollIntoView parks a landed section
-  // — so the jump target always owns the reading top. Above every section
+  // Scrollspy, classic rule: the current section is the one nearest the
+  // reading line from above; re-read per scroll frame (cheap for seven
+  // sections). The line sits a nav height below where scrollIntoView parks a
+  // landed section (scroll-margin-top already includes the nav height, so the
+  // cushion is deliberate slack, not the park position). Above every section
   // (page top), the journey starts at the first link so wayfinding never
   // reads as "nowhere".
   function syncCurrent() {
@@ -163,15 +163,29 @@
     // above every section (page top), the journey starts at the first link
     // so wayfinding never reads as "nowhere".
     const navHeight = nav?.offsetHeight ?? 64;
+    // Pick the qualifying section *nearest* the line, not the last one in
+    // `links` order. `links` is a logical order, but the panes sit in three
+    // columns — Project and Source, with Graph and Publication nested inside
+    // Source, and Problems/Preview/Watch in the rail. A column can therefore
+    // hold a section that is later in `links` yet higher on screen, and
+    // ordering by `links` handed currency to a section parked off the top of
+    // another column after a jump (a jump to Graph settled on Preview).
+    // Nearest-to-the-line is order-independent: it agrees with the ordered
+    // rule whenever order matches the layout, and is correct when it does not.
     let best: string | null = null;
+    let bestTop = -Infinity;
     for (const { id } of links) {
       const section = sectionFor(id);
       if (!section) continue;
       const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
+      const top = section.getBoundingClientRect().top;
       // 1px tolerance: a landed section can rest a subpixel below the line
       // after scrollIntoView rounding, which must not hand currency back to
-      // the section behind it.
-      if (section.getBoundingClientRect().top <= navHeight + margin + 1) best = id;
+      // the section behind it. Ties keep the earlier link.
+      if (top <= navHeight + margin + 1 && top > bestTop) {
+        best = id;
+        bestTop = top;
+      }
     }
     current = best ?? links[0].id;
   }

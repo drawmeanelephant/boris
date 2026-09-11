@@ -113,6 +113,32 @@ function navLink(page: Page, name: string) {
   return page.getByRole('navigation', { name: 'Editor sections' }).getByRole('link', { name, exact: true });
 }
 
+// A jump writes currency to the target synchronously, then animates (smooth
+// scroll) and re-asserts viewport truth — per scroll frame and again on the
+// component's 600ms fallback timer. An assertion made straight after the
+// click therefore samples the pre-scroll instant value, not the settled one.
+// Hold until both scroll containers are still and the resync window has
+// passed, so the currency assertion reads the verdict the author ends on.
+async function waitForJumpToSettle(page: Page) {
+  await page.waitForFunction(() => new Promise<boolean>((resolve) => {
+    const rail = document.querySelector('.workspace-rail');
+    const start = performance.now();
+    let lastY = window.scrollY;
+    let lastRail = rail ? rail.scrollTop : 0;
+    let still = 0;
+    const step = () => {
+      const y = window.scrollY;
+      const r = rail ? rail.scrollTop : 0;
+      still = y === lastY && r === lastRail ? still + 1 : 0;
+      lastY = y;
+      lastRail = r;
+      if (still >= 10 && performance.now() - start >= 700) resolve(true);
+      else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }));
+}
+
 test('nav click jumps, focuses the target section, and pulses the arrival highlight', async ({ page }) => {
   await installApi(page);
   await navLink(page, 'Problems').click();
@@ -344,6 +370,25 @@ test('the Graph nav link returns to full behavior once a file is open', async ({
 
   await graph.click();
   await expect(page.locator('#graph')).toHaveClass(/arrived/, { timeout: 2_000 });
+  // Settled, not the instant pre-scroll write: the spy must still name Graph
+  // after the jump animates and the 600ms resync fires.
+  await waitForJumpToSettle(page);
+  await expect(graph).toHaveAttribute('aria-current', 'true');
+});
+
+test('a jump keeps currency on the target after the resync window', async ({ page }) => {
+  // Reduced motion makes the jump instant, so nothing animates: the only
+  // thing that can move currency after the click is the component's 600ms
+  // resync. The panes sit in separate columns, so a section that is later in
+  // nav order can be positioned above the reading line — that section must
+  // not steal currency from the target the author actually jumped to.
+  await installApi(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+  const graph = navLink(page, 'Graph');
+  await graph.click();
+  await waitForJumpToSettle(page);
   await expect(graph).toHaveAttribute('aria-current', 'true');
 });
 
