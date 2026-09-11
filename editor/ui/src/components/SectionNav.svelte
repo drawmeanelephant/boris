@@ -51,6 +51,12 @@
   let canScrollStart = $state(false);
   let canScrollEnd = $state(false);
 
+  // The destination of the most recent nav jump. Panes in different columns
+  // can land at the same reading offset (Project, Source and Problems share a
+  // grid row), where geometry alone cannot say which pane the author meant
+  // and an order-based tie-break would name the wrong one.
+  let jumpTarget: string | null = null;
+
   let arrivedTimer: ReturnType<typeof setTimeout> | undefined;
   let resyncTimer: ReturnType<typeof setTimeout> | undefined;
   let arrivedElement: HTMLElement | undefined;
@@ -128,6 +134,7 @@
     // target now, and the scroll listener re-asserts viewport truth as the
     // (smooth) jump settles — or as soon as the author scrolls again.
     current = id;
+    jumpTarget = id;
     clearTimeout(resyncTimer);
     resyncTimer = setTimeout(syncCurrent, 600);
   }
@@ -139,13 +146,17 @@
     canScrollEnd = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
   }
 
+  // Tolerance for the reading line: a landed section can rest a subpixel
+  // below its scroll-margin-top after scrollIntoView rounding. Small on
+  // purpose — it only has to absorb rounding, not reach the next pane down.
+  const LINE_TOLERANCE_PX = 3;
+
   // Scrollspy, classic rule: the current section is the one nearest the
   // reading line from above; re-read per scroll frame (cheap for seven
-  // sections). The line sits a nav height below where scrollIntoView parks a
-  // landed section (scroll-margin-top already includes the nav height, so the
-  // cushion is deliberate slack, not the park position). Above every section
-  // (page top), the journey starts at the first link so wayfinding never
-  // reads as "nowhere".
+  // sections). The line is each section's own scroll-margin-top — exactly
+  // where scrollIntoView parks it — so a jump target owns the reading top.
+  // Above every section (page top), the journey starts at the first link so
+  // wayfinding never reads as "nowhere".
   function syncCurrent() {
     // Bottom rule (standard scrollspy behavior): at max scroll the last
     // present section is current, because a short page or the footer clamp
@@ -159,10 +170,10 @@
         }
       }
     }
-    // Reading line: the last section whose top edge has reached it wins;
-    // above every section (page top), the journey starts at the first link
-    // so wayfinding never reads as "nowhere".
-    const navHeight = nav?.offsetHeight ?? 64;
+    // Reading line: among the sections whose top edge has reached it, the
+    // one nearest the line wins; above every section (page top) nothing
+    // qualifies, and there the journey starts at the first link so
+    // wayfinding never reads as "nowhere".
     // Pick the qualifying section *nearest* the line, not the last one in
     // `links` order. `links` is a logical order, but the panes sit in three
     // columns — Project and Source, with Graph and Publication nested inside
@@ -179,12 +190,29 @@
       if (!section) continue;
       const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
       const top = section.getBoundingClientRect().top;
-      // 1px tolerance: a landed section can rest a subpixel below the line
-      // after scrollIntoView rounding, which must not hand currency back to
-      // the section behind it. Ties keep the earlier link.
-      if (top <= navHeight + margin + 1 && top > bestTop) {
+      // The reading line every section is measured against is its own
+      // scroll-margin-top — the y a jump parks it at — plus a tolerance for
+      // subpixel rounding, so a landed section never loses currency to the
+      // section behind it. The nav height is deliberately NOT added again:
+      // scroll-margin-top already includes it, and the extra offset put the
+      // line a nav height below the park position, which let a neighbouring
+      // pane sit nearer the line than the jump target that had just landed.
+      // Ties keep the earlier link.
+      if (top <= margin + LINE_TOLERANCE_PX && top > bestTop) {
         best = id;
         bestTop = top;
+      }
+    }
+    // A jump destination that is still at the reading line wins a tie against
+    // a pane that shares its offset in another column. Once scrolling moves
+    // the destination out of contention the reading-line answer takes over
+    // again, so this self-releases and never pins currency to a stale jump.
+    if (jumpTarget && best !== jumpTarget) {
+      const target = sectionFor(jumpTarget);
+      if (target) {
+        const margin = parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+        const top = target.getBoundingClientRect().top;
+        if (top <= margin + LINE_TOLERANCE_PX && top >= bestTop) best = jumpTarget;
       }
     }
     current = best ?? links[0].id;

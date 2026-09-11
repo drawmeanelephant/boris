@@ -392,6 +392,92 @@ test('a jump keeps currency on the target after the resync window', async ({ pag
   await expect(graph).toHaveAttribute('aria-current', 'true');
 });
 
+// The panes occupy different columns per breakpoint: one track at mobile,
+// two plus a full-width rail below the desktop breakpoint, and three at
+// >=80rem (Project / Source, with Graph and Publication nested inside Source,
+// / rail). Nav order is therefore NOT visual order at desktop widths — a
+// section later in nav order can sit higher on screen, or land at the same
+// reading offset in another column. Currency must still follow the pane the
+// author jumped to, in every layout; this pins that contract so a future
+// pane that breaks the order-versus-layout relationship fails here loudly
+// instead of silently mislabelling the active pane.
+const NAV_LAYOUTS = [
+  { name: 'desktop three-column', viewport: { width: 1440, height: 720 }, columns: 3 },
+  { name: 'narrow two-column', viewport: { width: 900, height: 800 }, columns: 2 },
+  { name: 'mobile single-column', viewport: { width: 480, height: 800 }, columns: 1 }
+];
+
+const NAV_TARGETS = [
+  { id: 'project', label: 'Project' },
+  { id: 'source', label: 'Source' },
+  { id: 'graph', label: 'Graph' },
+  { id: 'publication', label: 'Publication' },
+  { id: 'problems', label: 'Problems' },
+  { id: 'preview', label: 'Preview' },
+  { id: 'watch', label: 'Watch' }
+];
+
+for (const layout of NAV_LAYOUTS) {
+  test(`nav currency follows the jump target in the ${layout.name} layout`, async ({ page }) => {
+    await installApi(page);
+    await page.setViewportSize(layout.viewport);
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+    // Every pane must be present, Graph and Publication included, or the
+    // scenario does not cover the divergence it claims to cover.
+    await expect(page.locator('main section')).toHaveCount(NAV_TARGETS.length);
+
+    // Layout precondition: if the breakpoints ever stop laying the panes out
+    // differently, this test would run the same scenario three times and stop
+    // guarding anything. Assert the column count the scenario is built on.
+    expect(
+      await page.evaluate(() => {
+        const main = document.querySelector('main');
+        return main ? getComputedStyle(main).gridTemplateColumns.split(/\s+/).filter(Boolean).length : 0;
+      }),
+      `${layout.name}: main grid column count`
+    ).toBe(layout.columns);
+
+    for (const target of NAV_TARGETS) {
+      await navLink(page, target.label).click();
+      await waitForJumpToSettle(page);
+      const state = await page.evaluate((id) => {
+        const ids = Array.from(document.querySelectorAll('.section-nav a'))
+          .map(a => (a.getAttribute('href') ?? '').slice(1));
+        const present = ids.filter(pid => document.getElementById(pid));
+        const el = document.getElementById(id);
+        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+        return {
+          current: (document.querySelector('.section-nav a[aria-current="true"]')?.getAttribute('href') ?? '').slice(1) || null,
+          order: Array.from(document.querySelectorAll('.section-nav a')).map(a => a.textContent).join(' > '),
+          tops: Array.from(document.querySelectorAll('main section')).map(s => `${s.id}:${Math.round(s.getBoundingClientRect().top)}`).join(' '),
+          targetTop: el ? Math.round(el.getBoundingClientRect().top) : null,
+          targetMargin: el ? parseFloat(getComputedStyle(el).scrollMarginTop) || 0 : null,
+          lastPresent: present.length ? present[present.length - 1] : null,
+          scrollY: Math.round(window.scrollY),
+          maxScroll: Math.round(maxScroll)
+        };
+      }, target.id);
+
+      // A jump the document cannot satisfy — the target is already as far as
+      // the page can scroll — leaves it off the reading line. The contract
+      // there is the spy's bottom rule (the last present pane), which the
+      // component documents, not the target.
+      const parked = state.targetTop !== null && state.targetMargin !== null
+        && Math.abs(state.targetTop - state.targetMargin) <= 4;
+      const expected = parked ? target.id : state.lastPresent;
+      // Soft, so one run reports every pane that diverges rather than
+      // stopping at the first — a layout regression usually moves several.
+      expect.soft(
+        state.current,
+        `${layout.name}: jumping to ${target.label} left aria-current on ${state.current}; expected ${expected}. ` +
+        `parked=${parked} (targetTop=${state.targetTop}, scroll-margin-top=${state.targetMargin}), ` +
+        `scrollY=${state.scrollY}/${state.maxScroll}. nav order: ${state.order}. pane tops: ${state.tops}`
+      ).toBe(expected);
+    }
+  });
+}
+
 test('modifier-click keeps the native hash-link behavior', async ({ page }) => {
   await installApi(page);
   const before = page.url();
