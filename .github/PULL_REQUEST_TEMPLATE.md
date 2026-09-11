@@ -15,13 +15,21 @@
   - **`Closes #N`** in the PR body when the merged change is the
     authoritative fix — GitHub auto-closes the issue on merge. One issue per
     keyword: write a separate `Closes #N` line (or bullet) for every issue;
-    comma lists (`Closes #N, #M`), bold-wrapped keywords (`**Closes #N**`),
-    and bare `#N` mentions do not auto-close and fail the `pr-issue-close
-    lint` CI check while the referenced issue is open.
+    comma lists (`Closes #N, #M`) and bold-wrapped keywords (`**Closes #N**`)
+    do not auto-close and fail the `pr-issue-close lint` CI check while the
+    referenced issue is open.
   - **`Refs #N` / `Related to #N`** when an issue must stay open for manual
     verification after merge (e.g. an audit card the owner inspects before
-    closing). Do not combine with `Closes #N` for the same issue — the
-    close-vs-reference intent must stay unambiguous.
+    closing, or a parent/umbrella issue whose remaining slices are still
+    open). The lint accepts this as a declaration that the merge does not
+    close the issue and reports it to the reviewer; the issue is never
+    auto-closed.
+  - **Every open-issue reference must declare one of those two intents.** A
+    bare `#N` mention — including one inside a comma list or on a `Closes`
+    line that names extra issues — fails the lint while that issue is open,
+    because the body does not say whether the merge closes it. Do not combine
+    `Closes` and `Refs` for the same issue: the close-vs-keep-open intent must
+    stay unambiguous.
 - **Changed Files**:
   - `<file-path-1>`
   - `<file-path-2>`

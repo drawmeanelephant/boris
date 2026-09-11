@@ -120,11 +120,13 @@ jobs:
       - name: Run the key-hint conformance lint
         run: node editor/ui/scripts/check-key-hints.mjs
 
-  # The issue-close lint fails a PR whose body references open issues without
-  # per-issue closing keywords ("Closes #N" — one issue per keyword, any
-  # GitHub close synonym, no comma lists, no bold-wrapped keywords, no bare
-  # "Refs #N" for issues the merge must close), so multi-issue fixes cannot
-  # orphan issues at merge time. The 2026-09-05 paperwork batch had to close
+  # The issue-close lint fails a PR that references an open issue without
+  # declaring, per issue, whether the merge closes it ("Closes #N" — one issue
+  # per keyword, any GitHub close synonym, no comma lists, no bold-wrapped
+  # keywords) or leaves it open ("Refs #N" / "Related to #N" — reported to the
+  # reviewer and never force-closed). A bare "#N" declares neither and fails,
+  # so multi-issue fixes cannot orphan issues at merge time and a parent
+  # umbrella is never force-closed. The 2026-09-05 paperwork batch had to close
   # 23 issues by hand after such PRs landed. Zero-dependency bash + gh; the
   # grammar self-test runs first so regressions fail offline on every push,
   # while the live PR-body check only has a subject on pull_request events.

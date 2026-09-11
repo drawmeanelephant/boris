@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Fail a PR when it references open issues without using per-issue closing
-# keywords, so multi-issue fixes cannot orphan issues at merge time.
+# Fail a PR that references an open issue without declaring, per issue,
+# whether the merge closes it or leaves it open — so multi-issue fixes cannot
+# orphan issues at merge time and a parent/umbrella issue is never force-closed
+# by a lint that cannot tell the two intents apart.
 #
 # Background (the 2026-09-05 paperwork incident): the morning batch of audit
 # PRs (#915-#932) landed while their referenced issues stayed open, because
@@ -13,10 +15,14 @@
 #   COVERED    "Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve
 #               #N" (case-insensitive, optional colon) — one issue per
 #              occurrence, the keyword immediately preceding the number.
+#   KEPT OPEN  "Refs #N" / "Related to #N" (optional colon) — an explicit
+#              declaration that the merge does NOT close the issue. This is
+#              valid intent, not a violation: it is how a parent/umbrella
+#              issue or an audit card is named without being force-closed, and
+#              the check reports it to the reviewer instead of failing.
 #   VIOLATION  (for every OPEN issue referenced in the body):
-#   NO-KEYWORD   bare "#N" mention — GitHub will not close it.
-#   NONCLOSING   only "Refs #N" / "Related to #N" — declared intent to keep
-#                it open; a merge that intends to close must say so.
+#   NO-KEYWORD   bare "#N" mention — neither intent declared, so the lint
+#                cannot tell closure from context and GitHub closes nothing.
 #   BOLD         keyword wrapped in **emphasis** — did not auto-close (#915).
 #   AMBIGUOUS    both a closing keyword and Refs/Related-to for the same
 #                issue — close-vs-reference intent is ambiguous (PR template
@@ -47,7 +53,7 @@ set -euo pipefail
 
 PROG="check-pr-issue-close"
 CLOSING_RE='(^|[^A-Za-z-])(Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve)[[:space:]]*:?[[:space:]]*#[0-9]+'
-NONCLOSING_RE='(^|[^A-Za-z-])(Refs|Related to)[[:space:]]*:?[[:space:]]*#[0-9]+'
+KEEP_OPEN_RE='(^|[^A-Za-z-])(Refs|Related to)[[:space:]]*:?[[:space:]]*#[0-9]+'
 BOLD_SPAN_RE='\*\*[^*]+\*\*'
 # A same-repo issue reference is a bare "#N" not glued to a word, path, or URL
 # fragment: "owner/repo#N" and "page#N" are cross-repo or anchor forms GitHub
@@ -106,16 +112,17 @@ strip_code() {
 # ---------------------------------------------------------------------------
 
 # classify_refs <body>: print one "<number> <CLASS>" line per referenced
-# number that is not covered by a valid per-issue closing keyword. Classes:
-# BOLD, NONCLOSING, NO-KEYWORD. Numbers covered by a plain closing keyword
-# are omitted here; the AMBIGUOUS class is reported separately (see below).
+# number that still needs a decision from the author. Classes: BOLD,
+# NO-KEYWORD. Numbers covered by a plain closing keyword are omitted (GitHub
+# closes them), as are numbers declared kept open by Refs/Related-to (see
+# kept_open_refs). The AMBIGUOUS class is reported separately (see below).
 classify_refs() {
   local body="$1"
   local norm bold refs all n norm_set bold_set refs_set
   body="$(strip_code "$body")" # code spans are not linkified by GitHub
   norm="$(numbers_matching "$(strip_bold "$body")" "$CLOSING_RE")"
   bold="$(numbers_matching "$body" "$CLOSING_RE")"
-  refs="$(numbers_matching "$body" "$NONCLOSING_RE")"
+  refs="$(numbers_matching "$body" "$KEEP_OPEN_RE")"
   all="$(numbers_matching "$body" "$ISSUE_REF_RE")"
   norm_set="$(to_set "$norm")"
   refs_set="$(to_set "$refs")"
@@ -137,12 +144,29 @@ classify_refs() {
     elif in_set "$n" "$bold_set"; then
       printf '%s BOLD\n' "$n"
     elif in_set "$n" "$refs_set"; then
-      printf '%s NONCLOSING\n' "$n"
+      continue # explicit keep-open intent: valid, reported by kept_open_refs
     else
       printf '%s NO-KEYWORD\n' "$n"
     fi
   done < <(printf '%s\n' "$all")
   return 0 # loop bodies end in `in_set && ...` lists that may fail; never leak
+}
+
+# kept_open_refs <body>: print the numbers the body explicitly declares it
+# will NOT close (a Refs/Related-to form with no plain closing keyword).
+# Purely informational: the reviewer sees which open issues the merge leaves
+# open, and the author is never told to close an umbrella it must not close.
+kept_open_refs() {
+  local body="$1" norm refs n norm_set
+  body="$(strip_code "$body")" # code spans are not linkified by GitHub
+  norm="$(numbers_matching "$(strip_bold "$body")" "$CLOSING_RE")"
+  refs="$(numbers_matching "$body" "$KEEP_OPEN_RE")"
+  norm_set="$(to_set "$norm")"
+  while IFS= read -r n; do
+    [[ -n "$n" ]] || continue
+    in_set "$n" "$norm_set" || printf '%s\n' "$n"
+  done < <(printf '%s\n' "$refs")
+  return 0 # same set -e leak guard as classify_refs
 }
 
 # ambiguous_refs <body>: print numbers referenced by BOTH a plain closing
@@ -151,7 +175,7 @@ ambiguous_refs() {
   local body="$1" norm refs n norm_set
   body="$(strip_code "$body")" # code spans are not linkified by GitHub
   norm="$(numbers_matching "$(strip_bold "$body")" "$CLOSING_RE")"
-  refs="$(numbers_matching "$body" "$NONCLOSING_RE")"
+  refs="$(numbers_matching "$body" "$KEEP_OPEN_RE")"
   norm_set="$(to_set "$norm")"
   while IFS= read -r n; do
     [[ -n "$n" ]] || continue
@@ -249,9 +273,7 @@ check_pr() {
     open_count=$((open_count + 1))
     case "$cls" in
       NO-KEYWORD)
-        report+="  #$n has no closing keyword — add a line \"Closes #$n\" (one issue per keyword)$nl" ;;
-      NONCLOSING)
-        report+="  #$n is only Refs/Related-to — if the merge must close it, add \"Closes #$n\"$nl" ;;
+        report+="  #$n is referenced without a declared intent — add \"Closes #$n\" if the merge closes it, or \"Refs #$n\" if it must stay open$nl" ;;
       BOLD)
         report+="  #$n uses a bold-wrapped keyword (**Closes #$n**) which does not auto-close — unwrap it$nl" ;;
       *)
@@ -269,10 +291,22 @@ check_pr() {
   done < <(printf '%s\n' "$ambiguous")
 
   if [[ $open_count -eq 0 ]]; then
-    note "PR #$pr: clean (no open issues referenced without per-issue closing keywords)"
+    local kept kept_note
+    kept_note=""
+    kept="$(kept_open_refs "$body")"
+    while IFS= read -r n; do
+      [[ -n "$n" ]] || continue
+      [[ "$(issue_kind "$n")" == "open" ]] || continue
+      kept_note+=" #$n"
+    done < <(printf '%s\n' "$kept")
+    if [[ -n "$kept_note" ]]; then
+      note "PR #$pr: clean (open issues declared kept open by Refs:$kept_note)"
+    else
+      note "PR #$pr: clean (every open issue reference declares its intent)"
+    fi
     return 0
   fi
-  printf 'FAIL: PR #%s references %s open issue(s) without per-issue closing keywords:\n%s' \
+  printf 'FAIL: PR #%s references %s open issue(s) without a declared close-or-keep-open intent:\n%s' \
     "$pr" "$open_count" "$report"
   return 1
 }
@@ -320,6 +354,28 @@ selftest() {
     failures=$((failures + 1))
   }
 
+  # assert_kept_open <name> <body> <needle>: the kept-open set must contain the
+  # needle. assert_kept_open_absent <name> <body> <needle>: it must not.
+  assert_kept_open() {
+    local name="$1" body="$2" want="$3" got
+    cases=$((cases + 1))
+    got="$(kept_open_refs "$body")"
+    if [[ "$got" == *"$want"* ]]; then return 0; fi
+    printf '    FAIL selftest: %s\n        want kept-open: %q\n        got:            %q\n' \
+      "$name" "$want" "$got" >&2
+    failures=$((failures + 1))
+  }
+
+  assert_kept_open_absent() {
+    local name="$1" body="$2" want="$3" got
+    cases=$((cases + 1))
+    got="$(kept_open_refs "$body")"
+    if [[ "$got" != *"$want"* ]]; then return 0; fi
+    printf '    FAIL selftest: %s\n        did not expect kept-open: %q\n        got:                     %q\n' \
+      "$name" "$want" "$got" >&2
+    failures=$((failures + 1))
+  }
+
   note "selftest: classify_refs"
 
   assert_classes "plain Closes covers the issue" \
@@ -353,10 +409,27 @@ Closes #912" ""
     "**Closes #912**" "912 BOLD"
   assert_classes "bold-wrapped list: head BOLD, tail NO-KEYWORD" \
     "**Closes #912, #913**" "913 NO-KEYWORD"
-  assert_classes "Refs only is NONCLOSING" \
-    "Refs #912" "912 NONCLOSING"
-  assert_classes "Related to only is NONCLOSING" \
-    "Related to #912" "912 NONCLOSING"
+  # A keep-open declaration is valid intent, not a violation: it is how a
+  # parent/umbrella issue is named without being force-closed by the merge.
+  assert_classes "Refs only declares keep-open intent" \
+    "Refs #912" ""
+  assert_classes "Related to only declares keep-open intent" \
+    "Related to #912" ""
+  assert_classes "colon Refs form declares keep-open intent" \
+    "Refs: #912" ""
+  assert_classes "bold Refs is still a keep-open declaration" \
+    "**Refs #912**" ""
+  assert_classes "a keep-open declaration also covers a bare repeat" \
+    "Refs #912
+See #912 again" ""
+  assert_classes "keep-open for one issue does not cover a bare other" \
+    "Refs #912
+Also mentions #913" "913 NO-KEYWORD"
+  assert_absent "the kept-open issue itself is not a violation" \
+    "Refs #912
+Also mentions #913" "912 "
+  assert_classes "boundary guard: Refers to is prose, not Refs" \
+    "Refers to #912" "912 NO-KEYWORD"
   assert_classes "boundary guard: Recloses is prose" \
     "Recloses #912" "912 NO-KEYWORD"
   assert_classes "boundary guard: auto-closes is prose" \
@@ -392,6 +465,22 @@ See \`Refs #912\` in the notes" ""
     "Closes drawmeanelephant/boris#912" ""
   assert_classes "cross-repo mention does not mask a real same-repo flag" \
     "See drawmeanelephant/lab#584 — also mentions #913 bare" "913 NO-KEYWORD"
+
+  note "selftest: kept_open_refs"
+  assert_kept_open "Refs declares the issue kept open" \
+    "Refs #912" "912"
+  assert_kept_open "Related to declares the issue kept open" \
+    "Related to #912" "912"
+  assert_kept_open "colon form declares the issue kept open" \
+    "Refs: #912" "912"
+  assert_kept_open_absent "a closing keyword is not kept open" \
+    "Closes #912" "912"
+  assert_kept_open_absent "a bare mention is not kept open" \
+    "See #912" "912"
+  assert_kept_open_absent "a code-span reference is not a declaration" \
+    "Docs say use \`Refs #912\` for that" "912"
+  assert_kept_open_absent "a different issue is not kept open" \
+    "Refs #900" "912"
 
   note "selftest: ambiguous_refs"
   assert_ambiguous "closing + Refs for the same issue is ambiguous" \
@@ -451,6 +540,11 @@ case "$mode" in
       printf 'FAIL: open issue #%s: %s\n' "$n" "$cls"
       rc_total=1
     done < <(classify_refs "$body")
+    while IFS= read -r n; do
+      [[ -n "$n" ]] || continue
+      [[ "$(issue_kind "$n")" == "open" ]] || continue
+      printf 'NOTE: open issue #%s is declared kept open (Refs/Related-to)\n' "$n"
+    done < <(kept_open_refs "$body")
     while IFS= read -r line; do
       [[ -n "$line" ]] || continue
       n="${line%% *}"
@@ -461,7 +555,7 @@ case "$mode" in
     exit $rc_total
     ;;
   -h|--help)
-    sed -n '2,45p' "$0"
+    sed -n '2,/^# Exit codes/p' "$0"
     ;;
   *)
     die "usage: $PROG --selftest | --pr <number> [...] | --body-file <path>"
