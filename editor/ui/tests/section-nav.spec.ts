@@ -113,6 +113,32 @@ function navLink(page: Page, name: string) {
   return page.getByRole('navigation', { name: 'Editor sections' }).getByRole('link', { name, exact: true });
 }
 
+// A jump writes currency to the target synchronously, then animates (smooth
+// scroll) and re-asserts viewport truth — per scroll frame and again on the
+// component's 600ms fallback timer. An assertion made straight after the
+// click therefore samples the pre-scroll instant value, not the settled one.
+// Hold until both scroll containers are still and the resync window has
+// passed, so the currency assertion reads the verdict the author ends on.
+async function waitForJumpToSettle(page: Page) {
+  await page.waitForFunction(() => new Promise<boolean>((resolve) => {
+    const rail = document.querySelector('.workspace-rail');
+    const start = performance.now();
+    let lastY = window.scrollY;
+    let lastRail = rail ? rail.scrollTop : 0;
+    let still = 0;
+    const step = () => {
+      const y = window.scrollY;
+      const r = rail ? rail.scrollTop : 0;
+      still = y === lastY && r === lastRail ? still + 1 : 0;
+      lastY = y;
+      lastRail = r;
+      if (still >= 10 && performance.now() - start >= 700) resolve(true);
+      else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }));
+}
+
 test('nav click jumps, focuses the target section, and pulses the arrival highlight', async ({ page }) => {
   await installApi(page);
   await navLink(page, 'Problems').click();
@@ -344,8 +370,113 @@ test('the Graph nav link returns to full behavior once a file is open', async ({
 
   await graph.click();
   await expect(page.locator('#graph')).toHaveClass(/arrived/, { timeout: 2_000 });
+  // Settled, not the instant pre-scroll write: the spy must still name Graph
+  // after the jump animates and the 600ms resync fires.
+  await waitForJumpToSettle(page);
   await expect(graph).toHaveAttribute('aria-current', 'true');
 });
+
+test('a jump keeps currency on the target after the resync window', async ({ page }) => {
+  // Reduced motion makes the jump instant, so nothing animates: the only
+  // thing that can move currency after the click is the component's 600ms
+  // resync. The panes sit in separate columns, so a section that is later in
+  // nav order can be positioned above the reading line — that section must
+  // not steal currency from the target the author actually jumped to.
+  await installApi(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+  const graph = navLink(page, 'Graph');
+  await graph.click();
+  await waitForJumpToSettle(page);
+  await expect(graph).toHaveAttribute('aria-current', 'true');
+});
+
+// The panes occupy different columns per breakpoint: one track at mobile,
+// two plus a full-width rail below the desktop breakpoint, and three at
+// >=80rem (Project / Source, with Graph and Publication nested inside Source,
+// / rail). Nav order is therefore NOT visual order at desktop widths — a
+// section later in nav order can sit higher on screen, or land at the same
+// reading offset in another column. Currency must still follow the pane the
+// author jumped to, in every layout; this pins that contract so a future
+// pane that breaks the order-versus-layout relationship fails here loudly
+// instead of silently mislabelling the active pane.
+const NAV_LAYOUTS = [
+  { name: 'desktop three-column', viewport: { width: 1440, height: 720 }, columns: 3 },
+  { name: 'narrow two-column', viewport: { width: 900, height: 800 }, columns: 2 },
+  { name: 'mobile single-column', viewport: { width: 480, height: 800 }, columns: 1 }
+];
+
+const NAV_TARGETS = [
+  { id: 'project', label: 'Project' },
+  { id: 'source', label: 'Source' },
+  { id: 'graph', label: 'Graph' },
+  { id: 'publication', label: 'Publication' },
+  { id: 'problems', label: 'Problems' },
+  { id: 'preview', label: 'Preview' },
+  { id: 'watch', label: 'Watch' }
+];
+
+for (const layout of NAV_LAYOUTS) {
+  test(`nav currency follows the jump target in the ${layout.name} layout`, async ({ page }) => {
+    await installApi(page);
+    await page.setViewportSize(layout.viewport);
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+    // Every pane must be present, Graph and Publication included, or the
+    // scenario does not cover the divergence it claims to cover.
+    await expect(page.locator('main section')).toHaveCount(NAV_TARGETS.length);
+
+    // Layout precondition: if the breakpoints ever stop laying the panes out
+    // differently, this test would run the same scenario three times and stop
+    // guarding anything. Assert the column count the scenario is built on.
+    expect(
+      await page.evaluate(() => {
+        const main = document.querySelector('main');
+        return main ? getComputedStyle(main).gridTemplateColumns.split(/\s+/).filter(Boolean).length : 0;
+      }),
+      `${layout.name}: main grid column count`
+    ).toBe(layout.columns);
+
+    for (const target of NAV_TARGETS) {
+      await navLink(page, target.label).click();
+      await waitForJumpToSettle(page);
+      const state = await page.evaluate((id) => {
+        const ids = Array.from(document.querySelectorAll('.section-nav a'))
+          .map(a => (a.getAttribute('href') ?? '').slice(1));
+        const present = ids.filter(pid => document.getElementById(pid));
+        const el = document.getElementById(id);
+        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+        return {
+          current: (document.querySelector('.section-nav a[aria-current="true"]')?.getAttribute('href') ?? '').slice(1) || null,
+          order: Array.from(document.querySelectorAll('.section-nav a')).map(a => a.textContent).join(' > '),
+          tops: Array.from(document.querySelectorAll('main section')).map(s => `${s.id}:${Math.round(s.getBoundingClientRect().top)}`).join(' '),
+          targetTop: el ? Math.round(el.getBoundingClientRect().top) : null,
+          targetMargin: el ? parseFloat(getComputedStyle(el).scrollMarginTop) || 0 : null,
+          lastPresent: present.length ? present[present.length - 1] : null,
+          scrollY: Math.round(window.scrollY),
+          maxScroll: Math.round(maxScroll)
+        };
+      }, target.id);
+
+      // A jump the document cannot satisfy — the target is already as far as
+      // the page can scroll — leaves it off the reading line. The contract
+      // there is the spy's bottom rule (the last present pane), which the
+      // component documents, not the target.
+      const parked = state.targetTop !== null && state.targetMargin !== null
+        && Math.abs(state.targetTop - state.targetMargin) <= 4;
+      const expected = parked ? target.id : state.lastPresent;
+      // Soft, so one run reports every pane that diverges rather than
+      // stopping at the first — a layout regression usually moves several.
+      expect.soft(
+        state.current,
+        `${layout.name}: jumping to ${target.label} left aria-current on ${state.current}; expected ${expected}. ` +
+        `parked=${parked} (targetTop=${state.targetTop}, scroll-margin-top=${state.targetMargin}), ` +
+        `scrollY=${state.scrollY}/${state.maxScroll}. nav order: ${state.order}. pane tops: ${state.tops}`
+      ).toBe(expected);
+    }
+  });
+}
 
 test('modifier-click keeps the native hash-link behavior', async ({ page }) => {
   await installApi(page);
