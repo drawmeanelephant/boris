@@ -16,7 +16,7 @@
 </script>
 
 <section id="watch" class="watch-pane" aria-labelledby="watch-heading" tabindex="-1">
-  <div class="watch-heading">
+  <div class="pane-heading">
     <div>
       <h2 id="watch-heading">Watch</h2>
       <p>The host supervises one fixed Boris watch daemon; its own build events stream here.</p>

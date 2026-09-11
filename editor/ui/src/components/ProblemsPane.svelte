@@ -24,7 +24,7 @@
 </script>
 
 <section id="problems" class="problems-pane" tabindex="-1" aria-labelledby="problems-heading">
-  <div class="problems-heading">
+  <div class="pane-heading">
     <div>
       <h2 id="problems-heading">Problems</h2>
       <p>Every result below comes from the Boris CLI or one of its published artifacts.</p>

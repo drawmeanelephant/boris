@@ -64,7 +64,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
 
 {#if node?.recipe}
   <section class="recipe-pane" aria-labelledby="recipe-heading">
-    <div class="problems-heading">
+    <div class="pane-heading">
       <div>
         <h3 id="recipe-heading">Recipe</h3>
         <p>Read-only Boris <code>recipe</code> facet. Source remains the <code>.cook</code> file. Scale recipe asks the compiler; it does not write quantities back.</p>

@@ -102,8 +102,9 @@ implies.
 [`editor/scripts/test-editor-gate.sh`](scripts/test-editor-gate.sh) runs the
 whole editor acceptance surface against a product `boris` binary in one shot:
 editor-host Zig tests, UI static checks and build, the mocked Playwright e2e
-suite, and the live integration scripts (contract fixture, host safe-editing,
-diagnostics, validation daemon, watch daemon, live preview, publication)
+suite, and the live integration scripts (contract fixture, host contract
+conformance, host safe-editing, diagnostics, validation daemon, watch daemon,
+live preview, publication)
 against the given binary. The CI `editor-test` lane invokes this same script (deps installed in
 the lane with the npm cache and `--with-deps` Chromium), so the local and CI
 editor validation cannot drift; the lane renders the gate's trailing NDJSON
@@ -124,6 +125,22 @@ on stdout — `{"event":"editor-gate","ok":…,"boris":…,"total_ms":…,
 `stages` on guard failures) — so logs and dashboards can `tail -1` it.
 The per-surface scripts below remain available individually;
 `test-cooklang.sh` (the Cooklang-corpus variant) is not part of the lane.
+
+[`scripts/test-host-contract.sh`](scripts/test-host-contract.sh) is the
+executable form of [`docs/contracts/editor-host.md`](/docs/contracts/editor-host.md):
+it parses the contract's endpoint table (§4) and error taxonomy (§9) out of the
+Markdown, reconciles both against the host's own route table and error set in
+both directions, probes every documented endpoint for its exact method set,
+rejects a generated set of near-miss and plausible-but-absent `/api/*` paths,
+and drives **every** code in the taxonomy to its documented status with a live
+request: a 50 000-file fixture for `too_many_files`, a directory where a page is
+expected for `io_error`, a non-executable `--boris` for `boris_unavailable`,
+`/bin/echo` for `invalid_boris_version`, and stub compilers for
+`unsupported_boris_artifact`, `unsafe_artifact_path`, `watch_unsupported`, and
+`watch_schema_unsupported`. A route or code added to the host without a contract
+row fails it, a documented row the host does not implement fails it, and a
+documented code that no request can raise fails it — so there is no `reserved`
+row to rot.
 
 ## M0 gates
 
@@ -344,19 +361,34 @@ heading-fragment completion, typing-time autocomplete, or editor-owned graph.
 
 ## M5 live preview fallback
 
-Until `boris serve` is available, the host runs exactly one fixed preview
-command per requested rebuild:
+The compiler's own local preview **is now shipped**, as `boris watch --serve
+[--port N]` ([CLI contract](/docs/contracts/cli.md), [watch-mode
+contract](/docs/contracts/watch-mode.md)): it reuses the watch coordinator's
+debounced rebuild cycle, serves the built tree on loopback, and pushes an SSE
+`reload` event after every successful rebuild.
+
+The host still runs its own path instead: exactly one fixed preview command per
+requested rebuild, then a second loopback origin serving the committed `dist/`
+bytes.
 
 ```text
 boris build --input content --incremental --html-dir dist
 ```
 
+This section was originally justified by a compiler serve mode not existing
+yet, and that rationale has expired — the two paths now overlap on
+serve-and-reload. They differ on posture: the editor's origin requires the
+session token, validates `Host` and any supplied `Origin`, rejects traversal
+and symlinks, and scopes generated subresources with an HttpOnly cookie, while
+`watch --serve` is an untokened static server on its own port. Reconciling them
+— delegate to `watch --serve`, or record why the preview origin's posture is
+worth keeping a second server — is **open work**. `AGENTS.md` treats the
+compiler's live server as *the* dev server and says not to invent a second one,
+so delegation is the default answer until the posture argument is written down.
+
 An explicit successful save requests that build; authors can also use the
-visibly named Rebuild preview button. The host never watches or renders source.
-A second ephemeral loopback origin serves the committed `dist/` bytes unchanged
-and terminates with the editor process. The preview origin requires its random
-session token, validates Host and any supplied Origin, rejects traversal and
-symlinks, and uses a port-scoped HttpOnly cookie for generated subresources.
+visibly named Rebuild preview button. The host never watches or renders source,
+and its preview origin terminates with the editor process.
 
 The UI reports idle, running, success, failed, and stale distinctly. If an
 existing `dist/index.html` is present at startup, it remains `stale` and the
@@ -528,9 +560,25 @@ and its re-enable after stop, validation-daemon coexistence, failure → fix →
 recovery without a restart, bounded-backoff recovery after `kill -9`, and
 SIGTERM reaping on both the explicit stop and editor shutdown (no orphan).
 
-Deliberate non-goals in this slice: no `--serve` (the host's own preview
-origin stays), no editor UI — the endpoints are the backend contract for a
-follow-up admin surface.
+**Watch pane.** The endpoints above are surfaced: the Watch pane shows the
+daemon's own state label (`idle`, `running`, `success`, `failed`, `stale`, or
+an unsupported compiler named as unsupported rather than as an error), the
+compiler/cycle meta line — which also reports `dropped_lines` once it is
+non-zero — the last daemon error, and **Start** / **Stop** as named buttons
+that are enabled only when the action would mean something. Under them sits a
+bounded, newest-first event feed (a 50-event window) driven by
+`GET /api/watch/events`: each row shows its host-assigned `seq` and the
+compiler's own event, and a ring eviction renders as an explicit boundary row
+rather than a silently contiguous stream.
+
+The pane is presentation over the host's spool. It never invents an event, a
+cycle, or a phase, and it never claims a build happened because a poll
+timed out.
+
+Deliberate non-goals: the host's own preview origin rather than delegating to
+the compiler's `watch --serve` (see M5 for that open reconciliation), and no
+event filtering, search, or replay controls — the feed is the tail, not a log
+viewer.
 
 ## Focus writing mode
 
@@ -589,6 +637,101 @@ button that opened it.
 
 The overlay is presentation-only: no new endpoints, no parallel pipeline,
 and no second buffer.
+
+## Reading hierarchy and pane headers
+
+The editor's chrome is one type scale, defined in
+[`ui/src/lib/tokens.css`](ui/src/lib/tokens.css) and consumed by
+[`ui/src/styles.css`](ui/src/styles.css). Reading order has to be carried by
+size, not only by weight and color, or every label competes with the prose it
+labels.
+
+- **Scale.** Two meta steps sit below the 16px body (`--text-2xs`,
+  `--text-xs`), then one step per heading level above it: `--text-lg` for
+  sub-pane titles (h3), `--text-xl` for pane titles (h2), `--text-2xl` for the
+  app title (h1). The ratio is ~1.2 pairwise, which is what makes a pane title
+  read as a heading beside body copy. `--text-code` is the monospace working
+  size for the source surface.
+- **No off-scale sizes.** Component rules must consume a token rather than a
+  raw `rem`. An off-scale size is exactly how the surface drifted into
+  everything-is-16px, and it is how a sub-pane heading ended up rendering
+  *larger* than the pane title above it (unstyled `h3` inherits the user
+  agent's `1.17em`). Extend the chain in `tokens.css` instead.
+- **Reading rhythm.** `:root` sets `--leading-normal` (1.55) so prose gets a
+  real line-height by default; headings take `--leading-tight` and controls
+  opt in explicitly. `--measure-prose` caps a lede's line length.
+- **Heading roles.** `h1`–`h3` are app/pane/sub-pane titles. `h4` is
+  deliberately not a fourth size: it is a group label inside a sub-pane
+  (`Children`, `Backlinks`, `Ingredients`, `Targets`), so it renders as a
+  small-caps label instead of competing with the body copy it introduces.
+  Authored Markdown rendered by Focus mode's reading surface resets that
+  treatment — it is document content, not UI.
+- **One pane header row (`.pane-heading`).** Every pane and sub-pane header is
+  the same flex row: a title, an optional one-line lede, and an optional action
+  cluster. The text block declares a flex basis and the row wraps, so a wide
+  action cluster (or the Problems result chip) drops to its own line instead of
+  squeezing the lede into a word-or-two column. The action cluster is allowed
+  to shrink so its own `flex-wrap` wraps the buttons; a non-shrinking cluster
+  overflows its section box and paints over the neighbouring pane.
+- **Focus writing mode.** The reading surface previews the author's document,
+  so its heading steps are relative (`em`) to the chosen text size: at XL the
+  document's own hierarchy scales with its body text rather than the body
+  outgrowing every heading.
+
+Presentation only: no endpoint, no Boris surface, and no pipeline change.
+
+## Project file tree
+
+The Project pane renders an indented directory tree over the host's file list.
+The host's `/api/files` list stays **flat** — the editor holds no directory
+model that could disagree with the paths Boris owns. The tree is derived
+presentation, built from the path segments of the files that actually survive
+the filter and the 200-file cap, so a directory never appears without a file
+under it, and filtering prunes the tree instead of leaving empty branches.
+
+- **One segment per row.** A row shows its own segment (`frontmatter.md`), and
+  indentation plus a guide rule carry the rest of the path. That is what stops
+  a long project path from breaking mid-token, and it is why rows can be denser
+  than the old full-path rows.
+- **The full path is still the name.** Each file row's accessible name
+  (`aria-label`) and tooltip are the complete project-relative path, so every
+  name this pane has ever exposed to tests, keyboard users, and voice control
+  still resolves, and two files that share a basename in different directories
+  stay distinguishable. Directory rows are ordinary labels, never controls, so
+  the tree's control count equals its file count (the bounded-tree contract
+  asserts 200 buttons for a 251-file project).
+- **Sibling order** is directories first, then files, each alphabetically —
+  stable regardless of the order the host enumerates in. Because the tree sorts
+  its own rows, the active file's guaranteed presence no longer depends on it
+  being pinned to the top of the list.
+- **Folder rows are disclosure buttons.** Each carries `aria-expanded` and a
+  CSS-only caret, so the accessible name is exactly the visible segment (a
+  caret in the name would make a voice user say it) and the row is reachable by
+  pointer, keyboard, and voice through native button behavior. Folder rows are
+  counted separately from file rows: the 200-file budget applies to files.
+- **Alignment.** Folder names start after their caret, and file rows reserve the
+  same gutter as padding, so a folder and a file at the same level begin their
+  names at the same x. The gutter is in absolute units on purpose — the two row
+  types set different font sizes, so an em-based caret would resolve to
+  different widths and the alignment would drift with depth.
+- **Collapsed state persists** per browser under
+  `boris-editor-project-collapsed`, and is treated as untrusted input on load:
+  every entry must be a plain relative directory path (no absolute paths, no
+  `..`, `\`, empty, or `//` segments, bounded count and length), and anything
+  that fails is dropped rather than repaired. The worst case is a folder that
+  reads expanded again.
+- **Opening a file always reveals it.** When the active path *changes*, the
+  folders above it are expanded, so opening from the command palette, a graph
+  link, or a problem always lands on a visible row. Because the reveal is keyed
+  to the change and not to each render, deliberately re-collapsing the folder
+  that holds the open file sticks until another file is opened.
+- **The filter matches whole paths**, not visible segments: typing `reference`
+  finds `content/reference/cli.md` from the root even though no file row shows
+  the word `reference`. Filtering prunes the tree, so only folders that still
+  hold a match are rendered.
+
+Per-segment match highlighting is a deliberate non-goal here: it would want a
+second source of truth for what matched. Add it with that in mind.
 
 ## Section navigation feedback
 

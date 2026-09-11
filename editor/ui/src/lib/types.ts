@@ -52,7 +52,7 @@ export type WatchStatePayload = {
   dropped_lines?: number;
   last_event?: Record<string, unknown> | null;
   compiler_id?: string | null;
-  hello_schema?: string | null;
+  hello_schema?: number | null;
   last_error?: string | null;
 };
 
@@ -76,6 +76,15 @@ export type WatchEventsResponse = {
 
 export type FileEntry = { path: string };
 export type FileList = { files: FileEntry[] };
+
+// The Project pane renders a directory tree, but the host's file list is a
+// flat set of project-relative paths and stays that way: the tree is derived
+// presentation, so nothing in the editor can hold a directory model that
+// disagrees with the paths Boris owns. A directory node exists only because a
+// visible file's path has that segment.
+export type ProjectTreeNode =
+  | { kind: 'dir'; name: string; path: string; children: ProjectTreeNode[] }
+  | { kind: 'file'; name: string; path: string };
 
 export const visibleFileLimit = 200;
 export const unfilteredPaletteEntryLimit = 50;

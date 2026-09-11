@@ -19,7 +19,7 @@
 </script>
 
 <section id="preview" tabindex="-1" aria-labelledby="preview-heading">
-  <div class="preview-heading">
+  <div class="pane-heading">
     <div>
       <h2 id="preview-heading">Preview</h2>
       <p>The frame serves unchanged files from Boris's committed <code>dist/</code> output.</p>

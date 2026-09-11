@@ -30,7 +30,7 @@
 </script>
 
 <section id="graph" class="graph-pane" tabindex="-1" aria-labelledby="graph-heading">
-  <div class="problems-heading">
+  <div class="pane-heading">
     <div>
       <h3 id="graph-heading">Graph</h3>
       <p>Read-only view of Boris <code>graph.json</code> and <code>completion.json</code>.</p>

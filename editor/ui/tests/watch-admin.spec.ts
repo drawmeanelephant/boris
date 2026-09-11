@@ -18,7 +18,7 @@ type WatchDaemonState = {
   dropped_lines: number;
   last_event: Record<string, unknown> | null;
   compiler_id: string | null;
-  hello_schema: string | null;
+  hello_schema: number | null;
   last_error: string | null;
 };
 
@@ -89,7 +89,7 @@ function mockWatchDaemon() {
         dropped_lines: 0,
         last_event: ring.length ? ring[ring.length - 1].event : null,
         compiler_id: 'boris/0.9.0',
-        hello_schema: 'boris-watch-events-1',
+        hello_schema: 1,
         last_error: lastError
       };
     },
