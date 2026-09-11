@@ -30,6 +30,12 @@
     because the body does not say whether the merge closes it. Do not combine
     `Closes` and `Refs` for the same issue: the close-vs-keep-open intent must
     stay unambiguous.
+  - **Never wrap the keyword or the number in backticks, and never put the
+    declaration in a fenced block.** GitHub does not linkify references inside
+    code spans or fences, so such a line is inert: the merge neither closes
+    the issue nor records the intent, and the lint fails it as INERT. This is
+    how #834 was orphaned on 2026-09-11 — the body read `Closes #834` in
+    backticks, the PR looked correctly linked, and the merge closed nothing.
 - **Changed Files**:
   - `<file-path-1>`
   - `<file-path-2>`
