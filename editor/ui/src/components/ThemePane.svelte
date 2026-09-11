@@ -21,7 +21,7 @@
 
 {#if themeLayoutOpen}
   <section class="theme-pane" aria-labelledby="theme-heading">
-    <div class="problems-heading">
+    <div class="pane-heading">
       <div>
         <h3 id="theme-heading">Theme layout</h3>
         <p>Closed slots come from Boris <code>completion.json</code>. The buffer scan is presentation only.</p>

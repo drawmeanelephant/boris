@@ -90,8 +90,11 @@ Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the
   target. Do not treat Pages or Standard.site as “not real because the
   README used to mention only `dist/`.”
 - **The editor is a product surface.** `editor/` is a local, compiler-backed
-  authoring host. It does not own parsing, the graph, validation, rendering, or
-  publication. Do not invent a parallel editor pipeline.
+  authoring host ([`editor/README.md`](editor/README.md)). It does not own
+  parsing, the graph, validation, rendering, or publication. Do not invent a
+  parallel editor pipeline. Its UI stack is settled — investing in it is the
+  direction of travel, not a deviation; see **What these protect** below for
+  the binding scope.
 - **The live server is part of the experience.** `boris watch --serve
   [--port N]` serves the built HTML tree on loopback with automatic browser
   reload, and `boris watch --watch-json` streams machine-readable NDJSON
@@ -123,6 +126,23 @@ Do not, without an explicit user request:
 - redesign concurrency/multiprocessing, replace Oliver with a non-native
   path, change Trunk–Satellite semantics, or permit arbitrary MDX, executable
   components, or JS expressions; do not invent a parallel pipeline for convenience.
+
+**What these protect.** These rules protect the **compiler core**: `src/`,
+`build.zig` / `build.zig.zon`, Oliver, and the site-compilation pipeline. They
+guard against an agent unilaterally re-platforming Boris or swapping the
+toolchain — they are not a preference for a less capable UI, and not a ban on
+the editor's existing stack. `editor/ui/` is a **Svelte 5 + Vite + TypeScript**
+static app with npm dev dependencies, and `editor/` is a Zig host: that stack is
+the sanctioned editor surface and the direction of travel, so improving,
+extending, and deepening it is normal work rather than a deviation. “Do not turn
+the core into a web app” means the *compiler* is not a web app — the editor is a
+separate local consumer of it. The `Svelte` / `Vite` entry above is scoped to
+compiling Boris sites, not to the editor.
+
+**Downstream consumers are out of scope.** Separate projects (for example macOS
+apps) consume `boris` as a compiler. Mainline Boris is the compiler plus this
+editor, and nothing here should reshape the editor around a downstream app's
+needs.
 
 Allowed normal work includes pure Zig under `src/`, allowed C ABI work under
 `vendor/`, author content and registered components, layouts, contracts, tests,

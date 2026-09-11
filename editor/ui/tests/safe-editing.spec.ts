@@ -2992,13 +2992,16 @@ test('large project file trees stay bounded and filterable (#418 M11)', async ({
   const tree = page.getByRole('navigation', { name: 'Project files' });
   await expect(page.getByRole('status', { name: 'Project files status' }))
     .toContainText('Showing 200 of 251 project files. Filter to find the rest.');
-  await expect(tree.getByRole('button')).toHaveCount(200);
+  // The cap counts files. Folder rows are disclosure controls, not files, so
+  // they are counted separately and never eat into the bounded file budget.
+  await expect(tree.locator('button.file-tree-file')).toHaveCount(200);
+  await expect(tree.locator('button.file-tree-dir')).toHaveCount(1);
   await expect(tree.getByRole('button', { name: 'content/p249.md', exact: true })).toHaveCount(0);
 
   await page.getByRole('textbox', { name: 'Filter project files' }).fill('p249');
   await expect(page.getByRole('status', { name: 'Project files status' }))
     .toContainText('1 project file matches “p249”');
-  await expect(tree.getByRole('button')).toHaveCount(1);
+  await expect(tree.locator('button.file-tree-file')).toHaveCount(1);
   await page.getByRole('button', { name: 'content/p249.md', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Source for content/p249.md' })).toBeVisible();
 });

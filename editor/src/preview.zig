@@ -1,7 +1,11 @@
-//! Real-compiler preview fallback used until `boris serve` lands.
+//! Real-compiler preview origin: one fixed incremental HTML command per
+//! requested rebuild, then the committed `dist/` bytes served unchanged on a
+//! second loopback origin.
 //!
-//! This module invokes one fixed incremental HTML command and serves the
-//! committed `dist/` bytes unchanged on a second loopback origin.
+//! The compiler's own local preview (`boris watch --serve`) now overlaps this
+//! path on serve-and-reload; the reconciliation — delegate, or record why this
+//! origin's token/Host/traversal posture is worth a second server — is recorded
+//! as open work in `docs/contracts/editor-host.md` §8.
 
 const std = @import("std");
 const Io = std.Io;

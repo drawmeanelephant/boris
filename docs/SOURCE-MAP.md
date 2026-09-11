@@ -41,7 +41,8 @@ The compiler is one binary. Files cluster by job, not by fashion.
 Outside `src/`:
 
 Editor
-: [`editor/`](../editor/) — local host. Compiler stays the authority.
+: [`editor/`](../editor/) — local host (`src/` host, `ui/` Svelte shell).
+  Compiler stays the authority. Contract: [editor-host.md](contracts/editor-host.md).
 
 Cloudflare Worker host example
 : [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/) — HTTP/R2 glue around the embed Wasm ABI. Not a publication target.

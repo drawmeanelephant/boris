@@ -438,14 +438,19 @@ fn serveCommandRun(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
     defer arena.deinit();
     // Validate runs through the long-lived daemon when the installed compiler
     // supports `validate --watch`; everything else keeps the one-shot runner.
+    // Runner failures are part of the documented API surface
+    // (docs/contracts/editor-host.md §9): an invalid command request is a 400
+    // and an unrecognized artifact version a 502. Letting them escape closed the
+    // connection with no response at all, so they are mapped here like every
+    // other handler's errors.
     const result = if (parsed.value.mode == .validate and config.daemon.watchSupported())
-        try config.daemon.runValidate(arena.allocator())
+        config.daemon.runValidate(arena.allocator()) catch |err| return respondApiError(request, err)
     else
-        try runner.run(arena.allocator(), io, .{
+        runner.run(arena.allocator(), io, .{
             .project_root = config.project_root,
             .boris_path = config.boris_path,
             .editor_id = editor_id,
-        }, parsed.value);
+        }, parsed.value) catch |err| return respondApiError(request, err);
     const bytes = try std.json.Stringify.valueAlloc(allocator, result, .{});
     defer allocator.free(bytes);
     return respondJson(request, .ok, bytes);
@@ -565,7 +570,6 @@ fn respondApiError(request: *http.Server.Request, err: anyerror) !void {
         error.FileTooLarge, error.SnapshotTooLarge, error.PayloadTooLarge => .{ .status = .payload_too_large, .code = "payload_too_large" },
         error.UnsupportedMediaType => .{ .status = .unsupported_media_type, .code = "unsupported_media_type" },
         error.TooManyFiles => .{ .status = .payload_too_large, .code = "too_many_files" },
-        error.CorruptRecovery => .{ .status = .internal_server_error, .code = "corrupt_recovery" },
         error.ImpactIdRequired, error.UnexpectedImpactId, error.InvalidImpactId, error.ProfileRequired, error.UnexpectedProfile, error.InvalidProfilePath, error.RecipeScaleIdRequired, error.RecipeScaleFactorRequired, error.UnexpectedRecipeScale, error.InvalidRecipeScaleId, error.InvalidRecipeScaleFactor => .{ .status = .bad_request, .code = "invalid_command_request" },
         error.UnsupportedArtifact => .{ .status = .bad_gateway, .code = "unsupported_boris_artifact" },
         error.InvalidBorisVersion => .{ .status = .bad_gateway, .code = "invalid_boris_version" },

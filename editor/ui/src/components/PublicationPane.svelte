@@ -10,7 +10,7 @@
 </script>
 
 <section id="publication" class="publication-pane" tabindex="-1" aria-labelledby="publication-heading">
-  <div class="problems-heading">
+  <div class="pane-heading">
     <div>
       <h2 id="publication-heading">Publication</h2>
       <p>The editor runs <code>boris plan --profile</code> and shows the normalized declaration. It does not deploy or store secrets.</p>

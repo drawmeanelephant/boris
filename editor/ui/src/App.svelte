@@ -32,7 +32,7 @@
     defaultCreatePath
   } from './lib/utils';
   import { connection, applyHealth, applyVersion, markConnected, markTokenMissing, markConnectFailed, markHostUnavailable } from './lib/state/connection.svelte';
-  import { project, refreshFiles } from './lib/state/project.svelte';
+  import { project, refreshFiles, initProjectTree } from './lib/state/project.svelte';
   import { buffer, dirty, loadBuffer, resetBuffer, undo, redo, trackCursor, discardBuffer, clearRecovery, stopRecoveryTimer, flushRecovery, loadRecovery, markBufferHostUnavailable } from './lib/state/buffer.svelte';
   import { authoring, suggestions, refreshAuthoring, setAuthoring } from './lib/state/authoring.svelte';
   import { graph, activeNode, parentNode, refreshGraph, setGraph } from './lib/state/graph.svelte';
@@ -824,6 +824,7 @@
   initFocusLayout();
   initFocusType();
   initFocusZen();
+  initProjectTree();
   connect();
 </script>
 

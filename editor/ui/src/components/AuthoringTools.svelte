@@ -29,7 +29,7 @@
 </script>
 
 <aside class="authoring-tools" aria-labelledby="authoring-heading">
-  <div class="authoring-heading">
+  <div class="pane-heading">
     <div>
       <h3 id="authoring-heading">Boris authoring hints</h3>
       <p>{authoring.status}</p>

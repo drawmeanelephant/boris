@@ -15,11 +15,17 @@
   color: var(--color-text);
   background: var(--color-canvas);
   font-synthesis: none;
+  /* One reading rhythm for the whole surface: prose inherits this, headings
+     and controls opt into the tighter step. */
+  line-height: var(--leading-normal);
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 20rem; min-height: 100vh; background: var(--color-canvas); }
-button, input, select, textarea { font: inherit; }
+/* The scale is anchored to the body step: every other size in lib/tokens.css
+   is defined relative to this 16px, so pinning it here keeps the chain honest
+   if a user-agent or platform default ever disagrees. */
+body { margin: 0; min-width: 20rem; min-height: 100vh; background: var(--color-canvas); font-size: var(--text-md); }
+button, input, select, textarea { font: inherit; line-height: var(--leading-tight); }
 
 button {
   min-height: 2.6rem;
@@ -54,10 +60,28 @@ header {
   color: var(--color-header-text);
   border-bottom: 0.2rem solid var(--color-accent);
 }
-h1, h2, p { margin-top: 0; }
-h1 { margin-bottom: 0; font-size: var(--text-xl); letter-spacing: -0.03em; }
+/* Heading roles. Size steps come from lib/tokens.css and are never raw rems,
+   so the order holds everywhere: h1 (app) > h2 (pane) > h3 (sub-pane) > body.
+   h4 is deliberately not a fifth size: it is a group label inside a sub-pane
+   (Children, Backlinks, Ingredients, Targets), so it reads as a label rather
+   than competing with the body copy it introduces. */
+h1, h2, h3, h4, h5, h6 { margin-top: 0; line-height: var(--leading-tight); }
+h1 { margin-bottom: 0; font-size: var(--text-2xl); letter-spacing: -0.03em; }
+h2 { margin-bottom: 0.35rem; font-size: var(--text-xl); letter-spacing: -0.015em; }
+h3 { margin-bottom: 0.3rem; font-size: var(--text-lg); letter-spacing: -0.005em; }
+h4 {
+  margin-bottom: 0.3rem;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+p { margin-top: 0; }
 .eyebrow { margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.12em; font-size: var(--text-xs); color: var(--header-chip-border); }
-.connection { max-width: 24rem; margin-bottom: 0.35rem; }
+/* Connection status is secondary to the app title: one step down, and it gets
+   the ordinary prose rhythm so a two-line status stays readable. */
+.connection { max-width: 24rem; margin-bottom: 0.35rem; font-size: var(--text-sm); }
 .theme-toggle {
   min-height: 2.1rem;
   margin-bottom: 0.35rem;
@@ -86,7 +110,7 @@ h1 { margin-bottom: 0; font-size: var(--text-xl); letter-spacing: -0.03em; }
    its content so overflow-x can engage on narrow viewports; the fade bars
    stay anchored to the non-scrolling nav. */
 .section-nav-row { display: flex; gap: 0.4rem; align-items: center; flex: 1 1 auto; min-width: 0; }
-.section-nav a { padding: 0.32rem 0.8rem; border-radius: var(--radius-pill); font-weight: 600; text-decoration: none; transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out); }
+.section-nav a { padding: 0.32rem 0.8rem; border-radius: var(--radius-pill); font-size: var(--text-sm); font-weight: 600; text-decoration: none; transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out); }
 .section-nav a:hover { background: var(--color-accent-soft); text-decoration: underline; }
 /* #941 B: scrollspy active pill mirrors the file-tree active treatment. */
 .section-nav a[aria-current='true'] { color: var(--color-on-accent); background: var(--color-accent); }
@@ -131,7 +155,7 @@ section.arrived {
 }
 
 .recovery-banner { display: flex; justify-content: space-between; gap: var(--space-7); padding: var(--space-4) var(--content-pad); color: var(--color-warn); background: var(--color-warn-soft); border-bottom: 1px solid var(--color-warn-border); }
-.recovery-banner h2 { margin-bottom: 0.25rem; font-size: var(--text-lg); }
+.recovery-banner h2 { margin-bottom: 0.25rem; font-size: var(--text-xl); }
 .recovery-banner p { margin-bottom: 0; }
 .recovery-banner ul { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .recovery-banner li { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
@@ -148,21 +172,84 @@ section {
      flush under it; the JS-measured var keeps the offset honest. */
   scroll-margin-top: calc(var(--section-nav-h, 3.25rem) + 0.75rem);
 }
-h2 { font-size: var(--text-lg); letter-spacing: -0.01em; }
 .project-pane, .source-pane, .problems-pane { min-height: 32rem; }
 .file-actions, .source-actions, .dialog-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
-.file-actions { margin: var(--space-5) 0; }
 .file-filter { margin-bottom: 0.85rem; }
-.file-filter p { margin: 0.45rem 0 0; color: var(--color-text-muted); }
-.file-tree { max-height: 22rem; overflow: auto; border-top: 1px solid var(--color-border-soft); }
-.file-tree ul { margin: 0; padding: var(--space-3) 0; list-style: none; }
-.file-tree button { width: 100%; min-height: 2.35rem; padding: 0.4rem 0.55rem; border: 0; border-radius: var(--radius-sm); text-align: left; overflow-wrap: anywhere; }
-.file-tree button:hover:not(.active) { background: var(--color-sunken); }
-.file-tree button.active { font-weight: 700; color: var(--color-on-accent); background: var(--color-accent); }
-.source-heading { display: flex; justify-content: space-between; align-items: start; gap: var(--space-4); }
-.source-heading h2 { margin-bottom: 0.15rem; }
+.file-filter p { margin: 0.45rem 0 0; color: var(--color-text-muted); font-size: var(--text-sm); }
+.file-tree {
+  max-height: 22rem;
+  overflow: auto;
+  border-top: 1px solid var(--color-border-soft);
+  /* The caret gutter, reserved on file rows too so a folder and a file at the
+     same level start their names at the same x. Absolute units, not em: the
+     two row types set different font sizes, so an em-based gutter would
+     resolve to different widths and the alignment would drift. */
+  --tree-gutter: 0.66rem;
+}
+.file-tree ul { margin: 0; padding: 0; list-style: none; }
+/* Only the outermost list gets vertical breathing room; nested levels are
+   spaced by their own rows. */
+.file-tree > ul { padding: var(--space-3) 0; }
+/* Depth is carried twice — an indent and a guide rule — so a deep path stays
+   scannable without repeating its prefix on every row. */
+.file-tree li > ul { margin-left: 0.45rem; padding-left: 0.8rem; border-left: 1px solid var(--color-border-soft); }
+/* Folder rows are disclosure buttons: a caret, the folder's own segment, and
+   aria-expanded for state. The caret is a pseudo-element so it never joins the
+   accessible name. The :hover:not(:disabled) specificity is deliberate — the
+   global button hover rule is one class heavier than a bare class selector, so
+   a plain .file-tree-dir:hover would lose to it. */
+.file-tree-dir {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 1.85rem;
+  padding: 0.25rem 0.55rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.file-tree-dir::before {
+  content: '';
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 0.34rem;
+  height: 0.34rem;
+  margin-right: 0.32rem;
+  border-right: 0.11rem solid currentColor;
+  border-bottom: 0.11rem solid currentColor;
+  transform: rotate(45deg) translate(-0.04rem, -0.04rem);
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+.file-tree-dir[aria-expanded='false']::before { transform: rotate(-45deg); }
+.file-tree-dir:hover:not(:disabled) { background: var(--color-sunken); }
+.file-tree-dir:active:not(:disabled) { box-shadow: none; }
+/* File rows are one path segment each, so they can be denser than the old
+   full-path rows were. overflow-wrap stays as a net for a single very long
+   segment; nothing here ever wraps at a slash mid-token any more. */
+.file-tree button.file-tree-file { width: 100%; min-height: 2.15rem; padding: 0.35rem 0.55rem 0.35rem calc(0.55rem + var(--tree-gutter)); border: 0; border-radius: var(--radius-sm); font-size: var(--text-sm); text-align: left; overflow-wrap: anywhere; }
+.file-tree button.file-tree-file:hover:not(.active) { background: var(--color-sunken); }
+.file-tree button.file-tree-file.active { font-weight: 700; color: var(--color-on-accent); background: var(--color-accent); }
 .path { color: var(--color-text-muted); overflow-wrap: anywhere; }
-label { display: block; margin: 0.75rem 0 0.35rem; font-weight: 700; }
+/* The open file's path is the one identifier an author checks constantly, so
+   it keeps the strong ink and takes the monospace face; the mono face also
+   gives it a different texture than the lede text around it. */
+.pane-heading .path { color: var(--color-text); font: var(--text-sm)/var(--leading-normal) var(--font-mono); }
+/* Field labels are a step below body copy: at body size and 700 weight they
+   were the loudest text in a pane, which is how a form label started to read
+   as more important than the prose it labels. */
+label { display: block; margin: 0.75rem 0 0.35rem; font-size: var(--text-sm); font-weight: 600; }
+/* The source field's label repeats the path the pane heading already shows in
+   full strength right above it. It has to stay visible — it is the
+   textarea's accessible name, and the editor's voice-control contract keeps
+   visible labels and accessible names identical — so it drops to the muted
+   ink instead and reads as the field label it is. */
+label[for='source-editor'] { color: var(--color-text-muted); }
 textarea {
   display: block;
   width: 100%;
@@ -173,17 +260,19 @@ textarea {
   border-radius: var(--radius-md);
   background: var(--color-surface);
   color: var(--color-text);
-  font: 0.92rem/1.55 var(--font-mono);
+  font: var(--text-code)/var(--leading-loose) var(--font-mono);
 }
 textarea[readonly] { background: var(--color-sunken); }
 input, select { width: 100%; padding: 0.7rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); }
 input:disabled, select:disabled, textarea:disabled { background: var(--color-sunken); }
-.authoring-tools { margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint); }
-.authoring-heading { display: flex; align-items: start; justify-content: space-between; gap: var(--space-4); }
-.authoring-heading h3, .authoring-heading p { margin-bottom: 0.35rem; }
-.completion-controls { display: grid; grid-template-columns: minmax(10rem, 0.7fr) minmax(12rem, 1fr) auto; align-items: end; gap: 0.65rem; }
+.authoring-tools { margin-top: var(--space-5); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint); }
+/* Category and filter share the first row; the insert action takes its own so
+   the key hints stay on one line and the button label stops wrapping. */
+.completion-controls { display: grid; grid-template-columns: minmax(9rem, 0.8fr) minmax(11rem, 1.2fr); align-items: start; gap: var(--space-3) var(--space-4); }
 .completion-controls label { margin-top: 0.35rem; }
-.key-hint { margin: 0.5rem 0 0; color: var(--color-text-muted); font-size: var(--text-xs); }
+.completion-controls > button { grid-column: 1 / -1; justify-self: start; }
+.authoring-tools dl { font-size: var(--text-sm); }
+.key-hint { margin: 0.5rem 0 0; color: var(--color-text-muted); font-size: var(--text-xs); line-height: var(--leading-normal); }
 .key-hint kbd, .dialog-actions kbd {
   margin-right: 0.3rem;
   padding: 0.05rem 0.35rem;
@@ -191,7 +280,7 @@ input:disabled, select:disabled, textarea:disabled { background: var(--color-sun
   border-radius: var(--radius-sm);
   background: var(--color-sunken);
   box-shadow: var(--kbd-inset);
-  font: 0.72rem/1.3 var(--font-mono);
+  font: var(--text-2xs)/1.3 var(--font-mono);
 }
 [role="listbox"] { max-height: 13rem; margin: 0.65rem 0; padding: 0.35rem; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); list-style: none; background: var(--color-surface); box-shadow: var(--shadow-2); }
 [role="option"] { display: grid; grid-template-columns: minmax(8rem, 0.45fr) 1fr; gap: 0.6rem; padding: 0.55rem 0.7rem; border-radius: var(--radius-sm); cursor: pointer; }
@@ -201,90 +290,116 @@ input:disabled, select:disabled, textarea:disabled { background: var(--color-sun
 .authoring-tools dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: var(--space-3); padding: 0.25rem 0; }
 .authoring-tools dt { font-weight: 700; }
 .authoring-tools dd { margin: 0; }
-.buffer-state { margin-top: 0.65rem; color: var(--color-ok); font-weight: 700; }
+.buffer-state { margin-top: 0.65rem; color: var(--color-ok); font-weight: 700; font-size: var(--text-sm); }
 .buffer-state.warning { color: var(--color-danger); }
 .inline-problems { margin-top: var(--space-4); padding: 0.85rem; border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); background: var(--color-danger-soft); }
-.inline-problems h3 { margin: 0 0 0.5rem; font-size: var(--text-md); }
+.inline-problems h3 { margin: 0 0 0.5rem; }
 .inline-problems ul, .problem-group ul, .analysis-results ul { margin: 0; padding: 0; list-style: none; }
 .inline-problems li + li { margin-top: 0.4rem; }
 .inline-problems button { width: 100%; text-align: left; }
 
 .workspace-rail { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-4); }
-.graph-pane { min-height: 0; margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint); }
-.graph-current { font-weight: 700; }
+.graph-pane { min-height: 0; margin-top: var(--space-5); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint); }
+.graph-current { font-weight: 700; font-size: var(--text-sm); font-family: var(--font-mono); overflow-wrap: anywhere; }
 .graph-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; margin: 0.75rem 0; }
-.graph-pane h3 { margin: 0.85rem 0 0.4rem; font-size: 0.95rem; }
 .graph-links { margin: 0; padding: 0; list-style: none; }
+.graph-links li { font-size: var(--text-sm); }
 .graph-links li + li { margin-top: 0.35rem; }
 .graph-links button { width: 100%; text-align: left; }
-.recipe-pane { margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint); }
-.recipe-pane h4 { margin: 0.85rem 0 0.4rem; font-size: 0.95rem; }
+/* h4 group labels sit above their list in every sub-pane; only the space
+   above them differs from the global heading defaults. */
+.graph-pane h4, .recipe-pane h4, .theme-pane h4, .publication-pane h4 { margin-top: var(--space-5); }
+.recipe-pane { margin-top: var(--space-5); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint); }
 .recipe-table { width: 100%; border-collapse: collapse; margin: 0 0 0.5rem; }
 .recipe-table th, .recipe-table td { text-align: left; padding: 0.35rem 0.45rem; border-bottom: 1px solid var(--color-border-soft); vertical-align: top; }
-.recipe-table th { color: var(--color-text-muted); font-size: var(--text-sm); }
+.recipe-table td { font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.recipe-table th { color: var(--color-text-muted); font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
 .recipe-table button { width: auto; min-height: 2.2rem; }
 .recipe-scale { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: end; margin: 0.75rem 0 var(--space-4); }
 .recipe-scale label { flex: 1 1 10rem; margin: 0; }
 .recipe-scale input { width: 100%; }
 .recipe-scale button { width: auto; }
-.problems-heading { display: flex; justify-content: space-between; align-items: start; gap: var(--space-4); }
+/* The shared header row for every pane and sub-pane: a title, an optional
+   one-line lede, and an optional action cluster. The text block declares a
+   real flex basis and the row wraps, so a wide action cluster (or the
+   Problems result chip) drops to its own line instead of squeezing the lede
+   into a word-or-two column. Actions hug the trailing edge whether they sit
+   beside the title or below it. */
+.pane-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+}
+.pane-heading > div:first-child { flex: 1 1 20rem; min-width: 0; }
+/* space-between (not margin-left: auto) so an action cluster that wraps to
+   its own line starts at the leading edge instead of floating right. The
+   cluster must be allowed to shrink: several buttons in a narrow pane exceed
+   the pane width, and a non-shrinking cluster overflows the section box and
+   paints over the neighbouring pane (#670 readability pass caught this as an
+   intercepting element in the delete-dialog e2e). Shrinking hands control
+   back to the cluster's own flex-wrap, which is what wraps the buttons. */
+.pane-heading > *:not(:first-child) { flex: 0 1 auto; max-width: 100%; }
+.pane-heading h2, .pane-heading h3 { margin-bottom: 0.2rem; }
+.pane-heading > div > p {
+  margin: 0;
+  max-width: var(--measure-prose);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+.pane-heading > div > p + p { margin-top: 0.2rem; }
 .validation-state-line { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; margin: 0.75rem 0; }
 .validation-state-line .validation-state { margin: 0; }
-.validation-meta { color: var(--color-text-muted); font: 0.82rem/1.4 var(--font-mono); }
-.command-result { flex: 0 0 auto; padding: 0.3rem 0.7rem; border: 1px solid var(--color-ok-border); border-radius: var(--radius-pill); color: var(--color-ok); background: var(--color-ok-soft); font-weight: 700; }
+.validation-meta { color: var(--color-text-muted); font: var(--text-sm)/var(--leading-normal) var(--font-mono); font-variant-numeric: tabular-nums; }
+.command-result { flex: 0 0 auto; padding: 0.3rem 0.7rem; border: 1px solid var(--color-ok-border); border-radius: var(--radius-pill); color: var(--color-ok); background: var(--color-ok-soft); font-size: var(--text-sm); font-weight: 700; white-space: nowrap; }
 .command-result.failure { color: var(--color-danger-strong); background: var(--color-danger-soft-strong); border-color: var(--color-danger-border); }
-.problems-notice { margin: 0.75rem 0 0; padding: 0.6rem 0.75rem; border-left: 0.3rem solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-sunken); }
+.problems-notice { margin: 0.75rem 0 0; padding: 0.6rem 0.75rem; border-left: 0.3rem solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-sunken); font-size: var(--text-sm); }
 .command-bar { display: flex; gap: 0.55rem; flex-wrap: wrap; margin: var(--space-4) 0; }
 .impact-command { max-width: 38rem; margin: var(--space-4) 0; }
 .impact-command > div { display: grid; grid-template-columns: minmax(12rem, 1fr) auto; gap: 0.55rem; }
-.warning-text, .fallback-notice { padding: 0.75rem; border-left: 0.3rem solid var(--color-warn-accent); border-radius: var(--radius-sm); background: var(--color-warn-soft); color: var(--color-warn); }
+.warning-text, .fallback-notice { padding: 0.75rem; border-left: 0.3rem solid var(--color-warn-accent); border-radius: var(--radius-sm); background: var(--color-warn-soft); color: var(--color-warn); font-size: var(--text-sm); }
 .problem-groups { display: grid; gap: 0.8rem; margin-top: var(--space-4); }
 .problem-group { min-height: 0; padding: var(--space-4); border-color: var(--color-danger-border); background: var(--color-danger-soft); }
 .problem-group h3 { overflow-wrap: anywhere; }
 .problem-card + .problem-card { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--color-danger-border); }
 .problem-card p { margin-bottom: 0.55rem; }
-.confidence { color: var(--color-text-faint); font-size: 0.9rem; }
+.confidence { color: var(--color-text-faint); font-size: var(--text-xs); }
 .problem-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
 .analysis-results { min-height: 0; margin-top: var(--space-4); padding: var(--space-4); background: var(--color-surface-tint); }
-.analysis-results li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 0.45rem 0; }
+.analysis-results li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 0.45rem 0; font-size: var(--text-sm); }
 
-.preview-heading { display: flex; align-items: start; justify-content: space-between; gap: var(--space-4); }
 .preview-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
 .button-link { display: inline-flex; min-height: 2.6rem; align-items: center; padding: 0.55rem 0.9rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface); text-decoration: none; }
-.preview-state { padding: 0.75rem; border-left: 0.3rem solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-sunken); }
+.preview-state { padding: 0.75rem; border-left: 0.3rem solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-sunken); font-size: var(--text-sm); }
 .preview-state.current { border-color: var(--color-accent); background: var(--color-ok-soft); }
 .preview-state.failure { border-color: var(--color-danger-border); background: var(--color-danger-soft); }
 #preview iframe { width: 100%; min-height: 36rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface); }
 .preview-frame.constrained { max-width: 100%; margin-inline: auto; }
 .preview-viewports { display: flex; flex-wrap: wrap; gap: 0.65rem 1rem; margin: 0.75rem 0; padding: 0.65rem 0.75rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
-.preview-viewports legend { font-weight: 700; }
-.preview-viewports label { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 500; }
+.preview-viewports legend { font-weight: 700; font-size: var(--text-sm); }
+.preview-viewports label { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 500; font-size: var(--text-sm); }
 .preview-viewports input { width: auto; }
-.preview-a11y { margin: 0.75rem 0; padding: 0.45rem 0.75rem; border-left: 0.3rem solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-surface-tint); }
+.preview-a11y { margin: 0.75rem 0; padding: 0.45rem 0.75rem; border-left: 0.3rem solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-surface-tint); font-size: var(--text-sm); }
 .preview-a11y ul { margin: 0.35rem 0 0; padding-left: 1.2rem; }
 .watch-pane { min-height: 0; }
-.watch-heading { display: flex; justify-content: space-between; align-items: start; gap: var(--space-4); }
-.watch-heading h2 { margin-bottom: 0.15rem; }
 .watch-state-line { display: flex; align-items: baseline; gap: 0.7rem; flex-wrap: wrap; margin: 0.75rem 0; }
 .watch-state-line .watch-state { margin: 0; }
-.watch-meta { color: var(--color-text-muted); font: 0.82rem/1.4 var(--font-mono); }
+.watch-meta { color: var(--color-text-muted); font: var(--text-sm)/var(--leading-normal) var(--font-mono); font-variant-numeric: tabular-nums; }
 .watch-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; margin: var(--space-4) 0; }
 .watch-unsupported { padding: 0.75rem; border-left: 0.3rem solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-sunken); }
-.watch-feed { max-height: 16rem; margin: 0; padding: var(--space-3) 0; overflow: auto; border-top: 1px solid var(--color-border-soft); list-style: none; }
-.watch-feed-empty { margin: 0.75rem 0 0; color: var(--color-text-muted); }
+.watch-feed { max-height: 16rem; margin: 0; padding: var(--space-3) 0; overflow: auto; border-top: 1px solid var(--color-border-soft); list-style: none; font-size: var(--text-sm); }
+.watch-feed-empty { margin: 0.75rem 0 0; color: var(--color-text-muted); font-size: var(--text-sm); }
 .watch-event { display: flex; align-items: baseline; gap: 0.45rem; padding: 0.3rem 0.15rem; border-bottom: 1px solid var(--color-border-soft); overflow-wrap: anywhere; }
-.watch-event-seq { flex: 0 0 auto; color: var(--color-text-faint); font: 0.78rem/1.4 var(--font-mono); }
+.watch-event-seq { flex: 0 0 auto; color: var(--color-text-faint); font: var(--text-xs)/1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
 .watch-event-ok .watch-event-label { color: var(--color-ok); }
 .watch-event-failure .watch-event-label { color: var(--color-danger); }
 .watch-event-info .watch-event-label { color: var(--color-text-muted); }
 .watch-event-boundary { font-style: italic; }
 .watch-event-boundary .watch-event-label { color: var(--color-text-faint); }
-.theme-pane { margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint-neutral); }
-.theme-pane h4 { margin: 0.85rem 0 0.4rem; font-size: 0.95rem; }
-.publication-pane { margin-top: var(--space-4); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint-neutral); }
-.publication-pane h3 { margin: 0.85rem 0 0.4rem; font-size: var(--text-md); }
-.publication-pane h4 { margin: 0.85rem 0 0.4rem; font-size: 0.95rem; }
-.publication-pane dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: var(--space-3); padding: 0.25rem 0; }
+.theme-pane { margin-top: var(--space-5); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint-neutral); }
+.publication-pane { margin-top: var(--space-5); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint-neutral); }
+.publication-pane dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: var(--space-3); padding: 0.25rem 0; font-size: var(--text-sm); }
 .publication-pane dt { font-weight: 700; }
 .publication-pane dd { margin: 0; }
 
@@ -323,6 +438,8 @@ button.primary kbd { background: var(--kbd-on-accent-bg); }
 .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 .comparison textarea, dialog > textarea { min-height: 13rem; }
 footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
+footer p { margin-bottom: 0; color: var(--color-text-muted); font-size: var(--text-sm); }
+footer .key-hint { margin: 0 0 0.35rem; }
 
 .visually-hidden-text {
   position: absolute;
@@ -362,7 +479,7 @@ footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
   border-bottom: 0.2rem solid var(--color-accent);
 }
 .focus-title { display: flex; align-items: baseline; gap: var(--space-4); min-width: 0; }
-.focus-title h2 { margin: 0; font-size: var(--text-lg); letter-spacing: -0.01em; }
+.focus-title h2 { margin: 0; font-size: var(--text-xl); letter-spacing: -0.01em; }
 .focus-title .path { margin: 0; color: var(--color-header-text); opacity: 0.8; }
 .focus-layouts {
   display: flex;
@@ -551,12 +668,22 @@ footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
   font-size: 0.85em;
   overflow-x: auto;
 }
+/* The reading surface previews the author's document, not the editor's
+   chrome, so its heading steps are relative (em) to the chosen text size: at
+   XL the document's own hierarchy scales with its body text instead of the
+   body outgrowing every heading. The h4 caps/color reset matters here — the
+   global h4 styling is for UI group labels, not for authored Markdown. */
 .focus-reading h1, .focus-reading h2, .focus-reading h3,
-.focus-reading h4, .focus-reading h5, .focus-reading h6 { line-height: 1.25; letter-spacing: -0.01em; }
-.focus-reading h1 { font-size: 1.6rem; margin: 1.4rem 0 0.6rem; }
-.focus-reading h2 { font-size: 1.3rem; margin: 1.3rem 0 0.55rem; }
-.focus-reading h3 { font-size: 1.12rem; margin: 1.1rem 0 0.5rem; }
-.focus-reading h4, .focus-reading h5, .focus-reading h6 { font-size: 1rem; margin: 1rem 0 0.45rem; }
+.focus-reading h4, .focus-reading h5, .focus-reading h6 {
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: inherit;
+}
+.focus-reading h1 { font-size: 1.55em; margin: 1.4rem 0 0.6rem; }
+.focus-reading h2 { font-size: 1.3em; margin: 1.3rem 0 0.55rem; }
+.focus-reading h3 { font-size: 1.12em; margin: 1.1rem 0 0.5rem; }
+.focus-reading h4, .focus-reading h5, .focus-reading h6 { font-size: 1em; margin: 1rem 0 0.45rem; }
 .focus-reading p { margin: 0 0 0.9rem; }
 .focus-surface[data-measure='wide'] .focus-reading p { max-width: 72ch; }
 .focus-reading ul, .focus-reading ol { margin: 0 0 0.9rem; padding-left: 1.6rem; }
@@ -576,7 +703,7 @@ footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
   background: var(--color-sunken);
 }
 .focus-reading code { font: 0.92em/1.5 var(--font-mono); }
-.focus-reading pre code { font-size: 0.88rem; }
+.focus-reading pre code { font-size: 0.88em; }
 .focus-reading hr { margin: 1.2rem 0; border: 0; border-top: 1px solid var(--color-border-soft); }
 .focus-reading a { color: var(--color-link); }
 .focus-wikilink {
@@ -630,6 +757,7 @@ footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
 @media (prefers-reduced-motion: reduce) {
   .focus-overlay { transition: none; }
   .zen-underlay { transition: none; }
+  .file-tree-dir::before { transition: none; }
   /* #941 A: the arrival pulse reduces to a static highlight under
      reduced motion — the attention cue stays, the motion goes. */
   section.arrived { animation: none; }
@@ -642,16 +770,21 @@ footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
   .section-nav-fade { display: block; }
   main, .comparison { grid-template-columns: 1fr; }
   .project-pane, .source-pane, .problems-pane { min-height: auto; }
-  .problems-heading, .analysis-results li { display: block; }
-  .preview-heading { display: block; }
+  .analysis-results li { display: block; }
+  /* .pane-heading already wraps, so the text block takes the full width and
+     the actions stack under it without any extra breakpoint rules. */
+  .pane-heading > div:first-child { flex-basis: 100%; }
   .command-result { display: inline-block; }
   .impact-command > div { grid-template-columns: 1fr; }
-  .authoring-heading { display: block; }
   .completion-controls { grid-template-columns: 1fr; }
 }
 
 @media (min-width: 80rem) {
-  main { grid-template-columns: minmax(16rem, 0.7fr) minmax(24rem, 1.3fr) minmax(20rem, 1fr); }
+  /* Three columns, sized by what has to fit rather than by equal thirds: the
+     Project column needs enough width for a full content path to sit on one
+     line (a broken path is the one place where wrapping costs meaning), the
+     Source column is the working surface, and the rail carries prose. */
+  main { grid-template-columns: minmax(16rem, 0.68fr) minmax(24rem, 1.28fr) minmax(20rem, 1.04fr); }
   .workspace-rail { grid-column: auto; max-height: calc(100vh - 14rem); overflow-y: auto; }
   /* Keep rail panes from shrinking below their content: a shrunken box spills
      its controls under the later-painted sibling pane, which covers clicks on

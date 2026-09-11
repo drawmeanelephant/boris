@@ -6,10 +6,10 @@
 # Takes a product `boris` binary (e.g. a build of a released tag) and runs
 # every editor acceptance surface against it — editor-host Zig tests, UI
 # static checks + build, the mocked Playwright e2e suite, and the live
-# integration scripts (contract fixture, host safe-editing, diagnostics,
-# validation daemon, live preview, publication) that spawn the binary
-# through the editor host. Re-verify a released Boris against the editor
-# with one command:
+# integration scripts (contract fixture, host contract conformance, host
+# safe-editing, diagnostics, validation daemon, watch daemon, live preview,
+# publication) that spawn the binary through the editor host. Re-verify a
+# released Boris against the editor with one command:
 #
 #   ./editor/scripts/test-editor-gate.sh /path/to/released/boris
 #
@@ -119,6 +119,7 @@ editor_bin="$root/editor/zig-out/bin/boris-editor"
 probe_bin="$root/editor/zig-out/bin/boris-editor-contract-probe"
 ui_dir="$root/editor/ui/dist"
 run_stage "live integration: contract fixture" ./editor/scripts/test-contract-fixture.sh "$boris_bin" "$probe_bin"
+run_stage "live integration: host contract conformance" ./editor/scripts/test-host-contract.sh "$boris_bin" "$editor_bin" "$ui_dir"
 run_stage "live integration: host safe-editing" ./editor/scripts/test-host.sh "$boris_bin" "$editor_bin" "$ui_dir"
 run_stage "live integration: diagnostics" ./editor/scripts/test-diagnostics.sh "$boris_bin" "$editor_bin" "$ui_dir"
 run_stage "live integration: validation daemon" ./editor/scripts/test-validation-daemon.sh "$boris_bin" "$editor_bin" "$ui_dir"

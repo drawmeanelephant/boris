@@ -74,6 +74,7 @@ per topic:
 | HTML output (default CLI) | [html-output.md](html-output.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |
+| Editor local host API (transport/security, file operations, daemons, preview) | [editor-host.md](editor-host.md) |
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
 | Graph-backed Markdown documentation links | [documentation-links.md](documentation-links.md) |
@@ -120,6 +121,7 @@ per topic:
 | [html-output.md](html-output.md) | HTML Whiteboard, Aside stream, layout splice, Atomic publish (default CLI) |
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
+| [editor-host.md](editor-host.md) | Boris Editor loopback host API: launch/transport discipline, endpoint surface and payloads, author-owned file operations, managed compiler daemons, preview origin |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
 | [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-render; cycles; fragment tree; IR 0.2 edge projection |
 | [documentation-links.md](documentation-links.md) | Existing-page inline Markdown-link rewrite to canonical HTML hrefs |

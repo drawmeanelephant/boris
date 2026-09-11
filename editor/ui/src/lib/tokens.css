@@ -88,14 +88,33 @@
   --shadow-3: 0 8px 20px rgba(16, 35, 29, 0.16), 0 24px 64px rgba(16, 35, 29, 0.3);
   --kbd-inset: inset 0 -1px 0 rgba(23, 32, 29, 0.12);
 
-  /* --- type scale --- */
-  --text-xs: 0.75rem;
-  --text-sm: 0.85rem;
-  --text-md: 1rem;
-  --text-lg: 1.15rem;
-  --text-xl: clamp(1.45rem, 2.4vw, 1.9rem);
-  --leading-tight: 1.25;
-  --leading-normal: 1.5;
+  /* --- type scale ---
+     One chain for the whole surface so reading order is carried by size as
+     well as by weight and color. Two meta steps sit below the 16px body,
+     then one step per heading level above it; the step ratio is ~1.2, which
+     is what makes a 21.6px pane title read as a heading beside 16px prose
+     instead of as "slightly bigger text".
+
+     Component styles must consume these tokens rather than raw rems: an
+     off-scale size is how the hierarchy drifted into everything-is-16px in
+     the first place. Extend the chain here instead of adding a local size. */
+  --text-2xs: 0.7rem;                              /* 11.2px kbd chips, micro labels */
+  --text-xs: 0.78rem;                              /* 12.5px eyebrows, status meta, captions */
+  --text-sm: 0.875rem;                             /* 14px   ledes, field labels, dense rows */
+  --text-md: 1rem;                                 /* 16px   body copy */
+  --text-lg: 1.125rem;                             /* 18px   sub-pane titles (h3) */
+  --text-xl: 1.35rem;                              /* 21.6px pane titles (h2) */
+  --text-2xl: clamp(1.6rem, 2.4vw, 2rem);           /* app title (h1) */
+  --text-code: 0.95rem;                            /* 15.2px monospace working surfaces */
+
+  /* --- reading rhythm ---
+     --leading-normal is the default for all text (:root). Headings take
+     --leading-tight; the source surface takes --leading-loose so code lines
+     breathe. --measure-prose caps a lede at a comfortable line length. */
+  --leading-tight: 1.3;
+  --leading-normal: 1.55;
+  --leading-loose: 1.65;
+  --measure-prose: 68ch;
 
   /* --- motion durations (all gated by prefers-reduced-motion in styles.css) --- */
   --motion-fast: 120ms;

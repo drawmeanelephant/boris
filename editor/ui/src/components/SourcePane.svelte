@@ -36,7 +36,7 @@
 </script>
 
 <section id="source" class="source-pane" tabindex="-1" aria-labelledby="source-heading">
-  <div class="source-heading">
+  <div class="pane-heading">
     <div>
       <h2 id="source-heading">Source</h2>
       <p class="path">{buffer.activePath || 'No file selected'}</p>
