@@ -1,0 +1,3 @@
+### Docs
+
+- Recorded the answer to [#584](https://github.com/drawmeanelephant/boris/issues/584): Nostr NIP-23 stays off the verified-target seam as a decision, not deferred work. A relay list is not a location provider, relays hold no committed artifact inventory, and a `complete` publish verdict is not a Proof Pack claim — so no registry membership, no Nostr Proof Pack claim, and no required live-smoke gate. Reopening requires a product reason that accepts a new location invariant for a destination with no `base_url`. The [first-tester fixture](/docs/contracts/fixtures/nostr-live-smoke/README.md) stays the opt-in Nostr-shaped evidence. Links: [the platform model](/docs/contracts/publication-platforms.md), [the Nostr contract](/docs/contracts/nostr-publication.md).

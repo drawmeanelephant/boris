@@ -105,6 +105,35 @@ Status vocabulary: **shipped and verified**, **deliberate but waiting**,
 - When a second platform is adopted, this contract's registry boundary
   applies (below).
 
+## Recorded decision: Nostr stays off the seam
+
+[#584](https://github.com/drawmeanelephant/boris/issues/584) asked for either a
+location adapter and registry membership for Nostr NIP-23, or the explicit
+reason it stays off this seam. The answer is the second arm, and it is recorded
+here as a decision rather than left as deferred work:
+
+- **A relay list is not a location provider.** There is no `base_url` /
+  `origin` / `base_path` to normalize, so the location invariant cannot be
+  stated for a relay set at all.
+- **Relays hold no committed artifact inventory.** The evidence chain has no
+  target-local object to commit, and therefore no `committed` record a deployer
+  could consume.
+- **A `complete` publish verdict is not a Proof Pack claim.** The per-relay
+  report is a bounded observation about one run; it says what relays answered,
+  never that a public location serves matching bytes.
+
+So the three verified-target extras stay unbuilt: no registry membership, no
+Nostr Proof Pack claim, and no required live-smoke gate. The
+[first-tester fixture](fixtures/nostr-live-smoke/README.md) remains the
+Nostr-shaped evidence, and it stays opt-in — ordinary `zig build test` never
+needs a key or a public relay.
+
+Reopening the registry question is a product decision, not a completeness
+task. It requires accepting a new location invariant for a destination that has
+no `base_url`, which is the bar above. A shipped CLI is not that reason. See
+[`nostr-publication.md`](nostr-publication.md) and
+[#454](https://github.com/drawmeanelephant/boris/issues/454).
+
 ## Target registry boundary
 
 `publication.target` is a small **target registry**: the closed vocabulary is
