@@ -35,9 +35,10 @@ not violated, by this split: it makes the publisher-platform boundary
 physical instead of conventional.
 
 Scope: this proposal covers only `tools/migration-lab/`. The other standalone
-tools (`tools/content-audit/`, `tools/docs-maintenance/`,
-`tools/search-index/`, `tools/testdata-generator/`) are out of scope and stay
-in-repo unless separately proposed.
+tools (`tools/docs-maintenance/`, `tools/search-index/`,
+`tools/testdata-generator/`) were out of scope here and stay in-repo unless
+separately proposed; `tools/content-audit/` has since graduated on this same
+pattern (see [`content-audit-standalone-repo.md`](content-audit-standalone-repo.md)).
 
 ## 1. Current state (measured)
 

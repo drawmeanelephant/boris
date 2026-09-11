@@ -2,7 +2,7 @@
 // Render a human-readable GitHub job-summary markdown block from a gate log.
 //
 // Every one-shot gate (scripts/gate-lib.sh consumers: editor-gate,
-// standalone-tools-gate, content-audit-gate, release-html-smoke-gate) ends
+// standalone-tools-gate, release-html-smoke-gate) ends
 // every outcome — success or failure — with exactly one machine-readable
 // NDJSON line on stdout: {"event":…,"ok":…, …}. This helper reads a gate log,
 // finds that trailing line (scanning from the end so intermediate "OK"/"FAIL"
