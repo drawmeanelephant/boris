@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
         with:
           version: 0.16.0
 
@@ -248,7 +248,7 @@ jobs:
 
       - name: Install Zig for deployment observer
         if: ${{ inputs.audit_deployment == true }}
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
         with:
           version: 0.16.0
 
