@@ -35,6 +35,7 @@ product.
 | Graph-backed Markdown documentation links | **Implemented first slice** — pre-render; see `documentation-links.md` |
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
+| Graph render formats | **Implemented first slice** — read-only `boris graph` Mermaid/DOT projection of the frozen graph; see [graph-formats.md](graph-formats.md) |
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
 | Cooklang compatibility | **Implemented, explicit opt-in** — bounded `.cook` body adapter via `--cooklang`, also emitting a structured `recipe` IR facet; see [cooklang-compatibility.md](cooklang-compatibility.md) |
 | Publication plan declaration | **Implemented** — `plan --profile PATH` emits normalized declaration JSON without publication; see [publication-plan.md](publication-plan.md) |
@@ -84,6 +85,7 @@ per topic:
 | Semantic relations (IR 0.3) | [semantic-relations.md](semantic-relations.md) |
 | AI Context Bundle | [context-bundle.md](context-bundle.md) |
 | Documentation Intelligence | [documentation-intelligence.md](documentation-intelligence.md) |
+| Graph render formats (`boris graph`) | [graph-formats.md](graph-formats.md) |
 | Textile compatibility adapter | [textile-compatibility.md](textile-compatibility.md) |
 | Cooklang recipe input adapter | [cooklang-compatibility.md](cooklang-compatibility.md) |
 | Rendered-site search artifacts | [rendered-search.md](rendered-search.md) |
@@ -131,6 +133,7 @@ per topic:
 | [semantic-relations.md](semantic-relations.md) | Bounded author relations and deliberate IR 0.3 schema plan |
 | [context-bundle.md](context-bundle.md) | Deterministic provenance-rich AI context export (`--context`) |
 | [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`); schema twin under `schemas/` |
+| [graph-formats.md](graph-formats.md) | Read-only Mermaid / Graphviz DOT render of the frozen graph (`boris graph`) |
 | [publication-profile.md](publication-profile.md) | Strict schema-v1 publication-profile parser, normalization, and static validation boundary |
 | [publication-plan.md](publication-plan.md) | Deterministic schema-v1 normalized publication declaration (`plan --profile PATH`) |
 | [../github-pages.md](../github-pages.md) | GitHub Pages workflow, public/evidence artifact separation, and operational setup |

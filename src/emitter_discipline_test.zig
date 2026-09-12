@@ -209,6 +209,14 @@ const modules = [_]Module{
     .{ .name = "fixtures_test.zig", .class = .other },
     .{ .name = "fuzz.zig", .class = .other },
     .{ .name = "graph.zig", .class = .other },
+    .{
+        .name = "graph_render.zig",
+        .class = .{ .emitter = .{
+            .encoder = .sink,
+            .note = "Mermaid / Graphviz DOT graph projection; labels delegate to the mermaid_label/dot_label encode targets",
+        } },
+        .source = @embedFile("graph_render.zig"),
+    },
     .{ .name = "github_pages.zig", .class = .other },
     .{ .name = "hardening_test.zig", .class = .other },
     .{ .name = "html_body.zig", .class = .other },

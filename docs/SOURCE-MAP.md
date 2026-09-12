@@ -35,6 +35,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | Nostr NIP-23 | `src/nostr.zig`, `src/nostr_plan.zig`, `src/nostr_sign.zig`, `src/nostr_publish.zig`, `src/nostr_keys.zig`, `src/nostr_emit.zig`, `src/ws_client.zig` | [nostr-publication.md](contracts/nostr-publication.md) |
 | Diagnostics | `src/diag.zig`, `src/diagnostic.zig` | [diagnostics.md](contracts/diagnostics.md) |
 | Graph health | `src/intelligence.zig` | [documentation-intelligence.md](contracts/documentation-intelligence.md) |
+| Graph render (`boris graph` Mermaid/DOT) | `src/graph_render.zig` | [graph-formats.md](contracts/graph-formats.md) |
 | Doctor | `src/doctor.zig` | Internal snapshot kernel only. No public `boris doctor` command. |
 | Hosted job runner (Cloudflare Containers) | `src/job_runner.zig` (`boris-job-runner`) | [cloudflare-container-runner.md](contracts/cloudflare-container-runner.md) |
 

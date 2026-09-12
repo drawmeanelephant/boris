@@ -14,6 +14,7 @@ boris impact ID [--input DIR] [--format human|json] [--report PATH]
 boris watch [build options]
 boris plan --profile PATH [plan overrides]
 boris recipe-scale --input DIR --id PAGE (--factor TEXT | --servings N) [--cooklang] [--out PATH]
+boris graph [--input DIR] [--format mermaid|dot] [--out PATH]
 ```
 
 ## Commands
@@ -32,6 +33,7 @@ boris recipe-scale --input DIR --id PAGE (--factor TEXT | --servings N) [--cookl
 | `nostr sign` | Sign a plan artifact into a signed-event bundle; the key is read once from stdin (hex or nsec) and never from argv/profile/env | Nothing; bundle JSON on stdout or `--out PATH` |
 | `nostr publish` | Send the exact signed events from a bundle to the plan's relays over RFC-6455 WebSocket (no key; the bundle was signed offline). Every relay interaction is bounded and produces per-relay evidence; the run always reaches a `complete`/`partial`/`failed`/`incomplete` verdict | Nothing; the report JSON on stdout or `--out PATH` |
 | `recipe-scale` | Compile the selected tree and print a derived Cooklang scale view for one page | Nothing; view JSON on stdout or `--out PATH`. Never rewrites `.cook` or `graph.json` |
+| `graph` | Render the frozen content graph as Mermaid (default) or Graphviz DOT | Nothing; the render on stdout or `--out PATH`. Read-only; see [graph-formats.md](graph-formats.md) |
 | `proof verify` | Apply the publication-check severity policy to the committed `checks.json` of one target (the #840 enforcement surface) | Nothing; verdict report on stderr |
 
 `boris standard-site` with no subcommand is a usage error (exit 2) that
@@ -180,6 +182,7 @@ The closed stdout-emitting set, with each entry's default document:
 | `nostr sign` | Signed-event bundle JSON |
 | `nostr publish` | Publish report JSON |
 | `recipe-scale` | Derived Cooklang scale-view JSON |
+| `graph` | Mermaid (default) or Graphviz DOT render of the frozen graph |
 
 Where a command defines `--out PATH`, that flag writes the same document to a
 file instead of stdout; without `--out`, the document is stdout-only for that
@@ -230,6 +233,8 @@ spelled `/private/tmp/…` is accepted.
 Single-file report flags (`--report` on `build`/`validate`, and
 `check`/`impact --report`) are deliberately outside containment: they write
 one explicit file, never a tree, so an absolute path is accepted as-is.
+`boris graph --out PATH` is the same shape: a single explicit render file, not
+an output tree, so it is likewise accepted anywhere the process may write.
 `--input` is likewise unconstrained: the compiler reads the content root but
 never writes into it as an output tree (outputs that would land inside the
 content root are `TargetOutputCollision`).

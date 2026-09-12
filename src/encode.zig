@@ -45,6 +45,13 @@ pub const Target = enum {
     xml_text,
     /// XML/RSS attribute value inside double quotes. Designed for RSS; not yet wired.
     xml_attr,
+    /// Mermaid flowchart label text between the quotes of `id["<here>"]`.
+    /// Mermaid decodes `#NNN;` character references in labels, so `#`, `"`,
+    /// `&`, `<`, and `>` all have to be neutralized or author text could
+    /// close the quoted label or inject label markup.
+    mermaid_label,
+    /// Graphviz DOT double-quoted attribute value: `label="<here>"`.
+    dot_label,
 };
 
 pub fn escapeAppend(
@@ -62,6 +69,8 @@ pub fn escapeAppend(
         .md_block_text => try appendSingleLine(buf, gpa, s),
         .xml_text => try appendXml(buf, gpa, s, false),
         .xml_attr => try appendXml(buf, gpa, s, true),
+        .mermaid_label => try appendMermaidLabel(buf, gpa, s),
+        .dot_label => try appendDotLabel(buf, gpa, s),
     }
 }
 
@@ -338,6 +347,64 @@ fn appendXml(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8, att
 }
 
 // ---------------------------------------------------------------------------
+// Graph render labels (Mermaid / Graphviz DOT)
+// ---------------------------------------------------------------------------
+
+/// Mermaid flowchart labels are quoted (`id["label"]`) but Mermaid still
+/// decodes `#NNN;` character references inside the quotes, so `#` must be
+/// neutralized before it can open a reference, and `"` must not close the
+/// quote. `&`, `<`, and `>` are escaped so an author title cannot be read as
+/// HTML label markup. Line terminators flatten to a space: a label has no
+/// representation for an embedded break and splitting one would forge a new
+/// diagram statement.
+fn appendMermaidLabel(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        if (separatorAt(s[i..])) |sep| {
+            try buf.append(gpa, ' ');
+            i += sep.len;
+            continue;
+        }
+        const c = s[i];
+        if (c < 0x20 or c == 0x7F) {
+            try buf.append(gpa, ' ');
+        } else switch (c) {
+            '#' => try buf.appendSlice(gpa, "#35;"),
+            '"' => try buf.appendSlice(gpa, "#quot;"),
+            '&' => try buf.appendSlice(gpa, "#38;"),
+            '<' => try buf.appendSlice(gpa, "#60;"),
+            '>' => try buf.appendSlice(gpa, "#62;"),
+            else => try buf.append(gpa, c),
+        }
+        i += 1;
+    }
+}
+
+/// Graphviz DOT attribute values are C-like double-quoted strings: `\` and `"`
+/// are the only characters that can escape the quotes, so the backslash is
+/// doubled first. Line terminators flatten to a space for the same reason as
+/// Mermaid labels: a raw break would end the attribute statement.
+fn appendDotLabel(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        if (separatorAt(s[i..])) |sep| {
+            try buf.append(gpa, ' ');
+            i += sep.len;
+            continue;
+        }
+        const c = s[i];
+        if (c < 0x20 or c == 0x7F) {
+            try buf.append(gpa, ' ');
+        } else switch (c) {
+            '"' => try buf.appendSlice(gpa, "\\\""),
+            '\\' => try buf.appendSlice(gpa, "\\\\"),
+            else => try buf.append(gpa, c),
+        }
+        i += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -438,6 +505,26 @@ test "xml text and attribute encoding — designed for RSS" {
     try expectEncoded(.xml_text, "a\x01b", "a\u{FFFD}b");
 }
 
+test "mermaid label cannot close its quote or open a character reference" {
+    try expectEncoded(.mermaid_label, "Core Concepts", "Core Concepts");
+    try expectEncoded(.mermaid_label, "say \"hi\"", "say #quot;hi#quot;");
+    try expectEncoded(.mermaid_label, "#quot;", "#35;quot;");
+    try expectEncoded(.mermaid_label, "a#35;b", "a#35;35;b");
+    try expectEncoded(.mermaid_label, "<b>&amp;</b>", "#60;b#62;#38;amp;#60;/b#62;");
+    try expectEncoded(.mermaid_label, "a\nb", "a b");
+    try expectEncoded(.mermaid_label, "a\u{2028}b", "a b");
+    try expectEncoded(.mermaid_label, "日本語", "日本語");
+}
+
+test "dot label escapes only quote and backslash" {
+    try expectEncoded(.dot_label, "Core Concepts", "Core Concepts");
+    try expectEncoded(.dot_label, "say \"hi\"", "say \\\"hi\\\"");
+    try expectEncoded(.dot_label, "a\\b", "a\\\\b");
+    try expectEncoded(.dot_label, "a\\\"b", "a\\\\\\\"b");
+    try expectEncoded(.dot_label, "a\nb", "a b");
+    try expectEncoded(.dot_label, "a\u{2029}b", "a b");
+}
+
 test "joined values are judged as a whole, not part by part" {
     const gpa = std.testing.allocator;
     var buf: std.ArrayList(u8) = .empty;
@@ -512,7 +599,7 @@ test "xml targets emit a numeric reference for line terminators" {
 test "every target is total and never emits a raw line terminator" {
     const gpa = std.testing.allocator;
     const hostile = "a\nb|c\"d\\e]f: g#h\r\n<i>&j\u{2028}k\u{2029}l\u{0085}m";
-    inline for (.{ .md_table_cell, .md_heading, .md_block_text }) |target| {
+    inline for (.{ .md_table_cell, .md_heading, .md_block_text, .mermaid_label, .dot_label }) |target| {
         const got = try alloc(gpa, target, hostile);
         defer gpa.free(got);
         try expectNoLineTerminator(got);
