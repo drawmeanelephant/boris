@@ -2,6 +2,7 @@
   import type { GraphNode } from '../lib/types';
   import { graph, activeNode, parentNode, graphChildren, graphSiblings, graphOutgoing, graphBacklinks, graphRelations, bufferWikiLinks } from '../lib/state/graph.svelte';
   import { problems } from '../lib/state/problems.svelte';
+  import GraphMap from './GraphMap.svelte';
 
   let {
     onOpenPath,
@@ -22,6 +23,7 @@
   const backlinks = $derived(graphBacklinks());
   const relations = $derived(graphRelations());
   const wikiLinks = $derived(bufferWikiLinks());
+  const mapDocument = $derived(graph.payload?.graph ?? null);
 
   function nodeForIdLocal(id: string): GraphNode | null {
     if (!graph.payload?.graph) return null;
@@ -37,6 +39,9 @@
     </div>
   </div>
   <p role="status" aria-label="Graph status" aria-live="polite">{graph.status}</p>
+  {#if mapDocument && mapDocument.nodes.length > 0}
+    <GraphMap graph={mapDocument} activeId={node?.id ?? null} onOpenNode={(next) => onOpenNode(next)} />
+  {/if}
   {#if node}
     <p class="graph-current">{node.id}{node.title ? ` · ${node.title}` : ''} · {node.role}{node.status ? ` · ${node.status}` : ''}</p>
     <div class="graph-actions" aria-label="Graph navigation">

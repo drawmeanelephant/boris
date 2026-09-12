@@ -306,6 +306,21 @@ input:disabled, select:disabled, textarea:disabled { background: var(--color-sun
 .graph-links li { font-size: var(--text-sm); }
 .graph-links li + li { margin-top: 0.35rem; }
 .graph-links button { width: 100%; text-align: left; }
+/* Graph map: a visual review aid over the frozen graph. The SVG is
+   aria-hidden; the lists below remain the keyboard path. */
+.graph-map { margin: var(--space-4) 0 0; }
+.graph-map-scroll { max-height: 22rem; overflow: auto; border: 1px solid var(--color-border-soft); border-radius: var(--radius-sm); background: var(--color-surface); }
+.graph-map svg { display: block; }
+.graph-map-edge { fill: none; stroke: var(--color-border-strong); stroke-width: 1.25; }
+.graph-map-edge--reference { stroke: var(--color-text-faint); stroke-dasharray: 4 3; }
+.graph-map-node { cursor: pointer; }
+.graph-map-node rect { fill: var(--color-surface); stroke: var(--color-border-strong); }
+.graph-map-node--trunk rect { stroke: var(--color-accent); }
+.graph-map-node text { fill: var(--color-text); font: var(--text-xs) var(--font-mono); pointer-events: none; }
+.graph-map-node:hover rect { fill: var(--color-surface-tint); }
+.graph-map-node--active rect { fill: var(--color-accent-soft); stroke: var(--color-focus); stroke-width: 2.5; }
+.graph-map-caption { margin-top: var(--space-2); font-size: var(--text-sm); color: var(--color-text-muted); }
+.graph-map-caption code { font-family: var(--font-mono); }
 /* h4 group labels sit above their list in every sub-pane; only the space
    above them differs from the global heading defaults. */
 .graph-pane h4, .recipe-pane h4, .theme-pane h4, .publication-pane h4 { margin-top: var(--space-5); }
