@@ -451,7 +451,9 @@ The pane also renders a deterministic SVG map of the frozen graph above the
 lists: pages layer by hierarchy, `parent` edges are solid, references dashed,
 and node borders scale with topology (direct children plus incoming
 references). The SVG is `aria-hidden` — it is a pointer convenience, and the
-lists remain the keyboard path.
+lists remain the keyboard path. The map viewport is a focusable scroll
+container (wheel, touch, arrow keys), and its zoom controls fit the graph to
+the pane width, zoom in and out, or restore actual size.
 
 The diagnostics integration gate deep-compares `/api/graph` with the real
 compiler-generated `graph.json`. Playwright covers parent/backlink/wiki-link

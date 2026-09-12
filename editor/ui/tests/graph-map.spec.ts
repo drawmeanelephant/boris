@@ -11,30 +11,44 @@ const FILES = [
   { path: 'boris.json' },
   { path: 'content/index.md' },
   { path: 'content/guides/start.md' },
-  { path: 'content/guides/exit-codes.md' }
+  { path: 'content/guides/exit-codes.md' },
+  { path: 'content/guides/topics/a.md' },
+  { path: 'content/guides/topics/b.md' },
+  { path: 'content/guides/topics/c.md' }
 ];
 
+// Wide enough to overflow the pane at actual size: five satellites under one
+// trunk is the shape the viewport zoom controls exist for.
 const GRAPH = {
   schemaVersion: '0.2.0',
   frozen: true,
   nodes: [
-    { index: 0, id: 'guides/exit-codes', sourcePath: 'content/guides/exit-codes.md', role: 'satellite', parent: 'index', parentIndex: 2, title: 'Exit Codes', status: null, tags: [], bodyOffset: 0 },
-    { index: 1, id: 'guides/start', sourcePath: 'content/guides/start.md', role: 'satellite', parent: 'index', parentIndex: 2, title: 'Start Here', status: null, tags: [], bodyOffset: 0 },
-    { index: 2, id: 'index', sourcePath: 'content/index.md', role: 'trunk', parent: null, parentIndex: null, title: 'Home', status: null, tags: [], bodyOffset: 0 }
+    { index: 0, id: 'guides/exit-codes', sourcePath: 'content/guides/exit-codes.md', role: 'satellite', parent: 'index', parentIndex: 5, title: 'Exit Codes', status: null, tags: [], bodyOffset: 0 },
+    { index: 1, id: 'guides/start', sourcePath: 'content/guides/start.md', role: 'satellite', parent: 'index', parentIndex: 5, title: 'Start Here', status: null, tags: [], bodyOffset: 0 },
+    { index: 2, id: 'guides/topics/a', sourcePath: 'content/guides/topics/a.md', role: 'satellite', parent: 'index', parentIndex: 5, title: 'Topic A', status: null, tags: [], bodyOffset: 0 },
+    { index: 3, id: 'guides/topics/b', sourcePath: 'content/guides/topics/b.md', role: 'satellite', parent: 'index', parentIndex: 5, title: 'Topic B', status: null, tags: [], bodyOffset: 0 },
+    { index: 4, id: 'guides/topics/c', sourcePath: 'content/guides/topics/c.md', role: 'satellite', parent: 'index', parentIndex: 5, title: 'Topic C', status: null, tags: [], bodyOffset: 0 },
+    { index: 5, id: 'index', sourcePath: 'content/index.md', role: 'trunk', parent: null, parentIndex: null, title: 'Home', status: null, tags: [], bodyOffset: 0 }
   ],
   edges: [
     { from: { type: 'page', value: 'guides/exit-codes' }, to: { type: 'page', value: 'index' }, kind: 'parent' },
     { from: { type: 'page', value: 'guides/start' }, to: { type: 'page', value: 'index' }, kind: 'parent' },
+    { from: { type: 'page', value: 'guides/topics/a' }, to: { type: 'page', value: 'index' }, kind: 'parent' },
+    { from: { type: 'page', value: 'guides/topics/b' }, to: { type: 'page', value: 'index' }, kind: 'parent' },
+    { from: { type: 'page', value: 'guides/topics/c' }, to: { type: 'page', value: 'index' }, kind: 'parent' },
     { from: { type: 'page', value: 'index' }, to: { type: 'page', value: 'guides/start' }, kind: 'reference' }
   ],
   reverseIndex: [
-    { target: { type: 'page', value: 'guides/start' }, incomingEdges: [2] },
-    { target: { type: 'page', value: 'index' }, incomingEdges: [0, 1] }
+    { target: { type: 'page', value: 'guides/start' }, incomingEdges: [5] },
+    { target: { type: 'page', value: 'index' }, incomingEdges: [0, 1, 2, 3, 4] }
   ],
   nav: [
-    { index: 0, id: 'guides/exit-codes', breadcrumb: [2, 0], children: [], siblings: [1] },
-    { index: 1, id: 'guides/start', breadcrumb: [2, 1], children: [], siblings: [0] },
-    { index: 2, id: 'index', breadcrumb: [2], children: [0, 1], siblings: [] }
+    { index: 0, id: 'guides/exit-codes', breadcrumb: [5, 0], children: [], siblings: [1, 2, 3, 4] },
+    { index: 1, id: 'guides/start', breadcrumb: [5, 1], children: [], siblings: [0, 2, 3, 4] },
+    { index: 2, id: 'guides/topics/a', breadcrumb: [5, 2], children: [], siblings: [0, 1, 3, 4] },
+    { index: 3, id: 'guides/topics/b', breadcrumb: [5, 3], children: [], siblings: [0, 1, 2, 4] },
+    { index: 4, id: 'guides/topics/c', breadcrumb: [5, 4], children: [], siblings: [0, 1, 2, 3] },
+    { index: 5, id: 'index', breadcrumb: [5], children: [0, 1, 2, 3, 4], siblings: [] }
   ]
 };
 
@@ -179,4 +193,45 @@ test('the semantic lists below the map remain the navigation path', async ({ pag
   const mapBottom = (await map.boundingBox())?.y ?? 0;
   const childBox = await children.boundingBox();
   expect(childBox && childBox.y).toBeGreaterThan(mapBottom);
+});
+
+test('zoom controls fit the map, zoom in, and restore actual size', async ({ page }) => {
+  await installApi(page);
+  await openIndex(page);
+
+  const svg = page.getByTestId('graph-map').locator('svg');
+  const viewport = page.getByRole('region', { name: 'Graph map viewport' });
+  const zoom = page.getByTestId('graph-map-zoom');
+  const clientWidth = await viewport.evaluate((element) => element.clientWidth);
+
+  // Default is fit: nothing clips at first paint.
+  const fitWidth = Number(await svg.getAttribute('width'));
+  expect(fitWidth).toBeLessThanOrEqual(clientWidth + 1);
+  await expect(zoom).not.toHaveText('100%');
+
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  expect(Number(await svg.getAttribute('width'))).toBeGreaterThan(fitWidth);
+
+  await page.getByRole('button', { name: 'Actual size (100%)' }).click();
+  await expect(zoom).toHaveText('100%');
+  // The acceptance graph is deliberately wider than the pane, so 1:1 panning
+  // is real rather than an empty scrollbar.
+  expect(Number(await svg.getAttribute('width'))).toBeGreaterThan(clientWidth);
+
+  await page.getByRole('button', { name: 'Fit map to width' }).click();
+  expect(Number(await svg.getAttribute('width'))).toBeLessThanOrEqual(clientWidth + 1);
+});
+
+test('the map viewport pans with the keyboard once focused', async ({ page }) => {
+  await installApi(page);
+  await openIndex(page);
+
+  await page.getByRole('button', { name: 'Actual size (100%)' }).click();
+  const viewport = page.getByRole('region', { name: 'Graph map viewport' });
+  await viewport.focus();
+  await expect(viewport).toBeFocused();
+
+  const before = await viewport.evaluate((element) => element.scrollLeft);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(before);
 });
