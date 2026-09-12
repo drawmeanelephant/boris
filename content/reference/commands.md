@@ -193,7 +193,7 @@ classifying the run `complete`/`partial`/`failed`/`incomplete` with per-relay
 evidence; a NIP-42 relay is reported honestly as `auth-required/unsupported`.
 A bare build never needs a key, a relay, or the network. See
 [[guides/nostr-publication|Nostr NIP-23 Publication]] for the workflow, and
-[`nostr-publication.md`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/nostr-publication.md)
+[`nostr-publication.md`](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/nostr-publication.md)
 for the normative contract.
 
 ## Analysis output

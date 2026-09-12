@@ -236,7 +236,7 @@ Cloudflare Pages / Vercel / Netlify
 Cloudflare Containers / Wasm
 : Compiler-shaped bets, not deployer adapters. The Wasm path has an
   example Worker host at
-  [`hosts/cloudflare-worker/`](https://github.com/drawmeanelephant/boris/blob/afterparty/hosts/cloudflare-worker/README.md) (#301); Containers have
+  [`hosts/cloudflare-worker/`](https://github.com/drawmeanelephant/boris/blob/main/hosts/cloudflare-worker/README.md) (#301); Containers have
   an official hosted-runner example (`boris-job-runner`) with operator path in
   `docs/cloudflare-container.md` (#300). Neither is a `publication.target`.
 
@@ -249,7 +249,7 @@ The editor
 GitHub Pages is the verified **depth model**; Standard.site is the second
 verified **target**. Everything else is waiting, off the seam, or not a host.
 The normative platform model is the
-[publication-platforms contract](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/publication-platforms.md).
+[publication-platforms contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/publication-platforms.md).
 
 </Details>
 

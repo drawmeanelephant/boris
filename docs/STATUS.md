@@ -1,6 +1,6 @@
 # Project status — Boris
 
-**As of:** 2026-09-02
+**As of:** 2026-09-12
 
 **Integration line:** `main`. The Build Week judging window is closed; Boris
 did not place (README "AI and OpenAI Build Week"). The `afterparty` line landed
@@ -33,6 +33,6 @@ Boris is a **graph-native publication compiler** ([publisher platform](https://g
 | Capability details (what works) | Contracts above + [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) |
 | Source locations | [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) |
 | How to run and common commands | [`README.md`](../README.md) — `zig build && ./zig-out/bin/boris --quiet` → `dist/` |
-| Open roadmap and parked cards | GitHub issues (e.g., #300, #301, #584, #670) |
+| Open roadmap and parked cards | GitHub issues (e.g., #454, #840, #907) |
 | Risk and environment notes | [`html-output.md`](contracts/html-output.md), [`validation.md`](contracts/validation.md), [`atproto-app-password.md`](contracts/atproto-app-password.md) |
 | Documentation map | [`docs/SOURCE-MAP.md`](SOURCE-MAP.md) and [`contracts/README.md`](contracts/README.md) |
