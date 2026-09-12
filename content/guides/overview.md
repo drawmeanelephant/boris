@@ -91,7 +91,7 @@ The shared authority sequence is easier to understand as four responsibilities:
 This is why a successful `validate` proves source/configuration prepublication
 validity but does not prove a later output write, deployment, accessibility, or
 prose-quality result. The exact boundary is in the
-[validation contract](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/validation.md).
+[validation contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/validation.md).
 
 <Details summary="HTML is the default target, not the whole pipeline">
 

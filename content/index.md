@@ -111,7 +111,7 @@ target. Freestanding Wasm embedding has an example Worker host, and
 Cloudflare Containers have an official hosted-runner example; neither is
 a verified target.
 
-Living status: the repository [`docs/STATUS.md`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/STATUS.md)
+Living status: the repository [`docs/STATUS.md`](https://github.com/drawmeanelephant/boris/blob/main/docs/STATUS.md)
 file. Contracts still win if this page and a contract disagree.
 
 </Details>

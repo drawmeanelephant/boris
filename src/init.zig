@@ -104,7 +104,7 @@ const getting_started_md =
     \\  `index`).
     \\- `tags` — free-form list rendered into page metadata.
     \\- `relations` — semantic edges such as `[relates_to=target]`; see
-    \\  [semantic relations](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/semantic-relations.md).
+    \\  [semantic relations](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/semantic-relations.md).
     \\
     \\A wiki link `[[getting-started]]` is a real graph edge: a link to a
     \\missing page fails the build instead of rendering as dead prose.

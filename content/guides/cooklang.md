@@ -19,7 +19,7 @@ not just the prose — reaches the IR as the `recipe` node facet.
 `boris recipe-scale` then derives scaled views without rewriting the source.
 
 The normative surface is the
-[cooklang-compatibility contract](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/cooklang-compatibility.md).
+[cooklang-compatibility contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/cooklang-compatibility.md).
 This page is the teaching trail; the contract wins.
 
 ## Whole-tree mode: `.cook` only {#whole-tree}

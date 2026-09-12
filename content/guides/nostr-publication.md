@@ -122,7 +122,7 @@ relays are still attempted. Exit `0` means the run completed; read the
 verdict in the report.
 
 A recorded disposable-identity publish lives at
-[`docs/contracts/fixtures/nostr-live-smoke/`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/fixtures/nostr-live-smoke/README.md).
+[`docs/contracts/fixtures/nostr-live-smoke/`](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/fixtures/nostr-live-smoke/README.md).
 It is optional evidence, not CI. Re-run notes are the first-person try on
 [#454](https://github.com/drawmeanelephant/boris/issues/454).
 
@@ -139,4 +139,4 @@ removed local article does not retract anything on a relay.
 - [[guides/publishing|Publishing Workflows]] — what is and is not verified
 - [[reference/commands|Command Reference]] — flags
 - [[reference/diagnostics|Diagnostics]] — `ENOSTR*` codes
-- Contract: [`docs/contracts/nostr-publication.md`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/nostr-publication.md)
+- Contract: [`docs/contracts/nostr-publication.md`](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/nostr-publication.md)

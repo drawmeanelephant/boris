@@ -1,0 +1,3 @@
+### Fixed
+
+- Corrected nine stale `blob/afterparty/...` links to `blob/main/...` across author-facing surfaces — the [publishing](/content/guides/publishing.md), [Nostr publication](/content/guides/nostr-publication.md), [Cooklang](/content/guides/cooklang.md), and [overview](/content/guides/overview.md) guides, the [homepage](/content/index.md), the [commands reference](/content/reference/commands.md), and the `boris init` starter text — so a reader who follows a contract link lands on current normative text instead of a frozen staging branch that predates those contracts' own current state. The [STATUS pointer table](/docs/STATUS.md) now cites open roadmap issues (#454, #840, #907) instead of four closed ones.
