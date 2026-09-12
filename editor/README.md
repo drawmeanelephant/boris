@@ -447,6 +447,12 @@ outgoing reference/include edges, reverse-index backlinks, and completion
 relations. The command palette jumps to an entity by id or title and can run
 `boris impact` on the open page. All of those actions are named buttons.
 
+The pane also renders a deterministic SVG map of the frozen graph above the
+lists: pages layer by hierarchy, `parent` edges are solid, references dashed,
+and node borders scale with topology (direct children plus incoming
+references). The SVG is `aria-hidden` — it is a pointer convenience, and the
+lists remain the keyboard path.
+
 The diagnostics integration gate deep-compares `/api/graph` with the real
 compiler-generated `graph.json`. Playwright covers parent/backlink/wiki-link
 navigation, title jump, impact-on-this-page, and refresh after a successful

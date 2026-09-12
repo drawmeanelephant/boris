@@ -140,6 +140,12 @@ includes, reverse-index backlinks, and any `relations` from
 `completion.json`. Wiki-link tokens (`[[id]]`) in the current buffer are
 listed and resolved against that same graph.
 
+Above those lists the pane draws a deterministic visual map of the frozen
+graph: pages layer by hierarchy, `parent` edges are solid, references dashed,
+and a node's border scales with topology (direct children plus incoming
+references). The map is a review aid — keyboard navigation stays on the named
+lists, and selecting a map node is a pointer convenience that opens the page.
+
 Named buttons open the target file. **Run impact on this page** fills the
 impact field and runs the same `boris impact` command as the Problems pane.
 `Ctrl+K` also jumps to an entity by id or title (`Go to guides/intro`).
