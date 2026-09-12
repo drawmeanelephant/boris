@@ -1,0 +1,3 @@
+### Added
+
+- `boris graph` renders the frozen content graph as deterministic text: Mermaid (default, copy-pasteable into GitHub/Notion) or Graphviz DOT, with read-only compile semantics, `--input DIR`, `--format mermaid|dot`, and `--out PATH` (stdout otherwise). The projection consumes the frozen nodes and typed `parent` / `include` / `reference` edges plus author semantic relations, aliases source endpoints, and escapes labels through the shared encoder. Links: [the graph render contract](/docs/contracts/graph-formats.md), [the CLI contract](/docs/contracts/cli.md), [documentation-intelligence fixtures](/docs/contracts/fixtures/documentation-intelligence/README.md).

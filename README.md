@@ -168,6 +168,7 @@ Useful first commands:
 ./zig-out/bin/boris watch --watch-json          # NDJSON build events: the machine feedback loop
 ./zig-out/bin/boris check                      # graph-health report
 ./zig-out/bin/boris impact getting-started    # dependency impact report
+./zig-out/bin/boris graph                      # Mermaid graph render (--format dot for Graphviz)
 ./zig-out/bin/boris plan --profile boris.json  # normalized publication declaration
 zig build test
 ```

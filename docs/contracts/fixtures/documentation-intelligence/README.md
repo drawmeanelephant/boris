@@ -28,6 +28,18 @@ impact, are committed beside this README. The `edge-cases/` trees cover empty
 and single-page inputs. The integration test also verifies that analysis does
 not create build artifacts or publish a report after invalid input.
 
+The same frozen graph is rendered by `boris graph`, with both outputs pinned
+beside those goldens:
+
+```text
+boris graph --input docs/contracts/fixtures/documentation-intelligence/content
+boris graph --input docs/contracts/fixtures/documentation-intelligence/content --format dot
+```
+
+`expected/graph.mmd` and `expected/graph.dot` are byte-exact goldens; the
+integration test re-renders them in-process. The render contract is
+[`graph-formats.md`](../../graph-formats.md).
+
 The release gate additionally covers source-endpoint impact, missing and
 malformed targets, invalid-input publication safety, and empty/single-page
 trees. These cases exercise the contract's error boundaries rather than only

@@ -85,6 +85,9 @@ pub const Command = enum {
     /// reads the committed checks report and applies an explicit severity
     /// policy. Never mutates the target.
     proof_verify,
+    /// `boris graph` — read-only text render of the frozen content graph in
+    /// Mermaid or Graphviz DOT. Never writes dist/, .boris/, or caches.
+    graph,
 };
 
 /// The subcommand selected under the `standard-site` family. Every member is
@@ -104,6 +107,13 @@ pub const StandardSiteCommand = enum {
 pub const AnalysisFormat = enum {
     human,
     json,
+};
+
+/// `boris graph --format` render target. The default is the Markdown-friendly
+/// Mermaid block; `dot` emits Graphviz source for consumers with `dot`.
+pub const GraphFormat = enum {
+    mermaid,
+    dot,
 };
 
 /// Canonical parsed options. Strings are views into argv (or static defaults).
@@ -280,6 +290,11 @@ pub const Options = struct {
     recipe_scale_factor: ?[]const u8 = null,
     recipe_scale_servings: ?[]const u8 = null,
     recipe_scale_out: ?[]const u8 = null,
+    /// `boris graph` inputs: the render format (default `mermaid`) and an
+    /// optional single-file output path. Exactly one destination is written:
+    /// `--out PATH` when given, stdout otherwise.
+    graph_format: GraphFormat = .mermaid,
+    graph_out: ?[]const u8 = null,
     /// `boris proof verify`: the target root whose `_boris/proof/` is
     /// verified, and the severity policy (#840). Warning cap null = counted,
     /// reported, never fatal.
@@ -439,6 +454,7 @@ fn parseOptionsAccumulate(gpa: std.mem.Allocator, args: []const []const u8, st: 
         if (try parseProfileAndPlanFlags(st, a, args, &i)) continue;
         if (try parseNostrFlags(st, a, args, &i)) continue;
         if (try parseRecipeScaleFlags(st, a, args, &i)) continue;
+        if (try parseGraphFlags(st, a, args, &i)) continue;
         if (try parseProofVerifyFlags(gpa, st, a, args, &i)) continue;
         if (try parseModeFlags(st, a, args, &i)) continue;
         if (try parseAnalysisFlags(st, a, args, &i)) continue;
@@ -469,6 +485,7 @@ fn parseOptionsAccumulate(gpa: std.mem.Allocator, args: []const []const u8, st: 
         .nostr_publish => return try buildNostrPublishOptions(st),
         .init => return try buildInitOptions(st),
         .recipe_scale => return try buildRecipeScaleOptions(st),
+        .graph => return try buildGraphOptions(st),
         .proof_verify => return try buildProofVerifyOptions(st),
         .standard_site => return try buildStandardSiteOptions(st),
         .build, .validate, .check, .impact, .watch => {},
@@ -684,6 +701,12 @@ const ParseState = struct {
     recipe_scale_out: ?[]const u8 = null,
     saw_recipe_scale_out: bool = false,
 
+    // `graph` family state.
+    graph_format: GraphFormat = .mermaid,
+    saw_graph_format: bool = false,
+    graph_out: ?[]const u8 = null,
+    saw_graph_out: bool = false,
+
     // Heap-backed accumulators and moved-ownership results.
     targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
     publication_location: ?github_pages.Location = null,
@@ -772,6 +795,7 @@ const simple_commands = [_]struct { name: []const u8, command: Command }{
     .{ .name = "impact", .command = .impact },
     .{ .name = "plan", .command = .plan },
     .{ .name = "recipe-scale", .command = .recipe_scale },
+    .{ .name = "graph", .command = .graph },
 };
 
 /// Exactly the `nostr` subcommands this build implements. An unknown one is a
@@ -866,6 +890,7 @@ fn commandWord(command: Command) []const u8 {
         .standard_site => "standard-site",
         .recipe_scale => "recipe-scale",
         .proof_verify => "proof verify",
+        .graph => "graph",
     };
 }
 
@@ -1215,6 +1240,38 @@ fn parseRecipeScaleFlags(
         if (st.command != .recipe_scale) return error.ConflictingFlags;
         try markSaw(&st.saw_recipe_scale_servings);
         st.recipe_scale_servings = try takeValue(args, i, a, "--servings");
+        return true;
+    }
+    return false;
+}
+
+/// `graph` family flags. `--out` is re-owned as the single-file render path
+/// (as `recipe-scale` re-owns it) and `--format` selects the render target
+/// instead of the analysis report format. Both are graph-only: on any other
+/// command the flag falls through to its normal owner.
+fn parseGraphFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (st.command != .graph) return false;
+
+    if (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out=")) {
+        try markSaw(&st.saw_graph_out);
+        st.graph_out = try takeValue(args, i, a, "--out");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--format") or std.mem.startsWith(u8, a, "--format=")) {
+        try markSaw(&st.saw_graph_format);
+        const value = try takeValue(args, i, a, "--format");
+        st.graph_format = if (std.mem.eql(u8, value, "mermaid"))
+            .mermaid
+        else if (std.mem.eql(u8, value, "dot"))
+            .dot
+        else
+            return failInvalidValue(st, "--format", "expected mermaid|dot");
         return true;
     }
     return false;
@@ -1972,6 +2029,34 @@ fn buildRecipeScaleOptions(st: *ParseState) ParseError!Options {
     };
 }
 
+/// `boris graph` renders the frozen graph to stdout (or one `--out` file).
+/// It compiles content like `check`/`impact` but is not an analysis report:
+/// projection selectors, watch/HTML state, `--report`, and `--timings` would
+/// either execute another path or corrupt the document stream.
+fn buildGraphOptions(st: *ParseState) ParseError!Options {
+    if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
+        st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
+        st.saw_report or st.saw_fail_on_unreferenced or st.saw_watch or st.saw_watch_json or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile or
+        st.saw_scope or st.saw_split_size or st.saw_bundles_only or st.saw_complete or st.saw_serve or st.serve_port != null)
+    {
+        return error.ConflictingFlags;
+    }
+    return .{
+        .help = false,
+        .quiet = st.quiet,
+        .timings = false,
+        .command = .graph,
+        .graph_format = st.graph_format,
+        .graph_out = st.graph_out,
+        .mode = .html,
+        .input_format = st.inputFormat(),
+        .input_dir = st.input_dir,
+        .out_dir = null,
+        .html_dir = null,
+        .targets = st.targets,
+    };
+}
+
 fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
     // The `standard-site` family is the one-shot network family: publish,
     // login, sessions, and logout. Compiler modes, targets, and projection
@@ -2512,6 +2597,7 @@ pub fn printUsage() void {
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
         \\  \\  recipe-scale        Print a derived Cooklang scale view (no rewrite)
+        \\  graph               Read-only graph render: Mermaid (default) or Graphviz DOT
         \\  proof verify        Fail when committed publication-check findings exceed policy
         \\  standard-site publish  One-shot Standard.site publish (stored session + reconcile; never implicit)
         \\  standard-site plan    Emit the deterministic Standard.site plan offline (no network)
@@ -2615,6 +2701,8 @@ pub fn printUsage() void {
         \\  --quiet             Suppress progress + success stderr; errors always print
         \\                      (exit codes/artifacts unchanged)
         \\  --format human|json  Analysis output format for check/impact (default human)
+        \\  --format mermaid|dot Graph render format for `graph` (default mermaid)
+        \\  --out PATH          Graph render output path (single file; default stdout)
         \\  --report PATH        Write the report to PATH (check/impact analysis; build/validate HTML diagnostics)
         \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
         \\  --profile PATH       Selected publication profile for `plan`
@@ -3715,6 +3803,50 @@ test "parse: recipe-scale requires id and a scalable factor" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "2", "--timings" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--id", "carbonara" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "2", "--textile", "--cooklang" }));
+}
+
+test "parse: graph takes format, out, input, and source format" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris", "graph",     "--input", "content",    "--format", "dot",
+        "--out", "graph.dot", "--quiet", "--cooklang",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.graph, o.command);
+    try expectEqual(GraphFormat.dot, o.graph_format);
+    try expectEqualStrings("graph.dot", o.graph_out.?);
+    try expectEqualStrings("content", o.input_dir);
+    try expectEqual(identity.InputFormat.cook, o.input_format);
+    try expect(o.quiet);
+    // The re-owned `--out` must not select IR mode.
+    try expectEqual(Mode.html, o.mode);
+    try expect(o.out_dir == null);
+
+    var bare = try parseOptions(std.testing.allocator, &.{ "boris", "graph" });
+    defer bare.deinit(std.testing.allocator);
+    try expectEqual(GraphFormat.mermaid, bare.graph_format);
+    try expect(bare.graph_out == null);
+
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--format", "svg" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--format", "json" }));
+    try expectError(error.EmptyValue, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--format=" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--out" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--format", "dot", "--format", "mermaid" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--out", "a.dot", "--out", "b.dot" }));
+    try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "graph", "extra" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--report", "r.json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--timings" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--no-rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--target", "public=dist/public" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--fail-on-unreferenced" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--watch" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--scope", "mascots" }));
+    // Other commands keep their own `--format` and `--out` owners.
+    var check = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--format", "json" });
+    defer check.deinit(std.testing.allocator);
+    try expectEqual(Command.check, check.command);
+    try expectEqual(AnalysisFormat.json, check.analysis_format);
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--format", "mermaid" }));
 }
 
 test "parse: --out selects IR mode" {

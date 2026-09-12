@@ -54,6 +54,7 @@ const atproto_session_std = @import("atproto_session_std.zig");
 const standard_site_smoke = @import("standard_site_smoke.zig");
 const recipe_scale = @import("recipe_scale.zig");
 const recipe_scale_view = @import("recipe_scale_view.zig");
+const graph_render = @import("graph_render.zig");
 const main_profile_loader = @import("main_profile_loader.zig");
 const main_dispatch = @import("main_dispatch.zig");
 const build_info_options = @import("build_info");
@@ -259,6 +260,10 @@ fn handleRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*
     _ = environ;
     return runRecipeScale(io, gpa, opts);
 }
+fn handleGraph(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
+    _ = environ;
+    return runGraph(io, gpa, opts, recorder);
+}
 fn handleProofVerify(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
     _ = recorder;
     _ = environ;
@@ -331,6 +336,7 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
         .nostr_publish = handleNostrPublish,
         .init = handleInit,
         .recipe_scale = handleRecipeScale,
+        .graph = handleGraph,
         .proof_verify = handleProofVerify,
         .validate = handleValidate,
         .validate_watch = handleValidateWatch,
@@ -474,6 +480,60 @@ pub fn runRecipeScale(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     };
     stdout_writer.interface.flush() catch |err| {
         errPrint("error: unable to flush scaled view: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    return .success;
+}
+
+/// Read-only graph render: compile the selected tree, project the frozen graph
+/// into Mermaid or Graphviz DOT, and write the document to `--out` or stdout.
+/// Never writes dist/, .boris/, RAG, context, RSS, or a cache.
+pub fn runGraph(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
+    var result = pipeline.compile(io, gpa, .{
+        .content_root = opts.input_dir,
+        .quiet = true,
+        .input_format = opts.input_format,
+        .timings = recorder,
+    }) catch |err| {
+        errPrint("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+
+    if (!result.ok) {
+        pipeline.printDiagnostics(gpa, result.diagnostics.items, opts.quiet) catch return .io_error;
+        return switch (result.failure) {
+            .io => .io_error,
+            .content, .none => .content_error,
+        };
+    }
+
+    const format: graph_render.Format = switch (opts.graph_format) {
+        .mermaid => .mermaid,
+        .dot => .dot,
+    };
+    const bytes = graph_render.render(gpa, result.pages.items, result.edges.items, format) catch |err| {
+        errPrint("error: unable to render graph: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(bytes);
+
+    if (opts.graph_out) |path| {
+        Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = bytes }) catch |err| {
+            errPrint("error: failed to write graph render {s}: {s}\n", .{ path, @errorName(err) });
+            return .io_error;
+        };
+        return .success;
+    }
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    stdout_writer.interface.writeAll(bytes) catch |err| {
+        errPrint("error: unable to write graph render: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    stdout_writer.interface.flush() catch |err| {
+        errPrint("error: unable to flush graph render: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     return .success;
@@ -3354,6 +3414,36 @@ test "runPipeline: unreferenced check findings are report-only unless opted in" 
     const strict_bytes = try cwd.readFileAlloc(io, strict_report, gpa, .unlimited);
     defer gpa.free(strict_bytes);
     try std.testing.expectEqualStrings(default_bytes, strict_bytes);
+}
+
+test "runPipeline: graph renders pin the documentation-intelligence goldens" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const cwd = Io.Dir.cwd();
+
+    const cases = [_]struct { format: cli.GraphFormat, expected: []const u8, name: []const u8 }{
+        .{ .format = .mermaid, .expected = "docs/contracts/fixtures/documentation-intelligence/expected/graph.mmd", .name = "graph.mmd" },
+        .{ .format = .dot, .expected = "docs/contracts/fixtures/documentation-intelligence/expected/graph.dot", .name = "graph.dot" },
+    };
+    for (cases) |case| {
+        const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, case.name });
+        defer gpa.free(out);
+        const code = runPipeline(io, gpa, .{
+            .command = .graph,
+            .graph_format = case.format,
+            .graph_out = out,
+            .input_dir = "docs/contracts/fixtures/documentation-intelligence/content",
+            .quiet = true,
+        });
+        try std.testing.expectEqual(ExitCode.success, code);
+        const got = try cwd.readFileAlloc(io, out, gpa, .unlimited);
+        defer gpa.free(got);
+        const want = try cwd.readFileAlloc(io, case.expected, gpa, .unlimited);
+        defer gpa.free(want);
+        try std.testing.expectEqualStrings(want, got);
+    }
 }
 
 test "runPipeline: duplicate-id exits 1" {

@@ -1,0 +1,20 @@
+digraph boris {
+  rankdir=TD;
+  node [shape=box];
+  p0 [label="Guides", class="trunk"];
+  p1 [label="Exit Codes", class="satellite"];
+  p2 [label="Reference", class="satellite"];
+  p3 [label="Start Here", class="satellite"];
+  p4 [label="Documentation Home", class="trunk"];
+  s0 [label="guides/exit-codes.md", shape=note, class="source"];
+  s1 [label="includes/shared.md", shape=note, class="source"];
+  p0 -> p3 [style=dotted];
+  p0 -> p1;
+  p0 -> p2;
+  p2 -> s0 [style=bold];
+  p2 -> s1 [style=bold];
+  p0 -> p3;
+  p3 -> s1 [style=bold];
+  p4 -> p0 [style=dotted];
+  s1 -> p2 [style=dotted];
+}

@@ -1,0 +1,21 @@
+graph TD
+  %% boris graph --format mermaid
+  classDef trunk stroke:#2563eb,stroke-width:2px;
+  classDef satellite stroke:#6b7280;
+  classDef source stroke:#9ca3af,stroke-dasharray:4 3;
+  p0["Guides"]:::trunk
+  p1["Exit Codes"]:::satellite
+  p2["Reference"]:::satellite
+  p3["Start Here"]:::satellite
+  p4["Documentation Home"]:::trunk
+  s0["guides/exit-codes.md"]:::source
+  s1["includes/shared.md"]:::source
+  p0 -.-> p3
+  p0 --> p1
+  p0 --> p2
+  p2 ==> s0
+  p2 ==> s1
+  p0 --> p3
+  p3 ==> s1
+  p4 -.-> p0
+  s1 -.-> p2
