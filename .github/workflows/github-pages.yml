@@ -52,7 +52,7 @@ jobs:
       # The profile parser independently cross-checks the same values offline.
       - name: Resolve GitHub Pages location
         id: pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Create and validate the publication plan
         env:
@@ -207,13 +207,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the public Pages artifact
-        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           name: github-pages
           path: public-site
 
       - name: Upload retained evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: boris-github-pages-evidence-${{ github.run_id }}
           path: evidence
@@ -235,7 +235,7 @@ jobs:
     steps:
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
       # This is an optional, separate observer. It consumes the exact plan and
       # target-local inventory retained by build; it never mutates the public
@@ -254,7 +254,7 @@ jobs:
 
       - name: Download target-local evidence
         if: ${{ inputs.audit_deployment == true }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: boris-github-pages-evidence-${{ github.run_id }}
           path: deployment-input
@@ -294,7 +294,7 @@ jobs:
 
       - name: Upload deployment evidence
         if: ${{ always() && inputs.audit_deployment == true }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: boris-github-pages-deployment-evidence-${{ github.run_id }}
           path: deployment-evidence
