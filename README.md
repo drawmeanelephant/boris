@@ -189,6 +189,11 @@ Nostr NIP-23 is `boris nostr plan` → `sign` → `publish`. The secret never
 meets the network. It is not a verified target. Operator path:
 [`content/guides/nostr-publication.md`](content/guides/nostr-publication.md).
 
+A commodity static host needs no target at all: build `dist/` and hand the
+directory to the host's own CLI. The
+[Surge.sh recipe](docs/surge.md) is one worked example — shell commands, a
+CNAME that survives rebuilds, and no `publication.target` entry.
+
 The local editor is a separate binary:
 
 ```bash
@@ -394,6 +399,7 @@ Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase ban
 - [`drawmeanelephant/boris-migration-lab`](https://github.com/drawmeanelephant/boris-migration-lab) — standalone migration laboratory (guide + converters)
 - [`docs/github-pages.md`](docs/github-pages.md) — Pages target
 - [`docs/standard-site.md`](docs/standard-site.md) — Atmosphere target
+- [`docs/surge.md`](docs/surge.md) — Surge.sh static-host recipe (not a target)
 - [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) — release checks
 - [`tools/source-rag/`](tools/source-rag/) — source-code RAG exporter
 - [`boris-content-audit`](https://github.com/drawmeanelephant/boris-content-audit) — standalone deterministic source-content audit tool (its own repository)

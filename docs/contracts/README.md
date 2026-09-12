@@ -134,6 +134,7 @@ per topic:
 | [publication-profile.md](publication-profile.md) | Strict schema-v1 publication-profile parser, normalization, and static validation boundary |
 | [publication-plan.md](publication-plan.md) | Deterministic schema-v1 normalized publication declaration (`plan --profile PATH`) |
 | [../github-pages.md](../github-pages.md) | GitHub Pages workflow, public/evidence artifact separation, and operational setup |
+| [../surge.md](../surge.md) | Surge.sh static-host shell recipe for a commodity host; not a verified target |
 | [publication-artifacts.md](publication-artifacts.md) | Deterministic schema-v1 inventory of committed Boris-owned HTML-target payload bytes |
 | [publication-checks.md](publication-checks.md) | Deterministic schema-v1 publication-checks evidence over committed inventory and exact payload bytes |
 | [publication-claims.md](publication-claims.md) | Deterministic schema-v1 claims-and-limitations derivation over committed inventory and checks evidence |

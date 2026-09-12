@@ -79,6 +79,7 @@ Completed audits were archived per
 | [`tools/search-index/README.md`](../tools/search-index/README.md) | Rendered search tool |
 | [`docs/github-pages.md`](github-pages.md) | GitHub Pages setup, location model, workflow, and evidence boundary |
 | [`docs/cloudflare-container.md`](cloudflare-container.md) | Hosted runner + Cloudflare Containers example (not a target) |
+| [`docs/surge.md`](surge.md) | Surge.sh static-host shell recipe (commodity host; not a target) |
 | [`docs/standard-site.md`](standard-site.md) | Standard.site first-tester path |
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
 | [`docs/AGENT-BINARY-KITS.md`](AGENT-BINARY-KITS.md) | Agent binary kit build and verification |
