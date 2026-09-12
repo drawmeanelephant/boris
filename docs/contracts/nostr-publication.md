@@ -30,6 +30,12 @@ the Nostr-shaped evidence. GitHub Pages and Standard.site remain the
 verified targets. Do not add `nostr` to the target registry to make this
 CLI feel finished.
 
+#584 asked for registry membership or for the explicit reason it stays off;
+the reason is recorded as a decision in
+[`publication-platforms.md`](publication-platforms.md) ("Recorded decision:
+Nostr stays off the seam"). The verified-target extras — a location adapter, a
+Nostr Proof Pack claim, and a required live-smoke gate — stay unbuilt with it.
+
 ## Scope
 
 The three commands are one pipeline with a hard offline/online boundary.
