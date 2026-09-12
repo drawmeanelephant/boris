@@ -96,7 +96,8 @@ shows the normalized declaration before anything is published.
 A first-time author should do this, in this order:
 
 1. `boris --quiet` — ship a local `dist/` you can open and inspect.
-2. Host that tree as static files, **or** use the official
+2. Host that tree as static files — the [Surge.sh recipe](surge.md) is one
+   worked commodity-host example — **or** use the official
    [GitHub Pages](github-pages.md) workflow when you want the first verified
    hosted target (location identity, inventory-only upload, retained evidence).
 3. Reach for [Standard.site](standard-site.md) only when you mean to publish
@@ -113,6 +114,7 @@ For a hosted site, the deployment URL is publication truth: `base_url`,
   [publication plan](contracts/publication-plan.md) ·
   [GitHub Pages](github-pages.md) ·
   [Standard.site](standard-site.md) ·
+  [Surge.sh recipe](surge.md) ·
   [publication platform model](contracts/publication-platforms.md)
 
 ## 6. Verify
