@@ -145,6 +145,9 @@ graph: pages layer by hierarchy, `parent` edges are solid, references dashed,
 and a node's border scales with topology (direct children plus incoming
 references). The map is a review aid — keyboard navigation stays on the named
 lists, and selecting a map node is a pointer convenience that opens the page.
+The viewport scrolls with the wheel, touch, or arrow keys after it is focused,
+and its controls fit the graph to the pane width, zoom in and out, or restore
+actual size.
 
 Named buttons open the target file. **Run impact on this page** fills the
 impact field and runs the same `boris impact` command as the Problems pane.
