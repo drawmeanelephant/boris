@@ -138,9 +138,7 @@
      off-scale size is how the hierarchy drifted into everything-is-16px in
      the first place. Extend the chain here instead of adding a local size.
      Its order is declared in the `--- declared scales ---` block above, with
-     every other ordered scale. */
-  --type-scale-chain: --text-2xs --text-xs --text-sm --text-md --text-lg --text-xl --text-2xl-compact --text-2xl;
-  --type-scale-off-chain: --text-code;
+     every other ordered scale — that list is the only copy. */
   --text-2xs: 0.7rem;                              /* 11.2px kbd chips, micro labels */
   --text-xs: 0.78rem;                              /* 12.5px eyebrows, status meta, captions */
   --text-sm: 0.875rem;                             /* 14px   ledes, field labels, dense rows */

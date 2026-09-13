@@ -734,7 +734,7 @@ labels.
   [`ui/scripts/check-scales.mjs`](ui/scripts/check-scales.mjs) fails
   `npm run check` otherwise, with no browser needed.
   `ui/tests/scales.spec.ts` then resolves the chain out of the *applied*
-  stylesheet at five widths, asserting strict ascent with no collisions, and
+  stylesheet at four widths, asserting strict ascent with no collisions, and
   `ui/tests/reading-hierarchy.spec.ts` measures the rendered heading levels in
   *both* density modes. The prose, the stylesheet, and the browser are all held
   to the one list.
