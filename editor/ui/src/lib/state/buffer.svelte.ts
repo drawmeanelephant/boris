@@ -6,7 +6,7 @@
 
 import { tick } from 'svelte';
 import { api } from '../api';
-import { connection } from './connection.svelte';
+import { connection, markHostUnavailable, HOST_UNAVAILABLE_DETAIL } from './connection.svelte';
 import type {
   BufferResponse,
   ErrorResponse,
@@ -214,11 +214,13 @@ export async function snapshotBuffer(options: RequestInit = {}) {
     ...options
   });
   if ((result.data as ErrorResponse).error === 'host_unavailable') {
-    // Mirrors the host-watch path: the connection line flips once, and the
-    // editing-status message is rewritten only on that transition.
-    const next = 'Local host unavailable. Restart boris-editor.';
-    if (connection.status !== next) {
-      connection.status = next;
+    // Mirrors the host-watch path: the connection readout flips once, and the
+    // editing-status message is rewritten only on that transition. The write
+    // goes through markHostUnavailable rather than assigning connection.status
+    // here, so the chip's short label can never disagree with the sentence it
+    // expands (#993).
+    if (connection.status !== HOST_UNAVAILABLE_DETAIL) {
+      markHostUnavailable();
       markBufferHostUnavailable();
     }
     return;

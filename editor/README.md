@@ -759,11 +759,33 @@ preferences. The mode is disposable UI state, never project truth:
   that clamps at max scroll keeps the target's `aria-current` while the
   target's box still covers the reading line; scrolling off it releases the
   marker.
+  - The residual-flat polish (#993) carries the same intent through the
+    chrome: Project recedes to a file drawer under the writing page (it no
+    longer stretches to the page's height, and drops the card elevation and
+    heavy edge for a recessed neutral surface with tighter padding), the nav
+    leads with Project and Source while the Review destinations recede into a
+    captioned, faint cluster (emphasis only — those links stay live, so
+    activating one still switches modes and lands), and Source takes page
+    material rather than a wider dashboard tile. The top band quiets too: the
+    header drops its decorative eyebrow so the product mark and the live
+    connection status share one baseline row, the connection readout collapses
+    to a compact state chip whose honest sentence is one activation away (the
+    live region announces the short label, not a sentence re-read on every
+    host blip), the theme control states only its state ("Dark"/"Light",
+    matching its accessible name), and Author takes a smaller product mark and
+    tighter header/nav bands than Review.
 - **Review**: the full diagnostics chrome, unchanged.
 
 Source is the hero in both modes (#989): the writing column outweighs the
-file and rail columns, and the editing surface is a bordered, elevated shell
-whose chrome is presentation only:
+file and rail columns, and the editing surface is a bordered shell whose
+chrome is presentation only. It keeps its elevation in Review; in Author the
+card edge and drop shadow give way to a quiet hairline and a `:focus-within`
+ring, and the pane itself is capped at a readable measure (~80 monospace
+columns) and centered in its grid column — the pane edge is the page edge, so
+heading, editor, gutter, and status line share one column instead of a narrow
+measure stretched across a wide tile. Below the cap the pane just fills its
+column, and the cap is Author-only: Review keeps the wide working surface
+beside its rail. The chrome is presentation only:
 
 - a measured **line gutter** — numbers for the visible window are placed at
   each line's measured position and the current line is highlighted, so
