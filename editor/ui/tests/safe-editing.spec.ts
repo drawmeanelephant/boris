@@ -21,6 +21,7 @@ type MockOptions = {
   commandByCall?: CommandResult[];
   recoverySkipped?: number;
   validateState?: Record<string, unknown>;
+  failFilesAfter?: number;
 };
 
 type CommandResult = {
@@ -162,10 +163,22 @@ async function installApi(page: Page, options: MockOptions = {}) {
     contentType: 'application/json',
     body: JSON.stringify(options.version ?? { compiler_id: 'boris/0.8.2' })
   }));
-  await page.route('**/api/files', route => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify({ files: options.files ?? [{ path: 'boris.json' }, { path: 'content/index.md' }] })
-  }));
+  let filesGets = 0;
+  await page.route('**/api/files', async route => {
+    filesGets += 1;
+    if (options.failFilesAfter !== undefined && filesGets > options.failFilesAfter) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'host_unavailable' })
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ files: options.files ?? [{ path: 'boris.json' }, { path: 'content/index.md' }] })
+    });
+  });
   await page.route('**/api/recovery', route => route.fulfill({
     contentType: 'application/json', body: JSON.stringify({ snapshots: options.recovery ?? [], skipped: options.recoverySkipped ?? 0 })
   }));
@@ -448,6 +461,19 @@ test('Create file path errors stay inside the dialog (#973)', async ({ page }) =
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('alert')).toContainText('paths must be boris.json or under content/ or themes/');
   expect(createRequests).toBe(0);
+});
+
+test('a created file stays in Project files when the list refresh fails', async ({ page }) => {
+  await installApi(page, { failFilesAfter: 1 });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await dialog.getByRole('textbox', { name: 'New file path' }).fill('content/bf-fail-retry.md');
+  await dialog.getByRole('button', { name: 'Create file', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Source for content/bf-fail-retry.md' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'content/bf-fail-retry.md', exact: true })).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Created content/bf-fail-retry.md.');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('The project file list could not be refreshed.');
 });
 
 test('recovery is announced and restored only on an explicit named action', async ({ page }) => {

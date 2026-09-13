@@ -32,7 +32,7 @@
     defaultCreatePath
   } from './lib/utils';
   import { connection, applyHealth, applyVersion, markConnected, markTokenMissing, markConnectFailed, markHostUnavailable } from './lib/state/connection.svelte';
-  import { project, refreshFiles, initProjectTree } from './lib/state/project.svelte';
+  import { project, refreshFiles, rememberFile, rememberRenamedFile, forgetFile, initProjectTree } from './lib/state/project.svelte';
   import { buffer, dirty, loadBuffer, resetBuffer, undo, redo, trackCursor, discardBuffer, clearRecovery, stopRecoveryTimer, flushRecovery, loadRecovery, markBufferHostUnavailable } from './lib/state/buffer.svelte';
   import { authoring, suggestions, refreshAuthoring, setAuthoring } from './lib/state/authoring.svelte';
   import { graph, activeNode, parentNode, refreshGraph, setGraph } from './lib/state/graph.svelte';
@@ -541,8 +541,12 @@
       dialogs.createError = '';
       dialogs.skipFocusRestore = true;
       createDialog.close();
-      await refreshFiles();
-      loadBuffer(result.data as BufferResponse, `Created ${path}.`);
+      const listed = await refreshFiles();
+      if (!listed) rememberFile(path);
+      loadBuffer(
+        result.data as BufferResponse,
+        listed ? `Created ${path}.` : `Created ${path}. The project file list could not be refreshed.`
+      );
     } else {
       dialogs.createError = `Could not create ${path}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
     }
@@ -690,8 +694,11 @@
       buffer.activePath = newPath;
       dialogs.skipFocusRestore = true;
       renameDialog.close();
-      await refreshFiles();
-      buffer.editorStatus = `Renamed ${oldPath} to ${newPath}.`;
+      const listed = await refreshFiles();
+      if (!listed) rememberRenamedFile(oldPath, newPath);
+      buffer.editorStatus = listed
+        ? `Renamed ${oldPath} to ${newPath}.`
+        : `Renamed ${oldPath} to ${newPath}. The project file list could not be refreshed.`;
     } else {
       dialogs.renameError = `Could not rename ${oldPath}: ${hostErrorLabel(result.data.error)}.`;
     }
@@ -707,8 +714,11 @@
       dialogs.skipFocusRestore = true;
       deleteDialog.close();
       resetBuffer();
-      await refreshFiles();
-      buffer.editorStatus = `Deleted ${path}.`;
+      const listed = await refreshFiles();
+      if (!listed) forgetFile(path);
+      buffer.editorStatus = listed
+        ? `Deleted ${path}.`
+        : `Deleted ${path}. The project file list could not be refreshed.`;
     } else {
       buffer.editorStatus = `Could not delete ${path}: ${hostErrorLabel(result.data.error)}.`;
     }
