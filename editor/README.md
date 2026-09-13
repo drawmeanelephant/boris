@@ -744,6 +744,46 @@ labels.
 
 Presentation only: no endpoint, no Boris surface, and no pipeline change.
 
+## Density modes and the writing surface
+
+The shell has two density modes (#990), persisted per browser under
+`boris-editor-density` and validated on load like the other editor
+preferences. The mode is disposable UI state, never project truth:
+
+- **Author** (the cold-open default): Source + Project. The review panes
+  (Problems, Preview, Watch, Graph, Publication) are not mounted, and the
+  authoring hints fold into a single disclosure under the writing surface
+  instead of a second card. A section-nav link whose pane lives in Review
+  switches modes and then lands on the real pane — it stays enabled, muted,
+  and titled, so the nav never claims a hidden pane is present.
+- **Review**: the full diagnostics chrome, unchanged.
+
+Source is the hero in both modes (#989): the writing column outweighs the
+file and rail columns, and the editing surface is a bordered, elevated shell
+whose chrome is presentation only:
+
+- a measured **line gutter** — numbers for the visible window are placed at
+  each line's measured position and the current line is highlighted, so
+  wrapped lines cannot drift them (a fixed-rhythm number column would lie on
+  wrapped prose);
+- a **current-line band** behind the text;
+- a **frontmatter/body seam** drawn when the buffer opens with a recognized
+  `---` … `---` fence pair. It reads fence shape only and validates nothing;
+  Boris remains the frontmatter authority.
+
+The geometry comes from a hidden mirror that holds the buffer verbatim with
+the textarea's exact font, padding, and wrapping metrics, the same technique
+Focus writing mode uses for its paragraph bands. The native textarea remains
+the editing authority; typing, undo/redo, save, and recovery are the shell's
+existing machinery.
+
+Problems now carries an action hierarchy (#991): a primary **Build and
+validate** group (Validate project, Build diagnostics, Build HTML) and a
+secondary **Analysis** group (Check graph, Verify proof), with Run impact in
+its named row. The in-flight command carries `aria-busy` plus an in-button
+progress affordance, and a proof report over 24 lines starts collapsed behind
+a `Show …` disclosure. The allowlist and exit-class reporting are unchanged.
+
 ## Project file tree
 
 The Project pane renders an indented directory tree over the host's file list.

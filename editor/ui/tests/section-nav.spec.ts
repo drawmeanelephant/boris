@@ -110,6 +110,10 @@ async function installApi(page: Page, options: InstallOptions = {}) {
   // launch-open path (#943).
   const launchParams = new URLSearchParams({ token: 'test-session-token' });
   if (options.open) launchParams.set('open', options.open);
+  // Nav currency and layout here assume every pane is mounted, i.e. Review
+  // density (#990); the Author/Review switch itself is covered by
+  // density-modes.spec.ts.
+  await page.addInitScript(() => localStorage.setItem('boris-editor-density', 'review'));
   await page.goto(`/#${launchParams.toString()}`);
 }
 

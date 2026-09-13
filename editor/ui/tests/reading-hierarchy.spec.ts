@@ -106,6 +106,10 @@ async function installApi(page: Page) {
       contentType: 'application/json', body: JSON.stringify({ status: endpoint === 'start' ? 'started' : 'stopped' })
     }));
   }
+  // These assertions read the full pane chrome, which lives in Review
+  // density (#990); the default Author view is covered by
+  // density-modes.spec.ts.
+  await page.addInitScript(() => localStorage.setItem('boris-editor-density', 'review'));
   await page.goto('/#token=test-session-token');
 }
 

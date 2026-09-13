@@ -1,5 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { fade } from 'svelte/transition';
+  import { prefersReducedMotion } from 'svelte/motion';
   import { token, launchOpenPath, api, elapsedLabel, hostErrorLabel, authorPathIssue, isLaunchOpenSafe, defaultLaunchPath } from './lib/api';
   import type {
     Health,
@@ -39,6 +41,7 @@
   import { publication, refreshPublication, setPublication } from './lib/state/publication.svelte';
   import { preview, setPreview, noteWatchRefusal, refreshPreviewState } from './lib/state/preview.svelte';
   import { focusMode, openFocusMode, closeFocusMode, initFocusLayout, initFocusType, initFocusZen, focusReturnElement, setFocusReturn } from './lib/state/focus.svelte';
+  import { density, initDensity, setDensity } from './lib/state/density.svelte';
   import { problems, copyDiagnosticPacket, scheduleValidateRefresh, startValidateWatch } from './lib/state/problems.svelte';
   import {
     startWatchStateWatch,
@@ -213,6 +216,7 @@
       return;
     }
     problems.running = true;
+    problems.runningMode = mode;
     const started = Date.now();
     problems.status = `Running ${commandLabel(mode)}…`;
     const body = mode === 'impact'
@@ -228,6 +232,7 @@
       method: 'POST', body: JSON.stringify(body)
     });
     problems.running = false;
+    problems.runningMode = '';
     if (!result.response.ok) {
       problems.status = `Could not run ${commandLabel(mode)}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
       return;
@@ -698,6 +703,27 @@
     return {};
   }
 
+  // Nav targets that live in the other density mode (#990). Activating one
+  // switches modes first and then lands: the pane is never claimed to be
+  // present when its mode is not showing it. Focus mode stays a separate
+  // overlay, so its nav entry is not part of this map.
+  const REVIEW_SECTIONS = ['graph', 'publication', 'problems', 'preview', 'watch'];
+
+  function navModeGated(): Record<string, string> {
+    if (density.mode === 'review') return {};
+    return Object.fromEntries(REVIEW_SECTIONS.map(id => [id, 'Review']));
+  }
+
+  // Runs before the SectionNav jump: switch to Review and let the panes
+  // mount so the target section exists by the time the jump looks for it.
+  async function revealSection(id: string) {
+    const mode = navModeGated()[id];
+    if (!mode) return;
+    setDensity('review');
+    buffer.editorStatus = `Switched to ${mode} mode to open the ${id} pane.`;
+    await tick();
+  }
+
   function reportBlockedNav(reason: string) {
     buffer.editorStatus = reason;
   }
@@ -872,6 +898,7 @@
   initFocusLayout();
   initFocusType();
   initFocusZen();
+  initDensity();
   initProjectTree();
   connect();
 </script>
@@ -890,11 +917,16 @@
 
 <Header connection={connection.status} />
 
-<SectionNav unavailable={navUnavailable()} onBlockedNav={reportBlockedNav} />
+<SectionNav
+  unavailable={navUnavailable()}
+  modeGated={navModeGated()}
+  onBlockedNav={reportBlockedNav}
+  onReveal={revealSection}
+/>
 
 <RecoveryBanner onRestore={restoreSnapshot} onDiscard={clearRecovery} />
 
-<main id="workspace" tabindex="-1">
+<main id="workspace" tabindex="-1" class:author-mode={density.mode === 'author'}>
   <ProjectPane
     onOpen={openFile}
     onCreate={openCreateDialog}
@@ -916,14 +948,16 @@
     onEnterFocus={enterFocusMode}
   />
 
-  <div class="workspace-rail">
-    <ProblemsPane
-      onRunCommand={runCommand}
-      onNavigate={navigateToProblem}
-    />
-    <PreviewPane onRebuild={() => rebuildPreview('manual')} />
-    <WatchPane />
-  </div>
+  {#if density.mode === 'review'}
+    <div class="workspace-rail" transition:fade={{ duration: prefersReducedMotion.current ? 0 : 120 }}>
+      <ProblemsPane
+        onRunCommand={runCommand}
+        onNavigate={navigateToProblem}
+      />
+      <PreviewPane onRebuild={() => rebuildPreview('manual')} />
+      <WatchPane />
+    </div>
+  {/if}
 </main>
 
 <ConflictDialog

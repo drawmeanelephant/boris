@@ -13,6 +13,8 @@
   import { problems, problemGroups, problemsNotice, staleProblems, copyDiagnosticPacket } from '../lib/state/problems.svelte';
   import { connection } from '../lib/state/connection.svelte';
   import { dirty } from '../lib/state/buffer.svelte';
+  import ActionGroup from './ActionGroup.svelte';
+  import ReportBlock from './ReportBlock.svelte';
 
   let {
     onRunCommand,
@@ -21,6 +23,12 @@
     onRunCommand: (mode: CommandMode) => void;
     onNavigate: (problem: Problem) => void;
   } = $props();
+
+  // The busy affordance lands on the button that was pressed, not on every
+  // command in the row (#991).
+  function running(mode: CommandMode): boolean {
+    return problems.running && problems.runningMode === mode;
+  }
 </script>
 
 <section id="problems" class="problems-pane" tabindex="-1" aria-labelledby="problems-heading">
@@ -47,18 +55,57 @@
   {#if dirty() && ((problems.result?.problems.length ?? 0) > 0 || problemsNotice().clean)}
     <p class="warning-text">Problems reflect saved files; the open buffer has unsaved changes.</p>
   {/if}
-  <div class="command-bar" aria-label="Boris commands">
-    <button type="button" disabled={problems.running} onclick={() => onRunCommand('validate')}>Validate project</button>
-    <button type="button" disabled={problems.running} onclick={() => onRunCommand('ir_build')}>Build diagnostics</button>
-    <button type="button" disabled={problems.running} onclick={() => onRunCommand('html_build')}>Build HTML</button>
-    <button type="button" disabled={problems.running} onclick={() => onRunCommand('check')}>Check graph</button>
-    <button type="button" disabled={problems.running} onclick={() => onRunCommand('proof_verify')}>Verify proof</button>
+  <div class="command-bar" aria-label="Boris commands" aria-busy={problems.running}>
+    <!-- Primary vs secondary action hierarchy (#991): the commands an author
+         runs constantly lead; the rarer analysis commands recede but stay
+         visible, named, and keyboard-reachable. Same allowlist either way. -->
+    <ActionGroup label="Build and validate" tone="primary">
+      <button
+        type="button"
+        class="primary"
+        class:is-running={running('validate')}
+        aria-busy={running('validate')}
+        disabled={problems.running}
+        onclick={() => onRunCommand('validate')}>Validate project</button>
+      <button
+        type="button"
+        class="primary"
+        class:is-running={running('ir_build')}
+        aria-busy={running('ir_build')}
+        disabled={problems.running}
+        onclick={() => onRunCommand('ir_build')}>Build diagnostics</button>
+      <button
+        type="button"
+        class:is-running={running('html_build')}
+        aria-busy={running('html_build')}
+        disabled={problems.running}
+        onclick={() => onRunCommand('html_build')}>Build HTML</button>
+    </ActionGroup>
+    <ActionGroup label="Analysis" tone="secondary">
+      <button
+        type="button"
+        class:is-running={running('check')}
+        aria-busy={running('check')}
+        disabled={problems.running}
+        onclick={() => onRunCommand('check')}>Check graph</button>
+      <button
+        type="button"
+        class:is-running={running('proof_verify')}
+        aria-busy={running('proof_verify')}
+        disabled={problems.running}
+        onclick={() => onRunCommand('proof_verify')}>Verify proof</button>
+    </ActionGroup>
   </div>
   <div class="impact-command">
     <label for="impact-id">Impact entity or source endpoint</label>
     <div>
       <input id="impact-id" value={problems.impactId} disabled={problems.running} oninput={(e) => (problems.impactId = (e.currentTarget as HTMLInputElement).value)} />
-      <button type="button" disabled={problems.running} onclick={() => onRunCommand('impact')}>Run impact</button>
+      <button
+        type="button"
+        class:is-running={running('impact')}
+        aria-busy={running('impact')}
+        disabled={problems.running}
+        onclick={() => onRunCommand('impact')}>Run impact</button>
     </div>
   </div>
   {#if dirty()}
@@ -107,7 +154,7 @@
   {#if problems.result?.proof_report}
     <section class="analysis-results" aria-labelledby="proof-report-heading">
       <h3 id="proof-report-heading">Proof verify report</h3>
-      <pre class="proof-report">{problems.result.proof_report}</pre>
+      <ReportBlock summary="proof verify report" report={problems.result.proof_report} />
     </section>
   {/if}
     {#if problems.result && problems.result.findings.length > 0}

@@ -4,6 +4,11 @@
   import { authoring, suggestions, changeCompletionKind, refreshAuthoring } from '../lib/state/authoring.svelte';
   import { buffer, insertSuggestion } from '../lib/state/buffer.svelte';
 
+  // Author mode (#990) keeps the hints present but folded away: the combobox
+  // and schema bounds are one disclosure, not a permanent slab under the
+  // writing surface. Review mode renders the same content expanded.
+  let { collapsed = false }: { collapsed?: boolean } = $props();
+
   // The completion combobox owns its keyboard behavior: Esc closes the list,
   // the arrows move the active suggestion, Enter inserts it. Focus and input
   // always reopen the list after an Esc close.
@@ -28,7 +33,7 @@
   }
 </script>
 
-<aside class="authoring-tools" aria-labelledby="authoring-heading">
+{#snippet tools()}
   <div class="pane-heading">
     <div>
       <h3 id="authoring-heading">Boris authoring hints</h3>
@@ -109,4 +114,17 @@
       <p>The schema is a looser pre-check for multibyte lengths and dates. The Boris parser remains authoritative.</p>
     </details>
   {/if}
-</aside>
+{/snippet}
+
+{#if collapsed}
+  <details class="authoring-tools authoring-collapse">
+    <summary>Boris authoring hints</summary>
+    <div class="authoring-collapse-body">
+      {@render tools()}
+    </div>
+  </details>
+{:else}
+  <aside class="authoring-tools" aria-labelledby="authoring-heading">
+    {@render tools()}
+  </aside>
+{/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { publication } from '../lib/state/publication.svelte';
   import { problems } from '../lib/state/problems.svelte';
+  import ReportBlock from './ReportBlock.svelte';
 
   let {
     onRunPlan,
@@ -17,7 +18,13 @@
       <h2 id="publication-heading">Publication</h2>
       <p>The editor runs <code>boris plan --profile</code> and shows the normalized declaration. It does not deploy or store secrets.</p>
     </div>
-    <button type="button" disabled={problems.running} onclick={onVerifyProof}>Verify proof</button>
+    <button
+      type="button"
+      class="quiet"
+      class:is-running={problems.running && problems.runningMode === 'proof_verify'}
+      aria-busy={problems.running && problems.runningMode === 'proof_verify'}
+      disabled={problems.running}
+      onclick={onVerifyProof}>Verify proof</button>
   </div>
   <p role="status" aria-label="Publication status" aria-live="polite">{publication.status}</p>
   {#if (publication.payload?.profiles.length ?? 0) > 0}
@@ -29,7 +36,13 @@
             <option value={profile.path}>{profile.path}</option>
           {/each}
         </select>
-        <button type="button" disabled={problems.running || !publication.selectedProfile} onclick={onRunPlan}>Run publication plan</button>
+        <button
+          type="button"
+          class="primary"
+          class:is-running={problems.running && problems.runningMode === 'plan'}
+          aria-busy={problems.running && problems.runningMode === 'plan'}
+          disabled={problems.running || !publication.selectedProfile}
+          onclick={onRunPlan}>Run publication plan</button>
       </div>
     </div>
   {:else}
@@ -83,6 +96,6 @@
   {#if publication.lastProofReport}
     <h3>Proof verify report</h3>
     <p>This is the contracted <code>boris proof verify</code> stderr. Exit class is in Problems; the editor does not invent pass or fail.</p>
-    <pre class="proof-report">{publication.lastProofReport}</pre>
+    <ReportBlock summary="proof verify report" report={publication.lastProofReport} />
   {/if}
 </section>
