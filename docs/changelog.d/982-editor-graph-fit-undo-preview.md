@@ -1,5 +1,5 @@
 <!--
-Filename: editor-graph-fit-undo-preview.md
+Filename: 982-editor-graph-fit-undo-preview.md
 Keep exactly one category heading. Replace this example link with a relevant
 repository-root-relative link; contract-visible work links its updated contract.
 -->
