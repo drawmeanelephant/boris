@@ -11,6 +11,7 @@ type FocusMockOptions = {
   layout?: string;
   /** Initial disk content served by /api/files/open. */
   disk?: string;
+  files?: Array<{ path: string }>;
 };
 
 async function installApi(page: Page, options: FocusMockOptions = {}) {
@@ -30,7 +31,10 @@ async function installApi(page: Page, options: FocusMockOptions = {}) {
   }));
   await page.route('**/api/files', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ files: [{ path: 'boris.json' }, { path: 'content/index.md' }] })
+    body: JSON.stringify({
+      files: options.files ?? [{ path: 'boris.json' }, { path: 'content/index.md' }],
+      last_open: null
+    })
   }));
   await page.route('**/api/recovery', route => route.fulfill({
     contentType: 'application/json', body: JSON.stringify({ snapshots: [], skipped: 0 })
@@ -439,7 +443,7 @@ test('arrows do nothing harmful when focus mode opens with no file', async ({ pa
   // textarea).
   const pageErrors: string[] = [];
   page.on('pageerror', err => pageErrors.push(err.message));
-  await installApi(page);
+  await installApi(page, { files: [{ path: 'boris.json' }] });
   await page.getByRole('button', { name: 'Focus', exact: true }).click();
   const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
   await expect(focus).toBeVisible();

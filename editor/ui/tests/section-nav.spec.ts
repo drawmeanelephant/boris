@@ -11,6 +11,7 @@ import { expect, test, type Page } from '@playwright/test';
 type InstallOptions = {
   /** Launch `open=` param: a cold-launch URL opens this file at connect. */
   open?: string;
+  files?: Array<{ path: string }>;
 };
 
 async function installApi(page: Page, options: InstallOptions = {}) {
@@ -27,7 +28,10 @@ async function installApi(page: Page, options: InstallOptions = {}) {
   }));
   await page.route('**/api/files', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ files: [{ path: 'boris.json' }, { path: 'content/index.md' }] })
+    body: JSON.stringify({
+      files: options.files ?? [{ path: 'boris.json' }, { path: 'content/index.md' }],
+      last_open: null
+    })
   }));
   await page.route('**/api/recovery', route => route.fulfill({
     contentType: 'application/json', body: JSON.stringify({ snapshots: [], skipped: 0 })
@@ -230,7 +234,7 @@ test('nav stays reachable while scrolled and keyboard activation works', async (
 });
 
 test('arrival highlight collapses to a static cue under reduced motion', async ({ page }) => {
-  await installApi(page);
+  await installApi(page, { files: [{ path: 'boris.json' }] });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const watch = page.locator('#watch');
   await navLink(page, 'Watch').click();
@@ -330,14 +334,17 @@ test('the open= launch param is consumed and not resurrected by nav clicks', asy
   expect(params.get('open')).toBeNull();
   expect(params.get('token')).toBe('test-session-token');
 
-  // Reload: no surprise reopen — the editor comes up with no file loaded.
+  // Reload: `open=` stays consumed. The shell may still open the default
+  // launch file (`content/index.md`), but it must not revive the fragment.
   await page.reload();
-  await expect(page.getByRole('textbox', { name: /Source for/ })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+  const reloaded = new URLSearchParams(new URL(page.url()).hash.slice(1));
+  expect(reloaded.get('open')).toBeNull();
   await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
 });
 
 test('the Graph nav link is available before a file is open (#970)', async ({ page }) => {
-  await installApi(page);
+  await installApi(page, { files: [{ path: 'boris.json' }] });
   const graph = navLink(page, 'Graph');
   await expect(graph).not.toHaveAttribute('aria-disabled');
   await expect(graph).not.toHaveAttribute('title');

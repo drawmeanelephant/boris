@@ -268,23 +268,27 @@ test('file rows reserve the caret gutter so names align at every level', async (
 
 test('the filter still matches full paths, not visible segments', async ({ page }) => {
   await installApi(page);
-  const nav = tree(page);
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
   const filter = page.getByRole('textbox', { name: 'Filter project files' });
 
   // "reference" is a folder segment that never appears on a file row.
+  // The open file stays visible even when it does not match the filter.
   await filter.fill('reference');
-  await expect(fileRows(page)).toHaveCount(1);
+  await expect(fileRows(page)).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'content/reference/cli.md', exact: true })).toBeVisible();
-  // Filtering prunes the tree: only folders that still hold a match remain.
+  await expect(page.getByRole('button', { name: 'content/index.md', exact: true })).toBeVisible();
+  // Filtering prunes the tree: only folders that still hold a match or the
+  // open file remain.
   await expect(dirRows(page)).toHaveText(['content/', 'reference/']);
 
   // A partial path spanning segments matches too.
   await filter.fill('guides/getting');
-  await expect(fileRows(page)).toHaveCount(1);
+  await expect(fileRows(page)).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'content/guides/getting-started.md', exact: true })).toBeVisible();
 
   await filter.fill('nothing-here');
-  await expect(nav.getByText('No project files match the filter.')).toBeVisible();
+  await expect(fileRows(page)).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'content/index.md', exact: true })).toBeVisible();
 });
 
 test('the open file is marked active at its true depth', async ({ page }) => {
