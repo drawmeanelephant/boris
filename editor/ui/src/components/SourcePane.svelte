@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Problem, GraphNode } from '../lib/types';
   import { buffer, dirty, editSource, undo, redo, trackCursor } from '../lib/state/buffer.svelte';
-  import { graph } from '../lib/state/graph.svelte';
   import { activeProblems, staleProblems } from '../lib/state/problems.svelte';
   import { problemLocationLabel } from '../lib/utils';
   import AuthoringTools from './AuthoringTools.svelte';
@@ -66,11 +65,15 @@
       onkeyup={trackCursor}
     ></textarea>
     <AuthoringTools />
-    <GraphPane
-      onOpenPath={onOpenFile}
-      onOpenNode={onOpenGraphNode}
-      onImpact={onImpact}
-    />
+  {:else}
+    <p>Choose a file from Project files. Generated output and editor state are intentionally excluded.</p>
+  {/if}
+  <GraphPane
+    onOpenPath={onOpenFile}
+    onOpenNode={onOpenGraphNode}
+    onImpact={onImpact}
+  />
+  {#if buffer.activePath}
     <RecipePane
       onScale={onScale}
       onReset={onReset}
@@ -100,12 +103,6 @@
         </ul>
       </aside>
     {/if}
-  {:else}
-    <p>Choose a file from Project files. Generated output and editor state are intentionally excluded.</p>
-    <section id="graph-empty" class="graph-pane" tabindex="-1" aria-labelledby="graph-heading-empty">
-      <h3 id="graph-heading-empty">Graph</h3>
-      <p role="status" aria-label="Graph status" aria-live="polite">{graph.status}</p>
-    </section>
   {/if}
   <p role="status" aria-label="Editing status" aria-live="polite">{buffer.editorStatus}</p>
   <PublicationPane onRunPlan={onRunPlan} />

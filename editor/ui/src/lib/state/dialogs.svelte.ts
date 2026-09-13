@@ -11,7 +11,9 @@ import type { PendingResolution } from '../types';
 export const dialogs = $state({
   pendingResolution: null as PendingResolution | null,
   createPath: 'content/new-page.md',
+  createError: '',
   renamePath: '',
+  renameError: '',
   lastDialogTrigger: null as HTMLElement | null,
   skipFocusRestore: false
 });

@@ -134,11 +134,12 @@ source. The native textarea remains the editing surface.
 ## Graph-aware navigation
 
 The **Graph** pane is a read-only inspector of the last successful Boris
-`graph.json`. It never edits the graph. After **Build diagnostics** the pane
-shows the open page's parent, children, siblings, outgoing references and
-includes, reverse-index backlinks, and any `relations` from
-`completion.json`. Wiki-link tokens (`[[id]]`) in the current buffer are
-listed and resolved against that same graph.
+`graph.json`. It never edits the graph. The map is a project-level view: it
+is available before any file is open. After **Build diagnostics**, selecting
+a page (from the map or by opening a file) shows that page's parent, children,
+siblings, outgoing references and includes, reverse-index backlinks, and any
+`relations` from `completion.json`. Wiki-link tokens (`[[id]]`) in the current
+buffer are listed and resolved against that same graph.
 
 Above those lists the pane draws a deterministic visual map of the frozen
 graph: pages layer by hierarchy, `parent` edges are solid, references dashed,

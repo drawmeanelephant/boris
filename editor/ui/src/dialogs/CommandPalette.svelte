@@ -68,6 +68,7 @@
           role="option"
           tabindex="-1"
           aria-selected={itemIndex === palette.selection}
+          aria-label="{paletteItemLabel(item)}; {detailFor(item)}"
           aria-disabled={isEnabled(item) ? 'false' : 'true'}
           class:selected={itemIndex === palette.selection}
           class:disabled={!isEnabled(item)}
@@ -83,6 +84,6 @@
     <p>No commands match “{palette.query}”.</p>
   {/if}
   <div class="dialog-actions">
-    <button type="button" onclick={onCancel}>Cancel<kbd>Esc</kbd></button>
+    <button type="button" aria-keyshortcuts="Escape" onclick={onCancel}>Cancel<kbd aria-hidden="true">Esc</kbd></button>
   </div>
 </dialog>

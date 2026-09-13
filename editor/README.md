@@ -785,13 +785,12 @@ layers feedback on top:
   `#token=…&section=<id>` instead of a bare `#<id>` — reloading after a
   jump stays authenticated. The consumed `open=` launch path is dropped,
   not carried forward, so a reload never re-opens the file.
-- **Unavailable targets say so.** Graph exists only once a file is open;
-  until then its nav link is presented disabled (`aria-disabled`, muted
-  style, tooltip) and activating it reports the reason through the
-  editing status instead of silently doing nothing. The link re-enables
-  automatically when a file opens.
+- **Unavailable targets say so.** A nav link whose pane is currently
+  absent is presented disabled (`aria-disabled`, muted style, tooltip)
+  and activating it reports the reason through the editing status instead
+  of silently doing nothing. Graph is a project-level `graph.json` view
+  and stays reachable with no file open; neighborhood lists appear once
+  a page is selected.
 
-The Source pane's graph empty-state section is `id="graph-empty"`, distinct
-from the real GraphPane's `id="graph"` (they never render at the same
-time, but the ids no longer collide in queries). Presentation-only: no new
-endpoints, no pipeline changes.
+The Graph pane is always `id="graph"` (the former `graph-empty` stub is
+gone). Presentation-only: no new endpoints, no pipeline changes.

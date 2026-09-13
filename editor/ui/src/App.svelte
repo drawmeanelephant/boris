@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { token, launchOpenPath, api, elapsedLabel, hostErrorLabel, isLaunchOpenSafe } from './lib/api';
+  import { token, launchOpenPath, api, elapsedLabel, hostErrorLabel, authorPathIssue, isLaunchOpenSafe } from './lib/api';
   import type {
     Health,
     Version,
@@ -529,26 +529,34 @@
   async function createFile() {
     const path = dialogs.createPath.trim();
     if (!path) return;
+    const localIssue = authorPathIssue(path);
+    if (localIssue) {
+      dialogs.createError = `Could not create ${path}: ${hostErrorLabel(localIssue)}.`;
+      return;
+    }
     const result = await api<BufferResponse | ErrorResponse>('/api/files/create', {
       method: 'POST', body: JSON.stringify({ path, content: '' })
     });
     if (result.response.ok) {
+      dialogs.createError = '';
       dialogs.skipFocusRestore = true;
       createDialog.close();
       await refreshFiles();
       loadBuffer(result.data as BufferResponse, `Created ${path}.`);
     } else {
-      buffer.editorStatus = `Could not create ${path}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
+      dialogs.createError = `Could not create ${path}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
     }
   }
 
   function openCreateDialog() {
     dialogs.createPath = defaultCreatePath(connection.inputMode);
+    dialogs.createError = '';
     openModal(createDialog);
   }
 
   function openRenameDialog() {
     dialogs.renamePath = buffer.activePath;
+    dialogs.renameError = '';
     openModal(renameDialog);
   }
 
@@ -613,9 +621,11 @@
     paletteDialog.close();
     if (item.kind === 'create') {
       dialogs.createPath = defaultCreatePath(connection.inputMode);
+      dialogs.createError = '';
       createDialog.showModal();
     } else if (item.kind === 'rename') {
       dialogs.renamePath = buffer.activePath;
+      dialogs.renameError = '';
       renameDialog.showModal();
     } else if (item.kind === 'delete') {
       deleteDialog.showModal();
@@ -652,14 +662,11 @@
     document.getElementById('watch')?.focus();
   }
 
-  // Nav targets whose pane is absent right now (#944): Graph exists only
-  // once a file is open — with none, the Source pane shows its graph-empty
-  // status band instead, so there is nothing to jump to. The reason is
-  // routed to the editing-status live region so a click on the disabled
-  // link says why instead of failing silently.
+  // Nav targets whose pane is absent right now. Graph is a project-level
+  // artifact and stays reachable with no file open (#970); keep this map
+  // for panes that are genuinely missing.
   function navUnavailable(): Record<string, string> {
-    if (buffer.activePath) return {};
-    return { graph: 'Graph is available once a file is open.' };
+    return {};
   }
 
   function reportBlockedNav(reason: string) {
@@ -670,17 +677,23 @@
     const newPath = dialogs.renamePath.trim();
     if (!buffer.activePath || !newPath) return;
     const oldPath = buffer.activePath;
+    const localIssue = authorPathIssue(newPath);
+    if (localIssue) {
+      dialogs.renameError = `Could not rename ${oldPath}: ${hostErrorLabel(localIssue)}.`;
+      return;
+    }
     const result = await api<ErrorResponse>('/api/files/rename', {
       method: 'POST', body: JSON.stringify({ path: oldPath, new_path: newPath })
     });
     if (result.response.ok) {
+      dialogs.renameError = '';
       buffer.activePath = newPath;
       dialogs.skipFocusRestore = true;
       renameDialog.close();
       await refreshFiles();
       buffer.editorStatus = `Renamed ${oldPath} to ${newPath}.`;
     } else {
-      buffer.editorStatus = `Could not rename ${oldPath}: ${hostErrorLabel(result.data.error)}.`;
+      dialogs.renameError = `Could not rename ${oldPath}: ${hostErrorLabel(result.data.error)}.`;
     }
   }
 
@@ -899,7 +912,7 @@
 <CreateDialog
   bind:dialog={createDialog}
   onKeydown={handleDialogKeydown}
-  onClose={() => { dialogs.createPath = defaultCreatePath(connection.inputMode); restoreDialogFocus(); }}
+  onClose={() => { dialogs.createPath = defaultCreatePath(connection.inputMode); dialogs.createError = ''; restoreDialogFocus(); }}
   onCreate={createFile}
   onCancel={() => createDialog.close()}
 />
@@ -907,7 +920,7 @@
 <RenameDialog
   bind:dialog={renameDialog}
   onKeydown={handleDialogKeydown}
-  onClose={() => { dialogs.renamePath = ''; restoreDialogFocus(); }}
+  onClose={() => { dialogs.renamePath = ''; dialogs.renameError = ''; restoreDialogFocus(); }}
   onRename={renameFile}
   onCancel={() => renameDialog.close()}
 />

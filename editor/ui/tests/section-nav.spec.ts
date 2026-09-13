@@ -282,17 +282,14 @@ test('mobile pill row scrolls and the active pill stays reachable', async ({ pag
 
 test('nav target ids are unique in both pane states', async ({ page }) => {
   await installApi(page);
-  // Empty state: SourcePane renders its graph empty-state section (#941's
-  // historical duplicate of #graph) — the real GraphPane is absent here.
-  const ids = ['project', 'source', 'graph', 'graph-empty', 'publication', 'problems', 'preview', 'watch'];
+  const ids = ['project', 'source', 'graph', 'publication', 'problems', 'preview', 'watch'];
   let duplicates = await page.evaluate(ids => {
     return ids.filter(id => document.querySelectorAll(`[id="${id}"]`).length > 1);
   }, ids);
   expect(duplicates).toEqual([]);
-  await expect(page.locator('#graph-empty')).toHaveCount(1);
-  await expect(page.locator('#graph')).toHaveCount(0);
+  await expect(page.locator('#graph')).toHaveCount(1);
+  await expect(page.locator('#graph-empty')).toHaveCount(0);
 
-  // Open state: the real GraphPane replaces the empty state.
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
   duplicates = await page.evaluate(ids => {
@@ -339,29 +336,22 @@ test('the open= launch param is consumed and not resurrected by nav clicks', asy
   await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
 });
 
-test('the Graph nav link is honestly disabled while no file is open (#944)', async ({ page }) => {
+test('the Graph nav link is available before a file is open (#970)', async ({ page }) => {
   await installApi(page);
   const graph = navLink(page, 'Graph');
-  await expect(graph).toHaveAttribute('aria-disabled', 'true');
-  await expect(graph).toHaveAttribute('title', 'Graph is available once a file is open.');
-  // An absent section can never be current.
-  await expect(graph).not.toHaveAttribute('aria-current');
+  await expect(graph).not.toHaveAttribute('aria-disabled');
+  await expect(graph).not.toHaveAttribute('title');
+  await expect(page.locator('#graph')).toHaveCount(1);
 
-  // Activation is a no-op that explains itself via the editing status —
-  // no jump, no arrival pulse, no URL write. force: because Playwright's
-  // actionability check refuses aria-disabled elements, while a real
-  // user's click still fires the handler.
-  await graph.click({ force: true });
-  await expect(page.locator('#graph')).toHaveCount(0);
-  await expect(page.locator('#graph-empty')).toBeVisible();
-  await expect(page.locator('.section-nav')).toHaveAttribute('data-arrived', '');
-  expect(new URL(page.url()).hash).not.toContain('section=graph');
-  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Graph is available once a file is open.');
+  await graph.click();
+  await expect(page.locator('#graph')).toHaveClass(/arrived/, { timeout: 2_000 });
+  await expect(page.locator('#graph')).toBeFocused();
+  expect(new URL(page.url()).hash).toContain('section=graph');
 });
 
-test('the Graph nav link returns to full behavior once a file is open', async ({ page }) => {
+test('the Graph nav link still jumps once a file is open', async ({ page }) => {
   await installApi(page);
-  await expect(navLink(page, 'Graph')).toHaveAttribute('aria-disabled', 'true');
+  await expect(navLink(page, 'Graph')).not.toHaveAttribute('aria-disabled');
 
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();

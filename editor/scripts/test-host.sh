@@ -102,7 +102,9 @@ printf '%s' "$graph" | grep -q '"graph_status":"unsupported"'
 printf '%s' "$graph" | grep -q '"graph":null'
 version="$(api_get /api/version)"
 printf '%s' "$version" | grep -q '"compiler_id":"boris/'
-printf '%s' "$version" | grep -q '"publication_plan"'
+printf '%s' "$version" | grep -Fq '"completion":[1]'
+printf '%s' "$version" | grep -Fq '"publication_plan":[1]'
+printf '%s' "$version" | grep -Fq '"frontmatter":[1]'
 
 opened="$(api_post /api/files/open '{"path":"content/index.md"}')"
 [[ "$(printf '%s' "$opened" | code_of)" == "200" ]]

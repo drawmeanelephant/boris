@@ -423,14 +423,31 @@ test('Create and Rename dialogs show visible Enter and Esc key hints (#462)', as
   await installApi(page);
   await page.getByRole('button', { name: 'Create file', exact: true }).click();
   const create = page.getByRole('dialog', { name: 'Create file' });
-  await expect(create.getByRole('button', { name: /Create file/ })).toContainText('Enter');
-  await expect(create.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+  await expect(create.getByRole('button', { name: 'Create file', exact: true })).toContainText('Enter');
+  await expect(create.getByRole('button', { name: 'Cancel', exact: true })).toContainText('Esc');
+  await expect(create.getByRole('button', { name: 'Create fileEnter' })).toHaveCount(0);
+  await expect(create.getByRole('button', { name: 'CancelEsc' })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
   await page.getByRole('button', { name: 'Rename file', exact: true }).click();
   const rename = page.getByRole('dialog', { name: 'Rename file' });
-  await expect(rename.getByRole('button', { name: /Rename file/ })).toContainText('Enter');
-  await expect(rename.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+  await expect(rename.getByRole('button', { name: 'Rename file', exact: true })).toContainText('Enter');
+  await expect(rename.getByRole('button', { name: 'Cancel', exact: true })).toContainText('Esc');
+});
+
+test('Create file path errors stay inside the dialog (#973)', async ({ page }) => {
+  await installApi(page);
+  let createRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/create')) createRequests += 1;
+  });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await dialog.getByRole('textbox', { name: 'New file path' }).fill('README.md');
+  await dialog.getByRole('button', { name: 'Create file', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('alert')).toContainText('paths must be boris.json or under content/ or themes/');
+  expect(createRequests).toBe(0);
 });
 
 test('recovery is announced and restored only on an explicit named action', async ({ page }) => {
@@ -1345,7 +1362,8 @@ test('clicking a completion option selects without inserting; the insert action 
   await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('wiki_link');
   const wiki = page.getByRole('combobox', { name: 'Filter wiki link', exact: true });
   await wiki.fill('guides');
-  const option = page.getByRole('listbox', { name: 'Boris completion suggestions' }).getByRole('option', { name: /guides\/intro/ });
+  const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions', exact: true });
+  const option = listbox.getByRole('option', { name: 'guides/intro; Introduction', exact: true });
   await option.click();
   await expect(option).toHaveAttribute('aria-selected', 'true');
   await expect(editor).toHaveValue('');
@@ -2212,13 +2230,14 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     const create = page.getByRole('dialog', { name: 'Create file' });
     await expect(create).toBeVisible();
     // Closed dialogs stay out of the tree: only the open dialog exposes Cancel.
-    // The dialog primary is "Create file Enter", so it does not collide with the
-    // toolbar's exact name. Native showModal inerts the background for
-    // assistive tech; Playwright still lists the toolbar trigger.
-    await expect(page.getByRole('button', { name: /Cancel/ })).toHaveCount(1);
-    await expect(create.getByRole('button', { name: /Cancel/ })).toBeVisible();
-    await expect(create.getByRole('button', { name: /Create file/ })).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Create file', exact: true })).toHaveCount(1);
+    // Both the toolbar trigger and the dialog submit are named "Create file"
+    // (#969); Playwright still lists the inert toolbar, so scope the in-modal
+    // action to the dialog. Shortcut chips must not glue into the name.
+    await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toHaveCount(1);
+    await expect(create.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+    await expect(create.getByRole('button', { name: 'Create file', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Create fileEnter' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'CancelEsc' })).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(create).toBeHidden();
     await expect(page.getByRole('button', { name: 'Create file', exact: true })).toHaveCount(1);
@@ -2694,7 +2713,12 @@ test('publication pane plans an existing profile and does not deploy (#418 M9)',
 });
 
 function visibleLabel(text: string): string {
-  return text.replace(/\s+/g, ' ').replace(/\b(Enter|Esc|Alt\+[A-Za-z]|Ctrl|Cmd|Tab)\b/g, '').replace(/\s+/g, ' ').trim();
+  return text
+    .replace(/\s+/g, ' ')
+    .replace(/\b(Enter|Esc|Alt\+[A-Za-z]|Ctrl|Cmd|Tab)\b/g, '')
+    .replace(/(Enter|Esc|Alt\+[A-Za-z])$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 async function assertNamedControls(root: ReturnType<Page['locator']>) {
@@ -2704,6 +2728,9 @@ async function assertNamedControls(root: ReturnType<Page['locator']>) {
   for (let index = 0; index < count; index += 1) {
     const button = buttons.nth(index);
     if (!(await button.isVisible())) continue;
+    // Icon zoom controls keep a compact glyph plus an explicit aria-label;
+    // graph-map.spec.ts pins those names.
+    if (await button.evaluate((el) => el.closest('.graph-map-controls') !== null)) continue;
     const text = visibleLabel(await button.innerText());
     await expect(button).toHaveAccessibleName(/\S/);
     if (text.length > 0) await expect(button).toHaveAccessibleName(new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
