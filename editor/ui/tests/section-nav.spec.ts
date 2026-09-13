@@ -117,6 +117,16 @@ async function installApi(page: Page, options: InstallOptions = {}) {
   await page.goto(`/#${launchParams.toString()}`);
 }
 
+// The connection readout is a chip (#993): the live region carries the short
+// label, and the honest sentence is one activation away. These continuity
+// checks are about the sentence, so they expand the chip first.
+async function expandConnection(page: Page) {
+  // The chip is a sibling of the text-only live region, not a descendant (#993).
+  const toggle = page.locator('.connection-chip');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  return page.locator('.connection-detail');
+}
+
 function navLink(page: Page, name: string) {
   return page.getByRole('navigation', { name: 'Editor sections' }).getByRole('link', { name, exact: true });
 }
@@ -326,7 +336,7 @@ test('nav click preserves the token and drops the consumed open param (#943)', a
   // token-wiping URL write), and the section jump is NOT reapplied — the
   // component's spy handles positioning, not launch parsing.
   await page.reload();
-  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
+  await expect(await expandConnection(page)).toContainText('Connected to boris-editor');
 });
 
 test('the open= launch param is consumed and not resurrected by nav clicks', async ({ page }) => {
@@ -345,7 +355,7 @@ test('the open= launch param is consumed and not resurrected by nav clicks', asy
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
   const reloaded = new URLSearchParams(new URL(page.url()).hash.slice(1));
   expect(reloaded.get('open')).toBeNull();
-  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
+  await expect(await expandConnection(page)).toContainText('Connected to boris-editor');
 });
 
 test('the Graph nav link is available before a file is open (#970)', async ({ page }) => {

@@ -30,6 +30,10 @@
     // mode's name. The link stays fully enabled: activation asks the owner
     // to reveal the mode first, then performs the ordinary jump.
     modeGated?: Record<string, string>;
+    // The active density mode (#993). Author leads with the writing
+    // destinations and lets the Review destinations recede; Review shows the
+    // full row at one weight. Emphasis only — every link stays live.
+    mode?: 'author' | 'review';
     // Receives the reason for a click on an unavailable target; App routes
     // it to the editing-status live region.
     onBlockedNav?: (reason: string) => void;
@@ -38,7 +42,7 @@
     onReveal?: (id: string) => Promise<void> | void;
   };
 
-  let { unavailable = {}, modeGated = {}, onBlockedNav, onReveal }: Props = $props();
+  let { unavailable = {}, modeGated = {}, mode = 'review', onBlockedNav, onReveal }: Props = $props();
 
   const links: SectionLink[] = [
     { id: 'project', label: 'Project' },
@@ -49,6 +53,12 @@
     { id: 'preview', label: 'Preview' },
     { id: 'watch', label: 'Watch' }
   ];
+
+  // The review-side destinations, in link order (#993). Author mode keeps
+  // them reachable but stops the strip from advertising the whole product:
+  // the boundary gets a caption and the group recedes to faint ink.
+  const REVIEW_IDS = new Set(['graph', 'publication', 'problems', 'preview', 'watch']);
+  const reviewBoundary = links.find(({ id }) => REVIEW_IDS.has(id))?.id ?? null;
 
   const ARRIVAL_MS = 1600;
 
@@ -327,18 +337,26 @@
   class="section-nav"
   class:scroll-start={canScrollStart}
   class:scroll-end={canScrollEnd}
+  class:author-quiet={mode === 'author'}
   data-arrived={arrived ?? ''}
   aria-label="Editor sections"
   bind:this={nav}
 >
   <div class="section-nav-row" bind:this={row}>
     {#each links as { id, label } (id)}
+      {#if mode === 'author' && id === reviewBoundary}
+        <!-- Group caption for the receded cluster. Decorative: the links
+             keep their own names in the accessibility tree. -->
+        <span class="section-nav-divider" aria-hidden="true"></span>
+        <span class="section-nav-group" aria-hidden="true">Review</span>
+      {/if}
       <a
         href="#{id}"
         onclick={(event) => void handleNav(event, id)}
         aria-current={current === id ? 'true' : undefined}
         aria-disabled={unavailable[id] ? 'true' : undefined}
         class:mode-gated={Boolean(modeGated[id])}
+        class:review-link={REVIEW_IDS.has(id)}
         title={unavailable[id]
           ?? (modeGated[id] ? `Shown in ${modeGated[id]} mode — activating switches modes` : undefined)}
       >{label}</a>

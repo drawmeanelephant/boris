@@ -710,17 +710,34 @@ The editor's chrome is one type scale, defined in
 size, not only by weight and color, or every label competes with the prose it
 labels.
 
-- **Scale.** Two meta steps sit below the 16px body (`--text-2xs`,
-  `--text-xs`), then one step per heading level above it: `--text-lg` for
-  sub-pane titles (h3), `--text-xl` for pane titles (h2), `--text-2xl` for the
-  app title (h1). The ratio is ~1.2 pairwise, which is what makes a pane title
-  read as a heading beside body copy. `--text-code` is the monospace working
-  size for the source surface.
+- **Scale.** The order is written down once, in `--scale-type` in
+  [`ui/src/lib/tokens.css`](ui/src/lib/tokens.css), and nothing else keeps a
+  copy of it. Two meta steps sit below body copy (`--text-2xs` for kbd chips and
+  micro labels, `--text-xs` for eyebrows and status meta), then `--text-sm` for
+  ledes and field labels and `--text-md` for the 16px body itself, and one step
+  per heading level above it: `--text-lg` for sub-pane titles (h3), `--text-xl`
+  for pane titles (h2), `--text-2xl-compact` for the app title (h1) in Author's
+  calmer band, and `--text-2xl` for that title in Review. The ratio is ~1.2
+  pairwise, which is what makes a pane title read as a heading beside body copy.
+  `--text-code` is the monospace working size for the source surface, and it is
+  listed as off-chain because it is an orthographic axis: it may interleave with
+  the steps but never coincide with one. Every step stays ordered at every
+  viewport, so a mode may choose a different step but two levels never collapse
+  onto one size.
 - **No off-scale sizes.** Component rules must consume a token rather than a
   raw `rem`. An off-scale size is exactly how the surface drifted into
   everything-is-16px, and it is how a sub-pane heading ended up rendering
   *larger* than the pane title above it (unstyled `h3` inherits the user
   agent's `1.17em`). Extend the chain in `tokens.css` instead.
+- **Enforced, not checked by eye.** A new `--text-*` token must be classified
+  in the type scale, and this section must name `--scale-type` —
+  [`ui/scripts/check-scales.mjs`](ui/scripts/check-scales.mjs) fails
+  `npm run check` otherwise, with no browser needed.
+  `ui/tests/scales.spec.ts` then resolves the chain out of the *applied*
+  stylesheet at four widths, asserting strict ascent with no collisions, and
+  `ui/tests/reading-hierarchy.spec.ts` measures the rendered heading levels in
+  *both* density modes. The prose, the stylesheet, and the browser are all held
+  to the one list.
 - **Reading rhythm.** `:root` sets `--leading-normal` (1.55) so prose gets a
   real line-height by default; headings take `--leading-tight` and controls
   opt in explicitly. `--measure-prose` caps a lede's line length.
@@ -744,6 +761,43 @@ labels.
 
 Presentation only: no endpoint, no Boris surface, and no pipeline change.
 
+## Spacing, radius, and stacking
+
+Three more ordered scales sit beside the type chain, declared the same way and
+in the same block of [`ui/src/lib/tokens.css`](ui/src/lib/tokens.css): the order
+lives in one `--scale-*` list, and nothing else keeps a copy.
+
+- **Spacing (`--scale-space`).** Eight steps on a 0.25rem base, `--space-1`
+  through `--space-8` (0.25rem to 3rem). Padding and gaps come from these, and
+  every step is a whole multiple of the base — that is what keeps a surface on
+  one rhythm instead of drifting into one-off values. The base is declared too,
+  as `--scale-space-base`, so the checks read it rather than trusting this
+  sentence.
+- **Radius (`--scale-radius`).** `--radius-sm`, `--radius-md`, `--radius-lg`,
+  and `--radius-pill`: three corner steps plus the pill, ascending.
+- **Stacking (`--scale-layer`).** One ladder for the whole editor,
+  `--layer-focus-mirror` < `--layer-focus-editor` < `--layer-focus-zen` <
+  `--layer-nav` < `--layer-skip-link` < `--layer-overlay`. The first three order
+  elements inside the focus editor's own stacking context — the measuring
+  mirror, the text above it, the dimming veil over both; the last three are
+  global chrome: the sticky section nav, the skip link, and the full-viewport
+  focus overlay. `z-index` in `styles.css` must name a layer, because a bare
+  number is how two layers silently swap places.
+
+Elevation tiers (`--shadow-1`, `--shadow-2`, `--shadow-3`) are deliberately not
+a declared scale: a shadow list has no scalar order for a list to protect.
+
+[`ui/scripts/check-scales.mjs`](ui/scripts/check-scales.mjs) enforces all of this
+from `npm run check` — every declared token of each family is classified, every
+listed name exists, each list ascends (numerically where a value is resolvable
+without a viewport, and reported as deferred where it is a `clamp`), spacing
+steps are whole multiples of the base, the layer ladder holds bare numbers, and
+this section names each scale's list. Then
+[`ui/tests/scales.spec.ts`](ui/tests/scales.spec.ts) re-reads the same lists out
+of the *applied* stylesheet: that is the half which catches what no file parse
+can, namely a value overridden in a later block, a media query, or the dark
+theme.
+
 ## Density modes and the writing surface
 
 The shell has two density modes (#990), persisted per browser under
@@ -759,11 +813,36 @@ preferences. The mode is disposable UI state, never project truth:
   that clamps at max scroll keeps the target's `aria-current` while the
   target's box still covers the reading line; scrolling off it releases the
   marker.
+  - The residual-flat polish (#993) carries the same intent through the
+    chrome: Project recedes to a file drawer under the writing page (it no
+    longer stretches to the page's height, and drops the card elevation and
+    heavy edge for a recessed neutral surface with tighter padding), the nav
+    leads with Project and Source while the Review destinations recede into a
+    captioned, faint cluster (emphasis only — those links stay live, so
+    activating one still switches modes and lands), and Source takes page
+    material rather than a wider dashboard tile. The top band quiets too: the
+    header drops its decorative eyebrow so the product mark and the live
+    connection status share one baseline row, the connection readout collapses
+    to a compact state chip whose honest sentence is one activation away (the
+    region is text-only and announces the short label, not a sentence re-read
+    on every host blip), the theme control states only its state
+    ("Dark"/"Light", matching its accessible name) and carries no
+    `aria-pressed` — a pressed state presumes a name that does not change with
+    it — and Author takes a smaller product mark and tighter header/nav bands
+    than Review.
 - **Review**: the full diagnostics chrome, unchanged.
 
 Source is the hero in both modes (#989): the writing column outweighs the
-file and rail columns, and the editing surface is a bordered, elevated shell
-whose chrome is presentation only:
+file and rail columns, and the editing surface is a bordered shell whose
+chrome is presentation only. It keeps its elevation in Review; in Author the
+card edge and drop shadow give way to a quiet hairline and a `:focus-within`
+ring the shell owns alone (the focused textarea keeps no second ring inside
+it), and the pane itself is capped at a readable measure (~80 monospace
+columns) and centered in its grid column — the pane edge is the page edge, so
+heading, editor, gutter, and status line share one column instead of a narrow
+measure stretched across a wide tile. Below the cap the pane just fills its
+column, and the cap is Author-only: Review keeps the wide working surface
+beside its rail. The chrome is presentation only:
 
 - a measured **line gutter** — numbers for the visible window are placed at
   each line's measured position and the current line is highlighted, so

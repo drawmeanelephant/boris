@@ -66,6 +66,31 @@
   --header-chip-bg: transparent;
   --header-chip-bg-hover: rgba(249, 255, 248, 0.14);
 
+  /* --- declared scales ---
+     These lists are the contract for every ordered scale here, and they live
+     in one place so each order is written down exactly once: nothing else —
+     not the tests, not the README, not a component — keeps a copy.
+
+     `--scale-type` is the prose chain, ascending. `--scale-type-offchain` is
+     the sizes that are real tokens but not steps of it, because they are an
+     orthographic axis: those may interleave with the chain but never coincide
+     with a step. `--scale-space` and `--scale-radius` are the spacing rhythm
+     and the corner steps, and `--scale-layer` is the stacking ladder.
+
+     A new `--text-*`, `--space-*`, `--radius-*`, or `--layer-*` token must be
+     listed in its scale, and `scripts/check-scales.mjs` fails otherwise — so
+     no size, gap, corner, or layer enters the surface unclassified. The
+     elevation tiers are deliberately absent: a shadow list has no scalar
+     order for a list to protect. */
+  --scale-type: --text-2xs --text-xs --text-sm --text-md --text-lg --text-xl --text-2xl-compact --text-2xl;
+  --scale-type-offchain: --text-code;
+  --scale-space: --space-1 --space-2 --space-3 --space-4 --space-5 --space-6 --space-7 --space-8;
+  /* The spacing rhythm's base, declared rather than described: the lint and
+     the browser walk both check that every step is a whole multiple of it. */
+  --scale-space-base: 0.25rem;
+  --scale-radius: --radius-sm --radius-md --radius-lg --radius-pill;
+  --scale-layer: --layer-focus-mirror --layer-focus-editor --layer-focus-zen --layer-nav --layer-skip-link --layer-overlay;
+
   /* --- spacing scale (0.25rem base) --- */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -82,6 +107,20 @@
   --radius-lg: 0.75rem;
   --radius-pill: 999px;
 
+  /* --- stacking layers ---
+     One ladder for the whole editor. The first three order elements *inside*
+     the focus editor's own stacking context — the measuring mirror, the text
+     above it, and the dimming veil over both; the last three are global
+     chrome: the sticky section nav, the skip link, and the full-viewport
+     focus overlay. `z-index` in styles.css must name one of these, because a
+     bare number is how two layers silently swap places. */
+  --layer-focus-mirror: 0;
+  --layer-focus-editor: 1;
+  --layer-focus-zen: 2;
+  --layer-nav: 5;
+  --layer-skip-link: 10;
+  --layer-overlay: 50;
+
   /* --- elevation tiers --- */
   --shadow-1: 0 1px 2px rgba(23, 32, 29, 0.05), 0 2px 4px rgba(23, 32, 29, 0.06);
   --shadow-2: 0 2px 4px rgba(23, 32, 29, 0.08), 0 6px 18px rgba(23, 32, 29, 0.1);
@@ -97,7 +136,9 @@
 
      Component styles must consume these tokens rather than raw rems: an
      off-scale size is how the hierarchy drifted into everything-is-16px in
-     the first place. Extend the chain here instead of adding a local size. */
+     the first place. Extend the chain here instead of adding a local size.
+     Its order is declared in the `--- declared scales ---` block above, with
+     every other ordered scale — that list is the only copy. */
   --text-2xs: 0.7rem;                              /* 11.2px kbd chips, micro labels */
   --text-xs: 0.78rem;                              /* 12.5px eyebrows, status meta, captions */
   --text-sm: 0.875rem;                             /* 14px   ledes, field labels, dense rows */
@@ -105,6 +146,7 @@
   --text-lg: 1.125rem;                             /* 18px   sub-pane titles (h3) */
   --text-xl: 1.35rem;                              /* 21.6px pane titles (h2) */
   --text-2xl: clamp(1.6rem, 2.4vw, 2rem);           /* app title (h1) */
+  --text-2xl-compact: clamp(1.5rem, 2vw, 1.75rem);   /* app title in the Author band: one step down, still above pane titles (h2) */
   --text-code: 0.95rem;                            /* 15.2px monospace working surfaces */
 
   /* --- reading rhythm ---

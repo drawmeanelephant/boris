@@ -33,7 +33,7 @@
     sourceOffset,
     defaultCreatePath
   } from './lib/utils';
-  import { connection, applyHealth, applyVersion, markConnected, markTokenMissing, markConnectFailed, markHostUnavailable } from './lib/state/connection.svelte';
+  import { connection, applyHealth, applyVersion, markConnected, markTokenMissing, markConnectFailed, markHostUnavailable, HOST_UNAVAILABLE_DETAIL } from './lib/state/connection.svelte';
   import { project, refreshFiles, rememberFile, rememberRenamedFile, forgetFile, initProjectTree } from './lib/state/project.svelte';
   import { buffer, dirty, loadBuffer, resetBuffer, undo, redo, trackCursor, discardBuffer, clearRecovery, stopRecoveryTimer, flushRecovery, loadRecovery, markBufferHostUnavailable } from './lib/state/buffer.svelte';
   import { authoring, suggestions, refreshAuthoring, setAuthoring } from './lib/state/authoring.svelte';
@@ -341,8 +341,9 @@
   }
 
   function noteHostUnavailable() {
-    const next = 'Local host unavailable. Restart boris-editor.';
-    if (connection.status === next) return;
+    // The sentence doubles as the "already reported" guard, so the copy and the
+    // comparison both come from the connection state module (#993).
+    if (connection.status === HOST_UNAVAILABLE_DETAIL) return;
     markHostUnavailable();
     markBufferHostUnavailable();
   }
@@ -915,11 +916,12 @@
   onfocus={() => void probeDisk()}
 />
 
-<Header connection={connection.status} />
+<Header />
 
 <SectionNav
   unavailable={navUnavailable()}
   modeGated={navModeGated()}
+  mode={density.mode}
   onBlockedNav={reportBlockedNav}
   onReveal={revealSection}
 />

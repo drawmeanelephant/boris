@@ -245,6 +245,20 @@ authority on frontmatter.
 A section-nav link for a pane that lives in Review switches modes and then
 jumps to that pane, so no link pretends a hidden pane is on screen.
 
+Author mode carries that promise through the chrome as well. Project recedes
+to a file drawer under the writing page instead of a second equal card, the
+section nav leads with Project and Source while the Review destinations recede
+into a captioned, faint cluster — still live links, so activating one still
+switches modes and lands — and Source is drawn as the page itself: the card
+edge and drop shadow give way to one focus ring, worn by the page rather than
+doubled inside it, and on a wide window the page is capped at a comfortable
+reading measure and centered, so you get a column to write in rather than a
+wider dashboard tile. The top band quiets as well: the
+title and the connection status share one row under a smaller product mark, the
+connection readout is a compact state chip whose full sentence is one
+activation away, and the theme control shows just the current theme. Review
+keeps the wide working surface beside its rail.
+
 ## Compiler-backed commands and problems
 
 The Problems pane runs a fixed allowlist of Boris invocations against saved

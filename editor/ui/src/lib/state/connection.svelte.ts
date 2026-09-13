@@ -9,6 +9,10 @@ import { versionLabel } from '../utils';
 import type { Health, Version } from '../types';
 
 export const connection = $state({
+  // The compact label the header chip shows (#993). It is written together
+  // with the honest sentence below — never derived by parsing it — so a short
+  // label can never quietly disagree with the detail it summarizes.
+  summary: 'Connecting…',
   status: 'Connecting to the local host…',
   compiler: 'Checking Boris version…',
   project: 'Checking project conventions…',
@@ -16,14 +20,22 @@ export const connection = $state({
   validateDaemon: false
 });
 
+// The single writer for the status pair: the chip's short label and the full
+// sentence the author expands on demand. Both are honest restatements of what
+// a host payload said, so they change in the same place and stay in step.
+function setStatus(summary: string, detail: string) {
+  connection.summary = summary;
+  connection.status = detail;
+}
+
 export function markTokenMissing() {
-  connection.status = 'Session token missing. Launch the editor from boris-editor.';
+  setStatus('Token missing', 'Session token missing. Launch the editor from boris-editor.');
   connection.compiler = 'Boris version unavailable.';
   connection.project = 'Project status unavailable.';
 }
 
 export function markConnected(editorId: string, started: number) {
-  connection.status = `Connected to ${editorId}. Opened project in ${elapsedLabel(started)}.`;
+  setStatus('Connected', `Connected to ${editorId}. Opened project in ${elapsedLabel(started)}.`);
 }
 
 export function applyHealth(health: Health) {
@@ -49,6 +61,12 @@ export function markConnectFailed() {
   connection.project = 'Project status unavailable.';
 }
 
+// The host-unavailable sentence is also the guard other host-watch paths use
+// to tell "already reported" from "just failed", so it lives here with the
+// writer instead of being re-typed at each site — one place to keep the short
+// label and the sentence in step with each other.
+export const HOST_UNAVAILABLE_DETAIL = 'Local host unavailable. Restart boris-editor.';
+
 export function markHostUnavailable() {
-  connection.status = 'Local host unavailable. Restart boris-editor.';
+  setStatus('Host unavailable', HOST_UNAVAILABLE_DETAIL);
 }

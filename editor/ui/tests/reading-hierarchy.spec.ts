@@ -14,10 +14,16 @@ import { expect, test, type Page } from '@playwright/test';
 //   5. a pane's action cluster never overflows its own section box — the
 //      overflow painted the cluster over the neighbouring pane, which is how
 //      it surfaced: a non-shrinking cluster made the Project pane's Delete
-//      file button land under #source and fail pointer interception.
+//      file button land under #source and fail pointer interception;
+//   6. the rendered heading levels stay ordered in *both* density modes.
 //
 // Sizes are read from computed styles, not from the stylesheet, so a token
 // edit that breaks the chain fails here rather than in a screenshot review.
+// Invariant 6 exists because the loop below pins Review density to reach the
+// full pane chrome, and density-modes.spec.ts only ever compares the pair it
+// was told about — so an Author-only override had flattened the app title onto
+// the pane-title size with every suite green. The declared chains themselves —
+// type, space, radius, and layer — are walked in scales.spec.ts.
 
 const BODY_REM = 16;
 
@@ -42,7 +48,7 @@ const PROBLEM = {
   packet: '{"code":"EFRONTMATTER"}'
 };
 
-async function installApi(page: Page) {
+async function installApi(page: Page, mode: 'author' | 'review' = 'review') {
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ status: 'ok', editor_id: 'boris-editor/0.1.0', project: { content: true, default_layout: true, publication_profile: true, input_mode: 'markdown' } })
@@ -106,16 +112,21 @@ async function installApi(page: Page) {
       contentType: 'application/json', body: JSON.stringify({ status: endpoint === 'start' ? 'started' : 'stopped' })
     }));
   }
-  // These assertions read the full pane chrome, which lives in Review
-  // density (#990); the default Author view is covered by
-  // density-modes.spec.ts.
-  await page.addInitScript(() => localStorage.setItem('boris-editor-density', 'review'));
+  // Most assertions here read the full pane chrome, which lives in Review
+  // density (#990), so Review is the default. The mode-sensitive checks pass
+  // their own mode and run in both.
+  await page.addInitScript(m => localStorage.setItem('boris-editor-density', m), mode);
   await page.goto('/#token=test-session-token');
 }
 
 /** Computed font-size in px for a selector. */
 async function fontSize(page: Page, selector: string): Promise<number> {
   return page.locator(selector).first().evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize));
+}
+
+/** Distinct sizes, so several panes sharing one token count once. */
+function distinct(sizes: number[]): number[] {
+  return [...new Set(sizes)];
 }
 
 /** Box and line metrics for a locator, so line counting stays honest. */
@@ -170,6 +181,70 @@ for (const width of [1440, 1024]) {
     const leading = await page.locator('#problems-heading + p').first()
       .evaluate(el => Number.parseFloat(getComputedStyle(el).lineHeight) / Number.parseFloat(getComputedStyle(el).fontSize));
     expect(leading).toBeGreaterThanOrEqual(1.4);
+  });
+}
+
+// The level map, in order. Querying one level rather than one element is what
+// makes this a walk of the scale: every pane title is checked, not just the
+// first one, so a single pane overriding h2 cannot hide behind a sibling.
+const HEADING_LEVELS = [
+  { level: 'app title (h1)', selector: 'header h1' },
+  { level: 'pane title (h2)', selector: '.pane-heading h2' },
+  { level: 'sub-pane title (h3)', selector: '.pane-heading h3' }
+] as const;
+
+for (const mode of ['author', 'review'] as const) {
+  test(`heading levels never invert in ${mode} density`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await installApi(page, mode);
+    await openHome(page);
+
+    // Only what is rendered counts, so a title inside a collapsed disclosure
+    // cannot satisfy a level the mode does not actually show.
+    const measured = await Promise.all(
+      HEADING_LEVELS.map(async ({ level, selector }) => {
+        const visible = page.locator(`${selector}:visible`);
+        const count = await visible.count();
+        const sizes: number[] = [];
+        for (let i = 0; i < count; i += 1) {
+          sizes.push(await visible.nth(i).evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize)));
+        }
+        return { level, sizes };
+      })
+    );
+
+    const [app, pane, subPane] = measured;
+    expect(app.sizes.length, 'the app title must be rendered in every density').toBeGreaterThan(0);
+    expect(pane.sizes.length, 'at least one pane title must be rendered').toBeGreaterThan(0);
+
+    const appSize = app.sizes[0];
+    const paneSizes = distinct(pane.sizes);
+    const subPaneSizes = distinct(subPane.sizes);
+
+    // Strict descent, and `toBeLessThan` is strict on purpose: an app title
+    // rendering at exactly the pane-title size is the regression, not a tie.
+    for (const size of paneSizes) {
+      expect(size, `a pane title must stay below the app title in ${mode} density`).toBeLessThan(appSize);
+      expect(size, `a pane title must outrank body copy in ${mode} density`).toBeGreaterThan(BODY_REM);
+    }
+    for (const size of subPaneSizes) {
+      expect(size, `a sub-pane title must stay below every pane title in ${mode} density`)
+        .toBeLessThan(Math.min(...paneSizes));
+      expect(size, `a sub-pane title must outrank body copy in ${mode} density`).toBeGreaterThan(BODY_REM);
+    }
+
+    // No two rendered levels may share a size, stated directly so the failure
+    // names the collision instead of only reporting an ordering miss.
+    const levels: Array<[string, number]> = [
+      ['app title (h1)', appSize],
+      ...paneSizes.map((size): [string, number] => ['pane title (h2)', size]),
+      ...subPaneSizes.map((size): [string, number] => ['sub-pane title (h3)', size]),
+      ['body copy', BODY_REM]
+    ];
+    const bySize = new Map<number, string[]>();
+    for (const [level, size] of levels) bySize.set(size, [...(bySize.get(size) ?? []), level]);
+    const collisions = [...bySize.values()].filter(names => names.length > 1);
+    expect(collisions, `two levels render at one size in ${mode} density: ${JSON.stringify(collisions)}`).toEqual([]);
   });
 }
 
