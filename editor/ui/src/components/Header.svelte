@@ -28,7 +28,17 @@
        full sentence behind the disclosure. -->
   <div class="header-identity">
     <h1>Boris Editor</h1>
-    <p class="connection" role="status" aria-label="Connection status" aria-live="polite">
+    <p class="connection">
+      <!-- #993: the live region is text-only, as every other one in the editor
+           is. A status role is atomic, so a button nested inside it would be
+           re-announced along with the state it sits in; the chip stays a real
+           button beside it, carrying the same short label. -->
+      <span
+        class="visually-hidden-text"
+        role="status"
+        aria-label="Connection status"
+        aria-live="polite">{connection.summary}</span
+      >
       <button
         type="button"
         class="connection-chip"
@@ -63,11 +73,13 @@
     </div>
     <!-- The theme control is a quiet preference, not a headline: the visible
          label is the state itself, matching its accessible name, and the
-         title explains what activating it does. -->
+         title explains what activating it does. It carries no aria-pressed:
+         a pressed state presumes a name that does not change with it, so
+         "Light, not pressed" would contradict the label — here the changing
+         name *is* the state. -->
     <button
       type="button"
       class="theme-toggle"
-      aria-pressed={theme.current === 'dark'}
       title={`Theme: ${theme.current} — switch to ${theme.current === 'dark' ? 'light' : 'dark'}`}
       onclick={toggleTheme}>{theme.current === 'dark' ? 'Dark' : 'Light'}</button
     >

@@ -47,7 +47,7 @@ button.danger:hover:not(:disabled) { background: var(--color-danger-soft); borde
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [role="option"]:focus-visible, summary:focus-visible { outline: var(--focus-ring-width) solid var(--color-focus); outline-offset: var(--focus-ring-offset); }
 a { color: var(--color-link); text-underline-offset: 0.2em; }
 
-.skip-link { position: absolute; left: var(--space-4); top: -4rem; padding: var(--space-3) var(--space-4); background: var(--color-surface); color: var(--color-text); border-radius: var(--radius-md); box-shadow: var(--shadow-2); z-index: 10; }
+.skip-link { position: absolute; left: var(--space-4); top: -4rem; padding: var(--space-3) var(--space-4); background: var(--color-surface); color: var(--color-text); border-radius: var(--radius-md); box-shadow: var(--shadow-2); z-index: var(--layer-skip-link); }
 .skip-link:focus { top: var(--space-4); }
 
 header {
@@ -162,9 +162,12 @@ p { margin-top: 0; }
 /* #993: Author mode gets a calmer top band. The writing surface is the
    subject, so the chrome above it takes less height and less ink — a smaller
    product mark and tighter bands. Review restores the full rhythm, where the
-   header is an entry point into the whole tool rather than a cover page. */
+   header is an entry point into the whole tool rather than a cover page.
+   The smaller mark is its own step in the chain (lib/tokens.css), not the
+   pane-title size: dropping h1 to --text-xl would have made the app title
+   exactly as large as the pane titles it outranks. */
 header[data-density='author'] { padding-block: var(--space-3); }
-header[data-density='author'] h1 { font-size: var(--text-xl); }
+header[data-density='author'] h1 { font-size: var(--text-2xl-compact); }
 
 .section-nav {
   display: flex;
@@ -175,7 +178,7 @@ header[data-density='author'] h1 { font-size: var(--text-xl); }
 }
 /* #941 C: the nav stays reachable after any jump. The header is not sticky,
    so this sticks cleanly below the viewport top. */
-.section-nav { position: sticky; top: 0; z-index: 5; }
+.section-nav { position: sticky; top: 0; z-index: var(--layer-nav); }
 /* The inner row is the scroller: flex 1 + min-width 0 let it shrink below
    its content so overflow-x can engage on narrow viewports; the fade bars
    stay anchored to the non-scrolling nav. */
@@ -476,6 +479,11 @@ main.author-mode .source-editor-shell:focus-within {
   border-color: var(--color-focus);
   box-shadow: 0 0 0 0.18rem var(--color-accent-soft);
 }
+/* #993: the shell is the page in Author, so it owns the focus ring. The
+   textarea keeps the global ring everywhere else, but inside this shell it
+   would draw a second rust frame just inside the page edge — a frame within
+   a frame, which is the boxed-admin look the page treatment replaced. */
+main.author-mode .source-surface textarea:focus-visible { outline: none; }
 .source-editor-shell.readonly { background: var(--color-sunken); }
 .source-gutter {
   position: relative;
@@ -804,7 +812,7 @@ footer .key-hint { margin: 0 0 0.35rem; }
 .focus-overlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--layer-overlay);
   display: flex;
   flex-direction: column;
   background: var(--color-canvas);
@@ -909,11 +917,11 @@ footer .key-hint { margin: 0 0 0.35rem; }
   flex: 1 1 0;
   min-width: 0;
 }
-.focus-editor-shell .focus-editor { position: relative; z-index: 1; }
+.focus-editor-shell .focus-editor { position: relative; z-index: var(--layer-focus-editor); }
 .zen-underlay {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: var(--layer-focus-zen);
   opacity: var(--zen-underlay);
   pointer-events: none;
   border-radius: var(--radius-lg);
@@ -923,7 +931,7 @@ footer .key-hint { margin: 0 0 0.35rem; }
 .focus-mirror {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: var(--layer-focus-mirror);
   /* opacity instead of visibility: Chrome returns empty client rects for
      ranges inside visibility:hidden subtrees, which would blind both aids. */
   opacity: 0;

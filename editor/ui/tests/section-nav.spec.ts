@@ -121,7 +121,8 @@ async function installApi(page: Page, options: InstallOptions = {}) {
 // label, and the honest sentence is one activation away. These continuity
 // checks are about the sentence, so they expand the chip first.
 async function expandConnection(page: Page) {
-  const toggle = page.getByRole('status', { name: 'Connection status' }).getByRole('button');
+  // The chip is a sibling of the text-only live region, not a descendant (#993).
+  const toggle = page.locator('.connection-chip');
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   return page.locator('.connection-detail');
 }

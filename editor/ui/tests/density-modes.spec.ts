@@ -343,6 +343,10 @@ test('Author gives Source page material and keeps the mirror 1:1', async ({ page
   await editor.focus();
   await expect.poll(() => shell.evaluate(el => getComputedStyle(el).borderTopColor)).not.toBe(unfocusedBorder);
 
+  // The shell owns the ring, so the focused textarea must not draw a second
+  // rust frame just inside the page edge — one edge, not a frame in a frame.
+  expect(await editor.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('none');
+
   // The wider measure rides --source-pad-x, which the textarea and its
   // measuring mirror both read: if they ever diverge, mirror rects stop
   // mapping 1:1 to buffer coordinates and the gutter/current-line drift.
@@ -459,17 +463,26 @@ test('Author gives the top band a calmer rhythm than Review', async ({ page }) =
   expect(status!.y).toBeLessThan(title!.y + title!.height);
 
   // The theme control states the state, and its visible label is its
-  // accessible name — the editor's standing rule for visible labels.
+  // accessible name — the editor's standing rule for visible labels. It is
+  // deliberately not a pressed toggle: a pressed state presumes a name that
+  // does not change with it, so "Light, not pressed" would contradict the
+  // label. Here the changing name *is* the state.
   const themeButton = page.getByRole('button', { name: 'Dark', exact: true });
-  await expect(themeButton).toHaveAttribute('aria-pressed', 'true');
   await expect(themeButton).toHaveText('Dark');
+  expect(await themeButton.getAttribute('aria-pressed')).toBeNull();
 
   // Author tightens the band and drops the product mark a step; Review
-  // restores the full rhythm.
+  // restores the full rhythm. The smaller mark is still an app title: it
+  // outranks the pane titles below it (dropping h1 to --text-xl had made the
+  // two identical, and nothing caught it).
   const author = {
     header: (await page.locator('header').boundingBox())!.height,
-    title: await page.locator('header h1').evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize))
+    title: await page.locator('header h1').evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize)),
+    paneTitle: await page
+      .locator('#source .pane-heading h2')
+      .evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize))
   };
+  expect(author.title).toBeGreaterThan(author.paneTitle);
   await switchToReview(page);
   const review = {
     header: (await page.locator('header').boundingBox())!.height,
@@ -484,10 +497,16 @@ test('the connection readout is a compact chip whose detail is on demand', async
   await openHome(page);
 
   const region = page.getByRole('status', { name: 'Connection status' });
-  const chip = region.getByRole('button');
+  const chip = page.locator('.connection-chip');
+
+  // The live region is text-only, as every other status region in the editor
+  // is: a button inside an atomic region would be re-announced with the state
+  // it sits in. The chip is a real button beside it, not inside it.
+  await expect(region.getByRole('button')).toHaveCount(0);
 
   // The live text is the short state, not the sentence that used to occupy the
   // band on every load, and the honest detail is not in the DOM until asked for.
+  await expect(region).toHaveText('Connected');
   await expect(chip).toHaveText('Connected');
   await expect(region).not.toContainText('Opened project in');
   await expect(page.locator('.connection-detail')).toHaveCount(0);
