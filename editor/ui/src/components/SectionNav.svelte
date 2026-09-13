@@ -81,6 +81,17 @@
     return section !== null && section.getClientRects().length > 0;
   }
 
+  // The section whose box spans the reading line — the pane the author is
+  // actually looking at. A mode-gated reveal can leave the page clamped at
+  // max scroll, where geometry-only rules hand currency to another pane even
+  // though the landed target covers the line.
+  function sectionCoversReadingLine(section: HTMLElement | null): boolean {
+    if (!sectionVisible(section)) return false;
+    const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
+    const rect = section.getBoundingClientRect();
+    return rect.top <= margin + LINE_TOLERANCE_PX && rect.bottom > margin;
+  }
+
   function clearArrival() {
     arrivedElement?.classList.remove('arrived');
     arrivedElement = undefined;
@@ -182,6 +193,16 @@
   // Above every section (page top), the journey starts at the first link so
   // wayfinding never reads as "nowhere".
   function syncCurrent() {
+    // The most recent jump target stays current while it still covers the
+    // reading line. A mode-gated reveal can leave the page clamped at max
+    // scroll, where the bottom rule and the nearest-above heuristic would
+    // hand currency to another pane even though the author's target is the
+    // visible destination (#992 review). Scrolling the target off the line
+    // releases it, so a stale jump never pins wayfinding.
+    if (jumpTarget && sectionCoversReadingLine(sectionFor(jumpTarget))) {
+      current = jumpTarget;
+      return;
+    }
     // Bottom rule (standard scrollspy behavior): at max scroll the last
     // present section is current, because a short page or the footer clamp
     // can keep it from ever reaching the reading line.
@@ -225,18 +246,6 @@
       if (top <= margin + LINE_TOLERANCE_PX && top > bestTop) {
         best = id;
         bestTop = top;
-      }
-    }
-    // A jump destination that is still at the reading line wins a tie against
-    // a pane that shares its offset in another column. Once scrolling moves
-    // the destination out of contention the reading-line answer takes over
-    // again, so this self-releases and never pins currency to a stale jump.
-    if (jumpTarget && best !== jumpTarget) {
-      const target = sectionFor(jumpTarget);
-      if (sectionVisible(target)) {
-        const margin = parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
-        const top = target.getBoundingClientRect().top;
-        if (top <= margin + LINE_TOLERANCE_PX && top >= bestTop) best = jumpTarget;
       }
     }
     current = best ?? links[0].id;

@@ -249,6 +249,29 @@ test('a nav link to a pane in the other mode switches modes and lands there', as
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Switched to Review mode');
 });
 
+test('a reduced-motion reveal keeps aria-current on the landed target at max scroll', async ({ page }) => {
+  // QA repro: a mode-gated reveal grows the page (Review mounts the Graph
+  // pane), the jump clamps at max scroll, and the reading line falls inside
+  // the Graph pane. The landed target must keep its active marker instead of
+  // the spy's bottom rule handing it to the last present pane.
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await installApi(page);
+  await openHome(page);
+
+  const graph = page.getByRole('navigation', { name: 'Editor sections' }).getByRole('link', { name: 'Graph', exact: true });
+  await graph.click();
+  await expect(page.locator('#graph')).toBeFocused();
+  await expect(graph).toHaveAttribute('aria-current', 'true');
+
+  // Settled state, after the spy's 600 ms resync: the target still owns
+  // wayfinding and no other link claims it.
+  await page.waitForTimeout(800);
+  await expect(graph).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByRole('navigation', { name: 'Editor sections' }).getByRole('link', { name: 'Watch', exact: true }))
+    .not.toHaveAttribute('aria-current');
+});
+
 test('the measured line gutter and current-line band track the caret', async ({ page }) => {
   await installApi(page);
   const editor = await openHome(page);

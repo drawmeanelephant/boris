@@ -755,7 +755,10 @@ preferences. The mode is disposable UI state, never project truth:
   authoring hints fold into a single disclosure under the writing surface
   instead of a second card. A section-nav link whose pane lives in Review
   switches modes and then lands on the real pane — it stays enabled, muted,
-  and titled, so the nav never claims a hidden pane is present.
+  and titled, so the nav never claims a hidden pane is present. A landing
+  that clamps at max scroll keeps the target's `aria-current` while the
+  target's box still covers the reading line; scrolling off it releases the
+  marker.
 - **Review**: the full diagnostics chrome, unchanged.
 
 Source is the hero in both modes (#989): the writing column outweighs the
