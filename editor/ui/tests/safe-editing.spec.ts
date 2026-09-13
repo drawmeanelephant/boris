@@ -3185,12 +3185,16 @@ test('opening the project names how long connect took (#418 M11)', async ({ page
 });
 
 test('opening and saving a file name the wait and elapsed time (#418 M11)', async ({ page }) => {
+  // No content/index.md: a default launch open would consume the wait copy
+  // before this test can click a file.
   await installApi(page, {
-    files: [{ path: 'boris.json' }, { path: 'content/index.md' }, { path: 'content/guides/start.md' }]
+    files: [{ path: 'boris.json' }, { path: 'content/guides/start.md' }]
   });
+  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
+  const holdOpenMs = 300;
   await page.route('**/api/files/open', async route => {
     const { path } = route.request().postDataJSON() as { path: string };
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await new Promise(resolve => setTimeout(resolve, holdOpenMs));
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -3201,7 +3205,7 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
   });
   await page.route('**/api/files/save', async route => {
     const body = route.request().postDataJSON() as { path: string; content: string };
-    await new Promise(resolve => setTimeout(resolve, 80));
+    await new Promise(resolve => setTimeout(resolve, holdOpenMs));
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
