@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { buffer } from '../lib/state/buffer.svelte';
 
   let {
@@ -25,15 +26,29 @@
   let unsavedVersion = $state<HTMLTextAreaElement | undefined>();
   let diskVersion = $state<HTMLTextAreaElement | undefined>();
 
+  function resetCompareScroll() {
+    for (const area of [deletedVersion, unsavedVersion, diskVersion]) {
+      if (!area) continue;
+      area.scrollTop = 0;
+      area.setSelectionRange(0, 0);
+    }
+  }
+
   // Compare panes can otherwise reopen at leftover scroll offsets from a
   // previous conflict, so the two columns look more divergent than they are.
+  // showModal focuses the first tabbable control; without autofocus on the
+  // primary button that can be the unsaved textarea, which jumps the caret
+  // (and scrollTop) to the end after this reset. Include the textarea refs
+  // and dialog.open so the reset runs after mount and after the dialog opens.
   $effect(() => {
     void buffer.content;
     void buffer.conflict?.content;
     void buffer.deletedConflict;
-    if (deletedVersion) deletedVersion.scrollTop = 0;
-    if (unsavedVersion) unsavedVersion.scrollTop = 0;
-    if (diskVersion) diskVersion.scrollTop = 0;
+    void deletedVersion;
+    void unsavedVersion;
+    void diskVersion;
+    void dialog?.open;
+    void tick().then(resetCompareScroll);
   });
 </script>
 
@@ -46,7 +61,8 @@
     <div class="dialog-actions">
       <button type="button" aria-keyshortcuts="Escape" onclick={onKeepEditing}>Keep editing<kbd aria-hidden="true">Esc</kbd></button>
       <button type="button" aria-keyshortcuts="Alt+D" onclick={onDiscardDeleted}>Discard changes<kbd aria-hidden="true">Alt+D</kbd></button>
-      <button type="button" class="primary" aria-keyshortcuts="Enter" onclick={onRecreate}>Re-create file<kbd aria-hidden="true">Enter</kbd></button>
+      <!-- svelte-ignore a11y_autofocus -->
+      <button type="button" class="primary" autofocus aria-keyshortcuts="Enter" onclick={onRecreate}>Re-create file<kbd aria-hidden="true">Enter</kbd></button>
     </div>
   {:else if buffer.conflict}
     <p>{buffer.activePath} changed on disk after you opened it. Compare both versions before choosing.</p>
@@ -63,7 +79,8 @@
     <div class="dialog-actions">
       <button type="button" aria-keyshortcuts="Escape" onclick={onKeepEditing}>Keep editing<kbd aria-hidden="true">Esc</kbd></button>
       <button type="button" aria-keyshortcuts="Alt+L" onclick={onLoadDisk}>Load disk version<kbd aria-hidden="true">Alt+L</kbd></button>
-      <button type="button" class="primary" aria-keyshortcuts="Enter" onclick={onReplace}>Replace disk version<kbd aria-hidden="true">Enter</kbd></button>
+      <!-- svelte-ignore a11y_autofocus -->
+      <button type="button" class="primary" autofocus aria-keyshortcuts="Enter" onclick={onReplace}>Replace disk version<kbd aria-hidden="true">Enter</kbd></button>
     </div>
   {/if}
 </dialog>

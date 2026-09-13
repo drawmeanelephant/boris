@@ -228,11 +228,40 @@ dialogs, conflict comparison, and recovered-state labeling.
 M2 deliberately does not invoke Boris, parse frontmatter or Markdown, provide
 completion, autosave, Git integration, diagnostics, or preview.
 
+## CLI to editor capability matrix
+
+The editor is a closed allowlist of Boris invocations, not a second compiler
+or a deploy console. This table is the map for allowlist growth. Wire argv
+lives in [`docs/contracts/editor-host.md`](../docs/contracts/editor-host.md)
+§6; this table records whether a CLI surface has an editor entrypoint.
+
+| CLI / surface | Editor entrypoint | Status | Notes |
+|---|---|---|---|
+| `validate` | Problems → Validate project | done | Served by the validation daemon when the compiler advertises `--watch`. |
+| `build --out .boris` | Problems → Build diagnostics | done | Creates `graph.json` / completion for the Graph pane. |
+| `build --html-dir dist` | Problems → Build HTML; Preview → Rebuild preview | done | Preview uses the fixed incremental rebuild, not the full flag matrix. |
+| `check` | Problems → Check graph | done | |
+| `impact` | Problems / Graph → Run impact | done | |
+| `plan --profile` | Publication → Run publication plan | done | Declaration only; not a deploy. |
+| `recipe-scale` | Recipe pane → Scale recipe | done | Compiler-owned view; the editor does not multiply amounts. |
+| `graph` (Mermaid / DOT) | Graph → Export graph | done | Default Mermaid, optional Graphviz DOT. Boris remains the renderer. |
+| Graph map of frozen `graph.json` | Graph pane map | related | Visual aid of the last IR graph; not the `boris graph` CLI. |
+| `proof verify` | Problems / Publication → Verify proof | done | Read-only; default policy; no credentials. |
+| `watch` / Watch daemon | Watch pane | partial | Host-managed start/stop/event stream for the fixed `boris watch --watch-json` argv. Not the full watch flag matrix. |
+| IR / RAG / context / llms / rss / sitemap exports | — | missing | Stay on the CLI until a later allowlisted wrapper. |
+| `standard-site *` / `nostr *` publish or login | — | non-goal | No secrets and no deploy in the editor. |
+| `init` | — | non-goal | Project bootstrap stays a CLI / `boris init` concern. |
+| Full `build` flag matrix | — | non-goal | Each mode has one host-fixed argv. |
+| `serve` | Preview origin | non-goal | Loopback preview of committed `dist/` is the fallback while compiler-owned `boris serve` is in flight. |
+
+Statuses are `done`, `partial`, `missing`, or `non-goal`. Non-goals stay
+non-goals until a contract change says otherwise.
+
 ## M3 Boris commands and problems
 
 The host exposes one authenticated `POST /api/commands/run` endpoint backed by
 a fixed command allowlist: validate, IR build, HTML build, check, impact,
-plan, and recipe-scale.
+plan, recipe-scale, graph export, and proof verify.
 The UI cannot supply argv or a working directory. Commands run against saved
 repository files, so all controls are disabled while the active buffer is
 dirty.
@@ -459,7 +488,9 @@ and node borders scale with topology (direct children plus incoming
 references). The SVG is `aria-hidden` — it is a pointer convenience, and the
 lists remain the keyboard path. The map viewport is a focusable scroll
 container (wheel, touch, arrow keys), and its zoom controls fit the graph to
-the pane width, zoom in and out, or restore actual size.
+the pane width, zoom in and out, or restore actual size. **Export graph**
+runs the fixed `boris graph` invocation (Mermaid by default, DOT as the
+second option) and offers copy or download of that document.
 
 The diagnostics integration gate deep-compares `/api/graph` with the real
 compiler-generated `graph.json`. Playwright covers parent/backlink/wiki-link
@@ -472,8 +503,9 @@ model, heading-fragment navigation, or theme/layout diagnostics.
 ## M7 Cooklang / restaurant authoring
 
 A content tree of only `.cook` pages is a Cooklang project. Health reports
-`input_mode: cooklang`, and every fixed Boris invocation (validate, IR/HTML
-build, check, impact, preview) adds `--cooklang`. Mixed trees stay mixed and
+`input_mode: cooklang`, and every fixed Boris invocation that compiles the
+tree (validate, IR/HTML build, check, impact, preview, graph export) adds
+`--cooklang`. `plan` and `proof verify` do not. Mixed trees stay mixed and
 fail the way Boris fails; the editor does not guess a dialect.
 
 The Recipe pane is a read-only view of the compiler `recipe` facet on

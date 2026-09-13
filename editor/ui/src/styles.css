@@ -302,6 +302,11 @@ input:disabled, select:disabled, textarea:disabled { background: var(--color-sun
 .graph-pane { min-height: 0; margin-top: var(--space-5); padding: var(--space-4); border: 1px solid var(--color-accent-border); border-radius: var(--radius-md); background: var(--color-surface-tint); }
 .graph-current { font-weight: 700; font-size: var(--text-sm); font-family: var(--font-mono); overflow-wrap: anywhere; }
 .graph-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; margin: 0.75rem 0; }
+.graph-export { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: end; }
+.graph-export label { margin: 0; }
+.graph-export select { width: auto; min-width: 11rem; }
+.graph-export-document { margin: 0.75rem 0 0; }
+.graph-export-document textarea { min-height: 10rem; max-height: 16rem; font-size: var(--text-sm); }
 .graph-links { margin: 0; padding: 0; list-style: none; }
 .graph-links li { font-size: var(--text-sm); }
 .graph-links li + li { margin-top: 0.35rem; }
@@ -421,6 +426,18 @@ input:disabled, select:disabled, textarea:disabled { background: var(--color-sun
 .publication-pane dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: var(--space-3); padding: 0.25rem 0; font-size: var(--text-sm); }
 .publication-pane dt { font-weight: 700; }
 .publication-pane dd { margin: 0; }
+.proof-report {
+  margin: 0.75rem 0 0;
+  padding: var(--space-3);
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-sunken);
+  font: var(--text-sm)/var(--leading-normal) var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 dialog {
   width: min(52rem, calc(100% - 2rem));
@@ -455,7 +472,7 @@ dialog.command-palette .dialog-actions { margin-top: 0.75rem; }
 .dialog-actions kbd { margin-left: 0.45rem; margin-right: 0; padding: 0.08rem 0.35rem; }
 button.primary kbd { background: var(--kbd-on-accent-bg); }
 .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
-.comparison textarea, dialog > textarea { min-height: 13rem; }
+.comparison textarea, dialog > textarea { min-height: 13rem; max-height: min(20rem, 40vh); }
 footer { padding: var(--space-4) var(--content-pad) var(--space-7); }
 footer p { margin-bottom: 0; color: var(--color-text-muted); font-size: var(--text-sm); }
 footer .key-hint { margin: 0 0 0.35rem; }

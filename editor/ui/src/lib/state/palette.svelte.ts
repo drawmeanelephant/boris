@@ -49,6 +49,8 @@ export function paletteItems(): PaletteItem[] {
     { kind: 'command', mode: 'check' },
     { kind: 'command', mode: 'impact' },
     { kind: 'command', mode: 'plan' },
+    { kind: 'command', mode: 'graph_export' },
+    { kind: 'command', mode: 'proof_verify' },
     { kind: 'preview' },
     { kind: 'source' },
     { kind: 'focus-enter' },
@@ -97,6 +99,9 @@ export function paletteEnabled(): Map<string, boolean> {
       if (item.kind === 'impact-here') return [paletteItemKey(item), activeNode() !== null && !problems.running] as const;
       if (item.kind === 'save') return [paletteItemKey(item), dirty() && !buffer.readOnly && !buffer.saveInFlight] as const;
       if (item.kind === 'preview') return [paletteItemKey(item), preview.data?.phase !== 'running'] as const;
+      if (item.kind === 'command' && item.mode === 'graph_export') {
+        return [paletteItemKey(item), !problems.running && graph.payload?.graph_status === 'ready'] as const;
+      }
       if (item.kind === 'command') return [paletteItemKey(item), !problems.running] as const;
       if (item.kind === 'watch-start') return [paletteItemKey(item), watchStartEnabled()] as const;
       if (item.kind === 'watch-stop') return [paletteItemKey(item), watchStopEnabled()] as const;

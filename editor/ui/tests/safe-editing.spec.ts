@@ -43,6 +43,8 @@ type CommandResult = {
   impact: Array<Record<string, unknown>>;
   publication_plan?: Record<string, unknown> | null;
   recipe_scale_view?: Record<string, unknown> | null;
+  graph_document?: string | null;
+  proof_report?: string | null;
 };
 
 function commandResult(mode: string, overrides: Partial<CommandResult> = {}): CommandResult {
@@ -51,6 +53,8 @@ function commandResult(mode: string, overrides: Partial<CommandResult> = {}): Co
     report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
     publication_plan: null,
     recipe_scale_view: null,
+    graph_document: null,
+    proof_report: null,
     ...overrides
   };
 }
@@ -414,6 +418,26 @@ test('external edits open an explicit two-version conflict dialog', async ({ pag
   await dialog.getByRole('button', { name: 'Load disk version' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Changed elsewhere\n');
+});
+
+test('conflict compare panes open scrolled to the top (#984)', async ({ page }) => {
+  const longUnsaved = Array.from({ length: 120 }, (_, index) => `unsaved line ${index + 1} of a long buffer.`).join('\n');
+  await installApi(page, { saveConflict: true });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill(longUnsaved);
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'External changes detected' });
+  await expect(dialog).toBeVisible();
+  const unsaved = dialog.locator('#unsaved-version');
+  const disk = dialog.locator('#disk-version');
+  await expect(unsaved).toHaveValue(longUnsaved);
+  expect(await unsaved.evaluate((node) => {
+    const area = node as HTMLTextAreaElement;
+    return { top: area.scrollTop, overflows: area.scrollHeight > area.clientHeight };
+  })).toEqual({ top: 0, overflows: true });
+  expect(await disk.evaluate((node) => (node as HTMLTextAreaElement).scrollTop)).toBe(0);
+  await expect(dialog.getByRole('button', { name: /Replace disk version/ })).toBeFocused();
 });
 
 test('Enter confirms the Delete dialog primary action with a visible hint (#462)', async ({ page }) => {
@@ -824,6 +848,7 @@ test('Boris commands expose visible accessible names and distinct exit classes',
   for (const name of ['Validate project', 'Build diagnostics', 'Build HTML', 'Check graph', 'Run impact']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveText(name);
   }
+  await expect(page.locator('#problems').getByRole('button', { name: 'Verify proof', exact: true })).toHaveText('Verify proof');
   await page.getByRole('button', { name: 'Build diagnostics', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Content or graph failure (exit 1)');
@@ -2707,6 +2732,30 @@ test('graph inspector refreshes after a successful diagnostics build (#418 M6)',
   await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Boris graph ready (3 pages).');
 });
 
+test('Export graph stays disabled until diagnostics exist (#985)', async ({ page }) => {
+  await installApi(page, { graph: [graphPayload(false)] });
+  await expect(page.getByRole('button', { name: 'Export graph', exact: true })).toBeDisabled();
+  await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Build diagnostics to create the Boris graph.');
+});
+
+test('Export graph runs allowlisted boris graph and offers the document (#985)', async ({ page }) => {
+  const mermaid = 'graph TD\n  p0["Home"]:::trunk\n';
+  await installApi(page, {
+    files: graphFiles,
+    commands: { graph_export: commandResult('graph_export', { graph_document: mermaid }) }
+  });
+  const graph = page.locator('#graph');
+  await expect(graph.getByRole('button', { name: 'Export graph', exact: true })).toBeEnabled();
+  const request = page.waitForRequest('**/api/commands/run');
+  await graph.getByRole('combobox', { name: 'Export format', exact: true }).selectOption('dot');
+  await graph.getByRole('button', { name: 'Export graph', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  expect((await request).postDataJSON()).toMatchObject({ mode: 'graph_export', graph_format: 'dot' });
+  await expect(graph.getByRole('textbox', { name: 'Exported Graphviz DOT' })).toHaveValue(mermaid);
+  await expect(graph.getByRole('button', { name: 'Copy export', exact: true })).toBeVisible();
+  await expect(graph.getByRole('button', { name: 'Download export', exact: true })).toBeVisible();
+});
+
 test('publication pane plans an existing profile and does not deploy (#418 M9)', async ({ page }) => {
   const plan = {
     format: 'boris-publication-plan',
@@ -2760,6 +2809,36 @@ test('publication pane plans an existing profile and does not deploy (#418 M9)',
   await expect(publication.getByRole('heading', { name: 'Local evidence' })).toBeVisible();
   await expect(publication).toContainText('no-deployment-verification');
   await expect(page.getByRole('button', { name: 'Deploy', exact: true })).toHaveCount(0);
+});
+
+test('Verify proof runs allowlisted boris proof verify (#986)', async ({ page }) => {
+  const report = 'boris proof verify: dist/_boris/proof/checks.json\n  checks: 3/3 passed\nverdict: pass\n';
+  await installApi(page, {
+    publication: {
+      profiles: [{ path: 'boris.json' }],
+      proof: {
+        path: 'dist/_boris/proof/proof-pack.json',
+        html_path: 'dist/_boris/proof/index.html',
+        target: 'public',
+        schema_version: '1',
+        overall_presentation_status: 'verified',
+        artifacts_total: 2,
+        checks_total: 3,
+        findings_total: 0,
+        claims_total: 3
+      }
+    },
+    commands: { proof_verify: commandResult('proof_verify', { proof_report: report }) }
+  });
+  const publication = page.locator('#publication');
+  const request = page.waitForRequest('**/api/commands/run');
+  await publication.getByRole('button', { name: 'Verify proof', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  expect((await request).postDataJSON()).toMatchObject({ mode: 'proof_verify' });
+  await expect(publication.getByRole('heading', { name: 'Proof verify report' })).toBeVisible();
+  await expect(publication).toContainText('verdict: pass');
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Verify proof finished: Success');
+  await expect(page.locator('#problems').getByRole('heading', { name: 'Proof verify report' })).toBeVisible();
 });
 
 function visibleLabel(text: string): string {

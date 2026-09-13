@@ -99,6 +99,20 @@ node -e '
   if (r.exit_code !== 0 || r.failure_class !== "success" || r.used_stderr_fallback || !r.report_version || !Array.isArray(r.findings)) throw Error("check artifact adaptation mismatch");
 ' "$work/check-valid.json"
 
+run_command "$work/graph-export.json" '{"mode":"graph_export"}'
+node -e '
+  const r = require(process.argv[1]);
+  if (r.mode !== "graph_export" || r.exit_code !== 0 || r.failure_class !== "success") throw Error("graph export failed: " + JSON.stringify({mode:r.mode,exit:r.exit_code,cls:r.failure_class}));
+  if (typeof r.graph_document !== "string" || r.graph_document.indexOf("graph TD") < 0) throw Error("expected mermaid document, got " + JSON.stringify(r.graph_document && r.graph_document.slice(0, 80)));
+  if (r.used_stderr_fallback) throw Error("graph export should not be a stderr fallback");
+' "$work/graph-export.json"
+
+run_command "$work/graph-export-dot.json" '{"mode":"graph_export","graph_format":"dot"}'
+node -e '
+  const r = require(process.argv[1]);
+  if (r.exit_code !== 0 || typeof r.graph_document !== "string" || r.graph_document.indexOf("digraph") < 0) throw Error("expected DOT document");
+' "$work/graph-export-dot.json"
+
 run_command "$work/impact-missing.json" '{"mode":"impact","impact_id":"does-not-exist"}'
 node -e '
   const r = require(process.argv[1]);
@@ -132,5 +146,14 @@ node -e '
   if (report.schemaVersion !== "html-build-report-0.2.0") throw Error("html-build-report.json missing");
 ' "$work/html-valid.json" "$work/project/.boris/html-build-report.json"
 [[ -f "$work/project/dist/index.html" ]]
+
+run_command "$work/proof-verify.json" '{"mode":"proof_verify"}'
+node -e '
+  const r = require(process.argv[1]);
+  if (r.mode !== "proof_verify") throw Error("proof verify mode not echoed: " + JSON.stringify(r));
+  if (r.used_stderr_fallback) throw Error("proof verify stderr is the contracted report, not a fallback");
+  if (typeof r.proof_report !== "string" || r.proof_report.indexOf("proof verify") < 0) throw Error("expected proof verify report, got " + JSON.stringify(r.proof_report));
+  if (![0, 1, 3].includes(r.exit_code)) throw Error("unexpected proof verify exit: " + r.exit_code);
+' "$work/proof-verify.json"
 
 echo "editor Boris diagnostics integration: ok"
