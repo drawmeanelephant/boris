@@ -1006,7 +1006,7 @@ footer .key-hint { margin: 0 0 0.35rem; }
      Source column is the working surface and takes the weight (#989), and the
      rail carries prose. Author mode (#990) drops the rail: two columns, with
      the writing surface taking the freed width. */
-  main { grid-template-columns: minmax(15rem, 0.5fr) minmax(28rem, 1.9fr) minmax(20rem, 1.05fr); }
+  main { grid-template-columns: minmax(15rem, 0.5fr) minmax(28rem, 1.8fr) minmax(22rem, 1.15fr); }
   main.author-mode { grid-template-columns: minmax(15rem, 0.5fr) minmax(28rem, 2.2fr); }
   .workspace-rail { grid-column: auto; max-height: calc(100vh - 14rem); overflow-y: auto; }
   /* Keep rail panes from shrinking below their content: a shrunken box spills
