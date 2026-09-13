@@ -2583,8 +2583,11 @@ fn takeValueAllowEmpty(
     return args[i.*];
 }
 
-pub fn printUsage() void {
-    std.debug.print(
+/// The public CLI help text. It is a named const rather than an inline literal
+/// inside the printer so a test can assert its shape: nothing read this text,
+/// which is how a doubled multiline marker survived on one mode line and
+/// printed a stray backslash in `boris --help`.
+pub const usage_text =
         \\Boris — Zig content compiler (HTML site + IR + optional RAG)
         \\
         \\Usage: boris <command> [options]
@@ -2596,7 +2599,7 @@ pub fn printUsage() void {
         \\  check               Read-only graph health report (findings do not fail by default)
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
-        \\  \\  recipe-scale        Print a derived Cooklang scale view (no rewrite)
+        \\  recipe-scale        Print a derived Cooklang scale view (no rewrite)
         \\  graph               Read-only graph render: Mermaid (default) or Graphviz DOT
         \\  proof verify        Fail when committed publication-check findings exceed policy
         \\  standard-site publish  One-shot Standard.site publish (stored session + reconcile; never implicit)
@@ -2796,7 +2799,10 @@ pub fn printUsage() void {
         \\      values fail validation). A draft renders to its .html files but is
         \\      excluded from nav, search, sitemap, RSS, and publication projections.
         \\
-    , .{});
+;
+
+pub fn printUsage() void {
+    std.debug.print("{s}", .{usage_text});
 }
 
 /// Focused usage for the `standard-site` family. `boris standard-site` with
@@ -3097,6 +3103,35 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
+
+test "usage: the public help text is well-formed and lists the shipped commands" {
+    // Regression: a doubled multiline marker on the `recipe-scale` mode line
+    // printed a stray backslash into `boris --help`. Nothing read this text, so
+    // assert the two properties that would have caught it.
+    try std.testing.expect(std.mem.indexOfScalar(u8, usage_text, '\\') == null);
+
+    // Every shipped command must be discoverable from the Modes list: this text
+    // and the reference page are the two places a user looks first.
+    const commands = [_][]const u8{
+        "build",
+        "validate",
+        "watch",
+        "check",
+        "impact",
+        "plan",
+        "recipe-scale",
+        "graph",
+        "proof verify",
+        "init",
+        "standard-site publish",
+        "nostr plan",
+    };
+    for (commands) |name| {
+        const line = try std.fmt.allocPrint(std.testing.allocator, "  {s}", .{name});
+        defer std.testing.allocator.free(line);
+        try std.testing.expect(std.mem.indexOf(u8, usage_text, line) != null);
+    }
+}
 
 test "parse: default is HTML mode" {
     var o = try parseOptions(std.testing.allocator, &.{"boris"});
