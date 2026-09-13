@@ -18,9 +18,11 @@ This page is lookup. For which command to run first, see
 
 </Aside>
 
-The public CLI has six core commands plus the `standard-site` and `nostr`
-families. With no command, Boris runs `build` and publishes an HTML site
-under `dist/` — the default target, not the only one.
+The public CLI is a small command set plus the `standard-site` and `nostr`
+families: `build`, `validate`, `watch`, `check`, `impact`, `plan`,
+`recipe-scale`, `graph`, `proof verify`, and `init`. With no command, Boris
+runs `build` and publishes an HTML site under `dist/` — the default target,
+not the only one.
 
 ## Commands at a glance
 
@@ -37,6 +39,9 @@ under `dist/` — the default target, not the only one.
 | `nostr sign` | Sign a plan artifact into a signed-event bundle (key once via stdin) | No; bundle JSON on stdout or `--out PATH` |
 | `nostr publish` | Send the exact signed events to the plan's relays over WebSocket | No; report JSON on stdout or `--out PATH` |
 | `recipe-scale --id PAGE --factor TEXT` | Print a derived Cooklang scale view | No; view JSON on stdout or `--out PATH` |
+| `graph` | Render the frozen graph as Mermaid (default) or Graphviz DOT | No; render on stdout or `--out PATH` |
+| `proof verify` | Apply the publication-check policy to a committed `checks.json` | No; verdict report on stderr |
+| `init [DIR]` | Materialize a deterministic starter site and verify that it compiles | A starter tree into `DIR` (must be empty) |
 
 ## Basic usage
 
@@ -209,6 +214,47 @@ for the normative contract.
 | `--report PATH` | Write the analysis report to PATH instead of stderr (check/impact) |
 | `--quiet` | Suppress normal progress and diagnostic text where supported |
 
+## Graph renders
+
+```bash
+./zig-out/bin/boris graph --input content --format mermaid
+./zig-out/bin/boris graph --input content --format dot --out graph.dot
+```
+
+`graph` renders the frozen content graph read-only: Mermaid by default, or
+Graphviz DOT with `--format dot`. It writes nothing unless `--out PATH` names a
+single file, and it never mutates the graph. See
+[`graph-formats.md`](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/graph-formats.md)
+for the normative render contract.
+
+## Publication-check policy
+
+```bash
+./zig-out/bin/boris proof verify --html-dir dist
+./zig-out/bin/boris proof verify --html-dir dist --max-warnings 0
+```
+
+`proof verify` applies the publication-check severity policy to the committed
+`checks.json` of one target. It writes no artifacts — the verdict goes to
+stderr — and findings beyond the configured caps exit `1`. `--max-errors N`,
+`--max-warnings N`, and repeatable `--block-code CODE` select the policy. This
+is the gate the GitHub Pages workflow runs before it deploys, so running it
+locally predicts the deploy.
+
+## Starter site
+
+```bash
+./zig-out/bin/boris init my-site
+```
+
+`init [DIR]` materializes a fixed starter tree — three content pages that
+exercise the graph, a closed-slot theme whose layout ships the rendered-search
+client, and the two publication profiles — and then compiles it through the
+normal HTML pipeline into a probe directory that is removed again. `DIR` must
+be empty or not exist, and the tree is byte-deterministic. Exit `0` means the
+starter was both materialized and compiled; a probe failure removes the tree
+and exits `1`, and a target outside the workspace skips the probe and says so.
+
 ## Publication profiles
 
 ```bash
@@ -244,7 +290,7 @@ workflow plus `plan --profile` for the normalized location.
 | Code | Meaning |
 |---:|---|
 | `0` | Command completed successfully |
-| `1` | Content/graph error, or a failing `check` health finding |
+| `1` | Content/graph error, a failing `check` health finding, or a `proof verify` policy failure |
 | `2` | Usage error, missing value, or conflicting flags |
 | `3` | I/O or other system failure |
 
