@@ -110,7 +110,7 @@ fi
 
 run_stage "editor format" zig fmt --check editor/build.zig editor/build.zig.zon editor/src
 run_stage "editor host unit tests" zig build --build-file editor/build.zig test
-run_stage "editor UI static checks (svelte-check + key hints)" npm --prefix editor/ui run check
+run_stage "editor UI static checks (svelte-check + key hints + scales)" npm --prefix editor/ui run check
 run_stage "editor UI build" npm --prefix editor/ui run build
 run_stage "editor host build (boris-editor + contract probe)" build_host_binaries
 run_stage "editor UI end-to-end suite (Playwright, mocked host)" npm --prefix editor/ui run test:e2e

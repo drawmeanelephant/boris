@@ -345,6 +345,16 @@ async function installApi(page: Page, options: MockOptions = {}) {
   await page.goto(options.hash ?? '/#token=test-session-token');
 }
 
+// The connection readout is a chip (#993): the live region carries the short
+// label, and the honest sentence is one activation away. Assertions that are
+// about the sentence expand the chip first instead of weakening to the label.
+async function expandConnection(page: Page) {
+  // The chip is a sibling of the text-only live region, not a descendant (#993).
+  const toggle = page.locator('.connection-chip');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  return page.locator('.connection-detail');
+}
+
 test('semantic shell and file tree expose stable keyboard and accessible names', async ({ page }) => {
   await installApi(page);
   await expect(page.getByRole('heading', { name: 'Boris Editor', level: 1 })).toBeVisible();
@@ -359,7 +369,7 @@ test('semantic shell and file tree expose stable keyboard and accessible names',
     const button = page.getByRole('button', { name, exact: true });
     await expect(button).toHaveText(name);
   }
-  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor/0.1.0.');
+  await expect(await expandConnection(page)).toContainText('Connected to boris-editor/0.1.0.');
   const tree = await page.getByRole('navigation', { name: 'Project files' }).ariaSnapshot();
   expect(tree).toContain('button "content/index.md"');
 });
@@ -3202,12 +3212,14 @@ test('hiding the tab flushes the latest unsaved buffer (#418 M11)', async ({ pag
 
 test('a dead editor host is named and tells you to restart (#418 M11)', async ({ page }) => {
   await installApi(page);
-  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor/0.1.0.');
+  await expect(await expandConnection(page)).toContainText('Connected to boris-editor/0.1.0.');
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
   await page.route('**/api/recovery/snapshot', route => route.abort());
   await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# After crash\n');
-  await expect(page.getByRole('status', { name: 'Connection status' }))
-    .toContainText('Local host unavailable. Restart boris-editor.');
+  // The chip names the failure in the live region; the rest of the sentence is
+  // behind the same disclosure.
+  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Host unavailable');
+  await expect(await expandConnection(page)).toContainText('Local host unavailable. Restart boris-editor.');
   await expect(page.getByRole('status', { name: 'Editing status' }))
     .toContainText('The editor host stopped');
 });
@@ -3263,7 +3275,7 @@ test('a clean buffer reloads when disk changes outside the editor (#418 M11)', a
 
 test('opening the project names how long connect took (#418 M11)', async ({ page }) => {
   await installApi(page);
-  await expect(page.getByRole('status', { name: 'Connection status' }))
+  await expect(await expandConnection(page))
     .toContainText('Opened project in');
 });
 
@@ -3273,7 +3285,7 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
   await installApi(page, {
     files: [{ path: 'boris.json' }, { path: 'content/guides/start.md' }]
   });
-  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected to boris-editor');
+  await expect(await expandConnection(page)).toContainText('Connected to boris-editor');
   const holdOpenMs = 300;
   await page.route('**/api/files/open', async route => {
     const { path } = route.request().postDataJSON() as { path: string };

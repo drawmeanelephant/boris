@@ -272,6 +272,256 @@ test('a reduced-motion reveal keeps aria-current on the landed target at max scr
     .not.toHaveAttribute('aria-current');
 });
 
+// #993 residual polish: after the #989–#991 slices Author still read as an
+// equal-card dashboard with a full IDE strip. These pin the three material
+// contracts so a regression is a failing test, not a vibe.
+test('Author demotes Project to a drawer instead of a twin card', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installApi(page);
+  await openHome(page);
+
+  const project = page.locator('#project');
+  const source = page.locator('#source');
+
+  // Material: the page keeps no elevation and the drawer sits on a different
+  // (recessed) surface, so the two stop sharing one card language.
+  await expect(project).toHaveCSS('box-shadow', 'none');
+  await expect(source).toHaveCSS('box-shadow', 'none');
+  expect(await project.evaluate(el => getComputedStyle(el).backgroundColor))
+    .not.toBe(await source.evaluate(el => getComputedStyle(el).backgroundColor));
+
+  // Geometry: the drawer no longer stretches to the page's height.
+  const projectBox = (await project.boundingBox())!;
+  const sourceBox = (await source.boundingBox())!;
+  expect(sourceBox.height).toBeGreaterThan(projectBox.height);
+
+  // Review restores the peer panel: one row, equal height, card elevation.
+  await switchToReview(page);
+  await expect(project).not.toHaveCSS('box-shadow', 'none');
+  const reviewProject = (await project.boundingBox())!;
+  const reviewSource = (await source.boundingBox())!;
+  expect(Math.abs(reviewProject.height - reviewSource.height)).toBeLessThanOrEqual(1);
+});
+
+test('Author quiets the Review destinations in the section nav', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installApi(page);
+  await openHome(page);
+  const nav = page.getByRole('navigation', { name: 'Editor sections' });
+
+  // Emphasis, not gating: every destination is still a live, named link.
+  await expect(nav.getByRole('link')).toHaveCount(7);
+  await expect(nav.locator('.section-nav-group')).toHaveText('Review');
+
+  const writingSize = await nav.getByRole('link', { name: 'Source', exact: true })
+    .evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize));
+  const reviewSize = await nav.getByRole('link', { name: 'Problems', exact: true })
+    .evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize));
+  expect(reviewSize).toBeLessThan(writingSize);
+
+  // The quieted link still switches modes and lands (the #990 contract), so
+  // quieting never turned a working destination into a dead one.
+  await nav.getByRole('link', { name: 'Problems', exact: true }).click();
+  await expect(page.locator('#problems')).toBeFocused();
+
+  // Review shows the whole row at one weight, with no caption.
+  await expect(nav.locator('.section-nav-group')).toHaveCount(0);
+  const reviewProblemsSize = await nav.getByRole('link', { name: 'Problems', exact: true })
+    .evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize));
+  await expect(nav.getByRole('link', { name: 'Source', exact: true })).toHaveCSS('font-size', `${reviewProblemsSize}px`);
+});
+
+test('Author gives Source page material and keeps the mirror 1:1', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installApi(page);
+  const editor = await openHome(page);
+  const shell = page.locator('.source-editor-shell');
+
+  // The page carries no card elevation; focus is what gives it an edge.
+  await expect(shell).toHaveCSS('box-shadow', 'none');
+  const unfocusedBorder = await shell.evaluate(el => getComputedStyle(el).borderTopColor);
+  await editor.focus();
+  await expect.poll(() => shell.evaluate(el => getComputedStyle(el).borderTopColor)).not.toBe(unfocusedBorder);
+
+  // The shell owns the ring, so the focused textarea must not draw a second
+  // rust frame just inside the page edge — one edge, not a frame in a frame.
+  expect(await editor.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('none');
+
+  // The wider measure rides --source-pad-x, which the textarea and its
+  // measuring mirror both read: if they ever diverge, mirror rects stop
+  // mapping 1:1 to buffer coordinates and the gutter/current-line drift.
+  const [mirror, textarea] = await Promise.all([
+    page.locator('.source-mirror').evaluate(el => {
+      const style = getComputedStyle(el);
+      return { paddingLeft: style.paddingLeft, fontSize: style.fontSize };
+    }),
+    editor.evaluate((el: HTMLTextAreaElement) => {
+      const style = getComputedStyle(el);
+      return { paddingLeft: style.paddingLeft, fontSize: style.fontSize };
+    })
+  ]);
+  expect(mirror).toEqual(textarea);
+});
+
+test('Author caps Source at a readable measure and keeps one column', async ({ page }) => {
+  // Wide enough that the Author column exceeds the measure cap, and the Review
+  // column (which shares the row with the rail) exceeds it too — so this test
+  // can tell "capped in Author" apart from "capped everywhere".
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await installApi(page);
+  const editor = await openHome(page);
+  const source = page.locator('#source');
+
+  // The pane's grid track, measured without parsing grid-template-columns: the
+  // sibling column's trailing edge plus the gap starts the track, and main's
+  // content box ends it. Comparing against main's border box would be wrong —
+  // that box includes main's own padding.
+  const measure = await source.evaluate(el => {
+    const main = document.querySelector('main') as HTMLElement;
+    const project = document.querySelector('#project') as HTMLElement;
+    const style = getComputedStyle(main);
+    const gap = Number.parseFloat(style.columnGap || '0');
+    const trackLeft = project.getBoundingClientRect().right + gap;
+    const trackRight = main.getBoundingClientRect().right - Number.parseFloat(style.paddingRight);
+    const rect = el.getBoundingClientRect();
+    return {
+      width: rect.width,
+      trackWidth: trackRight - trackLeft,
+      leftInset: rect.left - trackLeft,
+      rightInset: trackRight - rect.right
+    };
+  });
+
+  // The measure is the pane: it stops short of its grid column and the slack is
+  // shared — a one-sided gap would be a layout accident, not a centered page.
+  expect(measure.width).toBeLessThan(measure.trackWidth - 200);
+  expect(Math.abs(measure.leftInset - measure.rightInset)).toBeLessThanOrEqual(2);
+
+  // The measure is a line length, not just a pixel count: 80-ish monospace
+  // columns is the point of the cap, so assert it in characters. The advance
+  // is measured from the live textarea font rather than assumed.
+  const columns = await editor.evaluate((el: HTMLTextAreaElement) => {
+    const style = getComputedStyle(el);
+    const probe = document.createElement('span');
+    probe.style.fontFamily = style.fontFamily;
+    probe.style.fontSize = style.fontSize;
+    probe.style.letterSpacing = style.letterSpacing;
+    probe.style.whiteSpace = 'pre';
+    probe.style.position = 'absolute';
+    probe.textContent = '0'.repeat(100);
+    document.body.appendChild(probe);
+    const advance = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+    const gutters = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+    return (el.clientWidth - gutters) / advance;
+  });
+  expect(columns).toBeGreaterThan(60);
+  expect(columns).toBeLessThan(95);
+
+  // Agreement: the heading and the editing shell share the page's column, and
+  // the line-number gutter stays bolted to the lines it numbers (no inset ever
+  // rents it away from the text it measures).
+  const [headingLeft, shellLeft, gutterRight, surfaceLeft] = await Promise.all([
+    page.locator('#source .pane-heading h2').evaluate(el => el.getBoundingClientRect().left),
+    page.locator('#source .source-editor-shell').evaluate(el => el.getBoundingClientRect().left),
+    page.locator('.source-gutter').evaluate(el => el.getBoundingClientRect().right),
+    page.locator('.source-surface').evaluate(el => el.getBoundingClientRect().left)
+  ]);
+  expect(Math.abs(headingLeft - shellLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(gutterRight - surfaceLeft)).toBeLessThanOrEqual(1);
+
+  // Author-only: Review keeps the wide working surface, filling its track.
+  await switchToReview(page);
+  const review = await source.evaluate(el => {
+    const main = el.parentElement as HTMLElement;
+    const project = document.querySelector('#project') as HTMLElement;
+    const rail = document.querySelector('.workspace-rail') as HTMLElement;
+    const gap = Number.parseFloat(getComputedStyle(main).columnGap || '0');
+    const trackLeft = project.getBoundingClientRect().right + gap;
+    const trackRight = rail.getBoundingClientRect().left - gap;
+    return { width: el.getBoundingClientRect().width, trackWidth: trackRight - trackLeft };
+  });
+  expect(review.width).toBeGreaterThan(measure.width);
+  expect(Math.abs(review.width - review.trackWidth)).toBeLessThanOrEqual(1);
+});
+
+test('Author gives the top band a calmer rhythm than Review', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // Pin the theme so the compact control's label is deterministic.
+  await page.addInitScript(() => localStorage.setItem('boris-editor-theme', 'dark'));
+  await installApi(page);
+  await openHome(page);
+
+  // The decorative eyebrow band is gone, and the product mark and the live
+  // status share one row instead of stacking as three separate text lines.
+  await expect(page.locator('header .eyebrow')).toHaveCount(0);
+  const [title, status] = await Promise.all([
+    page.locator('header h1').boundingBox(),
+    page.locator('header .connection').boundingBox()
+  ]);
+  expect(status!.y).toBeGreaterThanOrEqual(title!.y);
+  expect(status!.y).toBeLessThan(title!.y + title!.height);
+
+  // The theme control states the state, and its visible label is its
+  // accessible name — the editor's standing rule for visible labels. It is
+  // deliberately not a pressed toggle: a pressed state presumes a name that
+  // does not change with it, so "Light, not pressed" would contradict the
+  // label. Here the changing name *is* the state.
+  const themeButton = page.getByRole('button', { name: 'Dark', exact: true });
+  await expect(themeButton).toHaveText('Dark');
+  expect(await themeButton.getAttribute('aria-pressed')).toBeNull();
+
+  // Author tightens the band and drops the product mark a step; Review
+  // restores the full rhythm. The smaller mark is still an app title: it
+  // outranks the pane titles below it (dropping h1 to --text-xl had made the
+  // two identical, and nothing caught it).
+  const author = {
+    header: (await page.locator('header').boundingBox())!.height,
+    title: await page.locator('header h1').evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize)),
+    paneTitle: await page
+      .locator('#source .pane-heading h2')
+      .evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize))
+  };
+  expect(author.title).toBeGreaterThan(author.paneTitle);
+  await switchToReview(page);
+  const review = {
+    header: (await page.locator('header').boundingBox())!.height,
+    title: await page.locator('header h1').evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize))
+  };
+  expect(author.header).toBeLessThan(review.header);
+  expect(author.title).toBeLessThan(review.title);
+});
+
+test('the connection readout is a compact chip whose detail is on demand', async ({ page }) => {
+  await installApi(page);
+  await openHome(page);
+
+  const region = page.getByRole('status', { name: 'Connection status' });
+  const chip = page.locator('.connection-chip');
+
+  // The live region is text-only, as every other status region in the editor
+  // is: a button inside an atomic region would be re-announced with the state
+  // it sits in. The chip is a real button beside it, not inside it.
+  await expect(region.getByRole('button')).toHaveCount(0);
+
+  // The live text is the short state, not the sentence that used to occupy the
+  // band on every load, and the honest detail is not in the DOM until asked for.
+  await expect(region).toHaveText('Connected');
+  await expect(chip).toHaveText('Connected');
+  await expect(region).not.toContainText('Opened project in');
+  await expect(page.locator('.connection-detail')).toHaveCount(0);
+
+  // On demand, by keyboard: the disclosure is a real button, not a hover-only
+  // tooltip, and activating it reveals the sentence the state summarizes.
+  await expect(chip).toHaveAttribute('aria-expanded', 'false');
+  await chip.press('Enter');
+  await expect(chip).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.connection-detail')).toContainText('Connected to boris-editor/0.1.0.');
+
+  await chip.press('Enter');
+  await expect(page.locator('.connection-detail')).toHaveCount(0);
+});
+
 test('the measured line gutter and current-line band track the caret', async ({ page }) => {
   await installApi(page);
   const editor = await openHome(page);
