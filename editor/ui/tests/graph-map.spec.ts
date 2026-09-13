@@ -204,6 +204,9 @@ async function installApi(page: Page, options: InstallOptions = {}) {
     })
   }));
   await page.route('https://preview.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Compiler output</h1>' }));
+  // Graph lives in Review density (#990); the default Author view is
+  // covered by density-modes.spec.ts.
+  await page.addInitScript(() => localStorage.setItem('boris-editor-density', 'review'));
   await page.goto(options.hash ?? '/#token=test-session-token');
 }
 

@@ -21,6 +21,12 @@ const { chromium } = require('playwright');
   });
   try {
     await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
+    // The Preview pane lives in Review density (#990); a cold open is the
+    // calm Author view. Switch modes the way an author would, then rebuild.
+    await page.getByRole('group', { name: 'Editor density' })
+      .getByRole('button', { name: 'Review', exact: true })
+      .click();
+    await page.locator('#preview').waitFor({ timeout: 30000 });
     await page.getByRole('button', { name: 'Rebuild preview' }).click();
     await page.locator('p.preview-state').filter({ hasText: 'success' }).waitFor({ timeout: 120000 });
     const frameBody = page.frameLocator('iframe[title="Boris site preview"]').locator('body');

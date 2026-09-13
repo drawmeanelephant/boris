@@ -7,7 +7,7 @@
 
 import { api, elapsedLabel } from '../api';
 import { failureLabel, groupProblems, packetCopyKey, projectPathForProblem } from '../utils';
-import type { CommandResult, Problem, ProblemGroup, RecipeScaleView, ValidateState } from '../types';
+import type { CommandMode, CommandResult, Problem, ProblemGroup, RecipeScaleView, ValidateState } from '../types';
 import { buffer, dirty } from './buffer.svelte';
 import { connection } from './connection.svelte';
 import { graph, activeNode } from './graph.svelte';
@@ -16,6 +16,9 @@ export const problems = $state({
   result: null as CommandResult | null,
   status: 'No Boris command has run yet.',
   running: false,
+  // Which allowlisted command is in flight, so the action hierarchy can put
+  // its busy affordance on the button that was actually pressed (#991).
+  runningMode: '' as CommandMode | '',
   impactId: '',
   copiedPacketKey: '',
   validateState: null as ValidateState | null,

@@ -230,6 +230,9 @@ async function installWatchApi(page: Page, options: WatchApiOptions = {}): Promi
     }));
   }
 
+  // Watch lives in Review density (#990); the default Author view is
+  // covered by density-modes.spec.ts.
+  await page.addInitScript(() => localStorage.setItem('boris-editor-density', 'review'));
   await page.goto('/#token=test-session-token');
   return daemon;
 }

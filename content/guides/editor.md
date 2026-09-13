@@ -226,6 +226,25 @@ does not store secrets or run a deployer.
 
 ---
 
+## Density modes and the writing surface
+
+The shell opens in **Author** mode: Source and Project only, with the
+authoring hints folded into one disclosure under the editor. **Review** mode
+restores the full chrome — Problems, Preview, Watch, Graph, and Publication.
+The choice is a per-browser preference, not project state; switching modes
+never touches your buffer or unsaved changes.
+
+Source is the hero in both modes. Around the native textarea the editor draws
+presentation chrome: a line gutter measured against the real text geometry
+(numbers for the visible window sit where their lines actually are, so
+wrapped lines cannot drift them, and the current line is highlighted), a
+current-line band, and a seam under a recognized leading frontmatter fence. The seam reads fence *shape* only — it
+does not parse YAML or keys, and **Build diagnostics** and Boris remain the
+authority on frontmatter.
+
+A section-nav link for a pane that lives in Review switches modes and then
+jumps to that pane, so no link pretends a hidden pane is on screen.
+
 ## Compiler-backed commands and problems
 
 The Problems pane runs a fixed allowlist of Boris invocations against saved
@@ -255,6 +274,14 @@ and what is a deliberate non-goal. The developer copy lives in the
 Boris exit codes stay distinct: **1** content/graph failure, **2**
 usage/configuration failure, **3** I/O/system failure. The editor surfaces the
 class plus the raw exit code.
+
+Commands are laid out by how often an author runs them: **Validate project**
+and **Build diagnostics** lead in a primary group, **Build HTML** sits with
+them, and **Check graph**, **Verify proof**, and **Run impact** recede into
+the analysis row — all still named, visible, and reachable from the command
+palette. The command in flight shows an in-button progress affordance and
+`aria-busy`, not only the status sentence, and a proof report longer than a
+screenful starts collapsed behind **Show proof verify report**.
 
 Diagnostics are grouped by content-relative source, severity, and Boris code.
 Each problem card offers:

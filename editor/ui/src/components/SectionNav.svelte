@@ -17,6 +17,8 @@
   //    presented disabled and explains itself on activation instead of
   //    silently doing nothing. Graph stays available with no file open
   //    (#970); the map is a project-level artifact.
+  import { tick } from 'svelte';
+
   type SectionLink = { id: string; label: string };
 
   type Props = {
@@ -24,12 +26,19 @@
     // human reason. Absent targets render aria-disabled with the reason as
     // their title; activation is a no-op that reports the reason.
     unavailable?: Record<string, string>;
+    // Section ids that live in another density mode (#990), mapped to that
+    // mode's name. The link stays fully enabled: activation asks the owner
+    // to reveal the mode first, then performs the ordinary jump.
+    modeGated?: Record<string, string>;
     // Receives the reason for a click on an unavailable target; App routes
     // it to the editing-status live region.
     onBlockedNav?: (reason: string) => void;
+    // Switches to the mode that owns a gated section and resolves once its
+    // pane is mounted.
+    onReveal?: (id: string) => Promise<void> | void;
   };
 
-  let { unavailable = {}, onBlockedNav }: Props = $props();
+  let { unavailable = {}, modeGated = {}, onBlockedNav, onReveal }: Props = $props();
 
   const links: SectionLink[] = [
     { id: 'project', label: 'Project' },
@@ -64,6 +73,23 @@
 
   function sectionFor(id: string): HTMLElement | null {
     return document.getElementById(id);
+  }
+
+  // A section hidden by the current density mode renders no boxes (unmounted
+  // by the mode switch), so the spy must not let it claim the reading line.
+  function sectionVisible(section: HTMLElement | null): section is HTMLElement {
+    return section !== null && section.getClientRects().length > 0;
+  }
+
+  // The section whose box spans the reading line — the pane the author is
+  // actually looking at. A mode-gated reveal can leave the page clamped at
+  // max scroll, where geometry-only rules hand currency to another pane even
+  // though the landed target covers the line.
+  function sectionCoversReadingLine(section: HTMLElement | null): boolean {
+    if (!sectionVisible(section)) return false;
+    const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
+    const rect = section.getBoundingClientRect();
+    return rect.top <= margin + LINE_TOLERANCE_PX && rect.bottom > margin;
   }
 
   function clearArrival() {
@@ -110,7 +136,7 @@
   // through to the browser (new tab/window), keyboard activation goes
   // through the same click event. preventDefault plus the manual jump keeps
   // URL and behavior in one place; href remains the no-JS fallback.
-  function handleNav(event: MouseEvent, id: string) {
+  async function handleNav(event: MouseEvent, id: string) {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     // An absent target never jumps and never touches the URL (#944); the
     // reason goes to the App's live region so the no-op says why. Enter on
@@ -120,6 +146,14 @@
       event.preventDefault();
       onBlockedNav?.(reason);
       return;
+    }
+    // A mode-gated target (#990) is shown in the other density mode: switch
+    // first, then take the ordinary jump so focus, URL, and currency land on
+    // the real pane instead of a no-op.
+    if (modeGated[id]) {
+      event.preventDefault();
+      await onReveal?.(id);
+      await tick();
     }
     const section = sectionFor(id);
     if (!section) return;
@@ -159,13 +193,23 @@
   // Above every section (page top), the journey starts at the first link so
   // wayfinding never reads as "nowhere".
   function syncCurrent() {
+    // The most recent jump target stays current while it still covers the
+    // reading line. A mode-gated reveal can leave the page clamped at max
+    // scroll, where the bottom rule and the nearest-above heuristic would
+    // hand currency to another pane even though the author's target is the
+    // visible destination (#992 review). Scrolling the target off the line
+    // releases it, so a stale jump never pins wayfinding.
+    if (jumpTarget && sectionCoversReadingLine(sectionFor(jumpTarget))) {
+      current = jumpTarget;
+      return;
+    }
     // Bottom rule (standard scrollspy behavior): at max scroll the last
     // present section is current, because a short page or the footer clamp
     // can keep it from ever reaching the reading line.
     const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
     if (maxScroll > 0 && window.scrollY >= maxScroll - 1) {
       for (let i = links.length - 1; i >= 0; i--) {
-        if (sectionFor(links[i].id)) {
+        if (sectionVisible(sectionFor(links[i].id))) {
           current = links[i].id;
           return;
         }
@@ -188,7 +232,7 @@
     let bestTop = -Infinity;
     for (const { id } of links) {
       const section = sectionFor(id);
-      if (!section) continue;
+      if (!sectionVisible(section)) continue;
       const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
       const top = section.getBoundingClientRect().top;
       // The reading line every section is measured against is its own
@@ -202,18 +246,6 @@
       if (top <= margin + LINE_TOLERANCE_PX && top > bestTop) {
         best = id;
         bestTop = top;
-      }
-    }
-    // A jump destination that is still at the reading line wins a tie against
-    // a pane that shares its offset in another column. Once scrolling moves
-    // the destination out of contention the reading-line answer takes over
-    // again, so this self-releases and never pins currency to a stale jump.
-    if (jumpTarget && best !== jumpTarget) {
-      const target = sectionFor(jumpTarget);
-      if (target) {
-        const margin = parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
-        const top = target.getBoundingClientRect().top;
-        if (top <= margin + LINE_TOLERANCE_PX && top >= bestTop) best = jumpTarget;
       }
     }
     current = best ?? links[0].id;
@@ -274,6 +306,17 @@
     updateEdges();
   });
 
+  // A density-mode switch mounts or unmounts whole panes (#990): re-run the
+  // spy after the DOM settles so aria-current cannot point at a pane that is
+  // no longer on screen, or miss one that just appeared.
+  $effect(() => {
+    void modeGated;
+    void (async () => {
+      await tick();
+      syncCurrent();
+    })();
+  });
+
   $effect(() => () => {
     clearTimeout(arrivedTimer);
     clearTimeout(resyncTimer);
@@ -292,10 +335,12 @@
     {#each links as { id, label } (id)}
       <a
         href="#{id}"
-        onclick={(event) => handleNav(event, id)}
+        onclick={(event) => void handleNav(event, id)}
         aria-current={current === id ? 'true' : undefined}
         aria-disabled={unavailable[id] ? 'true' : undefined}
-        title={unavailable[id]}
+        class:mode-gated={Boolean(modeGated[id])}
+        title={unavailable[id]
+          ?? (modeGated[id] ? `Shown in ${modeGated[id]} mode — activating switches modes` : undefined)}
       >{label}</a>
     {/each}
   </div>
