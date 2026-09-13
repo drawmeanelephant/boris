@@ -30,21 +30,57 @@
   const MIN_ZOOM = 0.05;
   const MAX_ZOOM = 3;
   const ZOOM_STEP = 1.25;
+  // Fit can drop to ~10% on a medium graph; the opening view stays at least
+  // this readable. Fit itself is unchanged and still shows the whole map.
+  const READABLE_FLOOR = 0.5;
 
   let viewport = $state() as HTMLElement | undefined;
   let viewportWidth = $state(0);
   // null means "fit the width"; a number is an explicit user zoom. Keeping
   // fit as a mode (not a value) lets a container resize re-fit the map.
   let manualScale = $state<number | null>(null);
+  let applyDefault = $state(true);
+  let centerOnOpen = $state(true);
 
   const fitScale = $derived(viewportWidth > 0 ? Math.min(1, viewportWidth / layout.width) : 1);
   const scale = $derived(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, manualScale ?? fitScale)));
   const zoomPercent = $derived(Math.round(scale * 100));
 
-  // A new graph starts fit; previous zoom belonged to the previous picture.
+  // A new graph starts at a readable default (Fit when that is already at
+  // least READABLE_FLOOR, otherwise the floor). Previous zoom belonged to
+  // the previous picture. Fit remains available and unclamped.
   $effect(() => {
     void layout.width;
-    manualScale = null;
+    void layout.height;
+    applyDefault = true;
+    centerOnOpen = true;
+  });
+
+  $effect(() => {
+    if (!applyDefault || viewportWidth <= 0) return;
+    manualScale = fitScale + 1e-6 < READABLE_FLOOR ? READABLE_FLOOR : null;
+    applyDefault = false;
+  });
+
+  $effect(() => {
+    const element = viewport;
+    if (!element || !centerOnOpen || viewportWidth <= 0) return;
+    void scale;
+    centerOnOpen = false;
+    void tick().then(() => {
+      if (manualScale === null) {
+        element.scrollLeft = 0;
+        element.scrollTop = 0;
+        return;
+      }
+      const target =
+        layout.nodes.find((item) => item.id === activeId) ??
+        layout.nodes.find((item) => item.role === 'trunk') ??
+        layout.nodes[0];
+      if (!target) return;
+      element.scrollLeft = Math.max(0, target.x * scale - element.clientWidth / 2);
+      element.scrollTop = Math.max(0, target.y * scale - element.clientHeight / 2);
+    });
   });
 
   $effect(() => {

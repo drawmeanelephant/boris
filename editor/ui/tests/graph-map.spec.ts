@@ -52,7 +52,71 @@ const GRAPH = {
   ]
 };
 
-async function installApi(page: Page) {
+type InstallOptions = {
+  files?: typeof FILES;
+  last_open?: string | null;
+  graph?: Record<string, unknown>;
+  hash?: string;
+};
+
+function wideGraph(leafCount: number) {
+  const leaves = Array.from({ length: leafCount }, (_, index) => ({
+    index,
+    id: `guides/page-${index}`,
+    sourcePath: `content/guides/page-${index}.md`,
+    role: 'satellite',
+    parent: 'index',
+    parentIndex: leafCount,
+    title: `Page ${index}`,
+    status: null,
+    tags: [] as string[],
+    bodyOffset: 0
+  }));
+  const trunk = {
+    index: leafCount,
+    id: 'index',
+    sourcePath: 'content/index.md',
+    role: 'trunk',
+    parent: null,
+    parentIndex: null,
+    title: 'Home',
+    status: null,
+    tags: [] as string[],
+    bodyOffset: 0
+  };
+  return {
+    schemaVersion: '0.2.0',
+    frozen: true,
+    nodes: [...leaves, trunk],
+    edges: leaves.map((leaf) => ({
+      from: { type: 'page', value: leaf.id },
+      to: { type: 'page', value: 'index' },
+      kind: 'parent'
+    })),
+    reverseIndex: [
+      { target: { type: 'page', value: 'index' }, incomingEdges: leaves.map((_, index) => index) }
+    ],
+    nav: [
+      ...leaves.map((leaf, index) => ({
+        index,
+        id: leaf.id,
+        breadcrumb: [leafCount, index],
+        children: [] as number[],
+        siblings: leaves.map((_, sibling) => sibling).filter((sibling) => sibling !== index)
+      })),
+      {
+        index: leafCount,
+        id: 'index',
+        breadcrumb: [leafCount],
+        children: leaves.map((_, index) => index),
+        siblings: [] as number[]
+      }
+    ]
+  };
+}
+
+async function installApi(page: Page, options: InstallOptions = {}) {
+  const files = options.files ?? FILES;
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
@@ -66,7 +130,7 @@ async function installApi(page: Page) {
   }));
   await page.route('**/api/files', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ files: FILES })
+    body: JSON.stringify({ files, last_open: options.last_open ?? null })
   }));
   await page.route('**/api/recovery', route => route.fulfill({
     contentType: 'application/json', body: JSON.stringify({ snapshots: [], skipped: 0 })
@@ -119,7 +183,7 @@ async function installApi(page: Page) {
   }));
   await page.route('**/api/graph', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ graph: GRAPH, graph_status: 'ready' })
+    body: JSON.stringify({ graph: options.graph ?? GRAPH, graph_status: 'ready' })
   }));
   await page.route('**/api/publication', route => route.fulfill({
     contentType: 'application/json',
@@ -140,7 +204,7 @@ async function installApi(page: Page) {
     })
   }));
   await page.route('https://preview.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Compiler output</h1>' }));
-  await page.goto('/#token=test-session-token');
+  await page.goto(options.hash ?? '/#token=test-session-token');
 }
 
 async function openIndex(page: Page) {
@@ -149,7 +213,7 @@ async function openIndex(page: Page) {
 }
 
 test('graph map is available before a file is open (#970)', async ({ page }) => {
-  await installApi(page);
+  await installApi(page, { files: FILES.filter((file) => file.path !== 'content/index.md') });
   const map = page.getByTestId('graph-map');
   await expect(map).toBeVisible();
   await expect(map.locator('[data-node-id]')).toHaveCount(GRAPH.nodes.length);
@@ -213,10 +277,11 @@ test('zoom controls fit the map, zoom in, and restore actual size', async ({ pag
   const zoom = page.getByTestId('graph-map-zoom');
   const clientWidth = await viewport.evaluate((element) => element.clientWidth);
 
-  // Default is fit: nothing clips at first paint.
+  await page.getByRole('button', { name: 'Fit map to width' }).click();
   const fitWidth = Number(await svg.getAttribute('width'));
   expect(fitWidth).toBeLessThanOrEqual(clientWidth + 1);
   await expect(zoom).not.toHaveText('100%');
+  await expect(page.getByRole('button', { name: 'Fit map to width' })).toBeDisabled();
 
   await page.getByRole('button', { name: 'Zoom in' }).click();
   expect(Number(await svg.getAttribute('width'))).toBeGreaterThan(fitWidth);
@@ -243,4 +308,25 @@ test('the map viewport pans with the keyboard once focused', async ({ page }) =>
   const before = await viewport.evaluate((element) => element.scrollLeft);
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(before);
+});
+
+test('default zoom stays readable and Fit still shows the whole map (#971)', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 720 });
+  await installApi(page, { graph: wideGraph(20) });
+  await openIndex(page);
+
+  const svg = page.getByTestId('graph-map').locator('svg');
+  const viewport = page.getByRole('region', { name: 'Graph map viewport' });
+  const zoom = page.getByTestId('graph-map-zoom');
+  const fit = page.getByRole('button', { name: 'Fit map to width' });
+
+  await expect.poll(async () => Number((await zoom.textContent())?.replace('%', ''))).toBe(50);
+  await expect(fit).toBeEnabled();
+
+  await fit.click();
+  const clientWidth = await viewport.evaluate((element) => element.clientWidth);
+  expect(Number(await svg.getAttribute('width'))).toBeLessThanOrEqual(clientWidth + 1);
+  const fitPercent = Number((await zoom.textContent())?.replace('%', ''));
+  expect(fitPercent).toBeLessThan(50);
+  await expect(fit).toBeDisabled();
 });

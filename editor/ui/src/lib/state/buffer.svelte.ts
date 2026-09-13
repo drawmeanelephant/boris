@@ -46,6 +46,7 @@ export function loadBuffer(next: BufferResponse, status: string) {
   buffer.readOnly = next.read_only;
   buffer.undoStack = [];
   buffer.redoStack = [];
+  breakUndoChunk();
   buffer.cursor = { line: 1, column: 1 };
   buffer.editorStatus = status;
 }
@@ -59,20 +60,63 @@ export function resetBuffer() {
   buffer.fingerprint = '';
   buffer.undoStack = [];
   buffer.redoStack = [];
+  breakUndoChunk();
+}
+
+const UNDO_COALESCE_MS = 1000;
+
+let undoChunk: { kind: 'insert'; at: number } | null = null;
+
+function breakUndoChunk() {
+  undoChunk = null;
+}
+
+function recordUndoEntry() {
+  buffer.undoStack = [...buffer.undoStack.slice(-99), buffer.content];
+  buffer.redoStack = [];
 }
 
 function pushUndo() {
-  buffer.undoStack = [...buffer.undoStack.slice(-99), buffer.content];
-  buffer.redoStack = [];
+  recordUndoEntry();
+  breakUndoChunk();
+}
+
+function inputKind(event: Event): 'insert' | 'other' {
+  if (!(event instanceof InputEvent)) return 'other';
+  switch (event.inputType) {
+    case 'insertText':
+    case 'insertCompositionText':
+    case 'insertFromComposition':
+      return 'insert';
+    default:
+      return 'other';
+  }
+}
+
+function closesInsertChunk(event: Event): boolean {
+  if (!(event instanceof InputEvent)) return true;
+  const data = event.data ?? '';
+  return data.length === 0 || /\s/u.test(data);
 }
 
 export function editSource(event: Event) {
   const next = (event.currentTarget as HTMLTextAreaElement).value;
   if (next === buffer.content) return;
-  pushUndo();
+  const kind = inputKind(event);
+  const now = Date.now();
+  const coalesce =
+    kind === 'insert' &&
+    undoChunk?.kind === 'insert' &&
+    now - undoChunk.at <= UNDO_COALESCE_MS;
+  if (!coalesce) recordUndoEntry();
   buffer.content = next;
   buffer.editorStatus = `Unsaved changes in ${buffer.activePath}.`;
   scheduleRecovery();
+  if (kind === 'insert' && !closesInsertChunk(event)) {
+    undoChunk = { kind: 'insert', at: now };
+  } else {
+    breakUndoChunk();
+  }
 }
 
 export function undo() {
@@ -81,6 +125,7 @@ export function undo() {
   buffer.undoStack = buffer.undoStack.slice(0, -1);
   buffer.redoStack = [...buffer.redoStack.slice(-99), buffer.content];
   buffer.content = previous;
+  breakUndoChunk();
   buffer.editorStatus = `Undid change in ${buffer.activePath}.`;
   scheduleRecovery();
 }
@@ -138,6 +183,7 @@ export async function discardBuffer() {
   buffer.content = buffer.baseline;
   buffer.undoStack = [];
   buffer.redoStack = [];
+  breakUndoChunk();
   buffer.editorStatus = `Discarded unsaved changes in ${discardedPath}.`;
 }
 

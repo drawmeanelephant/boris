@@ -10,6 +10,7 @@ const project = @import("project.zig");
 const preview = @import("preview.zig");
 const publication = @import("publication.zig");
 const recovery = @import("recovery.zig");
+const last_open = @import("last_open.zig");
 const runner = @import("runner.zig");
 const security = @import("security.zig");
 const validation_daemon = @import("validation_daemon.zig");
@@ -291,7 +292,9 @@ const SnapshotRequest = struct {
 fn serveFileList(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
     var files = file_api.list(allocator, io, config.project_root) catch |err| return respondApiError(request, err);
     defer files.deinit(allocator);
-    const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .files = files.entries }, .{});
+    const last_path = try last_open.load(allocator, io, config.state_root);
+    defer if (last_path) |path| allocator.free(path);
+    const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .files = files.entries, .last_open = last_path }, .{});
     defer allocator.free(bytes);
     return respondJson(request, .ok, bytes);
 }
@@ -326,6 +329,7 @@ fn serveFileOpen(io: Io, allocator: std.mem.Allocator, request: *http.Server.Req
     defer parsed.deinit();
     var buffer = file_api.open(allocator, io, config.project_root, parsed.value.path) catch |err| return respondApiError(request, err);
     defer buffer.deinit(allocator);
+    rememberLastOpen(allocator, io, config, parsed.value.path);
     return respondBuffer(allocator, request, .ok, "opened", parsed.value.path, buffer);
 }
 
@@ -367,6 +371,7 @@ fn serveFileCreate(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
     var buffer = file_api.create(allocator, io, config.project_root, parsed.value.path, parsed.value.content) catch |err| return respondApiError(request, err);
     defer buffer.deinit(allocator);
     config.daemon.noteSave();
+    rememberLastOpen(allocator, io, config, parsed.value.path);
     return respondBuffer(allocator, request, .created, "created", parsed.value.path, buffer);
 }
 
@@ -379,6 +384,7 @@ fn serveFileRename(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
     recovery.clear(io, config.state_root, parsed.value.path) catch |err| {
         std.log.warn("could not clear recovery snapshot after rename: {s}", .{@errorName(err)});
     };
+    rememberLastOpen(allocator, io, config, parsed.value.new_path);
     config.daemon.noteSave();
     const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .status = "renamed", .path = parsed.value.new_path }, .{});
     defer allocator.free(bytes);
@@ -394,8 +400,25 @@ fn serveFileDelete(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
     recovery.clear(io, config.state_root, parsed.value.path) catch |err| {
         std.log.warn("could not clear recovery snapshot after delete: {s}", .{@errorName(err)});
     };
+    forgetLastOpenIfMatch(allocator, io, config, parsed.value.path);
     config.daemon.noteSave();
     return respondJson(request, .ok, "{\"status\":\"deleted\"}");
+}
+
+fn rememberLastOpen(allocator: std.mem.Allocator, io: Io, config: Config, path: []const u8) void {
+    last_open.save(allocator, io, config.state_root, path) catch |err| {
+        std.log.warn("could not record last-open path: {s}", .{@errorName(err)});
+    };
+}
+
+fn forgetLastOpenIfMatch(allocator: std.mem.Allocator, io: Io, config: Config, path: []const u8) void {
+    const current = last_open.load(allocator, io, config.state_root) catch return;
+    const owned = current orelse return;
+    defer allocator.free(owned);
+    if (!std.mem.eql(u8, owned, path)) return;
+    last_open.clear(io, config.state_root) catch |err| {
+        std.log.warn("could not clear last-open path: {s}", .{@errorName(err)});
+    };
 }
 
 fn serveRecoveryList(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {

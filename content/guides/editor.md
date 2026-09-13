@@ -54,6 +54,9 @@ URL **fragment** carries a random session token. Open that URL in your browser;
 every API request must repeat the token, and any supplied `Origin` must match
 the session origin. A bare `--boris` command name is resolved through `PATH`;
 a path-like value is canonicalized against the directory you launched from.
+Without an `open=` fragment the editor restores the last author-owned file
+you had open, or `content/index.md` when that file is present. An `open=`
+fragment still wins, including when it is ignored as unsafe.
 
 `Ctrl+K` (or `Cmd+K`) opens a command palette for file actions, Boris
 commands, preview rebuild, and jumping to a project file. Esc, the palette's
@@ -85,7 +88,9 @@ then atomically renames it into place.
   change does not wait for Save. Transient filesystem errors are skipped and
   retried.
 - **Undo / redo** — session-local, keyboard-driven (`Ctrl/Cmd+Z`, `Ctrl/Cmd+
-  Shift+Z`) and via the toolbar.
+  Shift+Z`) and via the toolbar. Consecutive inserts coalesce into one undo
+  step until a pause, a word boundary, or a non-insert (delete, paste,
+  undo/redo).
 - **Recovery snapshots** — dirty buffers are snapshotted to the disposable OS
   user-cache state root on the first unsaved change, then periodically, and
   again when the tab hides. A later editor process labels them as *recovered
@@ -265,7 +270,9 @@ boris build --input content --incremental --html-dir dist
 ```
 
 You can also trigger it with the **Rebuild preview** button. The UI reports
-`idle`, `running`, `success`, `failed`, and `stale` distinctly. Boris's staged
+`idle`, `running`, `success`, `failed`, and `stale` distinctly. If
+`dist/index.html` already exists when the editor starts, preview is `stale`
+with that content in the iframe rather than an empty idle pane. Boris's staged
 output commit preserves the last valid `dist/` tree after a failed rebuild, so
 the preview iframe advances only on success. Embedded preview content is
 sandboxed; a named link opens the exact site origin in a new tab for full

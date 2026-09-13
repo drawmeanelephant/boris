@@ -22,6 +22,8 @@ type MockOptions = {
   recoverySkipped?: number;
   validateState?: Record<string, unknown>;
   failFilesAfter?: number;
+  lastOpen?: string | null;
+  previewState?: Record<string, unknown>;
 };
 
 type CommandResult = {
@@ -176,7 +178,10 @@ async function installApi(page: Page, options: MockOptions = {}) {
     }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ files: options.files ?? [{ path: 'boris.json' }, { path: 'content/index.md' }] })
+      body: JSON.stringify({
+        files: options.files ?? [{ path: 'boris.json' }, { path: 'content/index.md' }],
+        last_open: options.lastOpen ?? null
+      })
     });
   });
   await page.route('**/api/recovery', route => route.fulfill({
@@ -317,7 +322,10 @@ async function installApi(page: Page, options: MockOptions = {}) {
   }));
   await page.route('**/api/preview/state', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ phase: 'idle', generation: 0, exit_code: null, used_stderr_fallback: false, message: 'Preview has not been built yet.', preview_url: 'https://preview.invalid/?token=test' })
+    body: JSON.stringify(options.previewState ?? {
+      phase: 'idle', generation: 0, exit_code: null, used_stderr_fallback: false,
+      message: 'Preview has not been built yet.', preview_url: 'https://preview.invalid/?token=test'
+    })
   }));
   await page.route('**/api/preview/rebuild', route => {
     const sequence = options.previewRebuilds ?? [{ phase: 'success', generation: 1, exit_code: 0, used_stderr_fallback: false, message: 'Preview is current from a successful Boris incremental build.', preview_url: 'https://preview.invalid/?token=test' }];
@@ -372,6 +380,22 @@ test('source editing, undo, redo, and explicit save work without a pointer', asy
   await page.keyboard.press('Control+s');
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/index.md.');
   await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+});
+
+test('typing a short line coalesces into one undo step (#972)', async ({ page }) => {
+  await installApi(page);
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await expect(editor).toHaveValue('# Home\n');
+  await editor.focus();
+  await editor.evaluate((element: HTMLTextAreaElement) => {
+    element.setSelectionRange(element.value.length, element.value.length);
+  });
+  await editor.pressSequentially('UXTESTLINE');
+  await expect(editor).toHaveValue('# Home\nUXTESTLINE');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(editor).toHaveValue('# Home\n');
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(editor).toHaveValue('# Home\nUXTESTLINE');
 });
 
 test('external edits open an explicit two-version conflict dialog', async ({ page }) => {
@@ -655,7 +679,7 @@ test('the Create file primary button still submits the same action (#459)', asyn
 });
 
 test('Delete dialog falls back to a named placeholder when no file is selected (#461)', async ({ page }) => {
-  await installApi(page);
+  await installApi(page, { files: [{ path: 'boris.json' }] });
   const dialog = page.locator('dialog').filter({ has: page.locator('#delete-heading') });
   expect(await dialog.locator('p').first().textContent()).toBe(
     'Delete selected file? This changes the project immediately and cannot be undone in Boris Editor.'
@@ -3161,7 +3185,9 @@ test('opening the project names how long connect took (#418 M11)', async ({ page
 });
 
 test('opening and saving a file name the wait and elapsed time (#418 M11)', async ({ page }) => {
-  await installApi(page);
+  await installApi(page, {
+    files: [{ path: 'boris.json' }, { path: 'content/index.md' }, { path: 'content/guides/start.md' }]
+  });
   await page.route('**/api/files/open', async route => {
     const { path } = route.request().postDataJSON() as { path: string };
     await new Promise(resolve => setTimeout(resolve, 80));
@@ -3184,16 +3210,16 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
       })
     });
   });
-  const opening = page.getByRole('button', { name: 'content/index.md', exact: true }).click();
-  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opening content/index.md');
+  const opening = page.getByRole('button', { name: 'content/guides/start.md', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opening content/guides/start.md');
   await opening;
-  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opened content/index.md.');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opened content/guides/start.md.');
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('s)');
-  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Wait\n');
+  await page.getByRole('textbox', { name: 'Source for content/guides/start.md' }).fill('# Wait\n');
   const saving = page.getByRole('button', { name: 'Save file', exact: true }).click();
-  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saving content/index.md');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saving content/guides/start.md');
   await saving;
-  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/index.md.');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/guides/start.md.');
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('s)');
 });
 
@@ -3242,4 +3268,55 @@ test('launching with a missing open= file surfaces the host failure (#649 A15)',
     openError: { error: 'file_not_found' }
   });
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Could not open content/nope.md');
+});
+
+test('cold launch without open= opens content/index.md (#975)', async ({ page }) => {
+  const openRequestPromise = page.waitForRequest('**/api/files/open');
+  await installApi(page);
+  expect((await openRequestPromise).postDataJSON()).toEqual({ path: 'content/index.md' });
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+});
+
+test('cold launch restores last_open when it is still in the file list (#975)', async ({ page }) => {
+  const openRequestPromise = page.waitForRequest('**/api/files/open');
+  await installApi(page, {
+    files: [{ path: 'boris.json' }, { path: 'content/index.md' }, { path: 'content/guides/start.md' }],
+    lastOpen: 'content/guides/start.md'
+  });
+  expect((await openRequestPromise).postDataJSON()).toEqual({ path: 'content/guides/start.md' });
+  await expect(page.getByRole('textbox', { name: 'Source for content/guides/start.md' })).toBeVisible();
+});
+
+test('open= wins over last_open (#975)', async ({ page }) => {
+  const openRequestPromise = page.waitForRequest('**/api/files/open');
+  await installApi(page, {
+    hash: '/#token=test-session-token&open=content/index.md',
+    files: [{ path: 'boris.json' }, { path: 'content/index.md' }, { path: 'content/guides/start.md' }],
+    lastOpen: 'content/guides/start.md'
+  });
+  expect((await openRequestPromise).postDataJSON()).toEqual({ path: 'content/index.md' });
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+});
+
+test('unsafe last_open is ignored and content/index.md opens instead (#975)', async ({ page }) => {
+  const openRequestPromise = page.waitForRequest('**/api/files/open');
+  await installApi(page, { lastOpen: 'dist/index.html' });
+  expect((await openRequestPromise).postDataJSON()).toEqual({ path: 'content/index.md' });
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+});
+
+test('existing dist preview state shows the iframe at connect (#975)', async ({ page }) => {
+  await installApi(page, {
+    previewState: {
+      phase: 'stale',
+      generation: 0,
+      exit_code: null,
+      used_stderr_fallback: false,
+      message: 'Showing existing preview output from an earlier build; rebuild to refresh.',
+      preview_url: 'https://preview.invalid/?token=test'
+    }
+  });
+  await expect(page.locator('.preview-state')).toContainText('Showing existing preview output');
+  await expect(page.getByTitle('Boris site preview')).toBeVisible();
+  await expect(page.getByText('No valid Boris preview output is available yet.')).toHaveCount(0);
 });

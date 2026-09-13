@@ -104,6 +104,8 @@ calls carry it in the `x-boris-editor-token` header instead. An embedder may
 append `&open=<project-relative path>` to the fragment as a shell-side
 convenience; the host never reads a file from the URL and its transport posture
 is unchanged (see [`editor/README.md`](../../editor/README.md#launch-line-contract)).
+Without `open=`, the shell may restore `last_open` from `GET /api/files` or
+open `content/index.md` when present (§5.3).
 
 ### 3.2 Loopback and header discipline
 
@@ -307,11 +309,20 @@ A malformed fingerprint is `400 invalid_fingerprint`.
 
 ### 5.3 Responses and shapes
 
-`/api/files` returns a **flat** list, sorted lexicographically by full path:
+`/api/files` returns a **flat** list, sorted lexicographically by full path,
+plus the last author-owned path successfully opened, created, or renamed in
+this project (stored under the disposable state root, never project truth):
 
 ```json
-{"files":[{"path":"boris.json"},{"path":"content/index.md"}]}
+{"files":[{"path":"boris.json"},{"path":"content/index.md"}],
+ "last_open":"content/index.md"}
 ```
+
+`last_open` is `null` when none has been recorded, the recorded path failed
+`validatePath`, or the state-root file is missing or unreadable. A successful
+`open` / `create` / `rename` records the new path; a successful `delete` of
+that path clears it. The shell may restore it on a cold launch that has no
+`open=` fragment, and must still ignore unsafe values.
 
 `open`, `save` (both outcomes), and `create` share the buffer shape:
 
@@ -677,11 +688,15 @@ used_stderr_fallback, message, preview_url, watch_active}`:
 
 | `phase` | Meaning |
 |---|---|
-| `idle` | No preview output has been built in this session |
+| `idle` | No `dist/index.html` exists yet — nothing to frame |
 | `running` | A rebuild is in flight |
 | `success` | The rebuild succeeded; `generation` advanced |
 | `failed` | The rebuild failed and no valid output exists |
-| `stale` | Output exists, but from an earlier build or a failed rebuild |
+| `stale` | Output exists from an earlier build, a failed rebuild, or a `dist/` tree that was already on disk when the editor started |
+
+If `dist/index.html` is present when the host process starts, the first
+`/api/preview/state` is `stale` (generation `0`) rather than empty `idle`, so
+the shell can frame the existing bytes.
 
 `generation` advances **only** on success, so the shell can reload the iframe
 exactly once per successful build. On failure `message` is the last
