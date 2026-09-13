@@ -68,3 +68,18 @@ export function authorPathIssue(path: string): 'invalid_path' | 'path_not_author
 export function isLaunchOpenSafe(path: string): boolean {
   return authorPathIssue(path) === undefined;
 }
+
+export const DEFAULT_LAUNCH_PATH = 'content/index.md';
+
+// Cold launch without `open=`: restore the host's last author-owned path when
+// it is still in the file list, otherwise open content/index.md when present.
+// Unsafe values are ignored the same way as an unsafe launch fragment.
+export function defaultLaunchPath(
+  files: ReadonlyArray<{ path: string }>,
+  lastOpen: string | null | undefined,
+): string | undefined {
+  const present = new Set(files.map((file) => file.path));
+  if (lastOpen && isLaunchOpenSafe(lastOpen) && present.has(lastOpen)) return lastOpen;
+  if (present.has(DEFAULT_LAUNCH_PATH)) return DEFAULT_LAUNCH_PATH;
+  return undefined;
+}

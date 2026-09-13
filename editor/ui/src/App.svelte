@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { token, launchOpenPath, api, elapsedLabel, hostErrorLabel, authorPathIssue, isLaunchOpenSafe } from './lib/api';
+  import { token, launchOpenPath, api, elapsedLabel, hostErrorLabel, authorPathIssue, isLaunchOpenSafe, defaultLaunchPath } from './lib/api';
   import type {
     Health,
     Version,
@@ -140,6 +140,14 @@
           void openFile(launchOpenPath);
         } else {
           buffer.editorStatus = `Launch open path ignored: ${launchOpenPath} is not an author-owned project file.`;
+        }
+      } else {
+        const fallback = defaultLaunchPath(filesResult.data.files, filesResult.data.last_open);
+        if (fallback) {
+          const opened = await openFile(fallback);
+          if (opened && recovery.ok && recovery.skipped > 0) {
+            buffer.editorStatus = `${recovery.skipped} recovery snapshot${recovery.skipped === 1 ? ' was' : 's were'} unreadable and ignored.`;
+          }
         }
       }
       startHostWatch();

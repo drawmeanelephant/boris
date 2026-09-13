@@ -93,7 +93,12 @@ API ([`file_api.validatePath`](src/file_api.zig)): exactly `boris.json` or a
 regular file below `content/` or `themes/`, with no leading `/`, no `..`
 segments, and no backslashes. An invalid path is ignored with a status message;
 a well-formed but missing path surfaces the host's `file_not_found`; either way
-the editor still boots to the project file list. The fragment is consumed only
+the editor still boots to the project file list. **`open=` wins:** a present
+fragment, even an ignored unsafe one, is never overridden by a restored path.
+Without `open=`, the shell restores `last_open` from `GET /api/files` when that
+path is still author-owned and still in the list, otherwise it opens
+`content/index.md` when that file is present. Unsafe recorded paths are ignored
+the same way as an unsafe fragment. The fragment is consumed only
 by the shell — the host keeps printing the token-only launch line and never
 reads a file from the URL, so the token/CSP/loopback posture is unchanged.
 
@@ -206,7 +211,8 @@ truth unless the author explicitly saves it.
 
 The authenticated file API is intentionally small:
 
-- `GET /api/files` and `POST /api/files/open` enumerate and open safe files;
+- `GET /api/files` and `POST /api/files/open` enumerate and open safe files
+  (`last_open` on the list is the disposable last author-owned path);
 - `POST /api/files/probe` compares the open-file fingerprint to disk without
   writing; transient filesystem errors stay in-session;
 - `POST /api/files/save`, `/create`, `/rename`, and `/delete` perform explicit

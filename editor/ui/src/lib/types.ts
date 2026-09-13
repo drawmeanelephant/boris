@@ -75,7 +75,7 @@ export type WatchEventsResponse = {
 };
 
 export type FileEntry = { path: string };
-export type FileList = { files: FileEntry[] };
+export type FileList = { files: FileEntry[]; last_open?: string | null };
 
 // The Project pane renders a directory tree, but the host's file list is a
 // flat set of project-relative paths and stays that way: the tree is derived

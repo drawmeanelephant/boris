@@ -91,6 +91,7 @@ api_get /api/version | grep -q '"compiler_id":"boris/'
 
 files="$(api_get /api/files)"
 printf '%s' "$files" | grep -q '"path":"content/index.md"'
+printf '%s' "$files" | grep -q '"last_open":null'
 if printf '%s' "$files" | grep -Eq 'dist/index.html|\.boris/graph.json'; then
   echo "generated output escaped into the author file list" >&2
   exit 1
@@ -110,6 +111,12 @@ opened="$(api_post /api/files/open '{"path":"content/index.md"}')"
 [[ "$(printf '%s' "$opened" | code_of)" == "200" ]]
 fingerprint="$(printf '%s' "$opened" | body_of | fingerprint_of)"
 [[ ${#fingerprint} -eq 64 ]]
+files="$(api_get /api/files)"
+printf '%s' "$files" | grep -q '"last_open":"content/index.md"'
+stop_editor
+start_editor
+files="$(api_get /api/files)"
+printf '%s' "$files" | grep -q '"last_open":"content/index.md"'
 
 # An external write after open must produce a 409 and preserve both versions.
 printf '# External edit\n' >"$work/project/content/index.md"

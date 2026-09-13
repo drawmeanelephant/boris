@@ -1,6 +1,7 @@
 const std = @import("std");
 const authoring = @import("authoring.zig");
 const graph = @import("graph.zig");
+const last_open = @import("last_open.zig");
 const contracts = @import("contracts.zig");
 const diagnostic_packet = @import("diagnostic_packet.zig");
 const file_api = @import("file_api.zig");
@@ -197,6 +198,7 @@ test "boris path resolution canonicalizes paths and passes through command names
 test {
     _ = authoring;
     _ = graph;
+    _ = last_open;
     _ = contracts;
     _ = diagnostic_packet;
     _ = file_api;

@@ -172,7 +172,7 @@ section {
      flush under it; the JS-measured var keeps the offset honest. */
   scroll-margin-top: calc(var(--section-nav-h, 3.25rem) + 0.75rem);
 }
-.project-pane, .source-pane, .problems-pane { min-height: 32rem; }
+.project-pane, .source-pane, .problems-pane { min-height: 32rem; min-width: 0; }
 .file-actions, .source-actions, .dialog-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
 .file-filter { margin-bottom: 0.85rem; }
 .file-filter p { margin: 0.45rem 0 0; color: var(--color-text-muted); font-size: var(--text-sm); }
@@ -308,11 +308,11 @@ input:disabled, select:disabled, textarea:disabled { background: var(--color-sun
 .graph-links button { width: 100%; text-align: left; }
 /* Graph map: a visual review aid over the frozen graph. The SVG is
    aria-hidden; the lists below remain the keyboard path. */
-.graph-map { margin: var(--space-4) 0 0; }
+.graph-map { margin: var(--space-4) 0 0; min-width: 0; max-width: 100%; }
 .graph-map-controls { display: flex; align-items: center; gap: 0.35rem; margin-bottom: var(--space-2); }
 .graph-map-controls button { width: auto; min-height: 2rem; padding: 0 0.6rem; font-size: var(--text-sm); }
 .graph-map-zoom { min-width: 3.4rem; text-align: center; font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
-.graph-map-scroll { max-height: 22rem; overflow: auto; border: 1px solid var(--color-border-soft); border-radius: var(--radius-sm); background: var(--color-surface); }
+.graph-map-scroll { max-height: 22rem; width: 100%; max-width: 100%; min-width: 0; overflow: auto; border: 1px solid var(--color-border-soft); border-radius: var(--radius-sm); background: var(--color-surface); }
 .graph-map-scroll:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
 .graph-map svg { display: block; }
 .graph-map-edge { fill: none; stroke: var(--color-border-strong); stroke-width: 1.25; }
