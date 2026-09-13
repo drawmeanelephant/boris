@@ -148,6 +148,15 @@ async function openIndex(page: Page) {
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# content/index.md\n');
 }
 
+test('graph map is available before a file is open (#970)', async ({ page }) => {
+  await installApi(page);
+  const map = page.getByTestId('graph-map');
+  await expect(map).toBeVisible();
+  await expect(map.locator('[data-node-id]')).toHaveCount(GRAPH.nodes.length);
+  await expect(page.getByText('Select a node to open a page, or pick a file from Project files.')).toBeVisible();
+  await expect(page.locator('[data-node-id].graph-map-node--active')).toHaveCount(0);
+});
+
 test('graph map renders one node per page and stays out of the accessibility tree', async ({ page }) => {
   await installApi(page);
   await openIndex(page);

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { GraphNode } from '../lib/types';
+  import { buffer } from '../lib/state/buffer.svelte';
   import { graph, activeNode, parentNode, graphChildren, graphSiblings, graphOutgoing, graphBacklinks, graphRelations, bufferWikiLinks } from '../lib/state/graph.svelte';
   import { problems } from '../lib/state/problems.svelte';
   import GraphMap from './GraphMap.svelte';
@@ -113,6 +114,10 @@
       </ul>
     {/if}
   {:else if graph.payload?.graph}
-    <p>This file is not a page in the Boris graph.</p>
+    {#if buffer.activePath}
+      <p>This file is not a page in the Boris graph.</p>
+    {:else}
+      <p>Select a node to open a page, or pick a file from Project files.</p>
+    {/if}
   {/if}
 </section>

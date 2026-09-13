@@ -182,7 +182,30 @@ export function themeAssets(): FileEntry[] {
   return project.files.filter(file => file.path.startsWith('themes/') && file.path.includes('/assets/'));
 }
 
-export async function refreshFiles() {
+export async function refreshFiles(): Promise<boolean> {
   const result = await api<FileList>('/api/files');
-  if (result.response.ok) project.files = result.data.files;
+  if (!result.response.ok) return false;
+  project.files = result.data.files;
+  return true;
+}
+
+function sortedWith(files: FileEntry[], path: string): FileEntry[] {
+  if (files.some(file => file.path === path)) return files;
+  return [...files, { path }].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+// Keep the tree honest when a write succeeded but GET /api/files did not:
+// insert, rename, or drop the known path instead of leaving buffer and list
+// pointing at different realities.
+export function rememberFile(path: string) {
+  project.files = sortedWith(project.files, path);
+}
+
+export function rememberRenamedFile(oldPath: string, newPath: string) {
+  const without = project.files.filter(file => file.path !== oldPath);
+  project.files = sortedWith(without, newPath);
+}
+
+export function forgetFile(path: string) {
+  project.files = project.files.filter(file => file.path !== path);
 }

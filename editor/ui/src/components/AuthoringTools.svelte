@@ -76,13 +76,14 @@
     <button type="button" disabled={!suggestions().length || buffer.readOnly} onclick={() => insertSuggestion(suggestions()[authoring.selectedSuggestion])}>Insert selected completion</button>
   </div>
   {#if authoring.completionOpen && suggestions().length > 0}
-    <ul id="completion-options" role="listbox" aria-label="Boris completion suggestions()">
+    <ul id="completion-options" role="listbox" aria-label="Boris completion suggestions">
       {#each suggestions() as suggestion, suggestionIndex (`${authoring.completionKind}-${suggestion.value}`)}
         <li
           id="completion-option-{suggestionIndex}"
           role="option"
           tabindex="-1"
           aria-selected={suggestionIndex === authoring.selectedSuggestion}
+          aria-label="{suggestion.value}; {suggestion.detail}"
           class:selected={suggestionIndex === authoring.selectedSuggestion}
           onclick={() => (authoring.selectedSuggestion = suggestionIndex)}
           onkeydown={(event) => {

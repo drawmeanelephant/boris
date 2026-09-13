@@ -13,9 +13,10 @@
   //    viewports, and the active pill scrolls into view. The bars are
   //    siblings of the scrollable row (not children) so they never scroll
   //    away or clip with the content.
-  //  - unavailable targets: a nav link whose pane is absent (Graph only
-  //    exists once a file is open) is presented disabled and explains
-  //    itself on activation instead of silently doing nothing (#944).
+  //  - unavailable targets: a nav link whose pane is currently absent is
+  //    presented disabled and explains itself on activation instead of
+  //    silently doing nothing. Graph stays available with no file open
+  //    (#970); the map is a project-level artifact.
   type SectionLink = { id: string; label: string };
 
   type Props = {

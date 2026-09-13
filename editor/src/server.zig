@@ -644,11 +644,11 @@ fn serveVersion(io: Io, allocator: std.mem.Allocator, request: *http.Server.Requ
     const response = .{
         .compiler_id = compiler_id,
         .supported = .{
-            .completion = [_]u8{1},
+            .completion = [_]u32{1},
             .ir = [_][]const u8{ "0.2.0", "0.3.0", "0.4.0" },
             .documentation_intelligence = [_][]const u8{"0.2.0"},
-            .publication_plan = [_]u8{1},
-            .frontmatter = [_]u8{1},
+            .publication_plan = [_]u32{1},
+            .frontmatter = [_]u32{1},
             .validate_watch = config.daemon.watchSupported(),
             .watch_json = config.watch.watchSupported(),
         },

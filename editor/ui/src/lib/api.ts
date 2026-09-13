@@ -43,14 +43,28 @@ export function hostErrorLabel(code: string | undefined): string {
   if (code === 'boris_unavailable') return 'the Boris binary is not available; restart the editor';
   if (code === 'invalid_boris_version') return 'the Boris version string is not usable';
   if (code === 'unsupported_boris_artifact') return 'a generated Boris artifact is stale or unsupported; rebuild it';
+  if (code === 'path_not_author_owned') return 'paths must be boris.json or under content/ or themes/';
+  if (code === 'invalid_path') return 'that path is not a valid project-relative file path';
+  if (code === 'path_already_exists') return 'a file already exists at that path';
+  if (code === 'file_not_found') return 'that file was not found';
+  if (code === 'read_only') return 'that file is read-only on disk';
+  if (code === 'invalid_utf8') return 'the file is not valid UTF-8';
+  if (code === 'io_error') return 'the editor host could not complete the file operation';
   return code ?? 'request failed';
 }
 
-// Mirrors editor/src/file_api.zig `validatePath` (authoritative rule).
-// Pre-check keeps an unsafe `open=` fragment from even reaching the host.
+// Classifies a project-relative path the same way as editor/src/file_api.zig
+// `validatePath` (syntax first, then author-owned roots). Used to pre-check
+// Create/Rename before POST and to keep an unsafe `open=` fragment from
+// reaching the host.
+export function authorPathIssue(path: string): 'invalid_path' | 'path_not_author_owned' | undefined {
+  if (!path || path.length > 4096) return 'invalid_path';
+  if (path.startsWith('/') || path.includes('\\') || path.includes('\u0000')) return 'invalid_path';
+  if (path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')) return 'invalid_path';
+  if (path === 'boris.json' || path.startsWith('content/') || path.startsWith('themes/')) return undefined;
+  return 'path_not_author_owned';
+}
+
 export function isLaunchOpenSafe(path: string): boolean {
-  if (!path || path.length > 4096) return false;
-  if (path.startsWith('/') || path.includes('\\') || path.includes('\u0000')) return false;
-  if (path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')) return false;
-  return path === 'boris.json' || path.startsWith('content/') || path.startsWith('themes/');
+  return authorPathIssue(path) === undefined;
 }

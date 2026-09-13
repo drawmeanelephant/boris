@@ -29,10 +29,22 @@
   <p>Rename {buffer.activePath} without replacing an existing file.</p>
   <form onsubmit={(event) => { event.preventDefault(); onRename(); }}>
     <label for="rename-path">New file path</label>
-    <input id="rename-path" value={dialogs.renamePath} oninput={(e) => (dialogs.renamePath = (e.currentTarget as HTMLInputElement).value)} />
+    <input
+      id="rename-path"
+      value={dialogs.renamePath}
+      aria-invalid={dialogs.renameError ? 'true' : undefined}
+      aria-describedby={dialogs.renameError ? 'rename-error' : undefined}
+      oninput={(e) => {
+        dialogs.renamePath = (e.currentTarget as HTMLInputElement).value;
+        dialogs.renameError = '';
+      }}
+    />
+    {#if dialogs.renameError}
+      <p id="rename-error" class="warning-text" role="alert">{dialogs.renameError}</p>
+    {/if}
     <div class="dialog-actions">
-      <button type="button" onclick={onCancel}>Cancel<kbd>Esc</kbd></button>
-      <button type="submit" class="primary" disabled={!submitReady}>Rename file<kbd>Enter</kbd></button>
+      <button type="button" aria-keyshortcuts="Escape" onclick={onCancel}>Cancel<kbd aria-hidden="true">Esc</kbd></button>
+      <button type="submit" class="primary" disabled={!submitReady} aria-keyshortcuts="Enter">Rename file<kbd aria-hidden="true">Enter</kbd></button>
     </div>
   </form>
 </dialog>
