@@ -36,6 +36,8 @@ export function commandLabel(mode: CommandMode): string {
       impact: 'Run impact',
       plan: 'Run publication plan',
       recipe_scale: 'Scale recipe',
+      graph_export: 'Export graph',
+      proof_verify: 'Verify proof',
     } satisfies Record<CommandMode, string>
   )[mode];
 }

@@ -108,7 +108,8 @@ export type ProbeResponse = {
 export type RecoverySnapshot = { path: string; content: string; fingerprint: string };
 export type RecoveryList = { snapshots: RecoverySnapshot[]; skipped?: number };
 export type ErrorResponse = { error?: string; status?: string };
-export type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact' | 'plan' | 'recipe_scale';
+export type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact' | 'plan' | 'recipe_scale' | 'graph_export' | 'proof_verify';
+export type GraphExportFormat = 'mermaid' | 'dot';
 export type FailureClass = 'success' | 'content' | 'usage' | 'io' | 'terminated';
 
 export type PendingResolution =
@@ -222,6 +223,8 @@ export type CommandResult = {
   impact: ImpactEndpoint[];
   publication_plan?: PublicationPlan | null;
   recipe_scale_view?: RecipeScaleView | null;
+  graph_document?: string | null;
+  proof_report?: string | null;
 };
 
 export type ProblemGroup = { key: string; label: string; problems: Problem[] };

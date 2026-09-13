@@ -1,0 +1,3 @@
+### Added
+
+- The editor now documents a CLI to editor capability matrix and allowlists two more read-only Boris commands: **Export graph** (`boris graph`, Mermaid by default or Graphviz DOT) and **Verify proof** (`boris proof verify --html-dir dist`), while conflict compare panes open at the top of both columns. Links: [the editor-host contract](/docs/contracts/editor-host.md), [the editor README matrix](/editor/README.md#cli-to-editor-capability-matrix), [#983](https://github.com/drawmeanelephant/boris/issues/983), [#984](https://github.com/drawmeanelephant/boris/issues/984), [#985](https://github.com/drawmeanelephant/boris/issues/985), [#986](https://github.com/drawmeanelephant/boris/issues/986).

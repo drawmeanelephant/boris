@@ -10,7 +10,8 @@ export const publication = $state({
   payload: null as PublicationPayload | null,
   status: 'Loading publication profiles…',
   selectedProfile: '',
-  lastPlan: null as PublicationPlan | null
+  lastPlan: null as PublicationPlan | null,
+  lastProofReport: null as string | null
 });
 
 export function setPublication(payload: PublicationPayload) {

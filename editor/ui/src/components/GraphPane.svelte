@@ -1,18 +1,20 @@
 <script lang="ts">
-  import type { GraphNode } from '../lib/types';
+  import type { GraphExportFormat, GraphNode } from '../lib/types';
   import { buffer } from '../lib/state/buffer.svelte';
-  import { graph, activeNode, parentNode, graphChildren, graphSiblings, graphOutgoing, graphBacklinks, graphRelations, bufferWikiLinks } from '../lib/state/graph.svelte';
+  import { graph, activeNode, parentNode, graphChildren, graphSiblings, graphOutgoing, graphBacklinks, graphRelations, bufferWikiLinks, setGraphExportFormat, copyGraphDocument, downloadGraphDocument } from '../lib/state/graph.svelte';
   import { problems } from '../lib/state/problems.svelte';
   import GraphMap from './GraphMap.svelte';
 
   let {
     onOpenPath,
     onOpenNode,
-    onImpact
+    onImpact,
+    onExport
   }: {
     onOpenPath: (path: string) => void;
     onOpenNode: (node: GraphNode | null) => void;
     onImpact: () => void;
+    onExport: () => void;
   } = $props();
 
   // Local deriveds so the template's {#if} narrows the node to non-null.
@@ -25,6 +27,7 @@
   const relations = $derived(graphRelations());
   const wikiLinks = $derived(bufferWikiLinks());
   const mapDocument = $derived(graph.payload?.graph ?? null);
+  const exportReady = $derived(graph.payload?.graph_status === 'ready');
 
   function nodeForIdLocal(id: string): GraphNode | null {
     if (!graph.payload?.graph) return null;
@@ -38,8 +41,31 @@
       <h3 id="graph-heading">Graph</h3>
       <p>Read-only view of Boris <code>graph.json</code> and <code>completion.json</code>.</p>
     </div>
+    <div class="graph-export" aria-label="Graph export">
+      <label for="graph-export-format">Export format</label>
+      <select
+        id="graph-export-format"
+        value={graph.exportFormat}
+        disabled={problems.running || !exportReady}
+        onchange={(e) => setGraphExportFormat((e.currentTarget as HTMLSelectElement).value as GraphExportFormat)}
+      >
+        <option value="mermaid">Mermaid</option>
+        <option value="dot">Graphviz DOT</option>
+      </select>
+      <button type="button" disabled={problems.running || !exportReady} onclick={onExport}>Export graph</button>
+    </div>
   </div>
   <p role="status" aria-label="Graph status" aria-live="polite">{graph.status}</p>
+  {#if graph.document}
+    <div class="graph-export-document">
+      <label for="graph-export-document">Exported {graph.exportFormat === 'dot' ? 'Graphviz DOT' : 'Mermaid'}</label>
+      <textarea id="graph-export-document" readonly value={graph.document}></textarea>
+      <div class="graph-actions">
+        <button type="button" onclick={() => void copyGraphDocument()}>{graph.copied ? 'Copied!' : 'Copy export'}</button>
+        <button type="button" onclick={downloadGraphDocument}>Download export</button>
+      </div>
+    </div>
+  {/if}
   {#if mapDocument && mapDocument.nodes.length > 0}
     <GraphMap graph={mapDocument} activeId={node?.id ?? null} onOpenNode={(next) => onOpenNode(next)} />
   {/if}

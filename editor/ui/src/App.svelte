@@ -208,6 +208,10 @@
       problems.status = 'Enter a scale factor before scaling the recipe.';
       return;
     }
+    if (mode === 'graph_export' && graph.payload?.graph_status !== 'ready') {
+      problems.status = 'Build diagnostics to create the Boris graph before exporting.';
+      return;
+    }
     problems.running = true;
     const started = Date.now();
     problems.status = `Running ${commandLabel(mode)}…`;
@@ -217,6 +221,8 @@
         ? { mode, profile: publication.selectedProfile.trim() }
         : mode === 'recipe_scale'
           ? { mode, recipe_scale_id: activeNode()!.id, recipe_scale_factor: problems.scaleFactor.trim() }
+          : mode === 'graph_export'
+            ? { mode, graph_format: graph.exportFormat }
         : { mode };
     const result = await api<CommandResult | ErrorResponse>('/api/commands/run', {
       method: 'POST', body: JSON.stringify(body)
@@ -243,6 +249,13 @@
     if (problems.result.publication_plan) publication.lastPlan = problems.result.publication_plan;
     if (mode === 'recipe_scale' && problems.result.failure_class === 'success' && problems.result.recipe_scale_view) {
       problems.scaleView = problems.result.recipe_scale_view;
+    }
+    if (mode === 'graph_export') {
+      graph.document = problems.result.failure_class === 'success' ? (problems.result.graph_document ?? null) : null;
+      graph.copied = false;
+    }
+    if (mode === 'proof_verify') {
+      publication.lastProofReport = problems.result.proof_report ?? null;
     }
     if (mode === 'html_build' || mode === 'plan') await refreshPublication();
   }
@@ -329,6 +342,18 @@
     markBufferHostUnavailable();
   }
 
+  async function openConflictCompare(trigger?: EventTarget | null) {
+    await tick();
+    openModal(conflictDialog, trigger);
+    await tick();
+    for (const area of conflictDialog.querySelectorAll('textarea')) {
+      const textarea = area as HTMLTextAreaElement;
+      textarea.scrollTop = 0;
+      textarea.setSelectionRange(0, 0);
+    }
+    conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+  }
+
   async function probeDisk() {
     if (!buffer.activePath || !buffer.fingerprint || buffer.saveInFlight || probeInFlight) return;
     if (document.querySelector('dialog[open]')) return;
@@ -359,9 +384,7 @@
           buffer.conflict = null;
           buffer.deletedConflict = true;
           buffer.editorStatus = `${buffer.activePath} was deleted outside the editor.`;
-          await tick();
-          openModal(conflictDialog);
-          conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+          await openConflictCompare();
         } else {
           const gone = buffer.activePath;
           stopRecoveryTimer();
@@ -382,9 +405,7 @@
         buffer.conflict = disk;
         buffer.deletedConflict = false;
         buffer.editorStatus = `External changes detected in ${buffer.activePath}. Nothing was overwritten.`;
-        await tick();
-        openModal(conflictDialog);
-        conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+        await openConflictCompare();
       } else {
         loadBuffer(disk, `Loaded external changes to ${probe.path}.`);
       }
@@ -424,16 +445,12 @@
         buffer.conflict = result.data as BufferResponse;
         buffer.deletedConflict = false;
         buffer.editorStatus = `External changes detected in ${buffer.activePath}. Nothing was overwritten.`;
-        await tick();
-        openModal(conflictDialog, trigger);
-        conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+        await openConflictCompare(trigger);
       } else if (result.response.status === 409 && error.status === 'deleted') {
         buffer.conflict = null;
         buffer.deletedConflict = true;
         buffer.editorStatus = `${buffer.activePath} was deleted outside the editor. Nothing was written.`;
-        await tick();
-        openModal(conflictDialog, trigger);
-        conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+        await openConflictCompare(trigger);
       } else if (error.error === 'read_only') {
         buffer.readOnly = true;
         buffer.editorStatus = `${buffer.activePath} is read-only. Nothing was written.`;
@@ -894,6 +911,8 @@
     onScale={() => runCommand('recipe_scale')}
     onReset={resetScale}
     onRunPlan={() => runCommand('plan')}
+    onVerifyProof={() => runCommand('proof_verify')}
+    onExportGraph={() => runCommand('graph_export')}
     onEnterFocus={enterFocusMode}
   />
 

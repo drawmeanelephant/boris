@@ -408,7 +408,7 @@ project-keyed and stable: two projects never share a state root.
 ### 6.1 Fixed allowlist
 
 The UI cannot supply argv or a working directory. `/api/commands/run` accepts
-one of seven modes and the host builds the exact command; every child runs with
+one of nine modes and the host builds the exact command; every child runs with
 cwd = project root, a 120 s timeout, and 16 MiB stdout/stderr ceilings.
 
 | `mode` | Fixed argv (prefixed by the resolved compiler path) |
@@ -420,9 +420,15 @@ cwd = project root, a 120 s timeout, and 16 MiB stdout/stderr ceilings.
 | `impact` | `impact <impact_id> --input content --format json --report .boris/editor-impact.json` |
 | `plan` | `plan --profile <profile>` |
 | `recipe_scale` | `recipe-scale --input content --id <id> --factor <factor>` |
+| `graph_export` | `graph --input content --format mermaid\|dot` |
+| `proof_verify` | `proof verify --html-dir dist` |
+
+The status of each CLI surface in the editor (done / partial / missing /
+non-goal) lives in the [CLI to editor capability matrix](../../editor/README.md#cli-to-editor-capability-matrix).
 
 When project discovery reports `input_mode: cooklang`, `--cooklang` is appended
-to every mode except `plan` (mode parity with the one-shot CLI). A timeout or a
+to every mode except `plan` and `proof_verify` (mode parity with the one-shot
+CLI; proof verify reads committed checks and does not compile). A timeout or a
 stdout/stderr overrun yields a `terminated` process problem, not an API error.
 
 `validate` is served by the managed validation daemon whenever the compiler
@@ -437,6 +443,7 @@ which path answered.
 | `impact_id` | Required for `impact`; forbidden for every other mode. 1–4096 bytes, valid UTF-8, no NUL/CR/LF, and must not start with `-` (so an id can never become an option). |
 | `profile` | Required for `plan`; forbidden otherwise. Author-owned relative source path (≤1024 bytes), same option-injection guard. |
 | `recipe_scale_id`, `recipe_scale_factor` | Required for `recipe_scale`; forbidden otherwise. Same guards; factor is trimmed, 1–64 bytes, and must not start with `-`. |
+| `graph_format` | Optional for `graph_export` (`mermaid` or `dot`; omitted means `mermaid`); forbidden for every other mode. |
 
 Violations are `400 invalid_command_request`.
 
@@ -448,7 +455,8 @@ The result payload is:
 {"mode":"validate","exit_code":0,"failure_class":"success",
  "compiler_id":"boris/0.8.2","report_version":"html-build-report-0.2.0",
  "used_stderr_fallback":false,"problems":[],"findings":[],"impact":[],
- "publication_plan":null,"recipe_scale_view":null}
+ "publication_plan":null,"recipe_scale_view":null,
+ "graph_document":null,"proof_report":null}
 ```
 
 - `failure_class` maps the compiler's contracted exit convention —
@@ -477,6 +485,13 @@ The result payload is:
 - `plan` and `recipe_scale` results carry `publication_plan` and
   `recipe_scale_view` respectively, forwarded as parsed Boris documents,
   only on a successful exit.
+- `graph_export` results carry `graph_document`, the exact Mermaid or DOT
+  stdout from `boris graph`, only on a successful exit. The host does not
+  re-layout or rewrite that document.
+- `proof_verify` results carry `proof_report`, a cleaned copy of the
+  contracted stderr verdict. `used_stderr_fallback` stays false: stderr is
+  the product report, not a compatibility fallback. The command mutates
+  nothing.
 
 A stale artifact must never be mistaken for this run's output: the host deletes
 the report named in the table above before spawning the child, for every mode

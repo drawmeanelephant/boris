@@ -3,9 +3,11 @@
   import { problems } from '../lib/state/problems.svelte';
 
   let {
-    onRunPlan
+    onRunPlan,
+    onVerifyProof
   }: {
     onRunPlan: () => void;
+    onVerifyProof: () => void;
   } = $props();
 </script>
 
@@ -15,6 +17,7 @@
       <h2 id="publication-heading">Publication</h2>
       <p>The editor runs <code>boris plan --profile</code> and shows the normalized declaration. It does not deploy or store secrets.</p>
     </div>
+    <button type="button" disabled={problems.running} onclick={onVerifyProof}>Verify proof</button>
   </div>
   <p role="status" aria-label="Publication status" aria-live="polite">{publication.status}</p>
   {#if (publication.payload?.profiles.length ?? 0) > 0}
@@ -76,5 +79,10 @@
     <p>Limitation <code>no-deployment-verification</code> is part of every Proof Pack. Local build verification and deployed-site verification are different facts.</p>
   {:else}
     <p>No local Proof Pack at <code>dist/_boris/proof/proof-pack.json</code> yet. Build HTML to produce evidence; that still is not a deploy.</p>
+  {/if}
+  {#if publication.lastProofReport}
+    <h3>Proof verify report</h3>
+    <p>This is the contracted <code>boris proof verify</code> stderr. Exit class is in Problems; the editor does not invent pass or fail.</p>
+    <pre class="proof-report">{publication.lastProofReport}</pre>
   {/if}
 </section>

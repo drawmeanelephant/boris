@@ -17,6 +17,8 @@ pub const Mode = enum {
     impact,
     plan,
     recipe_scale,
+    graph_export,
+    proof_verify,
 };
 
 pub const FailureClass = enum {
@@ -81,6 +83,8 @@ pub const Result = struct {
     impact: []ImpactEndpoint,
     publication_plan: ?std.json.Value = null,
     recipe_scale_view: ?std.json.Value = null,
+    graph_document: ?[]const u8 = null,
+    proof_report: ?[]const u8 = null,
 };
 
 pub const Config = struct {
@@ -95,6 +99,7 @@ pub const Request = struct {
     profile: ?[]const u8 = null,
     recipe_scale_id: ?[]const u8 = null,
     recipe_scale_factor: ?[]const u8 = null,
+    graph_format: ?[]const u8 = null,
 };
 
 const check_report_name = "editor-check.json";
@@ -117,6 +122,11 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
     if (request.mode != .recipe_scale and (request.recipe_scale_id != null or request.recipe_scale_factor != null)) {
         return error.UnexpectedRecipeScale;
     }
+    if (request.mode == .graph_export) {
+        try validateGraphFormat(request.graph_format);
+    } else if (request.graph_format != null) {
+        return error.UnexpectedGraphFormat;
+    }
     try prepareArtifactRoot(io, config.project_root, request.mode);
 
     const compiler_id = try readCompilerId(allocator, io, config);
@@ -135,6 +145,8 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
     var structured_report = false;
     var publication_plan: ?std.json.Value = null;
     var recipe_scale_view: ?std.json.Value = null;
+    var graph_document: ?[]const u8 = null;
+    var proof_report: ?[]const u8 = null;
 
     switch (request.mode) {
         .ir_build => if (try readGeneratedFile(allocator, io, config.project_root, "build-report.json")) |bytes| {
@@ -178,6 +190,15 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
             recipe_scale_view = try parseRecipeScaleView(allocator, execution.stdout);
             structured_report = true;
         },
+        .graph_export => if (failure_class == .success and execution.stdout.len > 0) {
+            graph_document = try allocator.dupe(u8, execution.stdout);
+            structured_report = true;
+        },
+        .proof_verify => if (std.mem.trim(u8, execution.stderr, " \t\r\n").len > 0) {
+            // Stderr is the contracted proof-verify report, not a compatibility fallback.
+            proof_report = try cleanText(allocator, execution.stderr, config.project_root, max_process_output);
+            structured_report = true;
+        },
     }
 
     if (!structured_report or problems.items.len == 0) {
@@ -199,6 +220,8 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
         .impact = try impact.toOwnedSlice(allocator),
         .publication_plan = publication_plan,
         .recipe_scale_view = recipe_scale_view,
+        .graph_document = graph_document,
+        .proof_report = proof_report,
     };
 }
 
@@ -245,8 +268,16 @@ pub fn commandArgv(
             "--factor",
             request.recipe_scale_factor.?,
         }),
+        .graph_export => try args.appendSlice(allocator, &.{
+            "graph",
+            "--input",
+            "content",
+            "--format",
+            graphFormat(request.graph_format),
+        }),
+        .proof_verify => try args.appendSlice(allocator, &.{ "proof", "verify", "--html-dir", "dist" }),
     }
-    if (input_mode == .cooklang and request.mode != .plan) try args.append(allocator, "--cooklang");
+    if (input_mode == .cooklang and appendsCooklangSelector(request.mode)) try args.append(allocator, "--cooklang");
     return args.toOwnedSlice(allocator);
 }
 
@@ -284,7 +315,7 @@ fn prepareArtifactRoot(io: Io, project_root: []const u8, mode: Mode) !void {
         .check => check_report_name,
         .impact => impact_report_name,
         .validate, .html_build => html_report_name,
-        .plan, .recipe_scale => unreachable,
+        .plan, .recipe_scale, .graph_export, .proof_verify => unreachable,
     };
     artifact_dir.deleteFile(io, stale_name) catch |err| switch (err) {
         error.FileNotFound => {},
@@ -650,6 +681,22 @@ fn validateProfilePath(path: []const u8) !void {
     try validateSourcePath(path);
 }
 
+fn appendsCooklangSelector(mode: Mode) bool {
+    return switch (mode) {
+        .plan, .proof_verify => false,
+        else => true,
+    };
+}
+
+fn graphFormat(format: ?[]const u8) []const u8 {
+    return format orelse "mermaid";
+}
+
+fn validateGraphFormat(format: ?[]const u8) !void {
+    const value = format orelse return;
+    if (!std.mem.eql(u8, value, "mermaid") and !std.mem.eql(u8, value, "dot")) return error.InvalidGraphFormat;
+}
+
 fn cleanText(allocator: std.mem.Allocator, input: []const u8, private_root: []const u8, max_bytes: usize) ![]const u8 {
     const replaced = if (private_root.len > 0)
         try std.mem.replaceOwned(u8, allocator, input, private_root, "<project>")
@@ -820,4 +867,38 @@ test "plan uses the selected profile and does not invent cooklang overrides" {
     try validateProfilePath("standard-site.json");
     try std.testing.expectError(error.InvalidProfilePath, validateProfilePath("--help"));
     try std.testing.expectError(error.UnsafeArtifact, validateProfilePath("../secret.json"));
+}
+
+test "graph export argv is the fixed compiler command with mermaid default" {
+    const allocator = std.testing.allocator;
+    const mermaid = try commandArgv(allocator, "boris", .{ .mode = .graph_export }, .markdown);
+    defer allocator.free(mermaid);
+    try std.testing.expectEqual(@as(usize, 6), mermaid.len);
+    try std.testing.expectEqualStrings("graph", mermaid[1]);
+    try std.testing.expectEqualStrings("--input", mermaid[2]);
+    try std.testing.expectEqualStrings("content", mermaid[3]);
+    try std.testing.expectEqualStrings("--format", mermaid[4]);
+    try std.testing.expectEqualStrings("mermaid", mermaid[5]);
+
+    const dot = try commandArgv(allocator, "boris", .{ .mode = .graph_export, .graph_format = "dot" }, .cooklang);
+    defer allocator.free(dot);
+    try std.testing.expectEqualStrings("dot", dot[5]);
+    try std.testing.expectEqualStrings("--cooklang", dot[dot.len - 1]);
+
+    try validateGraphFormat(null);
+    try validateGraphFormat("mermaid");
+    try validateGraphFormat("dot");
+    try std.testing.expectError(error.InvalidGraphFormat, validateGraphFormat("--help"));
+    try std.testing.expectError(error.InvalidGraphFormat, validateGraphFormat("json"));
+}
+
+test "proof verify argv is the fixed compiler command and skips cooklang" {
+    const allocator = std.testing.allocator;
+    const argv = try commandArgv(allocator, "boris", .{ .mode = .proof_verify }, .cooklang);
+    defer allocator.free(argv);
+    try std.testing.expectEqual(@as(usize, 5), argv.len);
+    try std.testing.expectEqualStrings("proof", argv[1]);
+    try std.testing.expectEqualStrings("verify", argv[2]);
+    try std.testing.expectEqualStrings("--html-dir", argv[3]);
+    try std.testing.expectEqualStrings("dist", argv[4]);
 }

@@ -157,9 +157,14 @@ actual size.
 
 Named buttons open the target file. **Run impact on this page** fills the
 impact field and runs the same `boris impact` command as the Problems pane.
-`Ctrl+K` also jumps to an entity by id or title (`Go to guides/intro`).
+**Export graph** runs the fixed `boris graph` command (Mermaid by default,
+Graphviz DOT as the documented second option) and offers copy or download of
+that document. The map is not a second layout engine. `Ctrl+K` also jumps to
+an entity by id or title (`Go to guides/intro`).
 
-If diagnostics have not been built yet, the pane says so instead of guessing.
+If diagnostics have not been built yet, the pane says so instead of guessing,
+and Export graph stays disabled until **Build diagnostics** has produced a
+graph.
 
 - [[guides/building-pages|Building and writing pages]] — parent, children, and wiki links
 - [[reference/relationships|Relationships]] — parent, children, and relations this pane displays
@@ -211,9 +216,11 @@ targets. That command does not compile or publish.
 
 Local evidence at `dist/_boris/proof/proof-pack.json` is shown when a previous
 HTML build left a Proof Pack. That pack is target-local presentation. It is
-not deployment verification. GitHub Pages deploy stays in the official
-Actions workflow; Standard.site publish stays on the CLI. The editor does not
-store secrets or run a deployer.
+not deployment verification. **Verify proof** runs the fixed
+`boris proof verify --html-dir dist` command and surfaces the contracted
+stderr verdict plus the compiler exit class. GitHub Pages deploy stays in the
+official Actions workflow; Standard.site publish stays on the CLI. The editor
+does not store secrets or run a deployer.
 
 - [[guides/publishing|Publishing targets]] — profile, plan, and verified targets
 
@@ -224,16 +231,26 @@ store secrets or run a deployer.
 The Problems pane runs a fixed allowlist of Boris invocations against saved
 repository files. The UI cannot supply argv or a working directory, and all
 controls are disabled while the active buffer is dirty (Boris reads files from
-disk, not from your buffer).
+disk, not from your buffer). The table below is the standing CLI to editor
+capability matrix — the map for what is in the editor, what is still missing,
+and what is a deliberate non-goal. The developer copy lives in the
+[editor README](https://github.com/drawmeanelephant/boris/blob/main/editor/README.md#cli-to-editor-capability-matrix).
 
-| Button | Exact Boris invocation | Reads |
-|---|---|---|
-| Validate project | `boris validate --input content` | nothing |
-| Build diagnostics | `boris build --input content --out .boris` | `build-report.json` |
-| Build HTML | `boris build --input content --html-dir dist` | nothing yet (see below) |
-| Check graph | `boris check --input content --format json --report .boris/editor-check.json` | Documentation Intelligence report |
-| Run impact | `boris impact <id> --input content --format json --report .boris/editor-impact.json` | Documentation Intelligence report |
-| Run publication plan | `boris plan --profile PATH` | stdout `boris-publication-plan` |
+| Button | Exact Boris invocation | Status | Reads |
+|---|---|---|---|
+| Validate project | `boris validate --input content` | done | HTML build report (daemon when `--watch` exists) |
+| Build diagnostics | `boris build --input content --out .boris` | done | `build-report.json` |
+| Build HTML | `boris build --input content --html-dir dist` | done | `html-build-report.json` |
+| Check graph | `boris check --input content --format json --report .boris/editor-check.json` | done | Documentation Intelligence report |
+| Run impact | `boris impact <id> --input content --format json --report .boris/editor-impact.json` | done | Documentation Intelligence report |
+| Run publication plan | `boris plan --profile PATH` | done | stdout `boris-publication-plan` |
+| Scale recipe | `boris recipe-scale --input content --id ID --factor FACTOR` | done | stdout `boris-recipe-scale` |
+| Export graph | `boris graph --input content --format mermaid\|dot` | done | stdout Mermaid or DOT |
+| Verify proof | `boris proof verify --html-dir dist` | done | contracted stderr verdict |
+| Watch daemon | `boris watch --input content --html-dir dist --watch-json` | partial | NDJSON event stream |
+| IR / RAG / context / llms / rss / sitemap | — | missing | stay on the CLI |
+| `standard-site *` / `nostr *` publish or login | — | non-goal | no secrets, no deploy |
+| `init`, full build flag matrix, `serve` | — | non-goal | preview is the `serve` fallback |
 
 Boris exit codes stay distinct: **1** content/graph failure, **2**
 usage/configuration failure, **3** I/O/system failure. The editor surfaces the

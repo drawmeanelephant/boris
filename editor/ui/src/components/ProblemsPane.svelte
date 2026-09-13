@@ -52,6 +52,7 @@
     <button type="button" disabled={problems.running} onclick={() => onRunCommand('ir_build')}>Build diagnostics</button>
     <button type="button" disabled={problems.running} onclick={() => onRunCommand('html_build')}>Build HTML</button>
     <button type="button" disabled={problems.running} onclick={() => onRunCommand('check')}>Check graph</button>
+    <button type="button" disabled={problems.running} onclick={() => onRunCommand('proof_verify')}>Verify proof</button>
   </div>
   <div class="impact-command">
     <label for="impact-id">Impact entity or source endpoint</label>
@@ -103,6 +104,12 @@
       </section>
     {/each}
   </div>
+  {#if problems.result?.proof_report}
+    <section class="analysis-results" aria-labelledby="proof-report-heading">
+      <h3 id="proof-report-heading">Proof verify report</h3>
+      <pre class="proof-report">{problems.result.proof_report}</pre>
+    </section>
+  {/if}
     {#if problems.result && problems.result.findings.length > 0}
       <section class="analysis-results" aria-labelledby="analysis-findings-heading">
         <h3 id="analysis-findings-heading">Analysis findings</h3>

@@ -18,6 +18,8 @@
     onScale,
     onReset,
     onRunPlan,
+    onVerifyProof,
+    onExportGraph,
     onEnterFocus
   }: {
     onSave: () => void;
@@ -28,6 +30,8 @@
     onScale: () => void;
     onReset: () => void;
     onRunPlan: () => void;
+    onVerifyProof: () => void;
+    onExportGraph: () => void;
     onEnterFocus: (trigger: HTMLElement | null) => void;
   } = $props();
 
@@ -72,6 +76,7 @@
     onOpenPath={onOpenFile}
     onOpenNode={onOpenGraphNode}
     onImpact={onImpact}
+    onExport={onExportGraph}
   />
   {#if buffer.activePath}
     <RecipePane
@@ -105,5 +110,5 @@
     {/if}
   {/if}
   <p role="status" aria-label="Editing status" aria-live="polite">{buffer.editorStatus}</p>
-  <PublicationPane onRunPlan={onRunPlan} />
+  <PublicationPane onRunPlan={onRunPlan} onVerifyProof={onVerifyProof} />
 </section>
