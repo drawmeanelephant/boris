@@ -17,9 +17,6 @@ zig build test-harness
 
 # Oliver rendering seam tests (renderer contract fixtures)
 zig build test-render
-
-# Contract-claim gate (quoted contract rules vs the built binary)
-zig build test-contract-claims
 ```
 
 All steps are **single-threaded**. No test relies on filesystem enumeration
@@ -28,37 +25,6 @@ order (paths and entity ids are sorted before assertions).
 The CLI contract smoke exercises the process boundary rather than only Zig
 parser units: explicit command routing, report goldens, repeated-output
 determinism, and distinct content/usage/I/O exit classes.
-
-## Contract-claim registry (`test/contract-claims.txt`)
-
-A contract that states a rule nothing executes will diverge from the
-implementation silently — which is how the Cooklang `{`-adjacency guard
-([#907](https://github.com/drawmeanelephant/boris/issues/907)) went unnoticed
-while the contract had spelled out the exact failure mode.
-
-`test/contract-claims.txt` pairs a **verbatim quote** from a normative contract
-with a black-box check in `test/contract-claims.checks.sh`. The gate
-(`scripts/test-contract-claims.sh`) fails on any of three conditions:
-
-| Condition | Meaning |
-|-----------|---------|
-| Prose drift | The quoted rule no longer appears in the named contract, so the check's premise is stale |
-| Divergence | `status: enforced` and the binary violates the claim |
-| Resolved divergence | `status: known-divergence` and the bug no longer reproduces |
-
-Records marked `known-divergence` must link an issue. They pass while the bug
-is present, so the fix fails the gate and forces the record to be updated —
-neither direction can rot quietly.
-
-Add a record when a contract states a rule the implementation must honor and
-no existing gate executes it. Prefer reusing a gate verbatim with
-`check: script:<path>` over restating it. Run with `--audit` for the list of
-contracts whose rules still have no quoted tether (untethered is not untested:
-many carry dedicated test steps of their own).
-
-Checks drive the installed binary the way a user or CI does. They must not
-re-implement compiler logic: a check that re-derives what the compiler does
-would pass even when the compiler is wrong.
 
 ## Disposable output
 
@@ -107,7 +73,6 @@ for invalid-graph cases.
 | Experimental HTML Aside stream | `src/compile.zig`, hardening |
 | Frontmatter / component / renderer / graph fuzz | `src/fuzz.zig` |
 | Oliver rendering seam contract | `zig build test-render` |
-| Contract prose ↔ executable claim tethers | `test/contract-claims.txt`, `scripts/test-contract-claims.sh` |
 
 ## Fuzz seeds and bounds
 

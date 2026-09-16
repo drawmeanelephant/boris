@@ -125,13 +125,20 @@ Do not, without an explicit user request:
   local debugging as product architecture;
 - redesign concurrency/multiprocessing, replace Oliver with a non-native
   path, change Trunk–Satellite semantics, or permit arbitrary MDX, executable
-  components, or JS expressions; do not invent a parallel pipeline for convenience.
+  components, or JS expressions; do not invent a parallel pipeline for convenience;
+- invent a parallel verification product (claim registries, quote-tether
+  harnesses, contract-coverage `--audit` worklists, `known-divergence`
+  ratchets, or extra `zig build test` steps that restate rules already
+  covered). A contract the code does not honor is a defect: fix the
+  implementation or rewrite the contract in the same change.
 
 **What these protect.** These rules protect the **compiler core**: `src/`,
 `build.zig` / `build.zig.zon`, Oliver, and the site-compilation pipeline. They
 guard against an agent unilaterally re-platforming Boris or swapping the
 toolchain — they are not a preference for a less capable UI, and not a ban on
-the editor's existing stack. `editor/ui/` is a **Svelte 5 + Vite + TypeScript**
+the editor's existing stack. They also keep the test surface to focused
+fixtures and the standing gates, not a second verification product.
+`editor/ui/` is a **Svelte 5 + Vite + TypeScript**
 static app with npm dev dependencies, and `editor/` is a Zig host: that stack is
 the sanctioned editor surface and the direction of travel, so improving,
 extending, and deepening it is normal work rather than a deviation. “Do not turn
@@ -164,7 +171,10 @@ and a changelog fragment.
   "What's next" list moves — it is a phase banner + pointer table (<80 lines);
   capability details live in [`docs/contracts/`](docs/contracts/) and the
   archived snapshot [`docs/archived/capability-matrix-v0.8.md`](docs/archived/capability-matrix-v0.8.md).
-  Extend focused fixtures/unit tests; `zig build test` is the baseline gate.
+  Extend focused fixtures/unit tests next to the code that changed;
+  `zig build test` is the baseline gate. Do not stand up a second gate
+  family, registry, or quote-tether runner — see **Non-negotiable
+  architecture**.
 - Prefer `std`, in-memory single-pass arena-friendly work, explicit structures
   (`Page`, frontmatter, parse-time Aside/component tokens), and established module
   boundaries. Target this repository's current Zig APIs. Use plain feature names
