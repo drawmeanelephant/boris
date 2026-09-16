@@ -131,6 +131,12 @@ alphanumerics separated by single dashes). Documents are sorted by canonical
 `path` using bytewise ordering. The producer emits documents and sections in
 that order and emits the fixed v1 keys in a stable order.
 
+The document `title` is the normalized text of the first `h1` inside the
+extraction root. When the root contains no `h1`, the producer falls back to the
+first `<title>` element in the document, then to the page `path`. No heading
+attribute overrides it: an unrecognized `data-boris-*` attribute, including
+`data-boris-search-title`, has no effect.
+
 ## Determinism, escaping, and trust boundary
 
 For the same ordered set of bytes in the selected HTML pages, the same options,

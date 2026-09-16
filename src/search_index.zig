@@ -233,7 +233,6 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
     try sections.append(a, .{});
     var title: ?[]u8 = null;
     var heading: bool = false;
-    var heading_marked = false;
     var code_depth: usize = 0;
     var excluded: usize = 0;
     var level: u8 = 0;
@@ -272,7 +271,6 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
                 if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6') {
                     try sections.append(a, .{ .level = n[1] - '0' });
                     heading = true;
-                    heading_marked = attrValue(txt, "data-boris-search-title") != null;
                     level = n[1] - '0';
                     if (attrValue(txt, "id")) |id| try appendDecoded(&sections.items[sections.items.len - 1].fragment, a, id);
                 } else if (std.ascii.eqlIgnoreCase(n, "code") or std.ascii.eqlIgnoreCase(n, "pre")) {
@@ -289,11 +287,10 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
         } else if (excluded > 0) excluded -= 1 else if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6' and heading) {
             heading = false;
             const heading_title = try normalize(a, sections.items[sections.items.len - 1].heading.items);
-            if (heading_marked or (level == 1 and title == null)) {
+            if (level == 1 and title == null) {
                 if (title) |old| a.free(old);
                 title = heading_title;
             } else a.free(heading_title);
-            heading_marked = false;
         } else if ((std.ascii.eqlIgnoreCase(n, "code") or std.ascii.eqlIgnoreCase(n, "pre")) and code_depth > 0) {
             code_depth -= 1;
             // Close the prose word boundary opened by the span (#778).
@@ -741,6 +738,21 @@ test "title fallback and heading fragments decode entities" {
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expectEqualStrings("Foo & Bar", d.title);
     try std.testing.expectEqualStrings("a&b", d.sections[0].fragment);
+}
+
+test "a data-boris-search-title attribute does not override the document title" {
+    // The documented title rule is the first `h1` inside the extraction root
+    // (rendered-search.md, "Extraction and normalization"). An earlier
+    // revision also let a heading carrying `data-boris-search-title` claim the
+    // title; no layout ever emitted the marker and the contract never
+    // described it, so the rule was removed (#881). It read the attribute
+    // through `attrValue`, so only this valued form ever triggered the
+    // override — pin that the headline case stays inert.
+    const html = "<main data-boris-search-root><h1>First</h1><p>one</p>" ++
+        "<h2 data-boris-search-title=\"true\">Second</h2><p>two</p></main>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("First", d.title);
 }
 
 test "writeJson escapes control characters so the index stays parseable" {
