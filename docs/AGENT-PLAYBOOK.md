@@ -38,7 +38,10 @@ verification command. Keep optional hardening separate.
 Capture the initial `git status --short`. Run the smallest relevant gates before
 an aggregate gate so one failure cannot hide others. For a microrelease, normally
 check `zig build`, `zig build test`, `zig build test-render`, `zig build
-package`, then `./scripts/release-gate.sh` when scope permits.
+package`, then `./scripts/release-gate.sh` when scope permits. That is the
+closed ship set. When a contract rule lacks coverage, extend a focused test or
+an existing script; do not add a claim registry, quote-tether, or
+contract-audit runner.
 
 Distinguish product failures from environment interference. A Zig global-cache
 `PermissionDenied` or denied symlink operation needs an allowed rerun or an
