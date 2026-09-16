@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, afterparty]
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     branches: [main, afterparty, 'codex/editor-*']
   workflow_dispatch:
 
@@ -364,6 +365,7 @@ jobs:
   ci:
     name: ci
     needs:
+      - changes
       - build-and-test
       - editor-test
       - key-hint-lint
@@ -377,6 +379,7 @@ jobs:
     steps:
       - name: Require matrix success
         run: |
+          changes="${{ needs.changes.result }}"
           build_and_test="${{ needs.build-and-test.result }}"
           editor_test="${{ needs.editor-test.result }}"
           key_hint_lint="${{ needs.key-hint-lint.result }}"
@@ -385,6 +388,7 @@ jobs:
           testdata_generator_test="${{ needs.testdata_generator_test.result }}"
           job_runner_image="${{ needs.job-runner-image.result }}"
           release_html_smoke="${{ needs.release-html-smoke.result }}"
+          echo "changes result: ${changes}"
           echo "build-and-test result: ${build_and_test}"
           echo "editor-test result: ${editor_test}"
           echo "key-hint lint result: ${key_hint_lint}"
@@ -404,3 +408,7 @@ jobs:
           # Same for the release smoke: it is the only guard against a release-only
           # crash, so a skip must never read as green.
           test "${release_html_smoke}" = "success"
+          # Change detection is a load-bearing input for the conditional lanes:
+          # if it fails, those lanes skip and the skips read green below, so a
+          # failed `changes` must fail the aggregate outright.
+          test "${changes}" = "success"

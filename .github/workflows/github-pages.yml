@@ -303,11 +303,13 @@ jobs:
 
       - name: Write deployment audit summary
         if: ${{ always() && inputs.audit_deployment == true }}
+        env:
+          DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
         run: |
           {
             echo "## GitHub Pages post-deploy audit"
             echo ""
-            echo '- Deployment status: succeeded (deploy-pages completed)'
+            echo "- Deployment status: $DEPLOYMENT_OUTCOME (deploy-pages step)"
             if test -f deployment-evidence/github-pages-deployment-evidence.json; then
               echo "- Audit result: $(jq -r '.audit.result' deployment-evidence/github-pages-deployment-evidence.json)"
               echo "- Requests: $(jq -r '.audit.requests' deployment-evidence/github-pages-deployment-evidence.json)"
