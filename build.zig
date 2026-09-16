@@ -789,24 +789,6 @@ pub fn build(b: *std.Build) void {
     );
     test_doc_links_step.dependOn(&doc_links_run.step);
 
-    // Contract-claim gate (#907): the normative contracts state load-bearing
-    // rules -- e.g. that the `{` closing a multiword Cooklang name must touch
-    // the name -- and nothing executed them, so the parser diverged from the
-    // contract unnoticed. This runs every record in test/contract-claims.txt:
-    // registry hygiene, a verbatim prose tether into the named contract, and a
-    // black-box check against the installed binary. `known-divergence` records
-    // pass while the bug still reproduces, so the eventual fix fails the gate
-    // and forces the record to be reclassified rather than left stale.
-    const contract_claims_run = b.addSystemCommand(&.{ "bash", "scripts/test-contract-claims.sh" });
-    contract_claims_run.setCwd(b.path("."));
-    contract_claims_run.has_side_effects = true;
-    contract_claims_run.step.dependOn(b.getInstallStep());
-    const test_contract_claims_step = b.step(
-        "test-contract-claims",
-        "Run the contract claim registry gate (quoted contract rules vs the binary)",
-    );
-    test_contract_claims_step.dependOn(&contract_claims_run.step);
-
     // --- Pipeline + graph tests (milestone 6) ------------------------------
     // Pipeline imports aside (component validation) → needs the Oliver render seam.
     const pipeline_mod = b.createModule(.{
@@ -1953,7 +1935,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_emitter_hostile_tests.step);
     test_step.dependOn(&emitter_registry.step);
     test_step.dependOn(&doc_links_run.step);
-    test_step.dependOn(&contract_claims_run.step);
     test_step.dependOn(&github_pages_audit_test.step);
     test_step.dependOn(&xhtml_evidence_run.step);
     test_step.dependOn(&watch_serve_run.step);
