@@ -123,12 +123,14 @@ one section, successive code fragments are joined by a single U+0020 in
 neither bucket fuses adjacent terms (#778); consumers searching code match
 against whole tokens, not one concatenated blob.
 
-The document `title` defaults to the first `h1`. Any `h1`–`h6` heading
-whose open tag carries a `data-boris-search-title` attribute **with an
-explicit value** overrides the `title` with that heading's text when the
-heading closes; a bare valueless attribute does not override, and a later
-marked heading replaces an earlier one. Sections, headings, and fragments
-are unaffected; only the `title` field changes.
+The document `title` resolves in priority order: marked headings first —
+any `h1`–`h6` carrying a `data-boris-search-title` attribute with a value
+(the value itself is ignored; a bare valueless attribute is not recognized)
+sets the `title` to that heading's normalized text when the heading closes,
+and the last marked heading in document order wins; otherwise the first
+`h1`'s text, then the `<title>` element, then the canonical `path`.
+Sections, headings, and fragments are unaffected; only the `title` field
+changes.
 
 Sections retain document order. Text before the first heading is level zero;
 each `h1`–`h6` begins the next section. An explicit heading `id` is copied as
