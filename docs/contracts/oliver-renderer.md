@@ -46,8 +46,8 @@ never strips HTML) into the deterministic semantic plain-text projection — see
 |-------|-------|
 | Repository | <https://github.com/drawmeanelephant/oliver> |
 | Branch | `main` |
-| Commit | `d74249415975d652654e521b7abea40c85b13255` |
-| Package hash | `oliver-0.0.0-LOsZkBCwIgDvYwuL75BY2DBWzhUvfeliKZ7vQlKfi5-I` |
+| Commit | `6b9d14f345908f18cc761b35a2e8584f140633d2` |
+| Package hash | `oliver-0.0.0-LOsZkEfAIgCkgLY6cfUqGEn0E_jnRFZpT-WMB-2uuBXT` |
 | Zig | 0.16.0 |
 
 The pin lives in `build.zig.zon` (`.dependencies.oliver.url` + `.hash`). Zig
@@ -59,7 +59,15 @@ time and cached by Zig).
 ### Why this revision
 
 Oliver upstream is CommonMark 0.31.2 (652/652 conformance) plus GFM tables.
-The pinned revision is Oliver `main` as of oliver#77's merge (`d742494`):
+The pinned revision is Oliver `d742494` (the oliver#77 merge, the pin Boris
+has run on since September) plus exactly one fix: the #907 brace-adjacency
+change in `tryToken` (a `{` terminates a name only when it touches the
+name — `Add @salt into the {bowl}` keeps `salt` as a one-word ingredient
+and `{bowl}` as literal prose). The minimal-vehicle branch keeps Boris's
+renderer seam (`RenderError`) exactly matching this Oliver surface; moving
+the pin to oliver `main` requires the separate renderer error-set migration
+(`RawHtmlRejected`) and is out of scope here. It carries everything from
+oliver#77's merge:
 public Cooklang string-quantity classify/scale (`classifyQuantity`,
 `parseFactor`, `scaleAmount`) and mixed numbers (`1 1/2`), on the same
 single pin that already carries the Markdown renderer extensions

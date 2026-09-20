@@ -880,6 +880,24 @@ test "seam: a single-word ingredient needs no braces" {
     );
 }
 
+test "seam: a distant brace does not swallow prose into the name (#907)" {
+    // Contract §Name termination: the multiword form's `{` must touch the
+    // name. `Add @salt into the {bowl} and stir.` must yield ingredient
+    // `salt` with no quantity, and the step prose keeps `into the {bowl}`
+    // instead of reading `salt into the` as the name with `bowl` as an
+    // amount.
+    const gpa = std.testing.allocator;
+    const result = try toMarkdown("Add @salt into the {bowl} and stir.\n", gpa);
+    try std.testing.expect(result.isOk());
+    defer freeResult(gpa, result);
+    try std.testing.expectEqual(@as(usize, 1), result.recipe.ingredients.len);
+    try std.testing.expectEqualStrings("salt", result.recipe.ingredients[0].name);
+    try std.testing.expect(result.recipe.ingredients[0].quantity.isEmpty());
+    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "salt into the") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "bowl") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "and stir") != null);
+}
+
 test "seam: braces end a multi-word ingredient name" {
     const gpa = std.testing.allocator;
     const result = try toMarkdown("Add @ground black pepper{} to taste.\n", gpa);
