@@ -10,8 +10,8 @@
         // (oliver#39). See docs/contracts/oliver-renderer.md for the pin
         // table.
         .oliver = .{
-            .url = "https://github.com/drawmeanelephant/oliver/archive/d74249415975d652654e521b7abea40c85b13255.tar.gz",
-            .hash = "oliver-0.0.0-LOsZkBCwIgDvYwuL75BY2DBWzhUvfeliKZ7vQlKfi5-I",
+            .url = "https://github.com/drawmeanelephant/oliver/archive/6b9d14f345908f18cc761b35a2e8584f140633d2.tar.gz",
+            .hash = "oliver-0.0.0-LOsZkEfAIgCkgLY6cfUqGEn0E_jnRFZpT-WMB-2uuBXT",
         },
         .secp256k1 = .{
             .url = "git+https://github.com/bitcoin-core/secp256k1#6e2c8bc4ecdc6e71dbe7a368f360d8d453ce435d",
