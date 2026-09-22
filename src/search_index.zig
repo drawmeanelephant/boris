@@ -743,6 +743,36 @@ test "title fallback and heading fragments decode entities" {
     try std.testing.expectEqualStrings("a&b", d.sections[0].fragment);
 }
 
+// #881: the data-boris-search-title extraction marker is contract behavior
+// (docs/contracts/rendered-search.md, "Extraction and normalization"). A
+// marked heading overrides <title> and unmarked h1s at any level; the last
+// marked heading in document order wins.
+test "marked heading overrides h1 and title element for document title" {
+    const html = "<html><head><title>Ignored Title</title></head>" ++
+        "<main data-boris-search-root><h1>First Heading</h1><p>body</p>" ++
+        "<h3 data-boris-search-title=\"true\">Marked &#38; Wins</h3><p>more</p></main></html>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Marked & Wins", d.title);
+}
+
+test "last marked heading wins and unmarked h2 does not override earlier title" {
+    const html = "<html><head><title>Head Title</title></head>" ++
+        "<main data-boris-search-root><h2 data-boris-search-title=\"true\">First Mark</h2><p>a</p>" ++
+        "<h4>Not Marked</h4><p>b</p><h5 data-boris-search-title=\"true\">Last Mark</h5><p>c</p></main></html>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Last Mark", d.title);
+}
+
+test "without marked heading first h1 beats title element" {
+    const html = "<html><head><title>Head Title</title></head>" ++
+        "<main data-boris-search-root><h1>Heading Wins</h1><p>body</p><h2>Sub</h2></main></html>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Heading Wins", d.title);
+}
+
 test "writeJson escapes control characters so the index stays parseable" {
     const gpa = std.testing.allocator;
     const sections = [_]Section{.{ .level = 1, .heading = "Heading\x01", .fragment = "h", .text = "body\x1f text", .code = "" }};
