@@ -18,6 +18,14 @@
       ]
     },
     {
+      "path": "guides/title-override.html",
+      "title": "Override title from h2",
+      "sections": [
+        {"level": 1, "heading": "Plain heading title", "fragment": "plain-heading-title", "text": "Body under the plain h1.", "code": ""},
+        {"level": 2, "heading": "Override title from h2", "fragment": "override-title-from-h2", "text": "Body under the marked h2.", "code": ""}
+      ]
+    },
+    {
       "path": "index.html",
       "title": "Home & Start",
       "sections": [
