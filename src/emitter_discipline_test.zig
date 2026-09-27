@@ -148,6 +148,7 @@ const modules = [_]Module{
     } } },
 
     .{ .name = "render.zig", .class = .other },
+    .{ .name = "html4_strict.zig", .class = .other },
     .{ .name = "render_wasm.zig", .class = .other },
     .{ .name = "render_wasm_test.zig", .class = .other },
     .{ .name = "wasm_image.zig", .class = .other },

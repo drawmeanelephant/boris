@@ -1,0 +1,11 @@
+body { color: #18212a; background: #fff; font: 1em/1.6 Georgia, serif; margin: 0; }
+.site { max-width: 70em; margin: auto; padding: 1em; }
+.page { max-width: 45em; }
+.site-nav, .breadcrumb, .page-toc, .page-children { font-family: Arial, sans-serif; }
+.site-nav ul, .breadcrumb ol { padding-left: 1.5em; }
+a { color: #174781; }
+a:focus { outline: 2px solid #174781; }
+.admonition { border-left: 3px solid #174781; padding-left: 1em; }
+.admonition__title { font-weight: bold; }
+pre { overflow: auto; }
+img { max-width: 100%; }

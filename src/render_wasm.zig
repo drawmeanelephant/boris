@@ -72,5 +72,11 @@ fn renderErr(err: render.RenderError) i32 {
         error.WriteFailed => -3,
         error.NoSpaceLeft => -4,
         error.RawHtmlNotXmlWellFormed => -5,
+        error.RawHtmlRejected => -7,
+        error.RawHtmlNotHtml4Strict => -8,
+        error.OrderedListStartNotHtml4Strict => -9,
+        error.InvalidHtml4StrictId => -10,
+        error.DuplicateHtml4StrictId => -11,
+        error.EmptyTableNotHtml4Strict => -12,
     };
 }

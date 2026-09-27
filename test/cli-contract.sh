@@ -88,4 +88,19 @@ else
   exit 1
 fi
 
+# Strict is a complete-site target, not a bare Oliver body switch. The
+# compatible theme builds; the default HTML5 theme fails as a content error
+# with one located diagnostic and no phantom fallback.
+STRICT_INPUT="fixtures/html4-strict/content"
+expect_exit 0 "${BORIS}" build --input="${STRICT_INPUT}" \
+  --theme themes/html4-strict --target-profile default=html4-strict \
+  --html-dir="${TMP#${ROOT}/}/strict-site" --quiet
+grep -q 'HTML 4.01//EN' "${TMP}/strict-site/index.html"
+grep -q 'HTML 4.01//EN' "${TMP}/strict-site/_boris/proof/index.html"
+expect_exit 1 "${BORIS}" validate --input="${STRICT_INPUT}" \
+  --target-profile default=html4-strict --report="${TMP}/strict-invalid.json" --quiet
+grep -q '"errorCount": 1' "${TMP}/strict-invalid.json"
+grep -q '"code": "EHTML4STRICT"' "${TMP}/strict-invalid.json"
+grep -q 'themes/boris/layouts/main.html' "${TMP}/strict-invalid.json"
+
 printf 'CLI contract process tests: PASS\n'

@@ -46,8 +46,8 @@ never strips HTML) into the deterministic semantic plain-text projection — see
 |-------|-------|
 | Repository | <https://github.com/drawmeanelephant/oliver> |
 | Branch | `main` |
-| Commit | `6b9d14f345908f18cc761b35a2e8584f140633d2` |
-| Package hash | `oliver-0.0.0-LOsZkEfAIgCkgLY6cfUqGEn0E_jnRFZpT-WMB-2uuBXT` |
+| Commit | `80d53b2118005b314d4c551d18a023f293eecc75` |
+| Package hash | `oliver-1.1.0-LOsZkBWrJwAXanVPCdrIH78YlOL63fgQUUSBhIBLXwhm` |
 | Zig | 0.16.0 |
 
 The pin lives in `build.zig.zon` (`.dependencies.oliver.url` + `.hash`). Zig
@@ -59,15 +59,9 @@ time and cached by Zig).
 ### Why this revision
 
 Oliver upstream is CommonMark 0.31.2 (652/652 conformance) plus GFM tables.
-The pinned revision is Oliver `d742494` (the oliver#77 merge, the pin Boris
-has run on since September) plus exactly one fix: the #907 brace-adjacency
-change in `tryToken` (a `{` terminates a name only when it touches the
-name — `Add @salt into the {bowl}` keeps `salt` as a one-word ingredient
-and `{bowl}` as literal prose). The minimal-vehicle branch keeps Boris's
-renderer seam (`RenderError`) exactly matching this Oliver surface; moving
-the pin to oliver `main` requires the separate renderer error-set migration
-(`RawHtmlRejected`) and is out of scope here. It carries everything from
-oliver#77's merge:
+The pinned revision is the Oliver #131 merge, containing the HTML 4.01 Strict
+fragment profile and the renderer's expanded typed error set. It retains the
+#907 Cooklang brace-adjacency fix and everything from oliver#77's merge:
 public Cooklang string-quantity classify/scale (`classifyQuantity`,
 `parseFactor`, `scaleAmount`) and mixed numbers (`1 1/2`), on the same
 single pin that already carries the Markdown renderer extensions
@@ -95,7 +89,7 @@ const markdown_options = oliver.MarkdownOptions{
 const render_options = oliver.html.RenderOptions{
     .heading_ids = true,
     .footnotes = true,
-    // .profile = .html (default) | .xhtml — per-target via `--target-profile`
+    // .profile = .html (default) | .xhtml | .html4_strict
 };
 ```
 
@@ -104,6 +98,9 @@ pre-profile renders. An XHTML target opts in per publication target
 (`--target-profile NAME=xhtml`); the profile is a serializer switch and does
 not touch `heading_ids`/`footnotes` (heading ids are plain attributes —
 XML-legal). See [XHTML output profile](#xhtml-output-profile) below.
+The `html4-strict` target is a **whole-document** opt-in: Boris checks the
+assembled layout, generated chrome, body and proof page, not just Oliver's
+fragment. See [the HTML 4.01 Strict contract](html4-strict.md).
 
 ## XHTML output profile
 
@@ -123,14 +120,9 @@ context in the diagnostics surface; flipping a target to XHTML requires a
 raw-HTML sweep of its content first. The same bytes render fine under the
 `html` profile.
 
-**Known upstream gap (footnotes):** the pinned Oliver's footnote markers
-(`data-footnote-ref`, `data-footnotes`, `data-footnote-backref`) are
-hardcoded valueless attributes, so an XHTML target whose content uses
-footnotes produces XML that is *not* well-formed — the build does not fail
-closed on it (tracked upstream as [drawmeanelephant/oliver#60](https://github.com/drawmeanelephant/oliver/issues/60)).
-Until the pinned revision carries the fix, keep footnote use off XHTML
-targets; the evidence guard (`zig build test-xhtml-evidence`) verifies
-well-formedness on a footnote-free page.
+The XHTML evidence guard (`zig build test-xhtml-evidence`) pins an
+independently parsed complete document. Strict uses separate
+whole-document checks and does not change XHTML output bytes.
 
 ## Cooklang seam (same pin)
 
@@ -230,16 +222,18 @@ byte-identical.
 
 ## Raw HTML policy
 
-Unchanged: raw HTML in trusted author content passes through unescaped
-(CommonMark HTML blocks + inline HTML). Boris does not sanitize; the boundary
-between trusted and untrusted content is a Boris policy concern, not a
-renderer concern. Fenced code is always escaped.
+On the default HTML target, raw HTML in trusted author content passes through
+unescaped (CommonMark HTML blocks + inline HTML). Boris does not sanitize; the
+boundary between trusted and untrusted content is a Boris policy concern, not
+a renderer concern. XHTML and HTML 4.01 Strict instead reject verbatim raw
+HTML, with different typed Oliver errors. Fenced code is always escaped.
 
 ## Diagnostics and errors
 
 Oliver reports input-size violations as `error.InputTooLarge` before any
-markup interpretation; the seam also surfaces `OutOfMemory` and writer
-failures. Boris maps these onto its own render → publication-failure path.
-There is no renderer diagnostic language to surface: markup interpretation is
-lenient (CommonMark), and Boris's own pre-render validators own author-facing
-diagnostics.
+markup interpretation; the seam also surfaces `OutOfMemory`, writer failures,
+and typed profile-specific rejections. On the Strict target, Boris maps
+`RawHtmlNotHtml4Strict`, `OrderedListStartNotHtml4Strict`,
+`InvalidHtml4StrictId`, `DuplicateHtml4StrictId` and
+`EmptyTableNotHtml4Strict` to `EHTML4STRICT`, with page/source/layout context
+and a content exit. Other markup interpretation is lenient (CommonMark).

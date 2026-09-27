@@ -79,12 +79,16 @@ fn appendKindAttributes(
     buf: *std.ArrayList(u8),
     gpa: std.mem.Allocator,
     kind: page_mod.RelationKind,
+    strict: bool,
 ) !void {
     // RelationKind.parse guarantees this is a safe class token. Escaping the
     // attribute as well keeps this renderer defensive for graph unit fixtures.
-    try buf.appendSlice(gpa, " data-relation-kind=\"");
-    try html_nav.appendEscaped(buf, gpa, kind.name());
-    try buf.appendSlice(gpa, "\" class=\"semantic-relation--");
+    if (!strict) {
+        try buf.appendSlice(gpa, " data-relation-kind=\"");
+        try html_nav.appendEscaped(buf, gpa, kind.name());
+        try buf.appendSlice(gpa, "\"");
+    }
+    try buf.appendSlice(gpa, " class=\"semantic-relation--");
     try buf.appendSlice(gpa, kind.name());
     try buf.appendSlice(gpa, "\"");
 }
@@ -95,16 +99,19 @@ fn renderViewList(
     views: []const RelationView,
     current_output_path: []const u8,
     backlinks: bool,
+    strict: bool,
 ) ![]u8 {
     if (views.len == 0) return "";
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
     const section_class = if (backlinks) "semantic-backlinks" else "semantic-relations";
     const label = if (backlinks) "Backlinks" else "Semantic relations";
-    try buf.appendSlice(allocator, "<section class=\"");
+    try buf.appendSlice(allocator, if (strict) "<div class=\"" else "<section class=\"");
     try buf.appendSlice(allocator, section_class);
-    try buf.appendSlice(allocator, "\" aria-label=\"");
-    try buf.appendSlice(allocator, label);
+    if (!strict) {
+        try buf.appendSlice(allocator, "\" aria-label=\"");
+        try buf.appendSlice(allocator, label);
+    }
     try buf.appendSlice(allocator, "\">\n<ul>\n");
     for (views) |view| {
         const linked_index = if (backlinks) view.source_index else view.target_index;
@@ -114,14 +121,14 @@ fn renderViewList(
         const href = try identity.relativeHref(allocator, current_output_path, out_path);
         defer allocator.free(href);
         try buf.appendSlice(allocator, "<li");
-        try appendKindAttributes(&buf, allocator, view.kind);
+        try appendKindAttributes(&buf, allocator, view.kind, strict);
         try buf.appendSlice(allocator, "><a href=\"");
         try html_nav.appendEscaped(&buf, allocator, href);
         try buf.appendSlice(allocator, "\">");
         try html_nav.appendEscaped(&buf, allocator, displayTitle(linked));
         try buf.appendSlice(allocator, "</a></li>\n");
     }
-    try buf.appendSlice(allocator, "</ul>\n</section>");
+    try buf.appendSlice(allocator, if (strict) "</ul>\n</div>" else "</ul>\n</section>");
     return try buf.toOwnedSlice(allocator);
 }
 
@@ -131,9 +138,19 @@ pub fn renderRelations(
     current_index: u32,
     current_output_path: []const u8,
 ) ![]u8 {
+    return renderRelationsProfile(allocator, nodes, current_index, current_output_path, false);
+}
+
+pub fn renderRelationsProfile(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    current_index: u32,
+    current_output_path: []const u8,
+    strict: bool,
+) ![]u8 {
     const views = try collectOutgoing(allocator, nodes, current_index);
     defer allocator.free(views);
-    return renderViewList(allocator, nodes, views, current_output_path, false);
+    return renderViewList(allocator, nodes, views, current_output_path, false, strict);
 }
 
 pub fn renderBacklinks(
@@ -142,9 +159,19 @@ pub fn renderBacklinks(
     current_index: u32,
     current_output_path: []const u8,
 ) ![]u8 {
+    return renderBacklinksProfile(allocator, nodes, current_index, current_output_path, false);
+}
+
+pub fn renderBacklinksProfile(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    current_index: u32,
+    current_output_path: []const u8,
+    strict: bool,
+) ![]u8 {
     const views = try collectBacklinks(allocator, nodes, current_index);
     defer allocator.free(views);
-    return renderViewList(allocator, nodes, views, current_output_path, true);
+    return renderViewList(allocator, nodes, views, current_output_path, true, strict);
 }
 
 /// Stable page-local material for HTML fingerprints. It includes every value

@@ -77,6 +77,7 @@ fn appendNavNode(
     /// 1-based level of `index` in the rendered forest (trunks = 1).
     level: u32,
     max_depth: ?u32,
+    strict: bool,
 ) !void {
     const node = nodes[index];
     const out_path = try outputPathFor(allocator, node);
@@ -93,7 +94,7 @@ fn appendNavNode(
     try buf.appendSlice(allocator, "\"><a href=\"");
     try appendEscaped(buf, allocator, href);
     try buf.appendSlice(allocator, "\"");
-    if (is_current) try buf.appendSlice(allocator, " aria-current=\"page\"");
+    if (is_current and !strict) try buf.appendSlice(allocator, " aria-current=\"page\"");
     try buf.appendSlice(allocator, ">");
     try appendEscaped(buf, allocator, displayTitle(node));
     try buf.appendSlice(allocator, "</a>");
@@ -119,7 +120,7 @@ fn appendNavNode(
             // below it, so a published satellite under a draft section stays
             // emitted but unadvertised until its parent publishes (#738).
             if (isDraft(nodes[child_index])) continue;
-            try appendNavNode(allocator, buf, nodes, nav, child_index, current_index, current_output_path, false, level + 1, max_depth);
+            try appendNavNode(allocator, buf, nodes, nav, child_index, current_index, current_output_path, false, level + 1, max_depth, strict);
         }
         try buf.appendSlice(allocator, "</ul>\n");
     }
@@ -142,18 +143,34 @@ pub fn renderNav(
     current_output_path: []const u8,
     max_depth: ?u32,
 ) ![]u8 {
+    return renderNavProfile(allocator, nodes, nav, current_index, current_output_path, max_depth, false);
+}
+
+pub fn renderNavProfile(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    nav: []const graph_mod.NavEntry,
+    current_index: u32,
+    current_output_path: []const u8,
+    max_depth: ?u32,
+    strict: bool,
+) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
 
-    try buf.appendSlice(allocator, "<nav class=\"site-nav\" aria-label=\"Site\">\n<ul>\n");
+    try buf.appendSlice(allocator, if (strict) "<div class=\"site-nav\">\n" else "<nav class=\"site-nav\" aria-label=\"Site\">\n<ul>\n");
+    var any_trunk = false;
 
     for (nodes, 0..) |node, i| {
         if (node.parent != null) continue; // trunks only (id order among frozen nodes)
         if (isDraft(node)) continue; // draft trunks are not advertised (#738)
-        try appendNavNode(allocator, &buf, nodes, nav, @intCast(i), current_index, current_output_path, true, 1, max_depth);
+        if (strict and !any_trunk) try buf.appendSlice(allocator, "<ul>\n");
+        any_trunk = true;
+        try appendNavNode(allocator, &buf, nodes, nav, @intCast(i), current_index, current_output_path, true, 1, max_depth, strict);
     }
 
-    try buf.appendSlice(allocator, "</ul>\n</nav>");
+    if (!strict or any_trunk) try buf.appendSlice(allocator, "</ul>\n");
+    try buf.appendSlice(allocator, if (strict) "</div>" else "</nav>");
     return try buf.toOwnedSlice(allocator);
 }
 
@@ -165,6 +182,17 @@ pub fn renderChildren(
     nav: []const graph_mod.NavEntry,
     current_index: u32,
     current_output_path: []const u8,
+) ![]u8 {
+    return renderChildrenProfile(allocator, nodes, nav, current_index, current_output_path, false);
+}
+
+pub fn renderChildrenProfile(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    nav: []const graph_mod.NavEntry,
+    current_index: u32,
+    current_output_path: []const u8,
+    strict: bool,
 ) ![]u8 {
     const children = nav[current_index].children;
     var any_advertised = false;
@@ -178,7 +206,7 @@ pub fn renderChildren(
 
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
-    try buf.appendSlice(allocator, "<nav class=\"page-children\" aria-label=\"Children\">\n<ul>\n");
+    try buf.appendSlice(allocator, if (strict) "<div class=\"page-children\">\n<ul>\n" else "<nav class=\"page-children\" aria-label=\"Children\">\n<ul>\n");
     for (children) |ci| {
         if (isDraft(nodes[ci])) continue;
         const child = nodes[ci];
@@ -192,7 +220,7 @@ pub fn renderChildren(
         try appendEscaped(&buf, allocator, displayTitle(child));
         try buf.appendSlice(allocator, "</a></li>\n");
     }
-    try buf.appendSlice(allocator, "</ul>\n</nav>");
+    try buf.appendSlice(allocator, if (strict) "</ul>\n</div>" else "</ul>\n</nav>");
     return try buf.toOwnedSlice(allocator);
 }
 
@@ -204,17 +232,28 @@ pub fn renderBreadcrumb(
     current_index: u32,
     current_output_path: []const u8,
 ) ![]u8 {
+    return renderBreadcrumbProfile(allocator, nodes, nav, current_index, current_output_path, false);
+}
+
+pub fn renderBreadcrumbProfile(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    nav: []const graph_mod.NavEntry,
+    current_index: u32,
+    current_output_path: []const u8,
+    strict: bool,
+) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
 
-    try buf.appendSlice(allocator, "<nav class=\"breadcrumb\" aria-label=\"Breadcrumb\">\n<ol>\n");
+    try buf.appendSlice(allocator, if (strict) "<div class=\"breadcrumb\">\n<ol>\n" else "<nav class=\"breadcrumb\" aria-label=\"Breadcrumb\">\n<ol>\n");
 
     const crumb = nav[current_index].breadcrumb;
     for (crumb, 0..) |ni, i| {
         const node = nodes[ni];
         const is_last = i + 1 == crumb.len;
         if (is_last) {
-            try buf.appendSlice(allocator, "<li aria-current=\"page\">");
+            try buf.appendSlice(allocator, if (strict) "<li class=\"is-current\">" else "<li aria-current=\"page\">");
             try appendEscaped(&buf, allocator, displayTitle(node));
             try buf.appendSlice(allocator, "</li>\n");
         } else {
@@ -230,7 +269,7 @@ pub fn renderBreadcrumb(
         }
     }
 
-    try buf.appendSlice(allocator, "</ol>\n</nav>");
+    try buf.appendSlice(allocator, if (strict) "</ol>\n</div>" else "</ol>\n</nav>");
     return try buf.toOwnedSlice(allocator);
 }
 

@@ -14,6 +14,7 @@ const diag = @import("diag.zig");
 const html_nav = @import("html_nav.zig");
 const html_relations = @import("html_relations.zig");
 const html_toc = @import("html_toc.zig");
+const html4_strict = @import("html4_strict.zig");
 const html_body = @import("html_body.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
@@ -543,7 +544,7 @@ fn mediaTypeForPath(path: []const u8) []const u8 {
 /// F9.1 closed metadata fragment: status, parent, tags when set (escaped).
 /// Title is owned by `{{title}}`; entity id is not repeated as chrome.
 /// Empty string when no set fields.
-fn renderMetadata(allocator: std.mem.Allocator, page: *const DurablePage) ![]const u8 {
+fn renderMetadata(allocator: std.mem.Allocator, page: *const DurablePage, strict: bool) ![]const u8 {
     const has_status = page.status != null;
     const has_parent = if (page.parent) |p| p.len > 0 else false;
     const has_tags = page.tags.len > 0;
@@ -553,24 +554,24 @@ fn renderMetadata(allocator: std.mem.Allocator, page: *const DurablePage) ![]con
     errdefer buf.deinit(allocator);
     try buf.appendSlice(allocator, "<dl class=\"page-metadata\">\n");
     if (page.status) |st| {
-        try buf.appendSlice(allocator, "  <div><dt>Status</dt><dd>");
+        try buf.appendSlice(allocator, if (strict) "  <dt>Status</dt><dd>" else "  <div><dt>Status</dt><dd>");
         try html_nav.appendEscaped(&buf, allocator, st.name());
-        try buf.appendSlice(allocator, "</dd></div>\n");
+        try buf.appendSlice(allocator, if (strict) "</dd>\n" else "</dd></div>\n");
     }
     if (page.parent) |parent| {
         if (parent.len > 0) {
-            try buf.appendSlice(allocator, "  <div><dt>Parent</dt><dd>");
+            try buf.appendSlice(allocator, if (strict) "  <dt>Parent</dt><dd>" else "  <div><dt>Parent</dt><dd>");
             try html_nav.appendEscaped(&buf, allocator, parent);
-            try buf.appendSlice(allocator, "</dd></div>\n");
+            try buf.appendSlice(allocator, if (strict) "</dd>\n" else "</dd></div>\n");
         }
     }
     if (page.tags.len > 0) {
-        try buf.appendSlice(allocator, "  <div><dt>Tags</dt><dd>");
+        try buf.appendSlice(allocator, if (strict) "  <dt>Tags</dt><dd>" else "  <div><dt>Tags</dt><dd>");
         for (page.tags, 0..) |tag, i| {
             if (i > 0) try buf.appendSlice(allocator, ", ");
             try html_nav.appendEscaped(&buf, allocator, tag);
         }
-        try buf.appendSlice(allocator, "</dd></div>\n");
+        try buf.appendSlice(allocator, if (strict) "</dd>\n" else "</dd></div>\n");
     }
     try buf.appendSlice(allocator, "</dl>\n");
     return try buf.toOwnedSlice(allocator);
@@ -766,6 +767,8 @@ fn promoteScannedPages(
 /// Optional rendering inputs for `renderAndPublishPage`. Defaults keep the
 /// minimal path (no graph chrome, headings, theme, or page assets).
 pub const RenderOptions = struct {
+    /// Selected per-page layout (fallback when no rule wins).
+    selected_layout_path: ?[]const u8 = null,
     site: ?*const FrozenSite = null,
     heading_index: ?*const wikilink.HeadingIndex = null,
     /// Prebuilt wiki id→node map covering `site.?.nodes`, shared across the
@@ -786,6 +789,74 @@ pub const RenderOptions = struct {
     /// safe for concurrent workers. Null keeps per-call expansion caching.
     include_cache: ?*include_mod.IncludeCache = null,
 };
+
+fn reportHtml4Failure(
+    gpa: std.mem.Allocator,
+    options: CompileOptions,
+    page: *const DurablePage,
+    source_path: []const u8,
+    selected_layout_path: []const u8,
+    reason: []const u8,
+    detail: []const u8,
+) void {
+    const message = std.fmt.allocPrint(gpa, "HTML 4.01 Strict page '{s}': {s}{s}{s} (selected layout: {s})", .{
+        page.output_path,
+        reason,
+        if (detail.len == 0) "" else ": ",
+        detail,
+        selected_layout_path,
+    }) catch return;
+    defer gpa.free(message);
+    const d: diag.Diagnostic = .{
+        .severity = .error_,
+        .code = .EHTML4STRICT,
+        .message = message,
+        .remediation = "Use a Strict-compatible layout and content; remove raw HTML, duplicate/invalid ids, non-1 ordered-list starts, and unsupported markup",
+        .source_path = source_path,
+        .id = page.entity_id,
+    };
+    appendHtmlDiagnostic(&options, d);
+    diag.printText(d, gpa);
+}
+
+fn checkHtml4Page(
+    gpa: std.mem.Allocator,
+    options: CompileOptions,
+    page: *const DurablePage,
+    bytes: []const u8,
+    selected_layout_path: []const u8,
+) !void {
+    const finding = (try html4_strict.check(gpa, bytes)) orelse return;
+    const through = bytes[0..@min(finding.offset, bytes.len)];
+    const line = std.mem.count(u8, through, "\n") + 1;
+    const last_newline = std.mem.lastIndexOfScalar(u8, through, '\n');
+    const column = if (last_newline) |idx| through.len - idx else through.len + 1;
+    const reason = try std.fmt.allocPrint(gpa, "{s} at assembled HTML {d}:{d}", .{ finding.reason, line, column });
+    defer gpa.free(reason);
+    reportHtml4Failure(gpa, options, page, page.source_path, selected_layout_path, reason, finding.detail);
+    return error.Html4StrictFailed;
+}
+
+fn reportHtml4AssetFailure(gpa: std.mem.Allocator, options: CompileOptions, path: []const u8) void {
+    const message = std.fmt.allocPrint(gpa, "HTML 4.01 Strict target contains an opaque HTML asset '{s}'", .{path}) catch return;
+    defer gpa.free(message);
+    const d: diag.Diagnostic = .{
+        .severity = .error_,
+        .code = .EHTML4STRICT,
+        .message = message,
+        .remediation = "Remove the HTML asset or make it a validated Boris page; only page and proof HTML are checked",
+        .source_path = path,
+    };
+    appendHtmlDiagnostic(&options, d);
+    diag.printText(d, gpa);
+}
+
+fn isOpaqueHtmlPath(path: []const u8) bool {
+    const ext = std.fs.path.extension(path);
+    return std.ascii.eqlIgnoreCase(ext, ".html") or
+        std.ascii.eqlIgnoreCase(ext, ".htm") or
+        std.ascii.eqlIgnoreCase(ext, ".xhtml");
+}
 
 /// Build the per-pass shared node maps (#726): wiki rewrite keys by entity id,
 /// documentation-link rewrite by source_path. Null members let every page fall
@@ -835,7 +906,7 @@ fn renderPageSlots(
     if (options.test_fail_render_at) |idx| {
         if (idx == page_index) return error.TestInjectedRenderFailure;
     }
-    const html = try html_body.renderSource(io, gpa, content_dir, doc_arena, source, page.source_path, page.output_path, .{
+    const html = html_body.renderSource(io, gpa, content_dir, doc_arena, source, page.source_path, page.output_path, .{
         .input_format = options.input_format,
         .nodes = if (render_opts.site) |s| s.nodes else &.{},
         .shared_node_map = render_opts.shared_node_map,
@@ -846,15 +917,26 @@ fn renderPageSlots(
         .output_profile = options.output_profile,
         .sources = options.sources,
         .include_cache = render_opts.include_cache,
-    });
+    }) catch |err| {
+        if (options.output_profile == .html4_strict and
+            (err == error.RawHtmlNotHtml4Strict or err == error.OrderedListStartNotHtml4Strict or
+                err == error.InvalidHtml4StrictId or err == error.DuplicateHtml4StrictId or
+                err == error.EmptyTableNotHtml4Strict))
+        {
+            reportHtml4Failure(gpa, options, page, page.source_path, render_opts.selected_layout_path orelse options.layout_path, @errorName(err), "");
+            return error.Html4StrictFailed;
+        }
+        return err;
+    };
 
     var slots: assemble.SlotValues = .{ .content = html };
+    const strict = options.output_profile == .html4_strict;
 
     if (layout.has_toc) {
-        slots.toc = try html_toc.renderToc(arena, html);
+        slots.toc = try html_toc.renderTocProfile(arena, html, strict);
     }
     if (layout.has_metadata) {
-        slots.metadata = try renderMetadata(arena, page);
+        slots.metadata = try renderMetadata(arena, page, strict);
     }
     if (layout.has_footer) {
         slots.footer = if (render_opts.theme) |t| t.footer() else "";
@@ -872,22 +954,22 @@ fn renderPageSlots(
         const gi = s.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
         const node = s.nodes[gi];
         if (layout.has_nav) {
-            slots.nav = try html_nav.renderNav(arena, s.nodes, s.nav, gi, page.output_path, layout.nav_depth);
+            slots.nav = try html_nav.renderNavProfile(arena, s.nodes, s.nav, gi, page.output_path, layout.nav_depth, strict);
         }
         if (layout.has_breadcrumb) {
-            slots.breadcrumb = try html_nav.renderBreadcrumb(arena, s.nodes, s.nav, gi, page.output_path);
+            slots.breadcrumb = try html_nav.renderBreadcrumbProfile(arena, s.nodes, s.nav, gi, page.output_path, strict);
         }
         if (layout.has_title) {
             slots.title = try html_nav.renderTitle(arena, node);
         }
         if (layout.has_children) {
-            slots.children = try html_nav.renderChildren(arena, s.nodes, s.nav, gi, page.output_path);
+            slots.children = try html_nav.renderChildrenProfile(arena, s.nodes, s.nav, gi, page.output_path, strict);
         }
         if (layout.has_relations) {
-            slots.relations = try html_relations.renderRelations(arena, s.nodes, gi, page.output_path);
+            slots.relations = try html_relations.renderRelationsProfile(arena, s.nodes, gi, page.output_path, strict);
         }
         if (layout.has_backlinks) {
-            slots.backlinks = try html_relations.renderBacklinks(arena, s.nodes, gi, page.output_path);
+            slots.backlinks = try html_relations.renderBacklinksProfile(arena, s.nodes, gi, page.output_path, strict);
         }
     } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks) {
         // Layout requests graph chrome but no frozen site — treat as internal error.
@@ -957,6 +1039,10 @@ pub fn renderAndPublishPage(
         render_opts,
     );
 
+    if (options.output_profile == .html4_strict) {
+        const assembled = try assemble.renderPageAlloc(doc_arena.allocator(), layout, slots);
+        try checkHtml4Page(gpa, options, page, assembled, render_opts.selected_layout_path orelse options.layout_path);
+    }
     const fail_publish = if (options.test_fail_publish_at) |idx| idx == page_index else false;
     try assemble.writePageWithSlotsOpts(io, dist_dir, page.output_path, layout, slots, .{
         .fail_before_publish = fail_publish,
@@ -1267,6 +1353,7 @@ pub fn isContentCompileFailure(err: anyerror) bool {
         error.AssetNotFile,
         error.AssetUnsafeSvg,
         error.LinkAuditFailed,
+        error.Html4StrictFailed,
         error.ThemeRootMissing,
         error.InvalidThemePath,
         error.ThemeSymlink,
@@ -1362,7 +1449,7 @@ pub fn compileHtmlSiteMulti(
                 total_stats.last_reset_capacity = st.last_reset_capacity;
             }
         } else |err| {
-            if (err != error.IncludeFailed and err != error.ReferenceFailed and
+            if (err != error.IncludeFailed and err != error.ReferenceFailed and err != error.Html4StrictFailed and
                 err != error.ComponentFailed and err != error.GraphValidationFailed and err != error.AmbiguousGlob and
                 err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
             {
@@ -1560,6 +1647,7 @@ const ParallelContext = struct {
     db: *PageDb,
     /// Per-page selected layout (parallel to PageDb).
     page_layouts: []const assemble.Layout,
+    page_sel_paths: []const []const u8,
     options: CompileOptions,
     is_dirty: []const bool,
     site: ?*const FrozenSite,
@@ -1621,6 +1709,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 page_index,
                 .{
                     .site = ctx.site,
+                    .selected_layout_path = ctx.page_sel_paths[page_index],
                     .shared_node_map = ctx.shared_node_map,
                     .shared_doclink_map = ctx.shared_doclink_map,
                     .heading_index = ctx.heading_index,
@@ -1915,6 +2004,7 @@ fn validatePrepublicationTarget(
     content_dir: Io.Dir,
     db: *PageDb,
     page_layouts: []const assemble.Layout,
+    page_sel_paths: []const []const u8,
     options: CompileOptions,
     shared: *const SharedCompileState,
     site: *const FrozenSite,
@@ -1995,6 +2085,7 @@ fn validatePrepublicationTarget(
             page_index,
             .{
                 .site = site,
+                .selected_layout_path = page_sel_paths[page_index],
                 .heading_index = &heading_index,
                 .theme = theme_bundle,
                 .page_assets = &content_assets.pages[page_index],
@@ -2010,6 +2101,9 @@ fn validatePrepublicationTarget(
         var sink = assemble.HoldUntilFlush.init(gpa);
         defer sink.deinit();
         try assemble.spliceToHoldSlots(page_layouts[page_index], slots, &sink);
+        if (options.output_profile == .html4_strict) {
+            try checkHtml4Page(gpa, options, page, sink.materialized.?, page_sel_paths[page_index]);
+        }
         try link_audit.auditDocumentWithOptions(
             gpa,
             &intended,
@@ -2642,6 +2736,7 @@ fn publishEvidenceReports(
     if (options.timings) |t| t.start(.proof_pack);
     publication_proof_pack.writeAfterTouches(io, gpa, dist_dir, options.target_name, .{
         .vcs_revision = options.vcs_revision,
+        .html4_strict = options.output_profile == .html4_strict,
         .test_fail_execution = options.test_fail_publication_proof_pack,
         .test_fail_json_tmp_write = options.test_fail_proof_pack_json_tmp_write,
         .test_fail_html_tmp_write = options.test_fail_proof_pack_html_tmp_write,
@@ -2782,7 +2877,8 @@ fn fingerprintPage(
 
     var inc_with_ref = try gpa.alloc([]const u8, inc_views.len +
         (if (ref_material.len > 0) @as(usize, 1) else 0) +
-        (if (relation_material.len > 0) @as(usize, 1) else 0));
+        (if (relation_material.len > 0) @as(usize, 1) else 0) +
+        (if (options.output_profile == .html) @as(usize, 0) else 1));
     defer gpa.free(inc_with_ref);
     @memcpy(inc_with_ref[0..inc_views.len], inc_views);
     var inc_with_ref_count = inc_views.len;
@@ -2792,6 +2888,10 @@ fn fingerprintPage(
     }
     if (relation_material.len > 0) {
         inc_with_ref[inc_with_ref_count] = relation_material;
+        inc_with_ref_count += 1;
+    }
+    if (options.output_profile != .html) {
+        inc_with_ref[inc_with_ref_count] = options.output_profile.jsonName();
     }
 
     // Fingerprint uses the effective selected layout identity and bytes.
@@ -2960,6 +3060,7 @@ fn renderPages(
     db: *PageDb,
     options: CompileOptions,
     page_layouts: []const assemble.Layout,
+    page_sel_paths: []const []const u8,
     is_dirty: []const bool,
     site: *const FrozenSite,
     heading_index: *wikilink.HeadingIndex,
@@ -2984,6 +3085,7 @@ fn renderPages(
             .dist_dir = stage_dir,
             .db = db,
             .page_layouts = page_layouts,
+            .page_sel_paths = page_sel_paths,
             .options = options,
             .is_dirty = is_dirty,
             .site = site,
@@ -3066,6 +3168,7 @@ fn renderPages(
                     page_index,
                     .{
                         .site = site,
+                        .selected_layout_path = page_sel_paths[page_index],
                         .shared_node_map = if (shared_wiki_map) |*m| m else null,
                         .shared_doclink_map = if (shared_doclink_map) |*m| m else null,
                         .heading_index = heading_index,
@@ -3624,6 +3727,26 @@ fn compilePagesInner(
     defer content_assets.deinit();
     const static_entries = try discoverStaticFiles(io, gpa, cwd, db, options, &theme_bundle, &content_assets);
     defer static_files.freeInventory(gpa, static_entries);
+    if (options.output_profile == .html4_strict) {
+        // Opaque HTML assets are copied verbatim and have no page/layout
+        // provenance or renderer pass. Refuse them rather than claiming the
+        // complete target conforms while an unchecked .html file survives.
+        for (theme_bundle.assets) |asset| {
+            if (!isOpaqueHtmlPath(asset.rel_path)) continue;
+            reportHtml4AssetFailure(gpa, options, asset.rel_path);
+            return error.Html4StrictFailed;
+        }
+        for (content_assets.pages) |page_assets| for (page_assets.entries) |asset| {
+            if (!isOpaqueHtmlPath(asset.output_rel)) continue;
+            reportHtml4AssetFailure(gpa, options, asset.output_rel);
+            return error.Html4StrictFailed;
+        };
+        for (static_entries) |asset| {
+            if (!isOpaqueHtmlPath(asset.rel_path)) continue;
+            reportHtml4AssetFailure(gpa, options, asset.rel_path);
+            return error.Html4StrictFailed;
+        }
+    }
     const page_theme_material = try prepareThemeMaterial(gpa, db, layouts_by_path, &theme_bundle, page_sel_paths);
     defer gpa.free(page_theme_material);
     const theme_root = theme_mod.themeRootFromLayoutPath(options.layout_path) orelse "";
@@ -3650,6 +3773,7 @@ fn compilePagesInner(
             content_dir,
             db,
             page_layouts,
+            page_sel_paths,
             options,
             shared,
             site,
@@ -3734,6 +3858,7 @@ fn compilePagesInner(
         db,
         options,
         page_layouts,
+        page_sel_paths,
         is_dirty,
         site,
         &heading_indexes.index,
@@ -3834,6 +3959,7 @@ pub fn observeWhiteboardLifecycle(
 // compile_*_test.zig siblings (pure move; see PR for the move audit).
 // This file remains the test root, so the siblings run under `test-compile`.
 test {
+    _ = @import("html4_strict.zig");
     _ = @import("compile_test_kit.zig");
     _ = @import("compile_site_core_test.zig");
     _ = @import("compile_failures_parallel_test.zig");

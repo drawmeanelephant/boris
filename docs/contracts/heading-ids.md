@@ -51,6 +51,9 @@ spec). Authors should prefer linking to ids visible in TOC or in rendered HTML.
 **Duplicate headings:** Oliver assigns the **same** `id` to multiple headings
 (no `-1`/`-2` disambiguation). That shared string is still a valid fragment
 target (set membership). Boris does not invent disambiguating suffixes.
+Exception: an opt-in [HTML 4.01 Strict target](html4-strict.md) rejects
+duplicate IDs instead of publishing a document that violates its ID rule;
+ordinary HTML and XHTML targets retain this behavior.
 
 ---
 

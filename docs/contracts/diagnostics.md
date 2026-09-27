@@ -146,6 +146,7 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `ERELATIONSELF` | error | Semantic relation targets its source page | shared semantic relation validation before graph freeze |
 | `ERELATIONDUPLICATE` | error | Same semantic `(kind,target)` tuple appears more than once | parser / shared semantic relation validation before graph freeze |
 | `EASSET` | error | Content-local page asset path invalid, outside the owning page’s sibling tree, missing, symlink, not a regular file, contains active SVG content, or collides at publication | `content_asset` → HTML |
+| `EHTML4STRICT` | error | An opt-in HTML 4.01 Strict target's renderer, selected layout, generated chrome, assembled page, or opaque HTML asset fails the strict whole-document boundary | `render` / `html4_strict` → HTML build / validate |
 | `EROUTEMISSING` | error | Published local `href`/`src` resolves to no output this build intends to keep | `link_audit` → HTML commit / validate |
 | `EROUTEESCAPE` | error | Published local `href`/`src` climbs above the output root and can never be served | `link_audit` → HTML commit / validate |
 | `EPUBLICATIONLOCATION` | error | A Boris-owned rendered public URL disagrees with the declared publication origin/base path, or a project-site root-relative route omits that base path | `link_audit` → HTML pre-commit gate / validate |

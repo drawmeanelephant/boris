@@ -11,6 +11,8 @@ when `--jobs N` is set — see [parallel-rendering.md](parallel-rendering.md).
 This document is **normative for the HTML path** implemented in
 `src/compile.zig` and `src/assemble.zig`. Claims below distinguish **mechanically
 tested** behavior from **platform-qualified** publication notes.
+The opt-in whole-document HTML 4.01 Strict compatibility target has additional
+validation and changed chrome; see [html4-strict.md](html4-strict.md).
 
 ---
 

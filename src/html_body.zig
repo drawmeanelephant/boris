@@ -421,11 +421,11 @@ pub fn renderSource(
                 try html_buf.appendSlice(arena, h.bytes);
             },
             .aside => |component| {
-                const h = try aside.renderHtml(component, doc_arena);
+                const h = try aside.renderHtmlProfile(component, doc_arena, options.output_profile);
                 try html_buf.appendSlice(arena, h);
             },
             .details => |component| {
-                const h = try aside.renderDetailsHtml(component, doc_arena);
+                const h = try aside.renderDetailsHtmlProfile(component, doc_arena, options.output_profile);
                 try html_buf.appendSlice(arena, h);
             },
         }

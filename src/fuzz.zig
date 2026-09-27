@@ -267,10 +267,20 @@ pub fn runRenderFuzz(seed: u64, iterations: usize) !void {
         // Render must not crash; OOM / InputTooLarge / writer failures are
         // acceptable.
         _ = render.render(md, &arena) catch |err| switch (err) {
-            // RawHtmlNotXmlWellFormed is unreachable through the seam (Boris
-            // always uses the HTML profile; see src/render.zig) but must be
-            // listed for exhaustive error-set coverage.
-            error.OutOfMemory, error.InputTooLarge, error.WriteFailed, error.NoSpaceLeft, error.RawHtmlNotXmlWellFormed => {},
+            // Profile-specific errors are unreachable through `render`
+            // (which uses `.html`), but the public error set is exhaustive.
+            error.OutOfMemory,
+            error.InputTooLarge,
+            error.WriteFailed,
+            error.NoSpaceLeft,
+            error.RawHtmlNotXmlWellFormed,
+            error.RawHtmlRejected,
+            error.RawHtmlNotHtml4Strict,
+            error.OrderedListStartNotHtml4Strict,
+            error.InvalidHtml4StrictId,
+            error.DuplicateHtml4StrictId,
+            error.EmptyTableNotHtml4Strict,
+            => {},
         };
     }
 }
