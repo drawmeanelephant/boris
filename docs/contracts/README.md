@@ -121,6 +121,7 @@ per topic:
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
 | [oliver-renderer.md](oliver-renderer.md) | Oliver pin + upgrade procedure, render seam, compatibility wall |
 | [html-output.md](html-output.md) | HTML Whiteboard, Aside stream, layout splice, Atomic publish (default CLI) |
+| [html4-strict.md](html4-strict.md) | Opt-in HTML 4.01 Strict whole-document boundary, gate, and authoring limits |
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [editor-host.md](editor-host.md) | Boris Editor loopback host API: launch/transport discipline, endpoint surface and payloads, author-owned file operations, managed compiler daemons, preview origin |

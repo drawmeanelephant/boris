@@ -229,6 +229,10 @@ fn stripTags(allocator: std.mem.Allocator, inner: []const u8) ![]const u8 {
 
 /// Render `{{toc}}` HTML from body HTML. Empty string when no h1–h3 with ids.
 pub fn renderToc(allocator: std.mem.Allocator, body_html: []const u8) ![]u8 {
+    return renderTocProfile(allocator, body_html, false);
+}
+
+pub fn renderTocProfile(allocator: std.mem.Allocator, body_html: []const u8, strict: bool) ![]u8 {
     var headings: std.ArrayList(Heading) = .empty;
     defer {
         for (headings.items) |h| allocator.free(h.text);
@@ -240,7 +244,7 @@ pub fn renderToc(allocator: std.mem.Allocator, body_html: []const u8) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
 
-    try buf.appendSlice(allocator, "<nav class=\"page-toc\" aria-label=\"On this page\">\n<ul>\n");
+    try buf.appendSlice(allocator, if (strict) "<div class=\"page-toc\">\n<ul>\n" else "<nav class=\"page-toc\" aria-label=\"On this page\">\n<ul>\n");
     for (headings.items) |h| {
         try buf.appendSlice(allocator, "<li class=\"page-toc__l");
         try buf.append(allocator, '0' + h.level);
@@ -252,7 +256,7 @@ pub fn renderToc(allocator: std.mem.Allocator, body_html: []const u8) ![]u8 {
         try buf.appendSlice(allocator, h.text);
         try buf.appendSlice(allocator, "</a></li>\n");
     }
-    try buf.appendSlice(allocator, "</ul>\n</nav>");
+    try buf.appendSlice(allocator, if (strict) "</ul>\n</div>" else "</ul>\n</nav>");
     return try buf.toOwnedSlice(allocator);
 }
 

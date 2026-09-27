@@ -1401,7 +1401,7 @@ fn parseTargetSpecs(
         return true;
     }
 
-    // --target-profile NAME=PROFILE (html|xhtml), applied after targets are
+    // --target-profile NAME=PROFILE (html|xhtml|html4-strict), applied after targets are
     // known. Mirrors --target-layout; the profile is a serialization switch
     // (#448) and composes with layout/rule selection.
     if (std.mem.eql(u8, a, "--target-profile") or std.mem.startsWith(u8, a, "--target-profile=")) {
@@ -1417,6 +1417,8 @@ fn parseTargetSpecs(
             .html
         else if (std.mem.eql(u8, profile_raw, "xhtml"))
             .xhtml
+        else if (std.mem.eql(u8, profile_raw, "html4-strict"))
+            .html4_strict
         else
             return error.InvalidValue;
         for (st.target_profiles.items) |existing| {
@@ -2684,7 +2686,7 @@ pub const usage_text =
     \\  --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
     \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
     \\  --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
-    \\  --target-profile N=P Per-target Oliver serialization profile (NAME=html|xhtml; default html)
+    \\  --target-profile N=P Per-target output profile (NAME=html|xhtml|html4-strict; default html)
     \\  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
     \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
     \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
@@ -3394,6 +3396,13 @@ test "parse: --target-profile selects the Oliver serialization profile (#448)" {
     defer def.deinit(std.testing.allocator);
     try expectEqual(render.OutputProfile.xhtml, def.html_profile.?);
     try expectEqual(render.OutputProfile.xhtml, def.targets.items[0].html_profile.?);
+    var strict = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--theme", "themes/html4-strict", "--target-profile", "default=html4-strict" });
+    defer strict.deinit(std.testing.allocator);
+    try expectEqual(Command.validate, strict.command);
+    try expectEqual(render.OutputProfile.html4_strict, strict.html_profile.?);
+    var strict_multi = try parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "legacy=html4-strict", "--target", "legacy=dist/legacy" });
+    defer strict_multi.deinit(std.testing.allocator);
+    try expectEqual(render.OutputProfile.html4_strict, strict_multi.targets.items[0].html_profile.?);
 
     // No profile → defaults to html (null overrides).
     var plain = try parseOptions(std.testing.allocator, &.{"boris"});

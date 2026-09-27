@@ -572,6 +572,123 @@ test "#448: xhtml target emits a well-formed document and fails closed on raw HT
     });
 }
 
+test "#1003: strict target validates layout, generated chrome, body, and proof HTML" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/html4-site", .{tmp.sub_path});
+    defer gpa.free(root);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{root});
+    defer gpa.free(dist);
+    const strict = @import("html4_strict.zig");
+    const opts = compile.CompileOptions{
+        .content_root = "fixtures/html4-strict/content",
+        .dist_dir = dist,
+        .layout_path = "themes/html4-strict/layouts/main.html",
+        .output_profile = .html4_strict,
+        .quiet = true,
+    };
+    _ = try compileHtmlSite(io, gpa, opts);
+    var out = try Io.Dir.cwd().openDir(io, dist, .{});
+    defer out.close(io);
+    for ([_][]const u8{ "index.html", "guides/steps.html", "_boris/proof/index.html" }) |path| {
+        const bytes = try readAllFile(io, out, path, gpa);
+        defer gpa.free(bytes);
+        try std.testing.expect(std.mem.startsWith(u8, bytes, strict.doctype));
+        try std.testing.expect((try strict.check(gpa, bytes)) == null);
+        try std.testing.expect(std.mem.indexOf(u8, bytes, "<nav") == null);
+    }
+    const home = try readAllFile(io, out, "index.html", gpa);
+    defer gpa.free(home);
+    try std.testing.expect(std.mem.indexOf(u8, home, "<div class=\"site-nav\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home, "<div class=\"admonition") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home, "<div class=\"details\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home, "<tbody>") != null);
+    const proof = try readAllFile(io, out, "_boris/proof/index.html", gpa);
+    defer gpa.free(proof);
+    try std.testing.expect(std.mem.indexOf(u8, proof, ".proof-nav li { display: inline;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, proof, "header {") == null);
+    const parallel_dist = try std.fmt.allocPrint(gpa, "{s}/parallel", .{root});
+    defer gpa.free(parallel_dist);
+    var parallel = opts;
+    parallel.dist_dir = parallel_dist;
+    parallel.jobs = 2;
+    _ = try compileHtmlSite(io, gpa, parallel);
+    var parallel_out = try Io.Dir.cwd().openDir(io, parallel_dist, .{});
+    defer parallel_out.close(io);
+    const parallel_home = try readAllFile(io, parallel_out, "index.html", gpa);
+    defer gpa.free(parallel_home);
+    try std.testing.expectEqualStrings(home, parallel_home);
+    const flipped_dist = try std.fmt.allocPrint(gpa, "{s}/flipped", .{root});
+    defer gpa.free(flipped_dist);
+    var first_profile = opts;
+    first_profile.dist_dir = flipped_dist;
+    first_profile.output_profile = .html;
+    first_profile.incremental = true;
+    _ = try compileHtmlSite(io, gpa, first_profile);
+    var second_profile = first_profile;
+    second_profile.output_profile = .html4_strict;
+    const changed = try compileHtmlSite(io, gpa, second_profile);
+    try std.testing.expectEqual(@as(usize, 2), changed.pages_written);
+    var flipped_out = try Io.Dir.cwd().openDir(io, flipped_dist, .{});
+    defer flipped_out.close(io);
+    const flipped_home = try readAllFile(io, flipped_out, "index.html", gpa);
+    defer gpa.free(flipped_home);
+    try std.testing.expectEqualStrings(home, flipped_home);
+    const flipped_proof = try readAllFile(io, flipped_out, "_boris/proof/index.html", gpa);
+    defer gpa.free(flipped_proof);
+    try std.testing.expect(std.mem.startsWith(u8, flipped_proof, strict.doctype));
+
+    // Validation follows the same assembly rule and never creates a target.
+    const validation_dist = try std.fmt.allocPrint(gpa, "{s}/validate-only", .{root});
+    defer gpa.free(validation_dist);
+    var validation = opts;
+    validation.dist_dir = validation_dist;
+    validation.validation_only = true;
+    _ = try compileHtmlSite(io, gpa, validation);
+    try std.testing.expectError(error.FileNotFound, Io.Dir.cwd().access(io, validation_dist, .{}));
+
+    // A layout cannot obtain a Strict verdict by switching the renderer
+    // alone; it must supply a valid complete document.
+    try writeTreeFile(io, root, "bad.html", "<!doctype html><main>{{content}}</main>");
+    const bad_path = try std.fmt.allocPrint(gpa, "{s}/bad.html", .{root});
+    defer gpa.free(bad_path);
+    var bad = opts;
+    bad.layout_path = bad_path;
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    bad.diagnostics = &collector;
+    try std.testing.expectError(error.Html4StrictFailed, compileHtmlSite(io, gpa, bad));
+    try std.testing.expectEqual(diag.Code.EHTML4STRICT, collector.list.items[0].code);
+    try std.testing.expect(std.mem.indexOf(u8, collector.list.items[0].message, "bad.html") != null);
+
+    const authored = try std.fmt.allocPrint(gpa, "{s}/content", .{root});
+    defer gpa.free(authored);
+    var invalid_content = opts;
+    invalid_content.content_root = authored;
+    invalid_content.diagnostics = &collector;
+    try writeTreeFile(io, root, "content/index.md", "# Same\n\n# Same\n");
+    try std.testing.expectError(error.Html4StrictFailed, compileHtmlSite(io, gpa, invalid_content));
+    try std.testing.expect(std.mem.indexOf(u8, collector.list.items[collector.list.items.len - 1].message, "DuplicateHtml4StrictId") != null);
+    const preserved = try readAllFile(io, out, "index.html", gpa);
+    defer gpa.free(preserved);
+    try std.testing.expectEqualStrings(home, preserved);
+    try writeTreeFile(io, root, "content/index.md", "<em>raw</em>\n");
+    try std.testing.expectError(error.Html4StrictFailed, compileHtmlSite(io, gpa, invalid_content));
+    try std.testing.expect(std.mem.indexOf(u8, collector.list.items[collector.list.items.len - 1].message, "RawHtmlNotHtml4Strict") != null);
+    try writeTreeFile(io, root, "content/index.md", "# Hint\n\n<Aside kind=\"tip\" id=\"hint\">\nClashing id.\n</Aside>\n");
+    try std.testing.expectError(error.Html4StrictFailed, compileHtmlSite(io, gpa, invalid_content));
+    try std.testing.expect(std.mem.indexOf(u8, collector.list.items[collector.list.items.len - 1].message, "duplicate document id") != null);
+    try writeTreeFile(io, root, "content/index.md", "# Safe\n");
+    try writeTreeFile(io, root, "static/landing.html", strict.doctype ++ "<html><head><title>Static</title></head><body><p>Unchecked</p></body></html>");
+    const static_path = try std.fmt.allocPrint(gpa, "{s}/static", .{root});
+    defer gpa.free(static_path);
+    invalid_content.static_dir = static_path;
+    try std.testing.expectError(error.Html4StrictFailed, compileHtmlSite(io, gpa, invalid_content));
+    try std.testing.expect(std.mem.indexOf(u8, collector.list.items[collector.list.items.len - 1].message, "opaque HTML asset") != null);
+}
+
 test "valid layout output equals prefix + rendered html + suffix" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

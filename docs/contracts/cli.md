@@ -531,11 +531,13 @@ The declared-profile equivalent is the per-target `static.dir` field
 
 ## Serialization profile (`--target-profile`)
 
-`--target-profile NAME=PROFILE` selects Oliver's serializer profile for one
+`--target-profile NAME=PROFILE` selects the output profile for one
 HTML target (`NAME` must match a `--target` or the synthetic `default`;
 repeatable). `PROFILE` is `html` (default, byte-identical to pre-profile
-output) or `xhtml` (XML-compatible serialization of the same normalized
-document).
+output), `xhtml` (XML-compatible serialization of the same normalized
+document), or `html4-strict` (a checked whole-document compatibility target;
+see [HTML 4.01 Strict](html4-strict.md)).
+
 
 An XHTML *document* is a layout concern: the layout template emits the XML
 declaration + `<html xmlns="http://www.w3.org/1999/xhtml">` and the page-body
@@ -546,6 +548,7 @@ diagnostics surface); the same bytes render fine under `html`. Flipping a
 target to XHTML requires a raw-HTML sweep of its content first. See the
 [multi-target contract](multi-target-isolated-output.md) and
 [Oliver renderer contract](oliver-renderer.md).
+
 
 `--target-profile` implies HTML mode, is valid for `build` and `validate`
 (the no-publication HTML path renders with the selected profile in memory),
