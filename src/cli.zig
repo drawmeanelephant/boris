@@ -2643,7 +2643,7 @@ pub const usage_text =
     \\  --out PATH          Smoke result artifact path (default: stdout)
     \\  standard-site options (all subcommands):
     \\  --session-root PATH Override the persistent session store root
-    \\  --profile PATH      Publication profile: emit Standard.site verification and/or Nostr naddr head links
+    \\  --profile PATH      HTML metadata opt-in (Standard.site / Nostr); CLI flags must match declared targets
     \\  --html              Explicit HTML site mode → --html-dir (default dist)
     \\  --html-dir <DIR>    HTML site mode with output directory DIR
     \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
