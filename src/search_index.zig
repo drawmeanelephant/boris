@@ -91,10 +91,22 @@ fn isFallbackChromeName(name: []const u8) bool {
     return std.ascii.eqlIgnoreCase(name, "header") or std.ascii.eqlIgnoreCase(name, "aside");
 }
 
-fn isSearchExcludeMarker(txt: []const u8) bool {
+fn hasClass(txt: []const u8, class_name: []const u8) bool {
+    var classes = std.mem.tokenizeAny(u8, attrValue(txt, "class") orelse "", " \t\r\n");
+    while (classes.next()) |class| {
+        if (std.mem.eql(u8, class, class_name)) return true;
+    }
+    return false;
+}
+
+fn isSearchExcludeMarker(name: []const u8, txt: []const u8) bool {
     return hasAttr(txt, "data-boris-search-exclude") or
         hasAttr(txt, "data-boris-search-ignore") or
-        hasAttr(txt, "data-boris-noindex");
+        hasAttr(txt, "data-boris-noindex") or
+        // The frozen metadata fragment cannot carry the search marker on
+        // HTML 4.01 Strict layouts, so identify this compiler-owned chrome by
+        // its stable class as well.
+        (std.ascii.eqlIgnoreCase(name, "dl") and hasClass(txt, "page-metadata"));
 }
 
 fn isHidden(txt: []const u8) bool {
@@ -170,6 +182,12 @@ fn normalize(a: std.mem.Allocator, raw: []const u8) ![]u8 {
     }
     return out.toOwnedSlice(a);
 }
+fn isAsciiWhitespaceOnly(text: []const u8) bool {
+    for (text) |c| {
+        if (!std.ascii.isWhitespace(c)) return false;
+    }
+    return true;
+}
 fn isBlock(n: []const u8) bool {
     return std.ascii.eqlIgnoreCase(n, "p") or
         std.ascii.eqlIgnoreCase(n, "div") or
@@ -186,7 +204,9 @@ fn isBlock(n: []const u8) bool {
         std.ascii.eqlIgnoreCase(n, "tfoot") or
         std.ascii.eqlIgnoreCase(n, "tr") or
         std.ascii.eqlIgnoreCase(n, "td") or
-        std.ascii.eqlIgnoreCase(n, "th");
+        std.ascii.eqlIgnoreCase(n, "th") or
+        std.ascii.eqlIgnoreCase(n, "dt") or
+        std.ascii.eqlIgnoreCase(n, "dd");
 }
 
 fn isBreak(n: []const u8) bool {
@@ -259,7 +279,7 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
         }
         const excluded_name = isAlwaysExcludedName(n) or
             (exclude_chrome and isFallbackChromeName(n)) or
-            isSearchExcludeMarker(txt) or
+            isSearchExcludeMarker(n, txt) or
             isHidden(txt);
         if (!tag.closing) {
             // Count every nested opener while excluded. Incrementing only on
@@ -316,7 +336,8 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
     }
     if (title == null) title = try a.dupe(u8, path);
     if (sections.items.len > 1 and sections.items[0].heading.items.len == 0 and
-        sections.items[0].prose.items.len == 0 and sections.items[0].code.items.len == 0)
+        isAsciiWhitespaceOnly(sections.items[0].prose.items) and
+        isAsciiWhitespaceOnly(sections.items[0].code.items))
     {
         // Drop the empty leading section by shifting the tail down, NOT by
         // advancing the slice. `sections.items = sections.items[1..]` moves the
@@ -732,6 +753,27 @@ test "table cells and breaks stay separate searchable words" {
     try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "x86 riscv") != null);
     try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "arm64x86") == null);
     try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "line break") != null);
+}
+
+test "definition list labels and values stay separate searchable words" {
+    const html = "<main data-boris-search-root><h1>Metadata</h1>" ++
+        "<dl><dt>Status</dt><dd>published</dd><dt>Tags</dt><dd>factory, boris</dd></dl>" ++
+        "</main>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Status published Tags factory, boris", d.sections[0].text);
+}
+
+test "compiler metadata is excluded without hiding authored definition lists" {
+    const html =
+        \\<main data-boris-search-root>
+        \\<dl class='page-metadata'><dt>Status</dt><dd>draft</dd><dt>Parent</dt><dd>private-log</dd></dl>
+        \\<h1>Glossary</h1><dl><dt>Status</dt><dd>published</dd></dl></main>
+    ;
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqual(@as(usize, 1), d.sections.len);
+    try std.testing.expectEqualStrings("Status published", d.sections[0].text);
 }
 
 test "title fallback and heading fragments decode entities" {

@@ -109,13 +109,16 @@ are treated as layout chrome and skipped. Navigation, footer,
 executable/non-visible elements, and regions marked
 `data-boris-search-exclude`, `data-boris-search-ignore`, or `data-boris-noindex`
 are never indexed. Nested markup inside an excluded region does not re-enter
-the index.
+the index. The compiler-emitted `<dl class="page-metadata">` block is also
+excluded as layout chrome, including on HTML 4.01 Strict layouts that cannot
+use the `data-boris-search-exclude` attribute.
 
 Rendered entities (`amp`, `lt`, `gt`, `quot`, `apos`, `nbsp`, and numeric
 character references) are decoded before title, heading, fragment, text, or
 code is stored. ASCII whitespace is collapsed to one U+0020 and trimmed at
-both ends. Table cells (`td`/`th`) and `<br>`/`<hr>` are word separators in
-`text`, so adjacent cells do not concatenate. Other UTF-8 text is preserved;
+both ends. Table cells (`td`/`th`), definition-list terms and descriptions
+(`dt`/`dd`), and `<br>`/`<hr>` are word separators in `text`, so adjacent
+elements do not concatenate. Other UTF-8 text is preserved;
 there is no case folding, stemming, punctuation removal, or language-specific
 normalization. Code is kept in `code` rather than merged into `text`. Within
 one section, successive code fragments are joined by a single U+0020 in
