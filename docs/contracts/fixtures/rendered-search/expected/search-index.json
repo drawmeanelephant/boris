@@ -3,6 +3,13 @@
   "schema_version": 1,
   "documents": [
     {
+      "path": "guides/definition-list.html",
+      "title": "Definition lists",
+      "sections": [
+        {"level": 1, "heading": "Definition lists", "fragment": "definition-lists", "text": "Glossary follows. Search whole token", "code": ""}
+      ]
+    },
+    {
       "path": "guides/install.html",
       "title": "Install Boris",
       "sections": [

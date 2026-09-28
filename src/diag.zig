@@ -64,6 +64,9 @@ pub const Code = enum {
     ERELATIONDUPLICATE,
     /// Content-local page asset path/missing/symlink/collision failures.
     EASSET,
+    /// A selected HTML 4.01 Strict page failed rendering or whole-document
+    /// validation, including selected layouts and generated chrome.
+    EHTML4STRICT,
     /// Published local `href`/`src` resolves to no output this build keeps.
     EROUTEMISSING,
     /// Published local `href`/`src` climbs above the output root.

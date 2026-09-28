@@ -61,12 +61,14 @@ pub const RenderError = error{
     WriteFailed,
     /// The output writer ran out of space.
     NoSpaceLeft,
-    /// Oliver's renderer rejects content it cannot guarantee XML-well-formed
-    /// under the XHTML profile. Boris always renders with the default HTML
-    /// profile, so this member is structurally unreachable through this seam;
-    /// it exists so the error set tracks Oliver's public return type exactly
-    /// (compile-time seam review when Oliver's surface changes).
+    /// Verbatim HTML cannot be certified under the XHTML profile.
     RawHtmlNotXmlWellFormed,
+    RawHtmlRejected,
+    RawHtmlNotHtml4Strict,
+    OrderedListStartNotHtml4Strict,
+    InvalidHtml4StrictId,
+    DuplicateHtml4StrictId,
+    EmptyTableNotHtml4Strict,
 };
 
 /// Zig-side view of rendered HTML.
@@ -98,6 +100,7 @@ const markdown_options = oliver.MarkdownOptions{
 pub const OutputProfile = enum {
     html,
     xhtml,
+    html4_strict,
 
     pub fn jsonName(self: OutputProfile) []const u8 {
         return @tagName(self);
@@ -129,6 +132,7 @@ pub fn renderProfile(md: []const u8, arena: *std.heap.ArenaAllocator, profile: O
         .profile = switch (profile) {
             .html => .html,
             .xhtml => .xhtml,
+            .html4_strict => .html4_strict,
         },
     };
 
@@ -571,6 +575,20 @@ test "render: xhtml profile fails closed on verbatim raw HTML (#448)" {
     try testing.expect(std.mem.indexOf(u8, html.bytes, "<em>raw</em>") != null);
 }
 
+test "render: strict profile rejects raw HTML, non-one lists, and duplicate heading ids" {
+    const cases = [_]struct { md: []const u8, expected: RenderError }{
+        .{ .md = "<div>raw</div>\n", .expected = error.RawHtmlNotHtml4Strict },
+        .{ .md = "3. Third\n", .expected = error.OrderedListStartNotHtml4Strict },
+        .{ .md = "# Same\n\n# Same\n", .expected = error.DuplicateHtml4StrictId },
+        .{ .md = "# Name {#3bad}\n", .expected = error.InvalidHtml4StrictId },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        try std.testing.expectError(case.expected, renderProfile(case.md, &arena, .html4_strict));
+    }
+}
+
 test "render: ordinary markdown through Oliver" {
     try withRender("# Home\n\nHello **world**.\n", struct {
         fn run(html: []const u8) !void {
@@ -883,18 +901,18 @@ test "docs: renderer contract pin matches build.zig.zon" {
         return error.TestUnexpectedResult;
     const revision = zon[sha_start..sha_end];
 
-    const hash_prefix = ".hash = \"oliver-0.0.0-";
+    const hash_prefix = ".hash = \"oliver-";
     const hash_start = (std.mem.indexOf(u8, zon, hash_prefix) orelse
         return error.TestUnexpectedResult) + hash_prefix.len;
     const hash_end = std.mem.indexOfPos(u8, zon, hash_start, "\"") orelse
         return error.TestUnexpectedResult;
-    const package_hash = zon[hash_start..hash_end];
+    const package_hash = zon[hash_start - "oliver-".len .. hash_end];
 
     // docs/contracts/oliver-renderer.md (pin table) and
     // docs/contracts/fixtures/oliver-compat/MATRIX.md must cite the same
     // revision and content hash as build.zig.zon.
     try expectDocPin(io, root, "docs/contracts/oliver-renderer.md", try std.fmt.allocPrint(gpa, "| Commit | `{s}` |", .{revision}), gpa);
-    try expectDocPin(io, root, "docs/contracts/oliver-renderer.md", try std.fmt.allocPrint(gpa, "| Package hash | `oliver-0.0.0-{s}` |", .{package_hash}), gpa);
+    try expectDocPin(io, root, "docs/contracts/oliver-renderer.md", try std.fmt.allocPrint(gpa, "| Package hash | `{s}` |", .{package_hash}), gpa);
     try expectDocPin(io, root, "docs/contracts/fixtures/oliver-compat/MATRIX.md", try std.fmt.allocPrint(gpa, "Pin: Oliver `{s}`", .{revision}), gpa);
 }
 

@@ -738,19 +738,27 @@ fn kindLabel(kind: []const u8, buf: *[64]u8) []const u8 {
 
 /// Render one Aside to an HTML admonition. Allocates from the document Whiteboard.
 pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
+    return renderHtmlProfile(a, doc_arena, .html);
+}
+
+pub fn renderHtmlProfile(a: Aside, doc_arena: *std.heap.ArenaAllocator, profile: render.OutputProfile) ![]const u8 {
     const arena = doc_arena.allocator();
     var class_buf: [64]u8 = undefined;
     const kind = sanitizeClass(64, a.kind, &class_buf);
     var label_buf: [64]u8 = undefined;
     const label = kindLabel(kind, &label_buf);
 
+    // Preserve pre-#1003 XHTML component bytes; only the new Strict target
+    // needs its nested Markdown to use the matching Oliver profile.
+    const inner_profile: render.OutputProfile = if (profile == .html4_strict) .html4_strict else .html;
     const inner = if (a.body.len > 0)
-        (try render.render(a.body, doc_arena)).bytes
+        (try render.renderProfile(a.body, doc_arena, inner_profile)).bytes
     else
         "";
 
     var out: std.ArrayList(u8) = .empty;
-    try out.appendSlice(arena, "<aside class=\"admonition admonition--");
+    const strict = profile == .html4_strict;
+    try out.appendSlice(arena, if (strict) "<div class=\"admonition admonition--" else "<aside class=\"admonition admonition--");
     try out.appendSlice(arena, kind);
     try out.appendSlice(arena, "\"");
     if (a.id.len > 0) {
@@ -758,15 +766,18 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
         try appendEscapedAttr(&out, arena, a.id);
         try out.appendSlice(arena, "\"");
     }
-    try out.appendSlice(arena, " aria-label=\"");
-    try appendEscapedAttr(&out, arena, label);
-    try out.appendSlice(arena, "\">\n");
+    if (!strict) {
+        try out.appendSlice(arena, " aria-label=\"");
+        try appendEscapedAttr(&out, arena, label);
+        try out.appendSlice(arena, "\"");
+    }
+    try out.appendSlice(arena, ">\n");
     try out.appendSlice(arena, "<p class=\"admonition__title\">");
     try out.appendSlice(arena, label);
     try out.appendSlice(arena, "</p>\n");
     try out.appendSlice(arena, "<div class=\"admonition__body\">\n");
     try out.appendSlice(arena, inner);
-    try out.appendSlice(arena, "</div>\n</aside>\n");
+    try out.appendSlice(arena, if (strict) "</div>\n</div>\n" else "</div>\n</aside>\n");
 
     return try out.toOwnedSlice(arena);
 }
@@ -774,21 +785,27 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
 /// Render one Details component using the platform-native disclosure elements.
 /// The summary is intentionally emitted as escaped text, never Markdown.
 pub fn renderDetailsHtml(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
+    return renderDetailsHtmlProfile(d, doc_arena, .html);
+}
+
+pub fn renderDetailsHtmlProfile(d: Details, doc_arena: *std.heap.ArenaAllocator, profile: render.OutputProfile) ![]const u8 {
     const arena = doc_arena.allocator();
-    const inner = if (d.body.len > 0) (try render.render(d.body, doc_arena)).bytes else "";
+    const inner_profile: render.OutputProfile = if (profile == .html4_strict) .html4_strict else .html;
+    const inner = if (d.body.len > 0) (try render.renderProfile(d.body, doc_arena, inner_profile)).bytes else "";
+    const strict = profile == .html4_strict;
     var out: std.ArrayList(u8) = .empty;
-    try out.appendSlice(arena, "<details class=\"details\"");
+    try out.appendSlice(arena, if (strict) "<div class=\"details\"" else "<details class=\"details\"");
     if (d.id.len > 0) {
         try out.appendSlice(arena, " id=\"");
         try appendEscapedAttr(&out, arena, d.id);
         try out.appendSlice(arena, "\"");
     }
-    if (d.open) try out.appendSlice(arena, " open");
-    try out.appendSlice(arena, ">\n<summary>");
+    if (d.open and !strict) try out.appendSlice(arena, " open");
+    try out.appendSlice(arena, if (strict) ">\n<p class=\"details__summary\">" else ">\n<summary>");
     try appendEscapedAttr(&out, arena, d.summary);
-    try out.appendSlice(arena, "</summary>\n<div class=\"details__body\">\n");
+    try out.appendSlice(arena, if (strict) "</p>\n<div class=\"details__body\">\n" else "</summary>\n<div class=\"details__body\">\n");
     try out.appendSlice(arena, inner);
-    try out.appendSlice(arena, "</div>\n</details>\n");
+    try out.appendSlice(arena, if (strict) "</div>\n</div>\n" else "</div>\n</details>\n");
     return try out.toOwnedSlice(arena);
 }
 

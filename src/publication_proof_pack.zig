@@ -10,6 +10,7 @@ const evidence_mod = @import("publication_evidence.zig");
 const proof_json = @import("proof_pack_json.zig");
 const proof_html = @import("proof_pack_html.zig");
 const proof_txn = @import("proof_pack_transaction.zig");
+const html4_strict = @import("html4_strict.zig");
 
 pub const output_path = artifact_inventory.proof_pack_output_path;
 pub const index_output_path = artifact_inventory.proof_index_output_path;
@@ -17,6 +18,9 @@ pub const report_format = "boris-publication-proof-pack";
 pub const schema_version: usize = 1;
 
 pub const Options = struct {
+    /// The proof presentation lives inside the published target too. A Strict
+    /// target must not leave this compiler-owned HTML5 page behind.
+    html4_strict: bool = false,
     /// Additive build provenance (#781): the opaque VCS revision token the
     /// producing binary was compiled from ("" when undetected, e.g. a
     /// tarball). Copied verbatim into `proof-pack.json` after `target` and
@@ -68,6 +72,7 @@ pub const Options = struct {
 };
 
 pub const Error = std.mem.Allocator.Error || error{
+    InvalidHtml4StrictPage,
     InvalidArtifactsReport,
     InvalidChecksReport,
     InvalidClaimsReport,
@@ -327,6 +332,10 @@ fn renderPairAndInstall(
         error.NoSpaceLeft => unreachable,
         error.InvalidChecksReport => return error.InvalidChecksReport,
     };
+    const published_html = if (options.html4_strict)
+        try strictProofHtml(gpa, html_bytes)
+    else
+        html_bytes;
     const txn_options = proof_txn.Options{
         .test_fail_json_tmp_write = options.test_fail_json_tmp_write,
         .test_fail_html_tmp_write = options.test_fail_html_tmp_write,
@@ -340,7 +349,80 @@ fn renderPairAndInstall(
         .test_fail_remove_html = options.test_fail_remove_html,
         .test_fail_remove_json = options.test_fail_remove_json,
     };
-    try proof_txn.installPair(io, root, json_bytes, html_bytes, txn_options);
+    try proof_txn.installPair(io, root, json_bytes, published_html, txn_options);
+}
+
+/// Re-serialize only compiler-owned proof chrome, not arbitrary author bytes.
+/// Dynamic values have already been text/attribute escaped by `renderHtml`.
+/// The full resulting document is then checked before the pair transaction.
+const strict_css =
+    \\body { font: 1em/1.5 Arial, sans-serif; color: #222; background: #fff; margin: 1em auto; max-width: 70em; }
+    \\.proof-header, .proof-main, .proof-footer { padding: 0.5em; }
+    \\.proof-nav ul { list-style: none; padding: 0; }
+    \\.proof-nav li { display: inline; margin-right: 1em; }
+    \\.proof-details { border: 1px solid #ccc; padding: 0.5em; margin: 1em 0; }
+    \\.proof-summary { font-weight: bold; }
+    \\table { border-collapse: collapse; width: 100%; }
+    \\th, td { border: 1px solid #ccc; padding: 0.4em; text-align: left; }
+    \\.table-wrap { overflow: auto; }
+    \\a { color: #174781; }
+    \\a:focus { outline: 2px solid #174781; }
+;
+
+fn strictProofHtml(gpa: std.mem.Allocator, html_bytes: []const u8) Error![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    var i: usize = 0;
+    while (i < html_bytes.len) {
+        if (html_bytes[i] != '<') {
+            try out.append(gpa, html_bytes[i]);
+            i += 1;
+            continue;
+        }
+        const end = std.mem.indexOfScalarPos(u8, html_bytes, i, '>') orelse return error.InvalidHtml4StrictPage;
+        const token = html_bytes[i .. end + 1];
+        if (std.mem.eql(u8, token, "<style>")) {
+            const close = std.mem.indexOfPos(u8, html_bytes, end + 1, "</style>") orelse return error.InvalidHtml4StrictPage;
+            try out.appendSlice(gpa, "<style type=\"text/css\">\n");
+            try out.appendSlice(gpa, strict_css);
+            i = close;
+            continue;
+        }
+        if (std.mem.startsWith(u8, token, "<section ")) {
+            try out.appendSlice(gpa, "<div");
+            try out.appendSlice(gpa, token["<section".len..]);
+            i = end + 1;
+            continue;
+        }
+        const replacement: ?[]const u8 = blk: {
+            if (std.mem.eql(u8, token, "<!DOCTYPE html>")) break :blk html4_strict.doctype;
+            if (std.mem.eql(u8, token, "<meta charset=\"utf-8\">")) break :blk "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">";
+            if (std.mem.startsWith(u8, token, "<meta name=\"viewport\"")) break :blk "";
+            if (std.mem.eql(u8, token, "<header>")) break :blk "<div class=\"proof-header\">";
+            if (std.mem.eql(u8, token, "</header>")) break :blk "</div>";
+            if (std.mem.eql(u8, token, "<nav aria-label=\"Contents\">")) break :blk "<div class=\"proof-nav\">";
+            if (std.mem.eql(u8, token, "</nav>")) break :blk "</div>";
+            if (std.mem.eql(u8, token, "<main>")) break :blk "<div class=\"proof-main\">";
+            if (std.mem.eql(u8, token, "</main>")) break :blk "</div>";
+            if (std.mem.eql(u8, token, "<footer>")) break :blk "<div class=\"proof-footer\">";
+            if (std.mem.eql(u8, token, "</footer>")) break :blk "</div>";
+            if (std.mem.eql(u8, token, "</section>")) break :blk "</div>";
+            if (std.mem.eql(u8, token, "<details>")) break :blk "<div class=\"proof-details\">";
+            if (std.mem.eql(u8, token, "</details>")) break :blk "</div>";
+            if (std.mem.eql(u8, token, "<summary>")) break :blk "<p class=\"proof-summary\">";
+            if (std.mem.eql(u8, token, "</summary>")) break :blk "</p>";
+            if (std.mem.eql(u8, token, "<table>")) break :blk "<table summary=\"Proof Pack evidence\">";
+            break :blk null;
+        };
+        if (replacement) |s| {
+            try out.appendSlice(gpa, s);
+        } else try out.appendSlice(gpa, token);
+        i = end + 1;
+    }
+    const bytes = try out.toOwnedSlice(gpa);
+    errdefer gpa.free(bytes);
+    if (try html4_strict.check(gpa, bytes) != null) return error.InvalidHtml4StrictPage;
+    return bytes;
 }
 
 /// Write `proof-pack.json` and `index.html` after the Touch Atlas commits.

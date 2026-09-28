@@ -40,6 +40,7 @@ themes/<name>/
 | [`corporate`](corporate/) | Dense product-docs chrome | `--theme themes/corporate` |
 | [`minimal`](minimal/) | Same shell, no search | `--theme themes/minimal` |
 | [`lab`](lab/) | Dark-first lab terminal, three color modes | `--theme themes/lab` |
+| [`html4-strict`](html4-strict/) | Opt-in legacy HTML 4.01 Strict compatibility | `--theme themes/html4-strict --target-profile default=html4-strict` |
 
 Sample sites that build these themes live under `examples/<name>-site/`.
 

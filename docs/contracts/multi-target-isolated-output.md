@@ -19,7 +19,7 @@ Layout selection:
 --html-layout <PATH>           # global default (default: themes/boris/layouts/main.html)
 --target-layout <NAME>=<PATH>  # per-target override (NAME must match a --target or "default")
 --layout-rule <TARGET> <SELECTOR> <LAYOUT_PATH>  # repeatable page layout rules (HTML only)
---target-profile <NAME>=<PROFILE>  # per-target serializer profile: html (default) or xhtml
+--target-profile <NAME>=<PROFILE>  # per-target profile: html (default), xhtml, or html4-strict
 ```
 
 Serialization profile:
@@ -37,6 +37,12 @@ Serialization profile:
   (`error.RawHtmlNotXmlWellFormed`, surfaced with page/offset context in the
   diagnostics surface). Flipping a target to XHTML requires a raw-HTML sweep
   of its content first; the same bytes render fine under `html`.
+- `--target-profile NAME=html4-strict` renders Oliver fragments with its
+  Strict serializer, emits Strict-compatible generated chrome and Proof Pack
+  HTML, and checks the complete assembled document before publication.
+  Every selected layout must supply the exact DOCTYPE and valid head/body
+  structure. Opaque `.html` assets are rejected. See
+  [the target contract](html4-strict.md) for its bounded validation subset.
 
 ### Constraints & Conflict Rules:
 1. **Implies HTML mode:** Providing `--target`, `--target-layout`, or `--target-profile` automatically sets the build mode to `.html`.

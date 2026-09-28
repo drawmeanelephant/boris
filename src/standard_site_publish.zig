@@ -36,7 +36,7 @@ pub const Error = identity.Error || authorization.Error || password.Error || xrp
 /// The Oliver rendering dependency pin recorded in the evidence bindings.
 /// Must match the revision in build.zig.zon (enforced by the zon test below);
 /// the upgrade procedure lives in docs/contracts/oliver-renderer.md.
-pub const oliver_pin = "oliver@6b9d14f345908f18cc761b35a2e8584f140633d2";
+pub const oliver_pin = "oliver@80d53b2118005b314d4c551d18a023f293eecc75";
 
 /// A session acquired for one publish/smoke run: either the DPoP-bound OAuth
 /// session or the Bearer app-password session. Both carry the DID + PDS origin
