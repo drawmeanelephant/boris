@@ -99,6 +99,14 @@ becomes the zero-write validation daemon described above. `check` and `impact`
 likewise create no product artifacts; only their explicit `--report` path may
 be written.
 
+HTML `build --profile PATH` remains an opt-in for Standard.site verification
+and Nostr head links, **not** profile-driven publication. Before compilation it
+checks the profile's selected input, targets, and target settings against the
+effective CLI flags and rejects any unselected declaration with exit 2 and a
+field-specific error, instead of silently building a synthetic `default`
+target. Profile editions and target RSS/llms declarations are likewise refused
+by this HTML path. See [the profile contract](publication-profile.md#offline-and-availability-boundary).
+
 ### `init`: deterministic starter scaffold with self-verification
 
 `boris init [DIR]` (default `.`) writes a fixed starter tree — three content

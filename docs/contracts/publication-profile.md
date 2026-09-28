@@ -1,11 +1,13 @@
 # Publication profile (schema v1, GitHub Pages declaration slice)
 
-**Status:** normative parser and static-plan contract. Boris accepts an
-explicit profile only through the stdout-only `boris plan --profile PATH`
-declaration command; profile execution is not available in this slice. The
-internal API and plan command parse and validate a selected local profile only;
-they do not discover content, create outputs, read environment variables,
-contact a network service, or invoke a publisher. See the
+**Status:** normative parser and static-plan contract. `boris plan --profile
+PATH` declares the full profile, but profile-driven build/watch/validate
+execution is not available in this slice. An HTML `build --profile PATH` can
+opt into Standard.site verification surfaces or Nostr head links, provided
+its CLI configuration matches the profile's selected input and HTML target
+declarations; it does not run the profile as a publication plan. The internal
+parser and plan command do not discover content, create outputs, read
+environment variables, contact a network service, or invoke a publisher. See the
 [publication-plan contract](publication-plan.md) for the declaration format.
 
 ## Selected profile workspace
@@ -154,3 +156,17 @@ The plan CLI is intentionally a declaration surface rather
 than a publication coordinator. Full profile execution remains deferred until
 a coordinator can execute every configured entry without silently ignoring any
 of them.
+
+For the existing HTML `build --profile` metadata opt-in, Boris requires one
+declared target and one selected CLI target, then compares the profile's
+workspace-relative `input`, `input_format`, target name/output, fallback
+theme/layout, layout rules, static directory, and sitemap path/URL against
+the effective CLI configuration. An explicitly selected Pages location must
+agree with the profile's publication URL. It also refuses profile editions
+(IR/RAG/Context), target RSS/llms declarations, and profiles with no enabled
+Standard.site or Nostr metadata surface. A mismatch is an exit-2 error naming
+the first unselected field/target before output is written, even with
+`--quiet`; matching CLI flags continue to emit Standard.site and Nostr
+surfaces. `watch` and `validate` still reject `--profile` at argument parsing.
+A profile is not a shortcut for `--target`, `--theme`, `--layout-rule`, or
+`--static-dir`.

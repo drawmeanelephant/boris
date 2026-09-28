@@ -1308,6 +1308,102 @@ const HtmlNostr = struct {
     }
 };
 
+const HtmlProfileMismatch = struct {
+    field: []const u8,
+    target_name: ?[]const u8 = null,
+};
+
+fn sameProfilePath(gpa: std.mem.Allocator, cwd: []const u8, workspace: []const u8, declared: []const u8, selected: []const u8) !bool {
+    const planned = try std.fs.path.resolve(gpa, &.{ workspace, declared });
+    defer gpa.free(planned);
+    const actual = try std.fs.path.resolve(gpa, &.{ cwd, selected });
+    defer gpa.free(actual);
+    return std.mem.eql(u8, planned, actual);
+}
+
+/// `--profile` enables two HTML metadata surfaces, not profile execution.
+/// Refuse a build whose profile describes HTML or edition work that the
+/// compiler would otherwise silently replace with CLI defaults. Matching
+/// CLI declarations keep the existing Standard.site and Nostr opt-ins alive.
+fn htmlProfileMismatch(
+    gpa: std.mem.Allocator,
+    io: Io,
+    request: *const publication_profile.PublicationRequest,
+    opts: Options,
+) !?HtmlProfileMismatch {
+    const plan = &request.plan;
+    if (plan.ir != null) return .{ .field = "editions.ir" };
+    if (plan.rag != null) return .{ .field = "editions.rag" };
+    if (plan.context != null) return .{ .field = "editions.context" };
+
+    const cwd = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd);
+    if (!try sameProfilePath(gpa, cwd, request.workspace.root, plan.input, opts.input_dir))
+        return .{ .field = "input" };
+    if (plan.input_format != switch (opts.input_format) {
+        .markdown => publication_profile.InputFormat.markdown,
+        .textile => publication_profile.InputFormat.textile,
+        .cook => publication_profile.InputFormat.cook,
+    }) return .{ .field = "input_format" };
+
+    const selected = opts.targets.items;
+    if (plan.targets.len != 1 or selected.len != 1)
+        return .{ .field = "targets" };
+    for (plan.targets, selected) |declared, cli_target| {
+        const name = declared.name;
+        if (!std.mem.eql(u8, name, cli_target.name))
+            return .{ .field = "name", .target_name = name };
+        if (!try sameProfilePath(gpa, cwd, request.workspace.root, declared.output, cli_target.output_dir))
+            return .{ .field = "output", .target_name = name };
+
+        const cli_layout = target.effectiveLayout(cli_target, opts.html_layout);
+        const profile_layout = if (declared.theme) |theme_root|
+            try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{theme_root})
+        else
+            try gpa.dupe(u8, declared.layout orelse "themes/boris/layouts/main.html");
+        defer gpa.free(profile_layout);
+        if (!try sameProfilePath(gpa, cwd, request.workspace.root, profile_layout, cli_layout))
+            return .{ .field = if (declared.theme != null) "theme" else "layout", .target_name = name };
+        if (declared.layout_rules.len != cli_target.layout_rules.len)
+            return .{ .field = "layout_rules", .target_name = name };
+        for (declared.layout_rules, cli_target.layout_rules) |rule, selected_rule| {
+            if (!rule.selectorBytesEqual(selected_rule) or
+                !try sameProfilePath(gpa, cwd, request.workspace.root, rule.layout_path, selected_rule.layout_path))
+                return .{ .field = "layout_rules", .target_name = name };
+        }
+        if (declared.static) |static| {
+            const selected_static = opts.static_dir orelse return .{ .field = "static", .target_name = name };
+            if (!try sameProfilePath(gpa, cwd, request.workspace.root, static.dir, selected_static))
+                return .{ .field = "static", .target_name = name };
+        } else if (opts.static_dir != null) return .{ .field = "static", .target_name = name };
+        if (declared.sitemap) |sitemap| {
+            if (opts.sitemap_path == null or
+                !std.mem.eql(u8, opts.sitemap_path.?, sitemap.path) or
+                opts.site_url == null or plan.site == null or plan.site.?.url == null)
+                return .{ .field = "sitemap", .target_name = name };
+            const selected_url = try rss.normalizedSiteUrl(gpa, opts.site_url.?);
+            defer gpa.free(selected_url);
+            if (!std.mem.eql(u8, selected_url, plan.site.?.url.?))
+                return .{ .field = "sitemap", .target_name = name };
+        } else if (opts.sitemap_path != null) return .{ .field = "sitemap", .target_name = name };
+        if (declared.rss != null) return .{ .field = "rss", .target_name = name };
+        if (declared.llms != null) return .{ .field = "llms", .target_name = name };
+    }
+    if (opts.publication_location) |location| {
+        const configured_location = if (plan.publication) |publication| switch (publication) {
+            .github_pages => |pages| pages.base_url,
+            .standard_site => |site| site.location.base_url,
+        } else return .{ .field = "publication" };
+        if (!std.mem.eql(u8, location.base_url, configured_location))
+            return .{ .field = "publication" };
+    }
+    if (plan.publication == null or
+        (plan.publication.? != .standard_site and
+            (plan.nostr == null or !plan.nostr.?.enabled)))
+        return .{ .field = "Standard.site or enabled Nostr metadata" };
+    return null;
+}
+
 /// When `--profile` names a Standard.site target, build the offline
 /// projection and surfaces so the HTML compile can emit verification
 /// artifacts. A missing profile, or a GitHub Pages profile, is a no-op.
@@ -1326,6 +1422,25 @@ fn loadHtmlVerification(
     }, &request);
     if (load_code != .success) return load_code;
     defer request.deinit(gpa);
+
+    const mismatch = htmlProfileMismatch(gpa, io, &request, opts) catch |err| {
+        std.debug.print("error: unable to compare --profile with HTML options: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    if (mismatch) |field| {
+        if (field.target_name) |name| {
+            std.debug.print(
+                "error: --profile HTML target '{s}' declares {s} not selected by this build; --profile does not execute HTML targets (pass matching CLI flags)\n",
+                .{ name, field.field },
+            );
+        } else {
+            std.debug.print(
+                "error: --profile declares {s} not selected by this build; --profile does not execute publication targets or editions\n",
+                .{field.field},
+            );
+        }
+        return .usage;
+    }
 
     const publication = request.plan.publication orelse return .success;
     switch (publication) {
