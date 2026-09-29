@@ -221,6 +221,83 @@ test -f "${PROFILE_ROOT}/dist/_boris/proof/standard-site.json"
 grep -q 'site.standard.document' "${PROFILE_ROOT}/dist/home.html"
 test -f "${PROFILE_ROOT}/dist/sitemap.xml"
 
+# `validate --profile` (#1006): the profile drives a zero-write validation
+# pass over its declared targets. Layout paths are workspace-relative only,
+# so the invocation runs from the profile workspace root — the same
+# convention the build contract documents for profiles. Named HTML selectors
+# conflict at parse time; non-executable declarations refuse with exit 2 and
+# a named field; the passing run writes nothing but an explicit --report
+# file.
+rm -rf "${PROFILE_ROOT}/dist"
+set +e
+"${BORIS}" validate --profile="${PROFILE_REL}/boris.json" --theme="${PROFILE_REL}/themes/custom" \
+  --quiet >"${PROFILE_LOG}" 2>&1
+THEME_EC=$?
+set -e
+if [[ "${THEME_EC}" -ne 2 ]] || ! grep -q -- '--profile conflicts with --theme' "${PROFILE_LOG}"; then
+  printf 'validate --profile theme-conflict mismatch (exit %s)\n' "${THEME_EC}" >&2
+  cat "${PROFILE_LOG}" >&2
+  exit 1
+fi
+cat >"${PROFILE_ROOT}/validate-editions.json" <<'EOF'
+{"format":"boris-publication-profile","schema_version":1,"editions":{"ir":{"output":".boris"}}}
+EOF
+set +e
+"${BORIS}" validate --profile="${PROFILE_REL}/validate-editions.json" --quiet >"${PROFILE_LOG}" 2>&1
+VEDITION_EC=$?
+set -e
+if [[ "${VEDITION_EC}" -ne 2 ]] || ! grep -q 'declares editions.ir' "${PROFILE_LOG}"; then
+  printf 'validate --profile edition refusal mismatch (exit %s)\n' "${VEDITION_EC}" >&2
+  cat "${PROFILE_LOG}" >&2
+  exit 1
+fi
+cat >"${PROFILE_ROOT}/validate-multi.json" <<'EOF'
+{
+  "format": "boris-publication-profile",
+  "schema_version": 1,
+  "input": "content",
+  "targets": [
+    { "name": "alpha", "output": "dist/alpha" },
+    { "name": "beta", "output": "dist/beta" }
+  ]
+}
+EOF
+"${BORIS}" validate --profile="${PROFILE_REL}/validate-multi.json" --quiet
+test ! -e "${PROFILE_ROOT}/dist"
+# The all-opt-in fixture profile declares a github-pages location; the
+# validator cannot honor it without the full publication boundary, so it
+# refuses instead of silently validating a subset.
+set +e
+"${BORIS}" validate --profile="${PROFILE_REL}/boris.json" --quiet >"${PROFILE_LOG}" 2>&1
+VPUB_EC=$?
+set -e
+if [[ "${VPUB_EC}" -ne 2 ]] || ! grep -q 'declares a publication location' "${PROFILE_LOG}"; then
+  printf 'validate --profile publication refusal mismatch (exit %s)\n' "${VPUB_EC}" >&2
+  cat "${PROFILE_LOG}" >&2
+  exit 1
+fi
+cat >"${PROFILE_ROOT}/validate-single.json" <<'EOF'
+{
+  "format": "boris-publication-profile",
+  "schema_version": 1,
+  "input": "content",
+  "site": { "url": "https://example.test/" },
+  "targets": [{
+    "name": "public", "output": "dist/never", "public": true,
+    "theme": "themes/custom",
+    "layout_rules": [{ "selector": "id:home", "layout": "themes/custom/layouts/home.html" }],
+    "static": { "dir": "static" },
+    "sitemap": { "path": "sitemap.xml" }
+  }]
+}
+EOF
+( cd "${PROFILE_ROOT}" && "${BORIS}" validate --profile="validate-single.json" \
+  --report="${PROFILE_ROOT}/validate-report.json" )
+grep -q '"ok": true' "${PROFILE_ROOT}/validate-report.json"
+test ! -e "${PROFILE_ROOT}/dist"
+test ! -e "${PROFILE_ROOT}/sitemap.xml"
+grep -q 'nostr:naddr' "${PROFILE_ROOT}/validate-report.json" && exit 1 || true
+
 # Strict is a complete-site target, not a bare Oliver body switch. The
 # compatible theme builds; the default HTML5 theme fails as a content error
 # with one located diagnostic and no phantom fallback.
