@@ -1,8 +1,10 @@
 # Publication profile (schema v1, GitHub Pages declaration slice)
 
 **Status:** normative parser and static-plan contract. `boris plan --profile
-PATH` declares the full profile, but profile-driven build/watch/validate
-execution is not available in this slice. An HTML `build --profile PATH` can
+PATH` declares the full profile, and `boris validate --profile PATH`
+executes the profile's declared HTML targets as a zero-write prepublication
+validation pass; profile-driven build/watch execution remains unavailable in
+this slice. An HTML `build --profile PATH` can
 opt into Standard.site verification surfaces or Nostr head links, provided
 its CLI configuration matches the profile's selected input and HTML target
 declarations; it does not run the profile as a publication plan. The internal
@@ -167,6 +169,10 @@ agree with the profile's publication URL. It also refuses profile editions
 Standard.site or Nostr metadata surface. A mismatch is an exit-2 error naming
 the first unselected field/target before output is written, even with
 `--quiet`; matching CLI flags continue to emit Standard.site and Nostr
-surfaces. `watch` and `validate` still reject `--profile` at argument parsing.
+surfaces. `validate --profile PATH` executes the declared HTML targets as a
+zero-write prepublication validation pass and refuses — with exit 2 and a
+named field — any declaration it cannot execute (editions, per-target
+RSS/llms, multi-target sitemap/static, publication locations, sitemap
+without `site.url`); `watch` still rejects `--profile` at argument parsing.
 A profile is not a shortcut for `--target`, `--theme`, `--layout-rule`, or
 `--static-dir`.

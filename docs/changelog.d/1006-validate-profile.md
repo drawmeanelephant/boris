@@ -1,0 +1,3 @@
+### Added
+
+- `boris validate --profile PATH` runs the profile's declared HTML targets as a zero-write prepublication validation pass: declared layouts, layout rules, static directory, sitemap path, input, and site URL drive the run, competing HTML selectors are conflicts, and declarations the validator cannot execute (editions, per-target RSS/llms, multi-target sitemap/static, publication locations, a sitemap declaration without `site.url`) refuse with exit 2 and a named field. Links: [the publication-profile contract](/docs/contracts/publication-profile.md) (Refs #1006; profile-driven build/watch remain deferred).

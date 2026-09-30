@@ -2164,26 +2164,52 @@ fn validateBuildConflicts(st: *ParseState) ParseError!void {
     // conflicting mode/selector is named as typed (#764, #874); a
     // multi-cause argv keeps the generic form.
     if (st.saw_profile) {
-        const profile_scan = scanConflicts(&.{
-            .{ .token = if (st.command == .watch) "watch" else "--watch", .triggered = st.command == .watch or st.saw_watch },
-            .{ .token = "validate", .triggered = st.command == .validate },
-            .{ .token = "check", .triggered = st.command == .check },
-            .{ .token = "impact", .triggered = st.command == .impact },
-            .{ .token = "--rag", .triggered = st.saw_rag },
-            .{ .token = "--rag-dir", .triggered = st.saw_rag_dir },
-            .{ .token = "--out", .triggered = st.saw_out },
-            .{ .token = "--no-rag", .triggered = st.saw_no_rag },
-            .{ .token = "--context", .triggered = st.saw_context },
-            .{ .token = "--context-dir", .triggered = st.saw_context_dir },
-            .{ .token = "--llms", .triggered = st.saw_llms },
-            .{ .token = "--llms-path", .triggered = st.saw_llms_path },
-            .{ .token = "--rss", .triggered = st.saw_rss },
-            .{ .token = "--rss-path", .triggered = st.saw_rss_path },
-        });
-        // The typed offender is always `--profile`; the other side of the
-        // pair is the conflicting mode or selector token.
-        if (profile_scan.triggered == 1) return failConflict(st, profile_scan.offender, "--profile");
-        if (profile_scan.triggered > 1) return error.ConflictingFlags;
+        // `validate --profile` keeps its own leaf set (#1006): profile-driven
+        // validation takes no HTML selector (the profile is the sole source
+        // of target/layout/theme/sitemap/static configuration) and no pages
+        // location, so each of those names a pair as typed; projection
+        // selectors and output-bearing flags stay generic because they are
+        // validate refusals, not profile fields.
+        if (st.command == .validate) {
+            const validate_profile_scan = scanConflicts(&.{
+                .{ .token = "--html", .triggered = st.saw_html },
+                .{ .token = "--html-dir", .triggered = st.saw_html_dir },
+                .{ .token = "--theme", .triggered = st.saw_theme },
+                .{ .token = "--html-layout", .triggered = st.saw_html_layout and !st.saw_theme },
+                .{ .token = "--target", .triggered = st.hasExplicitTargets() },
+                .{ .token = "--target-layout", .triggered = st.hasTargetLayouts() },
+                .{ .token = "--target-profile", .triggered = st.hasTargetProfiles() },
+                .{ .token = "--layout-rule", .triggered = st.hasLayoutRules() },
+                .{ .token = "--sitemap", .triggered = st.saw_sitemap },
+                .{ .token = "--sitemap-path", .triggered = st.saw_sitemap_path },
+                .{ .token = "--static-dir", .triggered = st.saw_static_dir },
+                .{ .token = "--site-url", .triggered = st.saw_site_url },
+                .{ .token = "--pages-base-url", .triggered = st.sawPagesLocation() },
+                .{ .token = "--watch", .triggered = st.saw_watch },
+            });
+            if (validate_profile_scan.triggered == 1) return failConflict(st, "--profile", validate_profile_scan.offender);
+            if (validate_profile_scan.triggered > 1) return error.ConflictingFlags;
+        } else {
+            const profile_scan = scanConflicts(&.{
+                .{ .token = if (st.command == .watch) "watch" else "--watch", .triggered = st.command == .watch or st.saw_watch },
+                .{ .token = "check", .triggered = st.command == .check },
+                .{ .token = "impact", .triggered = st.command == .impact },
+                .{ .token = "--rag", .triggered = st.saw_rag },
+                .{ .token = "--rag-dir", .triggered = st.saw_rag_dir },
+                .{ .token = "--out", .triggered = st.saw_out },
+                .{ .token = "--no-rag", .triggered = st.saw_no_rag },
+                .{ .token = "--context", .triggered = st.saw_context },
+                .{ .token = "--context-dir", .triggered = st.saw_context_dir },
+                .{ .token = "--llms", .triggered = st.saw_llms },
+                .{ .token = "--llms-path", .triggered = st.saw_llms_path },
+                .{ .token = "--rss", .triggered = st.saw_rss },
+                .{ .token = "--rss-path", .triggered = st.saw_rss_path },
+            });
+            // The typed offender is always `--profile`; the other side of the
+            // pair is the conflicting mode or selector token.
+            if (profile_scan.triggered == 1) return failConflict(st, profile_scan.offender, "--profile");
+            if (profile_scan.triggered > 1) return error.ConflictingFlags;
+        }
     }
     if (st.saw_fail_on_unreferenced and st.command != .check) return error.ConflictingFlags;
 
@@ -2543,6 +2569,8 @@ fn buildOptionsForMode(
             o.serve_port = st.serve_port;
             o.html_profile = default_profile;
             o.profile_path = st.profile_path;
+            o.profile_input_override = if (st.saw_input) st.input_dir else null;
+            o.profile_input_format_override = if (st.saw_textile or st.saw_cooklang) st.inputFormat() else null;
         },
     }
     return o;
@@ -2645,7 +2673,7 @@ pub const usage_text =
     \\  --out PATH          Smoke result artifact path (default: stdout)
     \\  standard-site options (all subcommands):
     \\  --session-root PATH Override the persistent session store root
-    \\  --profile PATH      HTML metadata opt-in (Standard.site / Nostr); CLI flags must match declared targets
+    \\  --profile PATH      HTML metadata opt-in for build (Standard.site / Nostr; flags must match declared targets); with validate, profile-driven validation
     \\  --html              Explicit HTML site mode → --html-dir (default dist)
     \\  --html-dir <DIR>    HTML site mode with output directory DIR
     \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
@@ -2710,7 +2738,7 @@ pub const usage_text =
     \\  --out PATH          Graph render output path (single file; default stdout)
     \\  --report PATH        Write the report to PATH (check/impact analysis; build/validate HTML diagnostics)
     \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
-    \\  --profile PATH       Selected publication profile for `plan`
+    \\  --profile PATH      Selected publication profile for `plan` (and profile-driven `validate`)
     \\  --id PAGE            Recipe page entity id (`recipe-scale`; required)
     \\  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; exclusive with --servings)
     \\  --servings N         Target serving count (`recipe-scale`; exclusive with --factor)
@@ -2771,7 +2799,6 @@ pub const usage_text =
     \\  --html-layout, --theme, --target, --target-layout, --target-profile,
     \\  --layout-rule, --sitemap / --sitemap-path, --static-dir) or --profile
     \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
-    \\  validate with --profile, non-HTML exports, --incremental, --refresh-evidence, --jobs, --format, or --out
     \\  validate --watch with --html-dir, --target, --serve/--port, --incremental, --jobs, or --format
     \\  Invalid target names, duplicate names, output collisions, workspace escape,
     \\  content/layout overlap, unknown --target-layout / --layout-rule target,
@@ -3494,7 +3521,19 @@ test "parse: plan requires a profile and rejects execution or projection selecto
     try expectEqual(Mode.html, html_profile.mode);
     try expectEqualStrings("site.json", html_profile.profile_path.?);
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--watch", "--profile", "site.json" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--profile", "site.json" }));
+    // `validate --profile` is profile-driven validation (#1006): the parse
+    // carries the profile and its documented input overrides, while HTML
+    // selectors are conflicts (named pair below).
+    var validate_profile_parse = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--profile", "site.json" });
+    defer validate_profile_parse.deinit(std.testing.allocator);
+    try expectEqual(Command.validate, validate_profile_parse.command);
+    try expectEqualStrings("site.json", validate_profile_parse.profile_path.?);
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--profile", "site.json", "--theme", "themes/other" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--profile", "site.json", "--sitemap-path", "sitemap.xml" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--profile", "site.json", "--pages-base-url", "https://example.test/", "--pages-origin", "https://example.test", "--pages-base-path", "" }));
+    var validate_profile_override = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--profile", "site.json", "--input", "docs", "--quiet" });
+    defer validate_profile_override.deinit(std.testing.allocator);
+    try expectEqualStrings("docs", validate_profile_override.profile_input_override.?);
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--profile", "b" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--out", "out" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--target", "public=dist" }));
@@ -5053,12 +5092,21 @@ test "parse detail: single-cause mode conflicts name the pair (#874)" {
     try expectEqualStrings("--timings", plan_timings.conflict_b.?);
 
     // Analyzer --profile: the mode is the other side of the pair.
-    var validate_profile = ParseErrorDetail{};
+    var check_profile2 = ParseErrorDetail{};
     try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
-        "boris", "validate", "--profile", "p.json", "--quiet",
-    }, &validate_profile));
-    try expectEqualStrings("validate", validate_profile.conflict_a.?);
-    try expectEqualStrings("--profile", validate_profile.conflict_b.?);
+        "boris", "check", "--profile", "p.json", "--quiet",
+    }, &check_profile2));
+    try expectEqualStrings("check", check_profile2.conflict_a.?);
+    try expectEqualStrings("--profile", check_profile2.conflict_b.?);
+
+    // validate --profile keeps profile-driven validation (#1006), but an HTML
+    // selector that would override a declared value is a named pair.
+    var validate_theme = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris", "validate", "--profile", "p.json", "--theme", "themes/other",
+    }, &validate_theme));
+    try expectEqualStrings("--profile", validate_theme.conflict_a.?);
+    try expectEqualStrings("--theme", validate_theme.conflict_b.?);
 
     var check_profile = ParseErrorDetail{};
     try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{

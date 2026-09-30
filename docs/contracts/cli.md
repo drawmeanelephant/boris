@@ -90,14 +90,29 @@ graph and add Documentation Intelligence analysis rather than layout/theme/HTML
 preflight. See the normative [validation contract](validation.md).
 
 `validate` does not create HTML, IR, RAG, context, RSS, cache, search, or
-publication-evidence artifacts. It accepts applicable existing HTML options,
-including target/layout/theme and sitemap configuration, and rejects `--profile`,
-export selectors, `--incremental`, `--refresh-evidence`, `--jobs`, `--format`, and `--out`; `--report PATH` writes
-the shared `html-build-report-0.2.0` JSON (additive; see
+publication-evidence artifacts. Without `--profile` it accepts applicable
+existing HTML options, including target/layout/theme and sitemap
+configuration, and rejects export selectors, `--incremental`,
+`--refresh-evidence`, `--jobs`, `--format`, and `--out`; `--report PATH`
+writes the shared `html-build-report-0.2.0` JSON (additive; see
 [Machine-readable reports](#machine-readable-reports)). With `--watch` it
-becomes the zero-write validation daemon described above. `check` and `impact`
-likewise create no product artifacts; only their explicit `--report` path may
-be written.
+becomes the zero-write validation daemon described above. `check` and
+`impact` likewise create no product artifacts; only their explicit
+`--report` path may be written.
+
+`validate --profile PATH` is profile-driven validation: the selected
+profile's declared HTML targets, layouts, layout rules, static directory,
+sitemap path, input, and site URL drive the same zero-write prepublication
+pass, and competing HTML CLI selectors (`--theme`, `--target`,
+`--layout-rule`, `--sitemap-path`, `--static-dir`, `--site-url`, pages
+location, `--watch`) are conflicts named as typed. `--input` and
+`--textile`/`--cooklang` remain the documented profile-mode overrides.
+Declarations the validator cannot execute refuse with exit 2 and a named
+field: profile editions (`editions.ir`/`editions.rag`/`editions.context`),
+per-target `rss` or `llms`, sitemap/static on a multi-target profile, a
+publication location, and a sitemap declaration without `site.url`. The
+run is zero-write: the only file `validate --profile` may produce is an
+explicit `--report`.
 
 HTML `build --profile PATH` remains an opt-in for Standard.site verification
 and Nostr head links, **not** profile-driven publication. Before compilation it
