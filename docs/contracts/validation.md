@@ -64,8 +64,14 @@ It deliberately rejects:
 - `--html-dir`, `--target`, `--serve`, and `--port` **with `--watch`**: the
   daemon always preflights the single synthetic `default` target and writes
   no output, so output/selection flags would silently select nothing;
-- publication-profile selection, which belongs to `plan` and any future
-  profile consumer.
+- `--profile` with `--watch` or competing HTML target/layout selectors.
+
+`validate --profile PATH` uses the same bounded profile-to-HTML mapping as
+`build --profile`: workspace-relative input/layout/theme/static paths,
+declared targets, sitemap, and offline publication metadata. Unsupported
+declarations fail before the zero-write preflight; see
+[the profile execution boundary](publication-profile.md#html-execution).
+An explicit report remains the only allowed filesystem write.
 
 RSS, IR, RAG, Context Bundle, and `llms.txt` are distinct projections, not HTML
 target configuration. This first command slice does not silently select or

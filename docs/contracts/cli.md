@@ -109,13 +109,23 @@ location, `--watch`) are conflicts named as typed. `--input` and
 `--textile`/`--cooklang` remain the documented profile-mode overrides.
 Declarations the validator cannot execute refuse with exit 2 and a named
 field: profile editions (`editions.ir`/`editions.rag`/`editions.context`),
-per-target `rss` or `llms`, sitemap/static on a multi-target profile, a
-publication location, and a sitemap declaration without `site.url`. The
+per-target `rss` or `llms`, sitemap/static or publication metadata on a
+multi-target profile, and a sitemap declaration without `site.url`. The
 run is zero-write: the only file `validate --profile` may produce is an
 explicit `--report`.
 
-HTML `build --profile PATH` remains an opt-in for Standard.site verification
-and Nostr head links, **not** profile-driven publication. Before compilation it
+With no HTML selectors, `build --profile PATH` and
+`watch --profile PATH [--serve]` execute that same declared HTML configuration.
+Paths resolve against the profile workspace, not invocation CWD. Watch retains
+the existing incremental rebuild, last-good preservation, and shutdown
+behavior. The profile is a startup snapshot; restart after changing it.
+Standard.site verification under watch is refused because its projection
+cannot yet be refreshed each cycle. Unsupported entries fail before any output
+is written, never by publishing a subset. See
+[the profile execution boundary](publication-profile.md#html-execution).
+
+With explicit HTML selectors, `build --profile PATH` retains the Standard.site
+verification and Nostr head-link metadata opt-in. Before compilation it
 checks the profile's selected input, targets, and target settings against the
 effective CLI flags and rejects any unselected declaration with exit 2 and a
 field-specific error, instead of silently building a synthetic `default`
@@ -221,10 +231,12 @@ never stdout.
 
 ## Workspace containment
 
-Every generated **output tree** — HTML (`--html-dir` / `--target`), IR
+Without profile-driven HTML execution, every generated **output tree** — HTML (`--html-dir` / `--target`), IR
 (`--out`), RAG (`--rag-dir`), context (`--context-dir`), and `llms.txt`
 (`--llms-path`) — is confined to the **workspace**, defined as the process
-current working directory. A misconfigured build can never clobber an
+current working directory. Profile-driven HTML execution instead confines
+targets to the selected profile's parent directory and resolves its paths
+there, even when invoked from a different CWD. A misconfigured build can never clobber an
 arbitrary tree outside the project. Output paths are resolved lexically
 against the cwd and checked with a **path-component boundary**: the resolved
 absolute path must equal the workspace or be `workspace/` + more (so `dist`

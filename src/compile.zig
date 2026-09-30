@@ -249,6 +249,9 @@ pub const CompileStats = struct {
 };
 
 pub const CompileOptions = struct {
+    /// Profile-relative layout/theme reads and output containment use this
+    /// workspace without changing the process CWD.
+    workspace_root: ?[]const u8 = null,
     target_name: []const u8 = "default",
     content_root: []const u8 = "content",
     dist_dir: []const u8 = "dist",
@@ -1396,6 +1399,7 @@ pub fn compileHtmlSiteMulti(
     try validateSitemapConfig(gpa, base_options);
 
     const plans = try target_mod.validateTargets(io, gpa, targets, .{
+        .workspace_root = base_options.workspace_root,
         .content_root = base_options.content_root,
         .layout_path = base_options.layout_path,
     });
@@ -1555,6 +1559,8 @@ fn loadLayoutsForPlan(
     any_failed: *bool,
     any_io_failed: *bool,
 ) !bool {
+    const cwd = try openLayoutWorkspace(io, base_options.workspace_root);
+    defer if (base_options.workspace_root != null) cwd.close(io);
     const declared = layout_select.collectDeclaredLayouts(gpa, plan.layout_path, plan.layout_rules) catch {
         any_failed.* = true;
         any_io_failed.* = true;
@@ -1565,7 +1571,7 @@ fn loadLayoutsForPlan(
     for (declared) |lp| {
         const gop = try layout_cache.getOrPut(gpa, lp);
         if (gop.found_existing) continue;
-        const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena) catch |err| {
+        const layout = loadLayoutOnce(io, cwd, lp, layout_arena) catch |err| {
             if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s} [{s}]\n", .{ plan.name, lp, @errorName(err), diag.Code.remediationForLayout(layoutCodeFor(err)) });
             const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
             defer gpa.free(msg);
@@ -1581,7 +1587,7 @@ fn loadLayoutsForPlan(
             _ = layout_cache.remove(lp);
             return true;
         };
-        const bytes = readFileAlloc(io, Io.Dir.cwd(), lp, gpa) catch |err| {
+        const bytes = readFileAlloc(io, cwd, lp, gpa) catch |err| {
             if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
             const msg = try std.fmt.allocPrint(gpa, "failed to read layout {s}: {s}", .{ lp, @errorName(err) });
             defer gpa.free(msg);
@@ -1637,6 +1643,10 @@ pub fn validateHtmlSiteMulti(
     validation_options.incremental = false;
     validation_options.jobs = 1;
     _ = compileHtmlSiteMulti(io, gpa, targets, validation_options) catch |err| return err;
+}
+
+fn openLayoutWorkspace(io: Io, root: ?[]const u8) !Io.Dir {
+    return if (root) |path| try Io.Dir.cwd().openDir(io, path, .{}) else Io.Dir.cwd();
 }
 
 const ParallelContext = struct {
@@ -2010,6 +2020,7 @@ fn validatePrepublicationTarget(
     site: *const FrozenSite,
     theme_bundle: *const theme_mod.ThemeBundle,
     content_assets: *const content_asset.SiteAssetInventory,
+    static_entries: []const static_files.Entry,
     include_cache: ?*include_mod.IncludeCache,
 ) !CompileStats {
     if (options.timings) |t| t.start(.heading_harvest);
@@ -2045,6 +2056,7 @@ fn validatePrepublicationTarget(
     defer gpa.free(audit_content_outs);
     try audit_assets.appendSlice(gpa, audit_content_outs);
     for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
+    for (static_entries) |entry| try audit_assets.append(gpa, entry.rel_path);
     if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
 
     var intended: std.StringHashMapUnmanaged(void) = .{};
@@ -3366,6 +3378,7 @@ fn auditOutputLinks(
     live_page_paths: []const []const u8,
     theme_bundle: *const theme_mod.ThemeBundle,
     content_assets: *const content_asset.SiteAssetInventory,
+    static_entries: []const static_files.Entry,
 ) !void {
     var audit_assets: std.ArrayList([]const u8) = .empty;
     defer audit_assets.deinit(gpa);
@@ -3373,6 +3386,7 @@ fn auditOutputLinks(
     defer gpa.free(audit_content_outs);
     try audit_assets.appendSlice(gpa, audit_content_outs);
     for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
+    for (static_entries) |entry| try audit_assets.append(gpa, entry.rel_path);
     if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
 
     var findings: std.ArrayList(link_audit.Finding) = .empty;
@@ -3711,7 +3725,9 @@ fn compilePagesInner(
 
     var layout_arena_local = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena_local.deinit();
-    var layouts = try preparePageLayouts(io, gpa, cwd, db, layout, options, layout_bytes, layout_arena_local.allocator());
+    const layout_cwd = try openLayoutWorkspace(io, options.workspace_root);
+    defer if (options.workspace_root != null) layout_cwd.close(io);
+    var layouts = try preparePageLayouts(io, gpa, layout_cwd, db, layout, options, layout_bytes, layout_arena_local.allocator());
     defer layouts.deinit(gpa, layout_bytes);
 
     const layouts_by_path = &layouts.layouts_by_path;
@@ -3721,7 +3737,7 @@ fn compilePagesInner(
 
     try validateVerificationSurfaces(gpa, db, layouts.page_layouts, layouts.page_sel_paths, options);
 
-    var theme_bundle = try prepareThemeBundle(io, gpa, cwd, db, options, layouts_by_path);
+    var theme_bundle = try prepareThemeBundle(io, gpa, layout_cwd, db, options, layouts_by_path);
     defer theme_bundle.deinit();
     var content_assets = try discoverContentAssets(io, gpa, content_dir, db, options, &theme_bundle);
     defer content_assets.deinit();
@@ -3779,6 +3795,7 @@ fn compilePagesInner(
             site,
             &theme_bundle,
             &content_assets,
+            static_entries,
             &include_cache,
         );
     }
@@ -3881,7 +3898,7 @@ fn compilePagesInner(
 
     var site_overlay = try writeSearchSitemapAndStandardSite(io, gpa, db, options, stage_dir, dist_dir, prior_sitemap.marker_present);
     defer site_overlay.deinit(gpa);
-    try auditOutputLinks(io, gpa, options, stage_dir, dist_dir, site_overlay.live_page_paths, &theme_bundle, &content_assets);
+    try auditOutputLinks(io, gpa, options, stage_dir, dist_dir, site_overlay.live_page_paths, &theme_bundle, &content_assets, static_entries);
     try writeInventoryOverlay(io, gpa, db, options, stage_dir, dist_dir, &theme_bundle, &content_assets, static_entries);
 
     // Prior static-file ownership is read from the committed inventory before

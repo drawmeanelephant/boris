@@ -272,7 +272,7 @@ fn handleProofVerify(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*
 }
 fn handleValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
     _ = environ;
-    if (opts.profile_path != null) return runValidateProfile(io, gpa, opts, recorder);
+    if (opts.profile_path != null) return runHtmlProfile(io, gpa, opts, recorder);
     return runValidate(io, gpa, opts, recorder);
 }
 fn handleValidateWatch(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder, environ: ?*std.process.Environ.Map) ExitCode {
@@ -1323,8 +1323,8 @@ fn sameProfilePath(gpa: std.mem.Allocator, cwd: []const u8, workspace: []const u
     return std.mem.eql(u8, planned, actual);
 }
 
-/// `--profile` enables two HTML metadata surfaces, not profile execution.
-/// Refuse a build whose profile describes HTML or edition work that the
+/// Explicit HTML selectors keep `--profile` as a metadata opt-in rather than
+/// profile execution. Refuse a build whose profile describes work that the
 /// compiler would otherwise silently replace with CLI defaults. Matching
 /// CLI declarations keep the existing Standard.site and Nostr opt-ins alive.
 fn htmlProfileMismatch(
@@ -1425,7 +1425,7 @@ fn loadHtmlVerification(
     if (load_code != .success) return load_code;
     defer request.deinit(gpa);
 
-    const mismatch = htmlProfileMismatch(gpa, io, &request, opts) catch |err| {
+    const mismatch = if (opts.profile_driven_html) null else htmlProfileMismatch(gpa, io, &request, opts) catch |err| {
         std.debug.print("error: unable to compare --profile with HTML options: {s}\n", .{@errorName(err)});
         return .io_error;
     };
@@ -2416,23 +2416,10 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
     return .success;
 }
 
-/// Authoritative no-publication HTML source/target validation.
-///
-/// This enters the same in-process compiler coordinator as a normal HTML build
-/// and returns at its explicit prepublication boundary. It never invokes a
-/// build in a temporary directory and never emits an authority/report file.
-/// Zero-write profile-driven validation: run the same prepublication
-/// validation pass as `validate`, with every executable HTML setting taken
-/// from the selected profile instead of CLI selectors. This is the validator
-/// slice of profile-driven execution (#1006): the profile drives the run, so
-/// competing HTML selectors are parse-time conflicts, and any declared
-/// entry the validator cannot execute (editions, target RSS/llms,
-/// multi-target sitemap/static, unverifiable publication metadata) is a
-/// fail-loud exit-2 refusal naming the field — never a silent default.
-/// No output is written: validation_only stops before the publication
-/// boundary. `--report PATH` keeps its plain-`validate` meaning: the one
-/// explicit file this command may write.
-fn runValidateProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
+/// Map normalized profile intent onto the existing HTML coordinator. Reject
+/// unsupported entries before any target is written; validation uses the same
+/// mapping and stops at the canonical zero-write prepublication boundary.
+fn runHtmlProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     var request: publication_profile.PublicationRequest = undefined;
     const load_code = main_profile_loader.loadProfileRequest(gpa, io, opts.profile_path.?, .{
         .input = opts.profile_input_override,
@@ -2451,20 +2438,20 @@ fn runValidateProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?
     // only the HTML targets while claiming profile coverage would be the
     // same silent-subset lie this command exists to prevent.
     if (plan.ir != null) {
-        errPrint("error: --profile declares editions.ir; validate --profile executes only the declared HTML targets\n", .{});
+        errPrint("error: --profile declares editions.ir; this HTML coordinator executes only the declared HTML targets\n", .{});
         return .usage;
     }
     if (plan.rag != null) {
-        errPrint("error: --profile declares editions.rag; validate --profile executes only the declared HTML targets\n", .{});
+        errPrint("error: --profile declares editions.rag; this HTML coordinator executes only the declared HTML targets\n", .{});
         return .usage;
     }
     if (plan.context != null) {
-        errPrint("error: --profile declares editions.context; validate --profile executes only the declared HTML targets\n", .{});
+        errPrint("error: --profile declares editions.context; this HTML coordinator executes only the declared HTML targets\n", .{});
         return .usage;
     }
 
     if (plan.targets.len == 0) {
-        errPrint("error: --profile declares no HTML targets; validate --profile executes only the declared HTML targets\n", .{});
+        errPrint("error: --profile declares no HTML targets\n", .{});
         return .usage;
     }
     if (plan.targets.len > 1 and
@@ -2473,24 +2460,34 @@ fn runValidateProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?
             break :blk false;
         }))
     {
-        errPrint("error: --profile declares sitemap or static on a multi-target site; validate --profile executes one target's prepublication pass\n", .{});
+        errPrint("error: --profile declares sitemap or static on a multi-target site; these settings currently require a single HTML target\n", .{});
         return .usage;
     }
     for (plan.targets) |t| {
         if (t.rss != null) {
-            errPrint("error: --profile target '{s}' declares rss; validate --profile does not validate feeds\n", .{t.name});
+            errPrint("error: --profile target '{s}' declares rss; this HTML coordinator does not execute feeds\n", .{t.name});
             return .usage;
         }
         if (t.llms != null) {
-            errPrint("error: --profile target '{s}' declares llms; validate --profile does not validate llms exports\n", .{t.name});
+            errPrint("error: --profile target '{s}' declares llms; this HTML coordinator does not execute llms exports\n", .{t.name});
             return .usage;
         }
     }
-    // A declared Pages location changes what the site URL must be; honoring
-    // it without the full location contract would be a silent subset.
-    if (plan.publication != null) {
-        errPrint("error: --profile declares a publication location; validate --profile executes only the declared HTML targets\n", .{});
+    if (plan.publication != null and plan.targets.len > 1) {
+        errPrint("error: --profile declares publication on a multi-target site; publication metadata currently requires a single HTML target\n", .{});
         return .usage;
+    }
+    if (plan.publication) |publication| {
+        if (publication == .standard_site and opts.watch) {
+            errPrint("error: --profile declares standard-site publication; watch cannot refresh its verification projection (use build --profile)\n", .{});
+            return .usage;
+        }
+        if (publication == .standard_site and
+            (opts.profile_input_override != null or opts.profile_input_format_override != null))
+        {
+            errPrint("error: --profile standard-site verification does not support input or input_format overrides\n", .{});
+            return .usage;
+        }
     }
     // A sitemap declaration requires the site URL it would be built from;
     // without it the declared path cannot be validated as written.
@@ -2507,108 +2504,24 @@ fn runValidateProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?
         }
     }
 
-    // Profile targets are workspace-relative; the validator resolves paths
-    // against the invocation CWD, so join them to the owned workspace root
-    // (same boundary as the Standard.site projection compile). Layout paths
-    // reject absolute or `..` segments (the layout-path grammar is
-    // workspace-relative only), so a profile that declares any theme/layout
-    // requires the invocation to run from the profile workspace root — the
-    // same convention the build contract documents for profiles. A
-    // layout-less profile composes the embedded default theme and runs from
-    // any CWD. CWDs resolve with symlinks (macOS /tmp → /private/tmp), so
-    // the comparison compares resolved paths on both sides.
+    // Resolve filesystem roots against the selected workspace. Layouts retain
+    // their strict relative grammar and are opened through the workspace dir.
     const workspace = request.workspace.root;
-    var workspace_declares_layout = false;
-    for (plan.targets) |t| {
-        if (t.theme != null or t.layout != null or t.layout_rules.len > 0) workspace_declares_layout = true;
-    }
-    const cwd = std.process.currentPathAlloc(io, gpa) catch return .io_error;
-    defer gpa.free(cwd);
-    const resolved_workspace = std.fs.path.resolve(gpa, &.{workspace}) catch return .io_error;
-    defer gpa.free(resolved_workspace);
-    const resolved_cwd = std.fs.path.resolve(gpa, &.{cwd}) catch return .io_error;
-    defer gpa.free(resolved_cwd);
-    if (workspace_declares_layout and !std.mem.eql(u8, resolved_workspace, resolved_cwd)) {
-        errPrint("error: --profile declares a theme or layout; run validate --profile from the profile workspace root {s} (layout paths are workspace-relative only)\n", .{resolved_workspace});
-        return .usage;
-    }
+    var config_arena = std.heap.ArenaAllocator.init(gpa);
+    defer config_arena.deinit();
+    const config = config_arena.allocator();
     var specs: std.ArrayList(target.TargetSpec) = .empty;
-    // Composed `theme/layouts/main.html` strings are the only non-borrowed
-    // layout paths in the specs; declared layout fields and the embedded
-    // default are request/static slices freed with the request.
-    var owned_layouts: std.ArrayList([]const u8) = .empty;
-    defer {
-        for (owned_layouts.items) |lp| gpa.free(lp);
-        owned_layouts.deinit(gpa);
-    }
-    defer {
-        for (specs.items) |t| {
-            gpa.free(t.name);
-            gpa.free(t.output_dir);
-            // t.layout_path is borrowed: it points into the request (declared
-            // theme/layout) or a static literal (embedded default), both of
-            // which outlive this function without a free here.
-            for (t.layout_rules) |rule| {
-                gpa.free(rule.value);
-                gpa.free(rule.layout_path);
-            }
-            if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
-        }
-        specs.deinit(gpa);
-    }
     for (plan.targets) |declared| {
-        const name = gpa.dupe(u8, declared.name) catch return .io_error;
-        const output = std.fs.path.resolve(gpa, &.{ workspace, declared.output }) catch {
-            gpa.free(name);
-            return .io_error;
-        };
+        const output = std.fs.path.resolve(config, &.{ workspace, declared.output }) catch return .io_error;
         const profile_layout: []const u8 = if (declared.theme) |theme_root|
-            std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{theme_root}) catch {
-                gpa.free(name);
-                gpa.free(output);
-                return .io_error;
-            }
+            std.fmt.allocPrint(config, "{s}/layouts/main.html", .{theme_root}) catch return .io_error
         else
             (declared.layout orelse "themes/boris/layouts/main.html");
-        // Declared layouts stay verbatim: the layout-path grammar is
-        // workspace-relative only (no absolute, no `..`), and the
-        // CWD == workspace gate above pins the invocation root, so the
-        // declared path is exactly what the equivalent CLI flag would
-        // carry. Layout-less targets compose the embedded default theme,
-        // whose CWD-relative layout needs no allocation.
-        const layout = if (declared.theme != null)
-            profile_layout
-        else if (declared.layout != null)
-            declared.layout.?
-        else
-            profile_layout; // embedded default theme: CWD-relative by contract
-        if (declared.theme != null) {
-            owned_layouts.append(gpa, layout) catch return .io_error;
-        }
-        var rules: std.ArrayList(layout_select.LayoutRule) = .empty;
-        for (declared.layout_rules) |rule| {
-            const rule_value = gpa.dupe(u8, rule.value) catch return .io_error;
-            // Same verbatim rule as the fallback layout above: workspace-
-            // relative grammar plus the workspace-root invocation gate make
-            // the declared rule path exactly what `--layout-rule` carries.
-            const rule_layout = gpa.dupe(u8, rule.layout_path) catch {
-                gpa.free(rule_value);
-                freeLayoutRules(gpa, &rules);
-                return .io_error;
-            };
-            rules.append(gpa, .{ .kind = rule.kind, .value = rule_value, .layout_path = rule_layout }) catch {
-                gpa.free(rule_value);
-                gpa.free(rule_layout);
-                freeLayoutRules(gpa, &rules);
-                return .io_error;
-            };
-        }
-        const owned_rules = rules.toOwnedSlice(gpa) catch return .io_error;
-        specs.append(gpa, .{
-            .name = name,
+        specs.append(config, .{
+            .name = declared.name,
             .output_dir = output,
-            .layout_path = layout,
-            .layout_rules = owned_rules,
+            .layout_path = profile_layout,
+            .layout_rules = declared.layout_rules,
         }) catch return .io_error;
     }
 
@@ -2617,8 +2530,6 @@ fn runValidateProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?
     var sitemap_path: ?[]const u8 = null;
     var static_dir: ?[]const u8 = null;
     var site_url: ?[]const u8 = null;
-    var owned_static: ?[]const u8 = null;
-    defer if (owned_static) |p| gpa.free(p);
     if (plan.targets.len == 1) {
         const declared = plan.targets[0];
         if (declared.sitemap) |s| {
@@ -2629,67 +2540,55 @@ fn runValidateProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?
             sitemap_path = s.path;
         }
         if (declared.static) |s| {
-            owned_static = std.fs.path.resolve(gpa, &.{ workspace, s.dir }) catch return .io_error;
-            static_dir = owned_static;
+            static_dir = std.fs.path.resolve(config, &.{ workspace, s.dir }) catch return .io_error;
         }
     }
-    if (plan.site) |site| {
-        if (site.url) |url| site_url = url;
-    }
+    if (sitemap_path != null) if (plan.site) |site| {
+        site_url = site.url;
+    };
 
-    const content_root = std.fs.path.resolve(gpa, &.{ workspace, plan.input }) catch |err| {
+    const content_root = std.fs.path.resolve(config, &.{ workspace, plan.input }) catch |err| {
         errPrint("error: unable to resolve content root: {s}\n", .{@errorName(err)});
         return .io_error;
     };
-    defer gpa.free(content_root);
 
-    var report_collector: ?diag.Collector = null;
-    if (opts.report_path != null) report_collector = diag.Collector.init(gpa, io);
-    defer if (report_collector) |*c| c.deinit();
-    const collector_ptr: ?*diag.Collector = if (report_collector) |*c| c else null;
-
-    compile.validateHtmlSiteMulti(io, gpa, specs.items, .{
-        .content_root = content_root,
-        .quiet = opts.quiet,
-        .input_format = switch (plan.input_format) {
-            .markdown => .markdown,
-            .textile => .textile,
-            .cook => .cook,
-        },
-        .sitemap_path = sitemap_path,
-        .static_dir = static_dir,
-        .site_url = site_url,
-        .allow_markdown_literals = opts.allow_markdown_links,
-        .timings = recorder,
-        .diagnostics = collector_ptr,
-    }) catch |err| {
-        const code = mapHtmlError(err, specs.items, "themes/boris/layouts/main.html", content_root);
-        appendEscapedDiagnostic(collector_ptr, err, code);
-        writeHtmlReport(io, gpa, opts, collector_ptr, false, profile_report_out_dir(specs.items), false);
-        return code;
+    var effective = opts;
+    effective.profile_driven_html = true;
+    effective.profile_workspace_root = workspace;
+    effective.input_dir = content_root;
+    effective.input_format = switch (plan.input_format) {
+        .markdown => .markdown,
+        .textile => .textile,
+        .cook => .cook,
     };
-
-    if (!opts.quiet) {
-        std.debug.print("ok: profile validation passed for {d} target(s)\n", .{plan.targets.len});
+    effective.targets = .{ .items = specs.items, .capacity = specs.capacity };
+    effective.html_dir = profile_report_out_dir(specs.items);
+    effective.html_layout = target.effectiveLayout(specs.items[0], default_layout);
+    effective.sitemap_path = sitemap_path;
+    effective.static_dir = static_dir;
+    effective.site_url = site_url;
+    if (plan.publication) |publication| {
+        effective.publication_location = switch (publication) {
+            .github_pages => |location| location,
+            .standard_site => |site| .{
+                .base_url = site.location.base_url,
+                .origin = site.location.origin,
+                .base_path = site.location.base_path,
+                .site_kind = .custom_domain,
+            },
+        };
     }
-    writeHtmlReport(io, gpa, opts, collector_ptr, true, profile_report_out_dir(specs.items), false);
-    return .success;
+    if (opts.command == .validate) {
+        effective.incremental = false;
+        effective.jobs = 1;
+    }
+    return runHtml(io, gpa, effective, recorder);
 }
 
 /// Report metadata names the would-be output root: the profile's first
 /// declared target output (the slice is sorted by name) when present.
 fn profile_report_out_dir(targets: []const target.TargetSpec) []const u8 {
     return if (targets.len > 0) targets[0].output_dir else default_html;
-}
-
-/// Free the rules accumulated for one target spec build (error paths before
-/// `toOwnedSlice` hands ownership to the spec slice).
-fn freeLayoutRules(gpa: std.mem.Allocator, rules: *std.ArrayList(layout_select.LayoutRule)) void {
-    for (rules.items) |rule| {
-        gpa.free(rule.value);
-        gpa.free(rule.layout_path);
-    }
-    rules.deinit(gpa);
 }
 
 pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
@@ -3140,7 +3039,10 @@ fn addWatchRoots(io: Io, gpa: std.mem.Allocator, opts: Options, watcher: *watch.
     var layout_roots: std.StringHashMapUnmanaged(void) = .{};
     defer layout_roots.deinit(gpa);
     const add_layout_root = struct {
-        fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, lp: []const u8, input_dir: []const u8) !void {
+        fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, layout: []const u8, input_dir: []const u8, workspace: ?[]const u8) !void {
+            const resolved = if (workspace) |root| try std.fs.path.resolve(gpa_, &.{ root, layout }) else null;
+            defer if (resolved) |path| gpa_.free(path);
+            const lp = resolved orelse layout;
             // A managed theme root owns `layouts/`, optional `footer.html` and
             // `assets/`. Watch the whole root, not just the layout's parent:
             // footer and referenced asset bytes are page-fingerprint inputs
@@ -3175,13 +3077,13 @@ fn addWatchRoots(io: Io, gpa: std.mem.Allocator, opts: Options, watcher: *watch.
             }
         }
     }.go;
-    try add_layout_root(watcher, &layout_roots, gpa, layout_path, opts.input_dir);
+    try add_layout_root(watcher, &layout_roots, gpa, layout_path, opts.input_dir, opts.profile_workspace_root);
     for (opts.targets.items) |t| {
         if (t.layout_path) |lp| {
-            try add_layout_root(watcher, &layout_roots, gpa, lp, opts.input_dir);
+            try add_layout_root(watcher, &layout_roots, gpa, lp, opts.input_dir, opts.profile_workspace_root);
         }
         for (t.layout_rules) |rule| {
-            try add_layout_root(watcher, &layout_roots, gpa, rule.layout_path, opts.input_dir);
+            try add_layout_root(watcher, &layout_roots, gpa, rule.layout_path, opts.input_dir, opts.profile_workspace_root);
         }
     }
 }
@@ -3211,9 +3113,23 @@ fn runValidateWatch(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 }
 
 pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
+    if (opts.profile_driven_html and opts.profile_workspace_root == null)
+        return runHtmlProfile(io, gpa, opts, recorder);
     const html_dir = opts.html_dir orelse default_html;
 
     const layout_path = opts.html_layout;
+
+    var html_verification: ?HtmlVerification = null;
+    defer if (html_verification) |*bundle| bundle.deinit(gpa);
+    const verify_code = loadHtmlVerification(io, gpa, opts, &html_verification);
+    if (verify_code != .success) return verify_code;
+    const verification: ?*const standard_site_emit.VerificationContext = if (html_verification) |*bundle| &bundle.vctx else null;
+
+    var html_nostr: ?HtmlNostr = null;
+    defer if (html_nostr) |*bundle| bundle.deinit(gpa);
+    const nostr_code = loadHtmlNostr(io, gpa, opts, &html_nostr);
+    if (nostr_code != .success) return nostr_code;
+    const nostr_head: ?*const nostr_emit.HeadConfig = if (html_nostr) |*bundle| &bundle.config else null;
 
     if (opts.watch) {
         var watcher = watch.PollingWatcher.init(gpa, io);
@@ -3228,6 +3144,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         };
         defer coord.deinit();
         coord.recorder = recorder;
+        coord.nostr_head = nostr_head;
 
         coord.run() catch |err| {
             return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
@@ -3241,20 +3158,10 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
     defer if (report_collector) |*c| c.deinit();
     const collector_ptr: ?*diag.Collector = if (report_collector) |*c| c else null;
 
-    var html_verification: ?HtmlVerification = null;
-    defer if (html_verification) |*bundle| bundle.deinit(gpa);
-    const verify_code = loadHtmlVerification(io, gpa, opts, &html_verification);
-    if (verify_code != .success) return verify_code;
-    const verification: ?*const standard_site_emit.VerificationContext = if (html_verification) |*bundle| &bundle.vctx else null;
-
-    var html_nostr: ?HtmlNostr = null;
-    defer if (html_nostr) |*bundle| bundle.deinit(gpa);
-    const nostr_code = loadHtmlNostr(io, gpa, opts, &html_nostr);
-    if (nostr_code != .success) return nostr_code;
-    const nostr_head: ?*const nostr_emit.HeadConfig = if (html_nostr) |*bundle| &bundle.config else null;
-
     if (opts.targets.items.len > 0) {
         _ = compile.compileHtmlSiteMulti(io, gpa, opts.targets.items, .{
+            .workspace_root = opts.profile_workspace_root,
+            .validation_only = opts.command == .validate,
             .content_root = opts.input_dir,
             .layout_path = layout_path,
             .incremental = opts.incremental,
@@ -3282,11 +3189,14 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
 
         if (!opts.quiet) {
             // Canonical order + effective paths (parse already sorts by name).
-            std.debug.print("ok: wrote HTML for {d} target(s):\n", .{opts.targets.items.len});
+            std.debug.print("ok: {s} for {d} target(s):\n", .{
+                if (opts.command == .validate) "validation passed" else "wrote HTML",
+                opts.targets.items.len,
+            });
             target.printTargetConfigLines(opts.targets.items, layout_path);
             // Publication-check verdict per target (#840): committed evidence
             // read back as a best-effort chrome line.
-            for (opts.targets.items) |spec| {
+            for (if (opts.command == .validate) &.{} else opts.targets.items) |spec| {
                 if (publication_touches.checksVerdictLine(gpa, io, spec.name, spec.output_dir)) |line| {
                     defer gpa.free(line);
                     std.debug.print("  {s}\n", .{line});
@@ -3331,10 +3241,10 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
     // this successful run. Multi-target runs publish _boris/proof/ under
     // each target directory, so an aggregate out_dir would hold foreign or
     // stale state (#741).
-    const include_proof =
-        opts.targets.items.len == 0 or
-        (opts.targets.items.len == 1 and
-            std.mem.eql(u8, opts.targets.items[0].output_dir, html_dir));
+    const include_proof = opts.command != .validate and
+        (opts.targets.items.len == 0 or
+            (opts.targets.items.len == 1 and
+                std.mem.eql(u8, opts.targets.items[0].output_dir, html_dir)));
     writeHtmlReport(io, gpa, opts, collector_ptr, true, html_dir, include_proof);
     return .success;
 }
