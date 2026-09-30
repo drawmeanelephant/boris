@@ -70,7 +70,7 @@ jobs:
       # install deterministically (#735 CI incident). Fresh builds are the
       # honest baseline for the release gate.
       - name: Install Zig
-        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
+        uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
           version: 0.16.0
           use-cache: false
@@ -161,7 +161,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Zig
-        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
+        uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
           version: 0.16.0
 
@@ -226,7 +226,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Zig
-        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
+        uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
           version: 0.16.0
 
@@ -264,7 +264,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Zig
-        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
+        uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
           version: 0.16.0
 
@@ -282,7 +282,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Zig
-        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
+        uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
           version: 0.16.0
 
@@ -305,7 +305,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Zig
-        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
+        uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
           version: 0.16.0
 
@@ -331,7 +331,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Zig
-        uses: drawmeanelephant/setup-zig@0ebfa31d4b441dab390eec35aa3f83e52cd01c05 # v2.2.1-node24 (fork)
+        uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
           version: 0.16.0
 
