@@ -33,6 +33,8 @@
 
 const std = @import("std");
 const c = @import("secp256k1");
+const root = @import("root");
+const crypto = if (@hasDecl(root, "nostr_auth_faults")) root.nostr_auth_faults.Crypto else c;
 
 /// A 32-byte secp256k1 secret key.
 pub const SecretKey = [32]u8;
@@ -64,7 +66,7 @@ pub const Context = struct {
     ctx: *c.secp256k1_context,
 
     pub fn init() Error!Context {
-        return .{ .ctx = c.secp256k1_context_create(c.SECP256K1_CONTEXT_NONE) orelse
+        return .{ .ctx = crypto.secp256k1_context_create(c.SECP256K1_CONTEXT_NONE) orelse
             return error.ContextCreationFailed };
     }
 
@@ -77,14 +79,14 @@ pub const Context = struct {
         var seed: [32]u8 = undefined;
         defer std.crypto.secureZero(u8, &seed);
         io.randomSecure(&seed) catch return error.ContextRandomizationFailed;
-        if (c.secp256k1_context_randomize(self.ctx, &seed) != 1) {
+        if (crypto.secp256k1_context_randomize(self.ctx, &seed) != 1) {
             return error.ContextRandomizationFailed;
         }
         return self;
     }
 
     pub fn deinit(self: *Context) void {
-        c.secp256k1_context_destroy(self.ctx);
+        crypto.secp256k1_context_destroy(self.ctx);
         self.* = undefined;
     }
 
@@ -92,7 +94,8 @@ pub const Context = struct {
     /// secret key. Returns `InvalidSecretKey` if the key is out of range.
     pub fn keyPairFromSecretKey(self: Context, secret_key: SecretKey) Error!KeyPair {
         var kp: c.secp256k1_keypair = undefined;
-        if (c.secp256k1_keypair_create(self.ctx, &kp, &secret_key) != 1) {
+        defer std.crypto.secureZero(u8, std.mem.asBytes(&kp));
+        if (crypto.secp256k1_keypair_create(self.ctx, &kp, &secret_key) != 1) {
             return error.InvalidSecretKey;
         }
         var xonly: c.secp256k1_xonly_pubkey = undefined;
@@ -116,12 +119,13 @@ pub const Context = struct {
     /// signs the 32-byte event id.
     pub fn signId(self: Context, id: [32]u8, keypair: KeyPair, aux_rand: ?[32]u8) Error!Signature {
         var kp: c.secp256k1_keypair = undefined;
-        if (c.secp256k1_keypair_create(self.ctx, &kp, &keypair.secret_key) != 1) {
+        defer std.crypto.secureZero(u8, std.mem.asBytes(&kp));
+        if (crypto.secp256k1_keypair_create(self.ctx, &kp, &keypair.secret_key) != 1) {
             return error.InvalidSecretKey;
         }
         var sig: Signature = undefined;
         const aux: ?[*]const u8 = if (aux_rand) |*a| a else null;
-        if (c.secp256k1_schnorrsig_sign32(self.ctx, &sig, &id, &kp, aux) != 1) {
+        if (crypto.secp256k1_schnorrsig_sign32(self.ctx, &sig, &id, &kp, aux) != 1) {
             return error.SigningFailed;
         }
         return sig;
@@ -135,7 +139,7 @@ pub const Context = struct {
         if (c.secp256k1_xonly_pubkey_parse(self.ctx, &xonly, &public_key) != 1) {
             return false;
         }
-        return c.secp256k1_schnorrsig_verify(self.ctx, &sig, &id, 32, &xonly) == 1;
+        return crypto.secp256k1_schnorrsig_verify(self.ctx, &sig, &id, 32, &xonly) == 1;
     }
 };
 

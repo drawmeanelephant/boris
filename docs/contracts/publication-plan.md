@@ -1,5 +1,12 @@
 # Publication plan (schema v1)
 
+An explicit `nostr.auth` declaration negotiates **schema 2**, with the same
+static declaration plus `nostr.auth`. Its schema is
+[`publication-plan-2.schema.json`](schemas/publication-plan-2.schema.json).
+Schema-1 consumers must reject schema 2, not ignore authentication.
+Without opt-in, schema-1 bytes and behavior remain unchanged. Article
+intention digests and signed NIP-23 fields do not depend on auth policy.
+
 **Status:** normative first declaration slice. `boris plan --profile PATH`
 reads one explicitly selected local publication profile, normalizes it through
 the owned `PublicationPlan`, validates that plan with the existing profile

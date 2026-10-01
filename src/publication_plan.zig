@@ -9,6 +9,7 @@ const std = @import("std");
 const github_pages = @import("github_pages.zig");
 const json_out = @import("json_out.zig");
 const nostr_mod = @import("nostr.zig");
+const nostr_auth = @import("nostr_auth.zig");
 const publication_profile = @import("publication_profile.zig");
 const standard_site = @import("standard_site.zig");
 
@@ -27,7 +28,7 @@ pub fn render(gpa: std.mem.Allocator, plan: *const publication_profile.Publicati
     try out.appendSlice(gpa, "{\n  \"format\": ");
     try json_out.writeString(&out, gpa, artifact_format);
     try out.appendSlice(gpa, ",\n  \"schema_version\": ");
-    try json_out.writeUsize(&out, gpa, schema_version);
+    try json_out.writeUsize(&out, gpa, if (plan.nostr != null and plan.nostr.?.auth_relays.len > 0) 2 else schema_version);
     try out.appendSlice(gpa, ",\n  \"input\": ");
     try json_out.writeString(&out, gpa, plan.input);
     try out.appendSlice(gpa, ",\n  \"input_format\": ");
@@ -128,6 +129,10 @@ fn renderNostr(out: *std.ArrayList(u8), gpa: std.mem.Allocator, nostr: publicati
     try json_out.writeUsize(out, gpa, nostr.timeout_ms);
     try out.appendSlice(gpa, ",\n    \"retries\": ");
     try json_out.writeUsize(out, gpa, nostr.retries);
+    if (nostr.auth_relays.len > 0) {
+        try out.appendSlice(gpa, ",\n    \"auth\": ");
+        try nostr_auth.writeDeclaration(out, gpa, nostr.auth_relays);
+    }
     try out.appendSlice(gpa, "\n  }");
 }
 
@@ -536,6 +541,29 @@ test "nostr-bearing rendered plan conforms to its published schema" {
 }
 
 const SchemaError = error{ SchemaViolation, UnsupportedRef, MissingDefs, MissingDef, UnsupportedSchema };
+
+test "publication-plan schema-1 consumer refuses explicit auth schema-2 declaration" {
+    const allocator = std.testing.allocator;
+    const source = try readFixture("docs/contracts/fixtures/nostr-publication/profile-auth.json");
+    defer allocator.free(source);
+    var profile = try parseProfile(source, .{});
+    defer profile.deinit(allocator);
+    const plan = try render(allocator, &profile.plan);
+    defer allocator.free(plan);
+    const again = try render(allocator, &profile.plan);
+    defer allocator.free(again);
+    try std.testing.expectEqualStrings(plan, again);
+    try std.testing.expect(std.mem.indexOf(u8, plan, "\"schema_version\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, plan, "\"mode\":\"nip42\"") != null);
+    const schema_bytes = try readFixture("docs/contracts/schemas/publication-plan-1.schema.json");
+    defer allocator.free(schema_bytes);
+    var schema = try std.json.parseFromSlice(std.json.Value, allocator, schema_bytes, .{});
+    defer schema.deinit();
+    var document = try std.json.parseFromSlice(std.json.Value, allocator, plan, .{});
+    defer document.deinit();
+    const validator: SchemaValidator = .{ .root = schema.value };
+    try std.testing.expectError(error.SchemaViolation, validator.validate(schema.value, document.value));
+}
 
 const SchemaValidator = struct {
     root: std.json.Value,

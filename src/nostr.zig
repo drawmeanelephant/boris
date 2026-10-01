@@ -605,6 +605,8 @@ pub fn decodeNsec(input: []const u8, out: *[32]u8) bool {
     // must equal 1).
     var values: [100]u5 = undefined;
     var check: [128]u5 = undefined;
+    defer std.crypto.secureZero(u8, std.mem.asBytes(&values));
+    defer std.crypto.secureZero(u8, std.mem.asBytes(&check));
     var check_len = bech32HrpExpand(hrp, &check);
     for (data, 0..) |ch, i| {
         const v = bech32CharValue(ch) orelse return false;
@@ -617,6 +619,7 @@ pub fn decodeNsec(input: []const u8, out: *[32]u8) bool {
     // Convert the 5-bit payload (everything before the checksum) to bytes.
     const payload = values[0 .. data.len - 6];
     var acc: u32 = 0;
+    defer std.crypto.secureZero(u32, @as(*[1]u32, @ptrCast(&acc)));
     var bits: u5 = 0;
     var out_len: usize = 0;
     for (payload) |v| {
@@ -624,14 +627,24 @@ pub fn decodeNsec(input: []const u8, out: *[32]u8) bool {
         bits += 5;
         if (bits >= 8) {
             bits -= 8;
+            if (out_len == out.len) return false;
             out[out_len] = @intCast((acc >> bits) & 0xff);
             out_len += 1;
-            if (out_len > 32) return false;
         }
     }
     // Padding must be zero; a non-zero trailing group is a malformed string.
     if (bits != 0 and (acc & ((@as(u32, 1) << bits) - 1)) != 0) return false;
     return out_len == 32;
+}
+
+test "nsec oversized valid-checksum payload refuses before writing past secret buffer" {
+    var encoded: [128]u8 = undefined;
+    var output: [32]u8 = undefined;
+    for ([_]usize{ 33, 34, 58 }) |length| {
+        const payload = [_]u8{1} ** 58;
+        const text = try encodeBech32("nsec", payload[0..length], &encoded);
+        try std.testing.expect(!decodeNsec(text, &output));
+    }
 }
 
 /// Decode one secret-key input line into a 32-byte secret: exactly 64 hex

@@ -58,6 +58,10 @@ const Module = struct {
 const legacy_budget = 4;
 
 const modules = [_]Module{
+    .{ .name = "nostr_auth.zig", .class = .other },
+    .{ .name = "nostr_auth_ipc.zig", .class = .other },
+    .{ .name = "nostr_auth_session.zig", .class = .other },
+    .{ .name = "nostr_auth_process_fixture.zig", .class = .other },
     .{
         .name = "rag_emit.zig",
         .class = .{ .emitter = .{ .encoder = .sink } },

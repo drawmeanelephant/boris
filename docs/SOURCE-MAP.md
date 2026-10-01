@@ -33,6 +33,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | GitHub Pages | `src/github_pages.zig` | [github-pages.md](github-pages.md) |
 | Standard.site / AT Protocol | `src/standard_site*.zig`, `src/atproto_*.zig` | [standard-site.md](standard-site.md), [contracts/standard-site.md](contracts/standard-site.md) |
 | Nostr NIP-23 | `src/nostr.zig`, `src/nostr_plan.zig`, `src/nostr_sign.zig`, `src/nostr_publish.zig`, `src/nostr_keys.zig`, `src/nostr_emit.zig`, `src/ws_client.zig` | [nostr-publication.md](contracts/nostr-publication.md) |
+| Nostr NIP-42 opt-in | `src/nostr_auth.zig`, `src/nostr_auth_ipc.zig`, `src/nostr_auth_session.zig`; existing publisher/transport; non-installed `src/nostr_auth_process_fixture.zig` for matrix process faults | [boundary and release-proof notes](contracts/nostr-publication.md#approved-nip-42-boundary-phase-1-1002) |
 | Diagnostics | `src/diag.zig`, `src/diagnostic.zig` | [diagnostics.md](contracts/diagnostics.md) |
 | Graph health | `src/intelligence.zig` | [documentation-intelligence.md](contracts/documentation-intelligence.md) |
 | Graph render (`boris graph` Mermaid/DOT) | `src/graph_render.zig` | [graph-formats.md](contracts/graph-formats.md) |

@@ -59,6 +59,7 @@ const json_out = @import("json_out.zig");
 const nostr = @import("nostr.zig");
 const keys = @import("nostr_keys.zig");
 const plan_mod = @import("nostr_plan.zig");
+const auth = @import("nostr_auth.zig");
 
 const Io = std.Io;
 
@@ -131,6 +132,7 @@ const PlanJson = struct {
         kind: u32 = 0,
     },
     author: struct { expected_pubkey: []const u8 = "" },
+    delivery: struct { relays: []const []const u8 = &.{}, auth: ?auth.Declaration = null } = .{},
     articles: []const ArticleJson,
 };
 
@@ -244,7 +246,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
     diag.sortDiagnostics(result.diagnostics.items);
     if (hasError(result.diagnostics.items)) return result;
 
-    result.bundle = try renderBundle(gpa, &plan_digest, pubkey_hex, articles.items);
+    result.bundle = try renderBundle(gpa, &plan_digest, pubkey_hex, articles.items, plan.schema_version);
     return result;
 }
 
@@ -279,7 +281,12 @@ fn parsePlan(arena: std.mem.Allocator, bytes: []const u8) !PlanJson {
     const parsed = try std.json.parseFromSlice(PlanJson, arena, bytes, .{ .ignore_unknown_fields = true });
     const plan = parsed.value;
     if (!std.mem.eql(u8, plan.format, plan_mod.artifact_format)) return error.InvalidPlanFormat;
-    if (plan.schema_version != plan_mod.schema_version) return error.InvalidPlanSchema;
+    auth.validateVersion(plan.schema_version, plan.delivery.auth) catch return error.InvalidPlanSchema;
+    if (plan.delivery.auth) |declaration| {
+        if (!auth.hex(plan.author.expected_pubkey, 64)) return error.InvalidPlanSchema;
+        try auth.checkDeclarationShape(arena, bytes);
+        try auth.validateDeclaration(arena, declaration, plan.delivery.relays);
+    }
     if (plan.protocol.kind != nostr.kind_long_form) return error.InvalidPlanKind;
     return plan;
 }
@@ -288,7 +295,7 @@ fn parsePrior(arena: std.mem.Allocator, bytes: []const u8) !PriorBundleJson {
     const parsed = try std.json.parseFromSlice(PriorBundleJson, arena, bytes, .{ .ignore_unknown_fields = true });
     const prior = parsed.value;
     if (!std.mem.eql(u8, prior.format, artifact_format)) return error.InvalidPriorFormat;
-    if (prior.schema_version != schema_version) return error.InvalidPriorSchema;
+    if (prior.schema_version != schema_version and prior.schema_version != 2) return error.InvalidPriorSchema;
     return prior;
 }
 
@@ -489,14 +496,14 @@ fn reject(result: *Result, code: diag.Code, entity_id: []const u8, reason: []con
 // Signed-event bundle serialization (json_out emitter; formats nothing)
 // =============================================================================
 
-fn renderBundle(gpa: std.mem.Allocator, plan_digest: *const [nostr.digest_hex_len]u8, pubkey_hex: []const u8, articles: []const ArticleOut) ![]u8 {
+fn renderBundle(gpa: std.mem.Allocator, plan_digest: *const [nostr.digest_hex_len]u8, pubkey_hex: []const u8, articles: []const ArticleOut, artifact_version: u32) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
 
     try out.appendSlice(gpa, "{\n  \"format\": ");
     try json_out.writeString(&out, gpa, artifact_format);
     try out.appendSlice(gpa, ",\n  \"schema_version\": ");
-    try json_out.writeUsize(&out, gpa, schema_version);
+    try json_out.writeUsize(&out, gpa, artifact_version);
     try out.appendSlice(gpa, ",\n  \"protocol\": {\n    \"nips_revision\": ");
     try json_out.writeString(&out, gpa, plan_mod.nips_revision);
     try out.appendSlice(gpa, ",\n    \"research_date\": ");
@@ -506,7 +513,7 @@ fn renderBundle(gpa: std.mem.Allocator, plan_digest: *const [nostr.digest_hex_le
     try out.appendSlice(gpa, "\n  },\n  \"plan\": {\n    \"format\": ");
     try json_out.writeString(&out, gpa, plan_mod.artifact_format);
     try out.appendSlice(gpa, ",\n    \"schema_version\": ");
-    try json_out.writeUsize(&out, gpa, plan_mod.schema_version);
+    try json_out.writeUsize(&out, gpa, artifact_version);
     try out.appendSlice(gpa, ",\n    \"digest\": ");
     try json_out.writeString(&out, gpa, plan_digest);
     try out.appendSlice(gpa, "\n  },\n  \"signer\": {\n    \"pubkey\": ");

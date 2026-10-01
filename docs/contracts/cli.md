@@ -484,6 +484,7 @@ relay, or the network.
 boris nostr plan --profile PATH
 boris nostr sign --plan PLAN.json --key-stdin [--out BUNDLE.json] [--prior PRIOR.json] [--created-at N]
 boris nostr publish --plan PLAN.json --bundle BUNDLE.json [--out REPORT.json]
+boris nostr sign --auth-session --plan PLAN.json --bundle BUNDLE.json --key-stdin [--report-out REPORT.json]
 ```
 
 | Command | Key | Network | Writes by default |
@@ -491,6 +492,20 @@ boris nostr publish --plan PLAN.json --bundle BUNDLE.json [--out REPORT.json]
 | `nostr plan` | never | never | Plan JSON on stdout |
 | `nostr sign` | once, from stdin | never | Bundle JSON on stdout or `--out PATH` |
 | `nostr publish` | never | the plan's relays | Report JSON on stdout or `--out PATH` |
+| `nostr sign --auth-session` | once, from stdin, after child ready | supervisor never; keyless child only | Child report on stdout or `--report-out PATH` |
+
+Session mode is a separate explicit mode, currently macOS-only. It requires
+an opt-in schema-2 plan and its already-signed schema-2 bundle, and rejects
+`--prior`, `--created-at`, and bundle `--out`. A direct opt-in `nostr publish`
+without the private live session refuses with exit 2 before opening sockets.
+Unsupported platforms refuse session mode, never approximate descriptor
+custody. `--auth-pipes 3,4` is a private launcher control, not a signer plugin
+or public helper-command interface. The child gets `/dev/null` stdin.
+Cancellation/channel loss is exit 3, not a fabricated publish report. See
+the [approved boundary and implementation notes](nostr-publication.md#approved-nip-42-boundary-phase-1-1002)
+for proactive-only compatibility and scoped macOS process-test evidence.
+Malformed/overlong key input, invalid secret scalars and wrong identity are
+content refusals (exit 1) before `begin`, with no report or relay connection.
 
 `nostr sign` options: `--plan PATH` (required), `--key-stdin` (required; the
 key is 64 hex digits or a NIP-19 `nsec`, read once and zeroed best-effort —

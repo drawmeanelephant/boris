@@ -45,6 +45,8 @@ pub const TlsOptions = struct {
 };
 
 pub const Limits = struct {
+    /// Session/auth absolute monotonic ceiling. Null preserves v1 deadlines.
+    deadline_ns: ?i96 = null,
     /// Reassembled text-message ceiling in bytes (outgoing and incoming).
     max_message_bytes: usize = 1 * 1024 * 1024,
     /// Single frame payload ceiling in bytes (also bounds control payloads).
@@ -67,6 +69,7 @@ pub const Limits = struct {
 };
 
 pub const Error = error{
+    Canceled,
     InvalidUrl,
     ResolveFailed,
     ConnectFailed,
@@ -255,30 +258,98 @@ fn RacePayload(comptime ReturnT: type) type {
 /// plus `Timeout` for the deadline firing first.
 fn RaceErrors(comptime ReturnT: type) type {
     const info = @typeInfo(ReturnT);
-    if (info == .error_union) return info.error_union.error_set || error{Timeout};
-    return error{Timeout};
+    if (info == .error_union) return info.error_union.error_set || error{ Timeout, Canceled };
+    return error{ Timeout, Canceled };
 }
 
 /// Run `target` under a single deadline budget. If the deadline fires first,
 /// the pending operation is cancelled and `error.Timeout` is returned; op
-/// errors propagate unchanged.
-fn raceDeadline(io: Io, timeout_ms: u32, comptime target: anytype, args: anytype) RaceErrors(@typeInfo(@TypeOf(target)).@"fn".return_type.?)!RacePayload(@typeInfo(@TypeOf(target)).@"fn".return_type.?) {
+/// errors propagate unchanged. If concurrency cannot be reserved, fail closed
+/// as a timeout rather than running a blocking operation or timer inline.
+pub fn raceDeadline(io: Io, timeout_ms: u32, comptime target: anytype, args: anytype) RaceErrors(@typeInfo(@TypeOf(target)).@"fn".return_type.?)!RacePayload(@typeInfo(@TypeOf(target)).@"fn".return_type.?) {
     const FnInfo = @typeInfo(@TypeOf(target)).@"fn";
     const ReturnT = FnInfo.return_type.?;
     const U = union(enum) { op: ReturnT, timer: Io.Cancelable!void };
     var slots: [2]U = undefined;
     var select: Io.Select(U) = .init(io, &slots);
-    select.async(.op, target, args);
-    select.async(.timer, deadlineSleep, .{ io, timeout_ms });
-    const result = select.await() catch return error.Timeout;
+    defer while (select.cancel()) |_| {};
+    // async is allowed to run inline when the worker pool is saturated.
+    // Both sides must be concurrent or the caller cannot enforce the deadline.
+    select.concurrent(.op, target, args) catch return error.Timeout;
+    select.concurrent(.timer, deadlineSleep, .{ io, timeout_ms }) catch return error.Timeout;
+    const result = try select.await();
     var op_result: ?ReturnT = null;
     switch (result) {
         .op => |r| op_result = r,
         .timer => {},
     }
-    while (select.cancel()) |_| {}
     if (op_result == null) return error.Timeout;
     return op_result.? catch |err| return err;
+}
+
+test "raceDeadline times out even when async execution would be eager" {
+    var threaded = Io.Threaded.init(std.testing.allocator, .{
+        .environ = std.process.Environ.empty,
+        .async_limit = .nothing,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    try std.testing.expectError(error.Timeout, raceDeadline(io, 20, deadlineSleep, .{ io, 500 }));
+}
+
+test "raceDeadline does not wait for an eager timer after a completed operation" {
+    var threaded = Io.Threaded.init(std.testing.allocator, .{
+        .environ = std.process.Environ.empty,
+        .async_limit = .nothing,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+    const start = Io.Clock.awake.now(io);
+
+    try raceDeadline(io, 2_000, deadlineSleep, .{ io, 5 });
+    try std.testing.expect(start.durationTo(Io.Clock.awake.now(io)).toMilliseconds() < 1_000);
+}
+
+test "raceDeadline fails closed before invoking an operation without concurrency" {
+    var threaded = Io.Threaded.init(std.testing.allocator, .{
+        .environ = std.process.Environ.empty,
+        .async_limit = .nothing,
+        .concurrent_limit = .nothing,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+    const Operation = struct {
+        fn run(called: *bool) Io.Cancelable!void {
+            called.* = true;
+        }
+    };
+    var called = false;
+
+    try std.testing.expectError(error.Timeout, raceDeadline(io, 20, Operation.run, .{&called}));
+    try std.testing.expect(!called);
+}
+
+test "raceDeadline drains the operation when the timer cannot reserve concurrency" {
+    var threaded = Io.Threaded.init(std.testing.allocator, .{
+        .environ = std.process.Environ.empty,
+        .async_limit = .nothing,
+        .concurrent_limit = .limited(1),
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+    const Operation = struct {
+        fn run(op_io: Io, drained: *std.atomic.Value(bool)) Io.Cancelable!void {
+            defer drained.store(true, .release);
+            try deadlineSleep(op_io, 10_000);
+        }
+    };
+    var drained: std.atomic.Value(bool) = .init(false);
+    const start = Io.Clock.awake.now(io);
+
+    try std.testing.expectError(error.Timeout, raceDeadline(io, 20, Operation.run, .{ io, &drained }));
+    try std.testing.expect(drained.load(.acquire));
+    try std.testing.expect(start.durationTo(Io.Clock.awake.now(io)).toMilliseconds() < 1_000);
 }
 
 fn connectStream(io: Io, address: Io.net.IpAddress) Io.net.IpAddress.ConnectError!Io.net.Stream {
@@ -317,6 +388,13 @@ fn connectTarget(io: Io, target: Target, timeout_ms: u32) (error{ Timeout, Resol
 }
 
 fn readSliceShortFn(self: *Client, buffer: []u8) Io.Reader.ShortError!usize {
+    if (self.prefetch.items.len != 0) {
+        const n = @min(buffer.len, self.prefetch.items.len);
+        @memcpy(buffer[0..n], self.prefetch.items[0..n]);
+        std.mem.copyForwards(u8, self.prefetch.items, self.prefetch.items[n..]);
+        self.prefetch.items.len -= n;
+        return n;
+    }
     return self.reader().readSliceShort(buffer);
 }
 
@@ -345,11 +423,14 @@ fn flushFn(writer: *Io.Writer) Io.Writer.Error!void {
 /// records into the underlying socket writer's buffer (std 0.16 never
 /// drains it), so the socket writer must be drained explicitly.
 fn sendAllAndFlush(self: *Client, bytes: []const u8) Error!void {
-    raceDeadline(self.io, self.limits.read_timeout_ms, writeAllAndFlushFn, .{ self.writer(), bytes }) catch |err| switch (err) {
+    errdefer self.failed_write = true;
+    raceDeadline(self.io, try self.operationTimeout(self.limits.read_timeout_ms), writeAllAndFlushFn, .{ self.writer(), bytes }) catch |err| switch (err) {
+        error.Canceled => return error.Canceled,
         error.Timeout, error.WriteFailed => return error.WriteTimeout,
     };
     if (self.box.tls != null) {
-        raceDeadline(self.io, self.limits.read_timeout_ms, flushFn, .{&self.box.socket_writer.interface}) catch |err| switch (err) {
+        raceDeadline(self.io, try self.operationTimeout(self.limits.read_timeout_ms), flushFn, .{&self.box.socket_writer.interface}) catch |err| switch (err) {
+            error.Canceled => return error.Canceled,
             error.Timeout, error.WriteFailed => return error.WriteTimeout,
         };
     }
@@ -497,6 +578,10 @@ const TlsBox = struct {
     tls: ?std.crypto.tls.Client = null,
 };
 
+fn initializeTls(box: *TlsBox, options: std.crypto.tls.Client.Options) !std.crypto.tls.Client {
+    return std.crypto.tls.Client.init(&box.socket_reader.interface, &box.socket_writer.interface, options);
+}
+
 pub const Client = struct {
     io: Io,
     gpa: std.mem.Allocator,
@@ -512,10 +597,31 @@ pub const Client = struct {
     /// Incoming-frame scratch. Frames larger than this are `OversizedMessage`
     /// even if `max_frame_payload` is higher: a relay `OK`/`NOTICE` never
     /// needs more, and a 1 MiB stack buffer is not worth it.
-    read_buf: [16384]u8 = undefined,
+    read_buf: [32768]u8 = undefined,
+    prefetch: std.ArrayList(u8) = .empty,
     /// Owned by the client; returned from `readMessage` as `.text`.
     message_buf: std.ArrayList(u8) = .empty,
     closed: bool = false,
+    failed_write: bool = false,
+
+    fn operationTimeout(self: *Client, ms: u32) Error!u32 {
+        if (self.limits.deadline_ns) |end| {
+            const remaining = end - Io.Timestamp.now(self.io, .awake).nanoseconds;
+            if (remaining <= 0) return error.ReadTimeout;
+            return @intCast(@min(ms, @divFloor(remaining + std.time.ns_per_ms - 1, std.time.ns_per_ms)));
+        }
+        return ms;
+    }
+
+    /// Check queued controls before a write. This is not an atomic peer gate.
+    pub fn hasPending(self: *Client) bool {
+        if (self.prefetch.items.len != 0 or self.reader().bufferedLen() != 0 or self.box.socket_reader.interface.bufferedLen() != 0) return true;
+        if (comptime @import("builtin").os.tag == .macos or @import("builtin").os.tag == .linux) {
+            var fds = [_]std.c.pollfd{.{ .fd = @intCast(self.stream.socket.handle), .events = std.posix.POLL.IN, .revents = 0 }};
+            return std.c.poll(&fds, 1, 0) > 0;
+        }
+        return false;
+    }
 
     pub fn connect(io: Io, gpa: std.mem.Allocator, url: []const u8, limits: Limits) Error!Client {
         const target = try Target.parse(url);
@@ -528,7 +634,13 @@ pub const Client = struct {
         // IPv6 with OS scope lookup). It is not a hostname resolver. Named
         // relays (`wss://relay.example.org`, `ws://localhost`) must go
         // through `HostName.connect` (DNS lookup + try addresses). #545.
-        const stream = connectTarget(io, target, limits.handshake_timeout_ms) catch |err| switch (err) {
+        var connect_timeout = limits.handshake_timeout_ms;
+        if (limits.deadline_ns) |end| {
+            const remaining = end - Io.Timestamp.now(io, .awake).nanoseconds;
+            if (remaining <= 0) return error.HandshakeTimeout;
+            connect_timeout = @intCast(@min(connect_timeout, @divFloor(remaining + std.time.ns_per_ms - 1, std.time.ns_per_ms)));
+        }
+        const stream = connectTarget(io, target, connect_timeout) catch |err| switch (err) {
             error.Timeout => return error.HandshakeTimeout,
             error.ResolveFailed => return error.ResolveFailed,
             else => return error.ConnectFailed,
@@ -607,23 +719,26 @@ pub const Client = struct {
                 ca_bundle.rescan(gpa, io, now) catch return error.TlsFailed;
             }
             var lock: Io.RwLock = .init;
-            const tls = std.crypto.tls.Client.init(
-                &self.box.socket_reader.interface,
-                &self.box.socket_writer.interface,
-                .{
-                    .host = .{ .explicit = self.limits.tls.verify_host orelse target.host },
-                    .ca = .{ .bundle = .{
-                        .gpa = gpa,
-                        .io = io,
-                        .lock = &lock,
-                        .bundle = &ca_bundle,
-                    } },
-                    .read_buffer = self.tls_read_buf,
-                    .write_buffer = self.tls_write_buf,
-                    .entropy = &entropy,
-                    .realtime_now = Io.Timestamp.now(io, .real),
-                },
-            ) catch return error.TlsFailed;
+            const tls_options: std.crypto.tls.Client.Options = .{
+                .host = .{ .explicit = self.limits.tls.verify_host orelse target.host },
+                .ca = .{ .bundle = .{
+                    .gpa = gpa,
+                    .io = io,
+                    .lock = &lock,
+                    .bundle = &ca_bundle,
+                } },
+                .read_buffer = self.tls_read_buf,
+                .write_buffer = self.tls_write_buf,
+                .entropy = &entropy,
+                .realtime_now = Io.Timestamp.now(io, .real),
+            };
+            const tls = if (limits.deadline_ns != null)
+                raceDeadline(io, try self.operationTimeout(limits.handshake_timeout_ms), initializeTls, .{ self.box, tls_options }) catch |err| switch (err) {
+                    error.Timeout => return error.HandshakeTimeout,
+                    else => return error.TlsFailed,
+                }
+            else
+                initializeTls(self.box, tls_options) catch return error.TlsFailed;
             // `tls.input`/`tls.output` point at `box.socket_reader`/
             // `box.socket_writer`; the box stays put for the Client's life.
             self.box.tls = tls;
@@ -649,7 +764,9 @@ pub const Client = struct {
     /// Release everything: a best-effort Close frame, the gpa-owned buffers,
     /// and the TCP connection. Idempotent; safe to call once from `defer`.
     pub fn deinit(self: *Client) void {
-        if (!self.closed) {
+        // A failed writer can retain plaintext. Never flush a timed-out AUTH
+        // (or article) again just to append a graceful Close frame.
+        if (!self.closed and !self.failed_write) {
             self.closed = true;
             var buf: [8]u8 = undefined;
             if (encodeFrame(&buf, .close, &.{}, [_]u8{ 0, 0, 0, 0 }, true, true) catch null) |len| {
@@ -657,6 +774,7 @@ pub const Client = struct {
             }
         }
         self.message_buf.deinit(self.gpa);
+        self.prefetch.deinit(self.gpa);
         self.gpa.free(self.socket_read_buf);
         self.gpa.free(self.socket_write_buf);
         self.gpa.free(self.tls_read_buf);
@@ -681,14 +799,14 @@ pub const Client = struct {
         try request_buf.appendSlice(self.gpa, key);
         try request_buf.appendSlice(self.gpa, "\r\nSec-WebSocket-Version: 13\r\n\r\n");
 
-        raceDeadline(self.io, self.limits.handshake_timeout_ms, writeAllAndFlushFn, .{ self.writer(), request_buf.items }) catch |err| switch (err) {
+        raceDeadline(self.io, try self.operationTimeout(self.limits.handshake_timeout_ms), writeAllAndFlushFn, .{ self.writer(), request_buf.items }) catch |err| switch (err) {
             error.Timeout => return error.HandshakeTimeout,
             else => return error.BadHandshake,
         };
         if (self.box.tls != null) {
             // Drain the TLS records out of the socket writer (see
             // `sendAllAndFlush`); a stalled upgrade is a handshake timeout.
-            raceDeadline(self.io, self.limits.handshake_timeout_ms, flushFn, .{&self.box.socket_writer.interface}) catch |err| switch (err) {
+            raceDeadline(self.io, try self.operationTimeout(self.limits.handshake_timeout_ms), flushFn, .{&self.box.socket_writer.interface}) catch |err| switch (err) {
                 error.Timeout => return error.HandshakeTimeout,
                 else => return error.BadHandshake,
             };
@@ -716,7 +834,7 @@ pub const Client = struct {
                 const pending = tls.reader.bufferedLen();
                 if (pending > 0) {
                     const drain_len = @min(pending, header_buf.len - header_len);
-                    const got = raceDeadline(self.io, self.limits.handshake_timeout_ms, readVecFn, .{ self.reader(), header_buf[header_len..][0..drain_len] }) catch |err| switch (err) {
+                    const got = raceDeadline(self.io, try self.operationTimeout(self.limits.handshake_timeout_ms), readVecFn, .{ self.reader(), header_buf[header_len..][0..drain_len] }) catch |err| switch (err) {
                         error.Timeout => return error.HandshakeTimeout,
                         else => return error.BadHandshake,
                     };
@@ -727,7 +845,7 @@ pub const Client = struct {
                 }
                 if (tls.eof()) return error.Closed;
             }
-            const got = raceDeadline(self.io, self.limits.handshake_timeout_ms, readVecFn, .{ self.reader(), header_buf[header_len..] }) catch |err| switch (err) {
+            const got = raceDeadline(self.io, try self.operationTimeout(self.limits.handshake_timeout_ms), readVecFn, .{ self.reader(), header_buf[header_len..] }) catch |err| switch (err) {
                 error.Timeout => return error.HandshakeTimeout,
                 else => return error.BadHandshake,
             };
@@ -746,6 +864,8 @@ pub const Client = struct {
         }
         const headers = header_buf[0..header_len];
         try self.validateHandshake(headers, &key_buf, key.len);
+        const end = (std.mem.indexOf(u8, headers, "\r\n\r\n") orelse return error.BadHandshake) + 4;
+        try self.prefetch.appendSlice(self.gpa, headers[end..]);
     }
 
     fn validateHandshake(self: *Client, headers: []const u8, key_buf: *[24]u8, key_len: usize) Error!void {
@@ -879,11 +999,13 @@ pub const Client = struct {
             if (frame.opcode == .text) {
                 if (expecting_continuation) return error.ProtocolError;
                 expecting_continuation = !frame.fin;
+                if (frame.payload.len > self.limits.max_message_bytes -| self.message_buf.items.len) return error.OversizedMessage;
                 try self.message_buf.appendSlice(self.gpa, frame.payload);
             } else {
                 // continuation
                 if (!expecting_continuation) return error.ProtocolError;
                 expecting_continuation = !frame.fin;
+                if (frame.payload.len > self.limits.max_message_bytes -| self.message_buf.items.len) return error.OversizedMessage;
                 try self.message_buf.appendSlice(self.gpa, frame.payload);
             }
             if (self.message_buf.items.len > self.limits.max_message_bytes) return error.OversizedMessage;
@@ -918,7 +1040,8 @@ pub const Client = struct {
         var header: [14]u8 = undefined;
         var header_len: usize = 0;
         while (header_len < 2) {
-            const got = raceDeadline(self.io, self.limits.read_timeout_ms, readSliceShortFn, .{ self, header[header_len..2] }) catch |err| switch (err) {
+            const got = raceDeadline(self.io, try self.operationTimeout(self.limits.read_timeout_ms), readSliceShortFn, .{ self, header[header_len..2] }) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
                 error.Timeout, error.ReadFailed => return error.ReadTimeout,
             };
             if (got == 0) return error.EndOfStream;
@@ -931,7 +1054,8 @@ pub const Client = struct {
         if (payload_len == 126) extra = 2 else if (payload_len == 127) extra = 8;
         const total_header = 2 + extra;
         while (header_len < total_header) {
-            const got = raceDeadline(self.io, self.limits.read_timeout_ms, readSliceShortFn, .{ self, header[header_len..total_header] }) catch |err| switch (err) {
+            const got = raceDeadline(self.io, try self.operationTimeout(self.limits.read_timeout_ms), readSliceShortFn, .{ self, header[header_len..total_header] }) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
                 error.Timeout, error.ReadFailed => return error.ReadTimeout,
             };
             if (got == 0) return error.EndOfStream;
@@ -946,13 +1070,15 @@ pub const Client = struct {
             if (payload_len > std.math.maxInt(u64) / 2) return error.ProtocolError;
         }
         if (payload_len > self.limits.max_frame_payload) return error.ProtocolError;
-        if (payload_len > self.read_buf.len) return error.OversizedMessage;
+        const scratch_ceiling: usize = if (self.limits.deadline_ns == null) 16384 else self.read_buf.len;
+        if (payload_len > scratch_ceiling) return error.OversizedMessage;
         if (masked) return error.ProtocolError;
 
         const payload: []u8 = self.read_buf[0..@intCast(payload_len)];
         var filled: usize = 0;
         while (filled < payload.len) {
-            const got = raceDeadline(self.io, self.limits.read_timeout_ms, readSliceShortFn, .{ self, payload[filled..] }) catch |err| switch (err) {
+            const got = raceDeadline(self.io, try self.operationTimeout(self.limits.read_timeout_ms), readSliceShortFn, .{ self, payload[filled..] }) catch |err| switch (err) {
+                error.Canceled => return error.Canceled,
                 error.Timeout, error.ReadFailed => return error.ReadTimeout,
             };
             if (got == 0) return error.EndOfStream;
