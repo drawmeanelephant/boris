@@ -225,6 +225,8 @@ pub fn isValidTargetName(name: []const u8) bool {
 
 /// Options for protected path checks during target validation.
 pub const ValidateTargetsOptions = struct {
+    /// Selected profile workspace; legacy callers use the process CWD.
+    workspace_root: ?[]const u8 = null,
     /// Content root (e.g. `--input`). Targets must not equal or nest with this directory.
     content_root: []const u8 = "content",
     /// Global default layout path (`--html-layout`). Used when a target has no override.
@@ -283,7 +285,10 @@ pub fn validateTargets(
         }
     }
 
-    const cwd_owned = try std.process.currentPathAlloc(io, gpa);
+    const cwd_owned = if (options.workspace_root) |root|
+        try gpa.dupeZ(u8, root)
+    else
+        try std.process.currentPathAlloc(io, gpa);
     defer gpa.free(cwd_owned);
     normalizeSlashesInPlace(cwd_owned);
     const cwd_path = stripTrailingSlash(cwd_owned);
@@ -363,7 +368,9 @@ pub fn validateTargets(
                     try protected_layouts.append(gpa, ld);
                 }
             }
-            try rejectSymlinkAlongPath(io, cwd_dir, gpa, lp);
+            const layout_abs = try resolveNormalized(gpa, cwd_path, lp);
+            defer gpa.free(layout_abs);
+            try rejectSymlinkAlongPath(io, cwd_dir, gpa, layout_abs);
         }
     }
 

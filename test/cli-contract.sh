@@ -9,6 +9,7 @@ BORIS="${1:-${ROOT}/zig-out/bin/boris}"
 if [[ ! -x "${BORIS}" ]]; then
   zig build
 fi
+if [[ "${BORIS}" != /* ]]; then BORIS="${ROOT}/${BORIS}"; fi
 
 FIXTURE="docs/contracts/fixtures/documentation-intelligence/content"
 EXPECTED="docs/contracts/fixtures/documentation-intelligence/expected"
@@ -88,8 +89,8 @@ else
   exit 1
 fi
 
-# --profile is a metadata opt-in, not an HTML target selector. Exercise the
-# profile workspace (different from cwd) and prove every missing target setting
+# Explicit HTML selectors retain the --profile metadata opt-in. Exercise the
+# profile workspace (different from cwd) and prove every unmatched target setting
 # fails before any write, while matching CLI settings retain Nostr/Standard.site.
 PROFILE_ROOT="${TMP}/profile-site"
 PROFILE_REL="${PROFILE_ROOT#${ROOT}/}"
@@ -151,7 +152,7 @@ expect_profile_refusal() {
     exit 1
   fi
 }
-expect_profile_refusal "name"
+expect_profile_refusal "name" --html
 expect_profile_refusal "theme" --target="public=${PROFILE_REL}/dist"
 expect_profile_refusal "layout_rules" --target="public=${PROFILE_REL}/dist" \
   --theme="${PROFILE_REL}/themes/custom"
@@ -257,25 +258,17 @@ cat >"${PROFILE_ROOT}/validate-multi.json" <<'EOF'
   "schema_version": 1,
   "input": "content",
   "targets": [
-    { "name": "alpha", "output": "dist/alpha" },
-    { "name": "beta", "output": "dist/beta" }
+    { "name": "alpha", "output": "dist/alpha", "theme": "themes/custom" },
+    { "name": "beta", "output": "dist/beta", "theme": "themes/custom" }
   ]
 }
 EOF
 "${BORIS}" validate --profile="${PROFILE_REL}/validate-multi.json" --quiet
 test ! -e "${PROFILE_ROOT}/dist"
-# The all-opt-in fixture profile declares a github-pages location; the
-# validator cannot honor it without the full publication boundary, so it
-# refuses instead of silently validating a subset.
-set +e
+# Profile-driven validation now honors the declared publication location and
+# metadata without publishing a subset or writing output.
 "${BORIS}" validate --profile="${PROFILE_REL}/boris.json" --quiet >"${PROFILE_LOG}" 2>&1
-VPUB_EC=$?
-set -e
-if [[ "${VPUB_EC}" -ne 2 ]] || ! grep -q 'declares a publication location' "${PROFILE_LOG}"; then
-  printf 'validate --profile publication refusal mismatch (exit %s)\n' "${VPUB_EC}" >&2
-  cat "${PROFILE_LOG}" >&2
-  exit 1
-fi
+test ! -e "${PROFILE_ROOT}/dist"
 cat >"${PROFILE_ROOT}/validate-single.json" <<'EOF'
 {
   "format": "boris-publication-profile",
@@ -297,6 +290,74 @@ grep -q '"ok": true' "${PROFILE_ROOT}/validate-report.json"
 test ! -e "${PROFILE_ROOT}/dist"
 test ! -e "${PROFILE_ROOT}/sitemap.xml"
 grep -q 'nostr:naddr' "${PROFILE_ROOT}/validate-report.json" && exit 1 || true
+
+# No repeated HTML flags: profile targets, rule layouts, static files, and
+# sitemap execute from a different CWD, including outside that CWD's tree.
+mkdir -p "${TMP}/caller"
+printf '<html><head>{{head}}</head><body>PROFILE-HOME <a href="robots.txt">Robots</a>{{content}}</body></html>\n' \
+  >"${PROFILE_ROOT}/themes/custom/layouts/home.html"
+cat >"${PROFILE_ROOT}/content/notes.md" <<'EOF'
+---
+parent: home
+title: Notes
+---
+
+Profile child page.
+EOF
+( cd "${TMP}/caller" && "${BORIS}" validate --profile="${PROFILE_ROOT}/validate-single.json" \
+  --report="${TMP}/profile-validation.json" --quiet )
+test ! -e "${PROFILE_ROOT}/dist"
+grep -q "\"contentRoot\": \"${PROFILE_ROOT}/content\"" "${TMP}/profile-validation.json"
+( cd "${TMP}/caller" && "${BORIS}" build --profile="${PROFILE_ROOT}/validate-single.json" --quiet )
+grep -q 'PROFILE-HOME' "${PROFILE_ROOT}/dist/never/home.html"
+test -f "${PROFILE_ROOT}/dist/never/notes.html"
+cmp "${PROFILE_ROOT}/static/robots.txt" "${PROFILE_ROOT}/dist/never/robots.txt"
+test -f "${PROFILE_ROOT}/dist/never/sitemap.xml"
+grep -q '"target": "public"' "${PROFILE_ROOT}/dist/never/_boris/proof/artifacts.json"
+test ! -e "${TMP}/caller/dist"
+cp -R "${PROFILE_ROOT}/dist/never" "${TMP}/profile-golden"
+( cd "${TMP}/caller" && "${BORIS}" build --profile="${PROFILE_ROOT}/validate-single.json" --jobs 2 --quiet )
+diff -r "${TMP}/profile-golden" "${PROFILE_ROOT}/dist/never"
+( cd "${TMP}/caller" && "${BORIS}" build --profile="${PROFILE_ROOT}/validate-single.json" --jobs 2 --quiet )
+diff -r "${TMP}/profile-golden" "${PROFILE_ROOT}/dist/never"
+"${BORIS}" validate --profile="${PROFILE_ROOT}/validate-single.json" --quiet
+diff -r "${TMP}/profile-golden" "${PROFILE_ROOT}/dist/never"
+# Equivalent legacy CLI-only selection remains byte-identical.
+( cd "${PROFILE_ROOT}" && "${BORIS}" build --input content --target public=dist/never \
+  --theme themes/custom --layout-rule public id:home themes/custom/layouts/home.html \
+  --static-dir static --sitemap --site-url https://example.test/ --quiet )
+diff -r "${TMP}/profile-golden" "${PROFILE_ROOT}/dist/never"
+
+# Metadata surfaces still work without repeated target flags.
+"${BORIS}" build --profile="${PROFILE_ROOT}/boris.json" --quiet
+grep -q 'nostr:naddr1' "${PROFILE_ROOT}/dist/home.html"
+"${BORIS}" build --profile="${PROFILE_ROOT}/standard-site.json" --quiet
+grep -q 'site.standard.document' "${PROFILE_ROOT}/dist/home.html"
+test -f "${PROFILE_ROOT}/dist/_boris/proof/standard-site.json"
+"${BORIS}" validate --profile="${PROFILE_ROOT}/standard-site.json" --quiet
+expect_exit 2 "${BORIS}" watch --profile="${PROFILE_ROOT}/standard-site.json" --quiet
+
+# Every declared plain HTML target runs, in canonical name order.
+"${BORIS}" build --profile="${PROFILE_ROOT}/validate-multi.json" --quiet
+test -f "${PROFILE_ROOT}/dist/alpha/home.html"
+test -f "${PROFILE_ROOT}/dist/beta/home.html"
+
+# Unsupported entries fail before overwriting an existing publication, even
+# when another target would be executable. No subset publication is allowed.
+sed 's/"sitemap": { "path": "sitemap.xml" }/"rss": { "path": "rss.xml" }/' \
+  "${PROFILE_ROOT}/standard-site.json" >"${PROFILE_ROOT}/unsupported-rss.json"
+cp -R "${PROFILE_ROOT}/dist" "${TMP}/before-refusal"
+expect_exit 2 "${BORIS}" build --profile="${PROFILE_ROOT}/unsupported-rss.json" --quiet
+expect_exit 2 "${BORIS}" validate --profile="${PROFILE_ROOT}/unsupported-rss.json" --quiet
+expect_exit 2 "${BORIS}" watch --profile="${PROFILE_ROOT}/unsupported-rss.json" --quiet
+diff -r "${TMP}/before-refusal" "${PROFILE_ROOT}/dist"
+expect_exit 2 "${BORIS}" build --profile="${PROFILE_ROOT}/validate-single.json" --input ../escape --quiet
+cp -R "${PROFILE_ROOT}/content" "${PROFILE_ROOT}/other-content"
+printf '\nProfile input override.\n' >>"${PROFILE_ROOT}/other-content/home.md"
+"${BORIS}" build --profile="${PROFILE_ROOT}/validate-single.json" --input other-content --quiet
+grep -q 'Profile input override' "${PROFILE_ROOT}/dist/never/home.html"
+"${BORIS}" validate --profile="${PROFILE_ROOT}/validate-single.json" --input other-content --quiet
+expect_exit 2 "${BORIS}" watch --profile="${PROFILE_ROOT}/validate-single.json" --theme themes/custom --quiet
 
 # Strict is a complete-site target, not a bare Oliver body switch. The
 # compatible theme builds; the default HTML5 theme fails as a content error

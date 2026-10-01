@@ -10,6 +10,13 @@ Watch mode is an opt-in local development feature that monitors source and layou
 - **Flag**: `--watch`
 - **Requires**: HTML mode (`--html`, `--html-dir`, or `--target`).
 - **Implication**: When `--watch` is specified, `--incremental` is automatically implied/enabled to guarantee fast rebuilding.
+- **Profile selection**: `watch --profile PATH` (or `build --watch --profile
+  PATH`) executes the profile's supported HTML configuration without repeated
+  HTML flags. Paths resolve against the profile workspace. Configuration is a
+  startup snapshot; restart after editing the profile. Unsupported entries and
+  competing HTML selectors fail before publication, including Standard.site
+  verification whose projection cannot yet refresh per cycle. See
+  [the profile boundary](publication-profile.md#html-execution).
 - **`boris validate --watch` (issue #647)**: the zero-write validation daemon.
   It reuses this same coordinator — debounce/coalescing, normalization,
   ignore rules, serialization, and signal handling — but every cycle runs the

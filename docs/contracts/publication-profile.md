@@ -1,13 +1,13 @@
 # Publication profile (schema v1, GitHub Pages declaration slice)
 
-**Status:** normative parser and static-plan contract. `boris plan --profile
-PATH` declares the full profile, and `boris validate --profile PATH`
-executes the profile's declared HTML targets as a zero-write prepublication
-validation pass; profile-driven build/watch execution remains unavailable in
-this slice. An HTML `build --profile PATH` can
-opt into Standard.site verification surfaces or Nostr head links, provided
-its CLI configuration matches the profile's selected input and HTML target
-declarations; it does not run the profile as a publication plan. The internal
+**Status:** normative parser, static-plan, and bounded HTML execution contract.
+`boris plan --profile PATH` declares the full profile. With no HTML CLI
+selectors, `build`, `watch`, and `validate --profile PATH` execute the declared
+HTML configuration through the existing compiler coordinator; validation
+stops at its zero-write prepublication boundary. Unsupported declarations
+fail with exit 2 before any target is written. An HTML `build --profile PATH`
+with explicit HTML selectors retains the matching Standard.site/Nostr metadata
+opt-in described below. The internal
 parser and plan command do not discover content, create outputs, read
 environment variables, contact a network service, or invoke a publisher. See the
 [publication-plan contract](publication-plan.md) for the declaration format.
@@ -16,14 +16,15 @@ environment variables, contact a network service, or invoke a publisher. See the
 
 A caller explicitly selects one profile file. Its path is normalized against
 the invocation CWD and the normalized parent directory is the profile
-workspace root. Every path in the profile, and every future profile-mode CLI
+workspace root. Every path in the profile, and every profile-mode CLI
 path override, is workspace-relative. Absolute paths, drive-rooted paths,
 backslashes, empty segments, `.` segments, and `..` segments are rejected.
 There is no Git-root, package-root, parent-directory, or conventional-file-name
 discovery. Legacy no-profile invocations retain their CWD-relative behavior.
 
-The parsed plan stores only canonical workspace-relative paths; the owned
-workspace root carries the absolute path used by a future coordinator.
+The parsed plan stores only canonical workspace-relative paths. The HTML
+coordinator resolves input/output/static roots and opens relative layout/theme
+paths against the owned workspace root, without changing process CWD.
 
 ## Strict JSON and bounds
 
@@ -124,7 +125,7 @@ again after overrides. A global HTML output override is rejected when a profile
 contains multiple targets. A GitHub Pages declaration remains configuration;
 it is not evidence that a deployment occurred.
 
-## Static validation and the deferred boundary
+## Static validation and the runtime boundary
 
 Before discovery, Slice 1 validates discriminator/version, types and bounds,
 site requirements, unique target names, at most one public target, public
@@ -133,11 +134,12 @@ containment, target/edition/input/layout/theme overlaps, machine-root
 separation, target-local public-artifact collisions, and known compiler-owned
 roots (`.boris-cache`, `_boris/search`).
 
-Dynamic ownership validation is deliberately deferred: it requires the
-discovered content, layouts, assets, routes, and staged output inventory to
-detect page/asset/derived-route collisions, actual filesystem conflicts, and
-symlink races. This slice performs no publication, so it cannot claim those
-checks or commit semantics. URL projection audits, deployment verification,
+The parser does not perform dynamic ownership validation. Executed HTML targets
+use the existing compiler checks over discovered content, layouts, assets,
+routes, and staged output inventory for page/asset/derived-route collisions,
+filesystem conflicts, and symlink safety. Existing per-target staging and
+per-file commit limitations remain unchanged; profile execution adds no
+whole-publication transaction. URL projection audits, deployment verification,
 and post-deploy HTTP checks remain outside the profile parser and plan
 declaration. Runtime HTML/RSS/llms coordinators may consume the normalized
 profile identity as one shared `{base_url, origin, base_path, site_kind}`
@@ -159,7 +161,46 @@ than a publication coordinator. Full profile execution remains deferred until
 a coordinator can execute every configured entry without silently ignoring any
 of them.
 
-For the existing HTML `build --profile` metadata opt-in, Boris requires one
+### HTML execution
+
+```text
+boris build --profile boris.json
+boris watch --profile boris.json --serve
+boris validate --profile boris.json --report diagnostics.json
+```
+
+Without explicit HTML selectors, the profile selects input, input format,
+target names/outputs, fallback theme/layout, layout rules, static files,
+sitemap, and publication location. All declared HTML targets execute in
+canonical name order with the existing target-isolation, staging, cache, and
+failure policies. No synthetic `default` target replaces a declared target.
+Standard.site verification and enabled Nostr head links remain offline,
+opt-in metadata surfaces, not network publication.
+
+Explicit `--input` and `--textile`/`--cooklang` override profile input values
+and are validated again; paths remain workspace-relative. `--quiet`, `--jobs`,
+`--incremental`, and `--refresh-evidence` retain their normal build meanings.
+Validation still rejects build execution controls and competing HTML selectors.
+`--report` retains its normal CWD-relative explicit-file meaning.
+
+This slice refuses profile editions (`ir`, `rag`, `context`), target RSS/llms,
+multi-target sitemap/static or publication metadata, and sitemap without
+`site.url`. Watch also refuses Standard.site verification (its projection
+cannot yet be refreshed each cycle); Standard.site verification refuses input
+overrides. Each refusal names the unsupported field and exits 2 even under
+`--quiet`, before writing a subset. These are execution boundaries, not
+changes to what the profile parser or `plan` accepts.
+
+Watch uses a startup snapshot of the profile. Restart after changing the
+profile itself. Content, layouts, theme assets/footer, and the selected static
+directory participate in the normal watch feedback loop; Nostr links persist
+across rebuilds. `--serve` serves the first canonical target, and SIGINT/SIGTERM
+retain the normal exit-0 shutdown. Watch with competing HTML selectors is a
+usage error. `validate --profile --watch` remains unavailable.
+
+### Existing explicit-selector metadata opt-in
+
+For HTML `build --profile` with explicit HTML selectors, Boris requires one
 declared target and one selected CLI target, then compares the profile's
 workspace-relative `input`, `input_format`, target name/output, fallback
 theme/layout, layout rules, static directory, and sitemap path/URL against
@@ -169,10 +210,5 @@ agree with the profile's publication URL. It also refuses profile editions
 Standard.site or Nostr metadata surface. A mismatch is an exit-2 error naming
 the first unselected field/target before output is written, even with
 `--quiet`; matching CLI flags continue to emit Standard.site and Nostr
-surfaces. `validate --profile PATH` executes the declared HTML targets as a
-zero-write prepublication validation pass and refuses — with exit 2 and a
-named field — any declaration it cannot execute (editions, per-target
-RSS/llms, multi-target sitemap/static, publication locations, sitemap
-without `site.url`); `watch` still rejects `--profile` at argument parsing.
-A profile is not a shortcut for `--target`, `--theme`, `--layout-rule`, or
-`--static-dir`.
+surfaces. To use the profile as the source of HTML configuration instead,
+omit those explicit HTML selectors.

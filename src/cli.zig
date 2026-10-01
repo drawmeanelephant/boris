@@ -193,6 +193,10 @@ pub const Options = struct {
     profile_input_override: ?[]const u8 = null,
     profile_input_format_override: ?identity.InputFormat = null,
     profile_html_output_override: ?[]const u8 = null,
+    /// No explicit HTML selectors: the selected profile drives the HTML run.
+    profile_driven_html: bool = false,
+    /// Resolved profile workspace, owned by the executing profile request.
+    profile_workspace_root: ?[]const u8 = null,
     impact_id: ?[]const u8 = null,
     /// Target directory for `boris init [DIR]` (default: ".").
     init_dir: ?[]const u8 = null,
@@ -2157,8 +2161,8 @@ fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
 /// mode-selection tail (`build`, `validate`, `check`, `impact`, `watch`).
 /// Per-family validation lives with each command's builder above.
 fn validateBuildConflicts(st: *ParseState) ParseError!void {
-    // `--profile` on the HTML build is the Standard.site verification-emit
-    // opt-in (#533) and the Nostr `nostr:naddr` alternate-link emit (#571).
+    // Without HTML selectors, `--profile` drives the HTML run. Explicit
+    // build selectors retain the matching Standard.site/Nostr metadata path.
     // Other modes already have their own profile commands (`plan`,
     // `standard-site *`, `nostr plan`) or do not emit surfaces. A single
     // conflicting mode/selector is named as typed (#764, #874); a
@@ -2190,8 +2194,9 @@ fn validateBuildConflicts(st: *ParseState) ParseError!void {
             if (validate_profile_scan.triggered == 1) return failConflict(st, "--profile", validate_profile_scan.offender);
             if (validate_profile_scan.triggered > 1) return error.ConflictingFlags;
         } else {
+            if (st.saw_watch and htmlSelectorToken(st) != null)
+                return failConflict(st, "--profile", htmlSelectorToken(st).?);
             const profile_scan = scanConflicts(&.{
-                .{ .token = if (st.command == .watch) "watch" else "--watch", .triggered = st.command == .watch or st.saw_watch },
                 .{ .token = "check", .triggered = st.command == .check },
                 .{ .token = "impact", .triggered = st.command == .impact },
                 .{ .token = "--rag", .triggered = st.saw_rag },
@@ -2569,6 +2574,12 @@ fn buildOptionsForMode(
             o.serve_port = st.serve_port;
             o.html_profile = default_profile;
             o.profile_path = st.profile_path;
+            // The synthetic target has already been inserted at this point;
+            // use the saved explicit-target state, not targets.items.len.
+            o.profile_driven_html = st.saw_profile and !had_explicit_targets and
+                !st.saw_html and !st.saw_html_dir and !st.saw_html_layout and
+                !st.hasTargetLayouts() and !st.hasTargetProfiles() and !st.hasLayoutRules() and
+                !st.wantsSitemap() and !st.wantsStatic() and !st.saw_site_url and !st.sawPagesLocation();
             o.profile_input_override = if (st.saw_input) st.input_dir else null;
             o.profile_input_format_override = if (st.saw_textile or st.saw_cooklang) st.inputFormat() else null;
         },
@@ -2673,7 +2684,8 @@ pub const usage_text =
     \\  --out PATH          Smoke result artifact path (default: stdout)
     \\  standard-site options (all subcommands):
     \\  --session-root PATH Override the persistent session store root
-    \\  --profile PATH      HTML metadata opt-in for build (Standard.site / Nostr; flags must match declared targets); with validate, profile-driven validation
+    \\  --profile PATH      Build/watch/validate the declared HTML targets (no HTML selectors)
+    \\                      Explicit build selectors retain the matching metadata opt-in
     \\  --html              Explicit HTML site mode → --html-dir (default dist)
     \\  --html-dir <DIR>    HTML site mode with output directory DIR
     \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
@@ -2738,7 +2750,7 @@ pub const usage_text =
     \\  --out PATH          Graph render output path (single file; default stdout)
     \\  --report PATH        Write the report to PATH (check/impact analysis; build/validate HTML diagnostics)
     \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
-    \\  --profile PATH      Selected publication profile for `plan` (and profile-driven `validate`)
+    \\  --profile PATH      Selected publication profile for plan/build/watch/validate
     \\  --id PAGE            Recipe page entity id (`recipe-scale`; required)
     \\  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; exclusive with --servings)
     \\  --servings N         Target serving count (`recipe-scale`; exclusive with --factor)
@@ -3520,7 +3532,10 @@ test "parse: plan requires a profile and rejects execution or projection selecto
     defer html_profile.deinit(std.testing.allocator);
     try expectEqual(Mode.html, html_profile.mode);
     try expectEqualStrings("site.json", html_profile.profile_path.?);
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--watch", "--profile", "site.json" }));
+    try expect(html_profile.profile_driven_html);
+    var watch_profile_parse = try parseOptions(std.testing.allocator, &.{ "boris", "--watch", "--profile", "site.json" });
+    defer watch_profile_parse.deinit(std.testing.allocator);
+    try expect(watch_profile_parse.watch and watch_profile_parse.profile_driven_html);
     // `validate --profile` is profile-driven validation (#1006): the parse
     // carries the profile and its documented input overrides, while HTML
     // selectors are conflicts (named pair below).
@@ -5115,13 +5130,14 @@ test "parse detail: single-cause mode conflicts name the pair (#874)" {
     try expectEqualStrings("check", check_profile.conflict_a.?);
     try expectEqualStrings("--profile", check_profile.conflict_b.?);
 
-    // Flag × flag: watch mode against --profile on a build.
+    // The compatibility watch spelling also permits profile-driven HTML.
     var watch_profile = ParseErrorDetail{};
-    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+    var watch_opts = try parseOptionsWithDetail(std.testing.allocator, &.{
         "boris", "build", "--watch", "--profile", "p.json",
-    }, &watch_profile));
-    try expectEqualStrings("--watch", watch_profile.conflict_a.?);
-    try expectEqualStrings("--profile", watch_profile.conflict_b.?);
+    }, &watch_profile);
+    defer watch_opts.deinit(std.testing.allocator);
+    try expect(watch_opts.profile_driven_html and watch_opts.watch);
+    try expect(watch_profile.conflict_a == null);
 
     // Multi-cause argv keeps the generic form rather than guessing a pair.
     var multi = ParseErrorDetail{};

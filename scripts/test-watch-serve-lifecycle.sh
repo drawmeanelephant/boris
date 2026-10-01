@@ -128,5 +128,101 @@ WATCH_PID=""
 grep -q "watch: received shutdown signal" "$WATCH_LOG" || fail "no shutdown message in watch log"
 pass "clean SIGTERM shutdown (exit 0, signal message logged)"
 
+note "profile-driven watch selects its layout and static directory"
+mkdir -p "$OUT/static"
+printf 'Profile robots one.\n' >"$OUT/static/robots.txt"
+cat >"$OUT/content/index.md" <<'MD'
+---
+id: index
+title: Profile watch
+status: published
+published_at: 2024-01-20T14:30:00Z
+summary: Watch profile metadata.
+---
+
+# Watch lifecycle
+
+Version two.
+MD
+printf '<html><head>{{head}}</head><body>PROFILE-LAYOUT {{content}}</body></html>\n' >"$OUT/theme/layouts/home.html"
+cat > "$OUT/boris.json" <<'JSON'
+{
+  "format": "boris-publication-profile",
+  "schema_version": 1,
+  "input": "content",
+  "publication": {
+    "target": "github-pages", "base_url": "https://example.test/",
+    "origin": "https://example.test", "base_path": ""
+  },
+  "targets": [{
+    "name": "public", "output": "profile-site", "public": true, "theme": "theme",
+    "layout_rules": [{"selector": "id:index", "layout": "theme/layouts/home.html"}],
+    "static": {"dir": "static"}
+  }],
+  "nostr": {
+    "enabled": true,
+    "pubkey": "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919",
+    "articles": ["index"], "relays": ["wss://relay.example.com"]
+  }
+}
+JSON
+WATCH_LOG="$OUT/profile-watch.log"
+"$BORIS" watch --profile "$OUT/boris.json" --serve --port 0 >"$WATCH_LOG" 2>&1 &
+WATCH_PID=$!
+PORT=""
+for _ in $(seq 1 40); do
+    PORT="$(sed -n 's/.*preview: http:\/\/127\.0\.0\.1:\([0-9]*\)\/.*/\1/p' "$WATCH_LOG" | head -1)"
+    [[ -n "$PORT" ]] && break
+    kill -0 "$WATCH_PID" 2>/dev/null || fail "profile watch exited: $(tail -3 "$WATCH_LOG")"
+    sleep 0.25
+done
+[[ -n "$PORT" ]] || fail "profile preview server never bound"
+curl -fsS --max-time 5 "http://127.0.0.1:$PORT/" | grep -q PROFILE-LAYOUT || fail "profile layout was ignored"
+curl -fsS --max-time 5 "http://127.0.0.1:$PORT/robots.txt" | grep -q 'robots one' || fail "profile static directory was ignored"
+grep -q 'nostr:naddr1' "$OUT/profile-site/index.html" || fail "profile Nostr links were ignored"
+pass "profile target is served with its rule layout and static files"
+
+note "profile watch rebuilds layout and static changes"
+printf '<html><head>{{head}}</head><body>PROFILE-UPDATED {{content}}</body></html>\n' >"$OUT/theme/layouts/home.html"
+printf 'Profile robots two.\n' >"$OUT/static/robots.txt"
+UPDATED=""
+for _ in $(seq 1 40); do
+    if curl -fsS --max-time 5 "http://127.0.0.1:$PORT/" | grep -q PROFILE-UPDATED \
+        && curl -fsS --max-time 5 "http://127.0.0.1:$PORT/robots.txt" | grep -q 'robots two'; then
+        UPDATED="yes"
+        break
+    fi
+    sleep 0.25
+done
+[[ "$UPDATED" == yes ]] || fail "profile layout/static edits did not rebuild"
+grep -q 'nostr:naddr1' "$OUT/profile-site/index.html" || fail "Nostr links disappeared on rebuild"
+pass "workspace-relative layout and static changes rebuilt"
+
+note "profile watch preserves last-good output and recovers from content errors"
+printf '%s\n' '---' 'parent: missing-parent' '---' 'Broken page.' >"$OUT/content/index.md"
+for _ in $(seq 1 40); do
+    grep -q EPARENTMISSING "$WATCH_LOG" && break
+    sleep 0.25
+done
+grep -q EPARENTMISSING "$WATCH_LOG" || fail "profile watch never reported the content failure"
+kill -0 "$WATCH_PID" 2>/dev/null || fail "profile watcher stopped on recoverable error"
+curl -fsS --max-time 5 "http://127.0.0.1:$PORT/" | grep -q PROFILE-UPDATED || fail "last-good output was lost"
+printf '# Watch lifecycle\n\nProfile recovered.\n' >"$OUT/content/index.md"
+UPDATED=""
+for _ in $(seq 1 40); do
+    if curl -fsS --max-time 5 "http://127.0.0.1:$PORT/" | grep -q 'Profile recovered'; then
+        UPDATED="yes"
+        break
+    fi
+    sleep 0.25
+done
+[[ "$UPDATED" == yes ]] || fail "profile watcher never recovered"
+kill -TERM "$WATCH_PID"
+RC=0
+wait "$WATCH_PID" || RC=$?
+WATCH_PID=""
+[[ "$RC" == 0 ]] || fail "profile watcher exited $RC on SIGTERM"
+pass "profile watcher recovered and shut down cleanly"
+
 rm -rf "$OUT"
 echo "watch-serve-lifecycle: all assertions passed"

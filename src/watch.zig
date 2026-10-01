@@ -13,6 +13,7 @@ const html_report = @import("html_report.zig");
 const watch_json = @import("watch_json.zig");
 const timings = @import("timings.zig");
 const publication_touches_mod = @import("publication_touches.zig");
+const nostr_emit = @import("nostr_emit.zig");
 
 /// Debounce window after the first change is observed (ms).
 pub const debounce_ms: i64 = 100;
@@ -612,6 +613,8 @@ pub const WatchCoordinator = struct {
     /// Opt-in phase timing/counter recorder (`--timings`); threaded into
     /// every initial + rebuild compile so the shutdown report carries data.
     recorder: ?*timings.Recorder = null,
+    /// Startup profile snapshot, owned by the caller for the watch lifetime.
+    nostr_head: ?*const nostr_emit.HeadConfig = null,
 
     /// Build the ignore-root list once for the coordinator lifetime
     /// (final outs + sibling `.boris-stage` trees).
@@ -792,6 +795,8 @@ pub const WatchCoordinator = struct {
         }
         if (subset) |targets| {
             if (compile.compileHtmlSiteMulti(self.io, self.gpa, targets, .{
+                .workspace_root = self.options.profile_workspace_root,
+                .nostr_head = self.nostr_head,
                 .content_root = self.options.input_dir,
                 .layout_path = layout_default,
                 .incremental = self.options.incremental,
@@ -1001,7 +1006,22 @@ pub const WatchCoordinator = struct {
         // Validate mode has no target fan-out: the single synthesized
         // "default" target is always rebuilt, so no layout subsetting.
         if (self.action == .html and self.options.targets.items.len > 0) {
-            owned_subset = try selectTargetsForRebuild(self.gpa, paths.items, self.options.targets.items, layout_default);
+            // Profile layout names are workspace-relative while watcher
+            // events are absolute. Strip only that workspace prefix before
+            // comparing; content and unknown events still rebuild all targets.
+            var keys: std.ArrayList([]const u8) = .empty;
+            defer keys.deinit(self.gpa);
+            for (paths.items) |path| {
+                const key = if (self.options.profile_workspace_root) |root|
+                    if (target_mod.hasAbsPathPrefix(path, root, builtin.os.tag == .macos or builtin.os.tag == .windows) and path.len > root.len)
+                        path[root.len + 1 ..]
+                    else
+                        path
+                else
+                    path;
+                try keys.append(self.gpa, key);
+            }
+            owned_subset = try selectTargetsForRebuild(self.gpa, keys.items, self.options.targets.items, layout_default);
             subset = owned_subset;
         }
         defer if (owned_subset) |s| self.gpa.free(s);
