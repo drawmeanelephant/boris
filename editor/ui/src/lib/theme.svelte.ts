@@ -24,7 +24,12 @@ function schemeTheme(): ThemeName {
 export const theme = $state<{ current: ThemeName }>({ current: 'light' });
 
 function applyTheme() {
-  document.documentElement.dataset.theme = theme.current;
+  const root = document.documentElement;
+  root.dataset.theme = theme.current;
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColor) {
+    themeColor.content = getComputedStyle(root).getPropertyValue('--color-canvas').trim();
+  }
 }
 
 let started = false;
