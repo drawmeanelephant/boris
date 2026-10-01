@@ -1,6 +1,8 @@
 # Nostr publication (NIP-23: plan, sign, publish)
 
 **Status:** normative contract for the three-command NIP-23 pipeline.
+The [approved NIP-42 boundary](#approved-nip-42-boundary-phase-1-1002) is a
+phase-1 design, not a shipped capability or an amendment to v1 behavior.
 `boris nostr plan --profile PATH` reads one explicitly selected local
 publication profile, selects the allowlisted pages that are eligible as
 NIP-23 long-form articles, derives the publication-safe Markdown and tag
@@ -635,6 +637,446 @@ handshake and then stops reading forces the client's flush to block, and the
 per-write deadline must interrupt it mid-flush (`WriteTimeout`) rather than
 hang. Both mock relays (in-repo and Python TLS) reassemble fragmented client
 messages, as a conforming server must.
+
+## Approved NIP-42 boundary (phase 1, #1002)
+
+**Status: phase-1 boundary approved by the user on 2026-10-01; not implemented.**
+Approval covers the design and its publication for handoff. Implementation
+requires a separate phase-2 instruction; this change does not authorize code.
+Refs [#1002](https://github.com/drawmeanelephant/boris/issues/1002).
+The [#493 v1 decision](https://github.com/drawmeanelephant/boris/issues/493)
+stands: unsupported authentication is a **Documented limitation**, not a
+defect. Everything in this section is an approved post-v1 design requirement. The
+current CLI, six-key profile grammar, artifact schemas, offline signer, and
+`auth-required` outcome above remain authoritative for shipped behavior.
+This design adds neither a verified publication target nor a Proof Pack claim.
+
+### Protocol revision and evidence
+
+On **2026-10-01**, re-read the complete official
+[NIP-42](https://github.com/nostr-protocol/nips/blob/656cecc7c0a815b6a2b218d3b5d6f078b3f4dbab/42.md)
+and
+[NIP-01](https://github.com/nostr-protocol/nips/blob/656cecc7c0a815b6a2b218d3b5d6f078b3f4dbab/01.md)
+at **`656cecc7c0a815b6a2b218d3b5d6f078b3f4dbab`** (commit date
+2026-08-08). This is the existing pin, not a claim that upstream head still
+matches it. Phase 2 must re-read these pinned texts and record any deliberate
+revision change before implementation.
+
+The governing facts are:
+
+- NIP-42 is `draft`, `optional`, `relay`. The relay sends
+  `["AUTH", <challenge-string>]`; the client sends
+  `["AUTH", <signed-event>]`, and the relay must answer with an `OK`.
+- **The challenge is an untrusted string, not a signed relay statement.**
+  There is no challenge signature or timestamp to verify. Transport peer
+  authentication, exact connection association, local lifetime limits, and
+  verification of **our response event** are the checks Boris can perform.
+- The response is kind `22242`, with the received challenge and relay URL
+  tags and a current `created_at`. NIP-01 makes that kind ephemeral; NIP-42
+  says it is not meant to be published or queried and relays must not
+  broadcast it. Ephemeral describes the **event**, not a new secret key.
+- A challenge lasts for its connection or until a new challenge replaces it.
+  NIP-42 permits challenges at any moment, including around a denied
+  operation; it does not guarantee a proactive challenge.
+- NIP-01's canonical event-id preimage and BIP-340 signature rules apply.
+  An auth `OK` names the **auth event id**, not the article id.
+  `auth-required:` means authentication is needed; `restricted:` means the
+  authenticated identity is not authorized for the operation.
+
+Current-code evidence at `main` revision `08969742`: `sendEvent` in
+`src/nostr_publish.zig` sends the article before `readUntilOk`; the latter
+classifies `AUTH` or an `auth-required:` rejection as unsupported. The
+`auth-required` and mixed-relay cases in `src/nostr_publish_matrix_test.zig`
+pin that v1 behavior. Phase 2 must insert an opt-in pre-article gate in this
+publisher, not build a second transport or publisher.
+
+### Decision: a scoped sign-session supervisor, a keyless publisher
+
+Keep ordinary `nostr sign` entirely offline. Add a **separate, explicit mode
+of `nostr sign`** that holds the author key while supervising a keyless
+`nostr publish` child. The supervisor itself opens no network connection;
+only the child uses the existing WebSocket client. The two processes exchange
+bounded public requests and signed auth events over private anonymous pipes.
+No secret, derived secret, keypair, nonce seed, secp256k1 context, or signing
+auxiliary randomness is returned to the child.
+
+Proposed invocation, **not available today**:
+
+```text
+boris nostr sign --auth-session --plan PLAN --bundle BUNDLE --key-stdin \
+  [--report-out REPORT]
+```
+
+This mode does not sign articles or create a bundle. The existing offline
+`nostr sign --plan PLAN --key-stdin [--out BUNDLE]` runs first, in a different
+invocation. Session mode requires its already-signed bundle, rejects
+`--prior`, `--created-at`, and bundle `--out`, and forwards the child's
+publish report to stdout or `--report-out`. There is no production auth-time
+override. The only secret-input spelling remains `--key-stdin` on
+`nostr sign`; `publish` has no secret input.
+
+The supervisor launches the same trusted Boris executable by its resolved
+executable path, not through a shell, `PATH` lookup, profile command, or
+external helper. Its private session mode is not a public general-purpose
+signing service. There is no named pipe, listening socket, key file, daemon,
+environment credential, or signer plugin in this slice.
+
+#### Custody and startup order
+
+1. Both processes validate the exact plan/bundle and their bindings before
+   network work. Public session policy fixes the plan and bundle SHA-256
+   digests, protocol revision, expected author, opted-in relay subset, and
+   timeout. No mutable profile is re-read during the session.
+2. **Spawn and complete the child's exec before reading the key.** Wait for
+   the child's bounded, versioned `ready` handshake; it must wait for `begin`
+   before opening any relay socket. This avoids copying a key-bearing
+   supervisor address space into a forked publisher. Do not fork another
+   child after key ingestion.
+3. The child gets `/dev/null` as stdin and only its two pipe endpoints,
+   report stdout, and diagnostic stderr. It must not inherit the
+   supervisor's key-input descriptor, unrelated descriptors, or a key
+   buffer. Pipe handles are supplied by the launcher, never the profile or
+   environment; all unrelated handles are close-on-exec.
+4. The supervisor reads the bounded hex/`nsec` key once from its own stdin
+   under the existing 128-byte policy. Derive the public key and require
+   equality with the plan and bundle signer. On failure, terminate/reap the
+   waiting child; no network operation has begun. Only then send `begin`.
+5. The key and secp256k1 signing context remain in supervisor memory for this
+   invocation only. Disable core dumps before key ingestion; use the
+   existing fresh-aux-randomness and signature-self-verification policy.
+   Zero input/key/aux buffers best-effort and destroy the context on all
+   handled exit paths. No persistence or crash-recovery credential exists.
+
+| Boundary | What crosses it | What does not cross it |
+|---|---|---|
+| Operator stdin → sign supervisor | One long-lived author secret, hex or `nsec` | No argv/env/profile/file fallback |
+| Supervisor → publish child | Public policy, session controls, signed kind-22242 response | No secret key or secret signing state, including at process creation |
+| Publish child → supervisor | Relay-bound opaque challenge and public correlation fields | No arbitrary signing preimage, hash, event, content, kind, or tags |
+| Publish child → relay | Verified `AUTH` event; after its matching positive `OK`, the original article `EVENT` | No key; no changed/re-signed article; no auth event sent as `EVENT` |
+| Either process → output/evidence | Public outcomes and bounded machine reasons | No key input, raw challenge, raw auth event, pipe transcript, or raw signer error |
+
+The supervisor is trusted with custody and the publisher is trusted to
+associate a challenge with the actual verified transport. The supervisor
+cannot independently prove that a string arrived on that connection; there
+is no signed relay challenge. A compromised publisher can request a bounded
+number of auth proofs for the explicitly allowed relays, but cannot ask this
+interface to sign an article, arbitrary digest, or another kind. A compromised
+supervisor can expose its key: this design does not claim protection from a
+compromised signer, kernel, or same-user process debugger. Process separation
+is a narrow data/API boundary, **not an OS sandbox or hardware key store**.
+Platform launch/descriptor behavior must be proved in phase 2; a platform
+that cannot meet the custody rules must reject session mode.
+
+An offline extra auth step cannot predict a live connection's challenge.
+A throwaway key is not a substitute for the relay's authorized identity, and
+NIP-42 at this pin supplies no delegation from the author to that key. The
+first slice uses exactly the planned author; multi-identity auth and remote
+signers are out of scope.
+
+### Opt-in declaration and compatibility
+
+Propose one optional, closed profile object:
+
+```json
+"auth": {
+  "mode": "nip42",
+  "relays": ["wss://auth-relay.example.org"]
+}
+```
+
+It lives under `nostr`, has exactly `mode` and `relays`, and opts in only the
+named relays. Normalize/sort/dedupe with Boris's existing relay normalizer;
+require a non-empty subset of `nostr.relays`, an enabled Nostr section, and
+URLs at most 1,024 UTF-8 bytes. The expected auth identity is
+`nostr.pubkey`; there is no separate credential or executable declaration.
+Unknown keys/modes, duplicate keys, wrong types, and out-of-bound values fail
+preflight. The existing limit of 256 relays still bounds the session.
+
+Carry the static subset as `delivery.auth` in opt-in Nostr plans. An opt-in
+plan, bundle, publish report, and general publication-plan declaration use a
+deliberately versioned **schema 2**. The profile keeps its additive schema-1
+grammar extension; old strict profile parsers already reject `auth` as an
+unknown key. Phase 2 updates the affected profile/plan
+contracts, parsers, and focused fixtures together. Old consumers must refuse
+the new version, not silently ignore required authentication. Plan digests
+bind the auth policy, but article intention digests and NIP-23 wire events
+do not change merely because transport auth is enabled.
+
+With `auth` absent, retain current schema-1 bytes, CLI behavior, offline
+signing, relay ordering, retries, diagnostics, and classification exactly.
+Do not emit `"auth": null`, spawn a supervisor, or wait for a challenge on
+that path. For relays outside the subset in a session run, use the existing
+unauthenticated publish path; an unexpected auth demand remains
+`auth-required`, never automatic consent to authenticate. Thus a mixed plan
+can publish normally to unauthenticated relays.
+
+An opt-in publish requires the live private signer session. A direct
+`nostr publish` without it refuses the invocation before any sockets open
+(exit 2); it must not silently drop the opt-in policy or read a key instead.
+Ordinary `plan` and bundle `sign`, including opt-in plans, remain offline.
+No challenge, auth timestamp, connection nonce, auth signature, auth event
+id, or observed relay outcome enters a plan or signed article bundle.
+
+### Minimal signer interface
+
+Use two unidirectional anonymous pipes, a four-byte big-endian length prefix,
+and strict UTF-8 JSON payloads. Version the handshake and every message as
+`boris-nostr-auth-ipc` version `1`; reject unknown/duplicate keys, trailing
+bytes, wrong types, unexpected messages, and lengths over **32,768 bytes**
+before allocation. JSON nesting is capped at eight containers. Private
+correlation tokens are public randomness, not credentials, and are not
+persisted in the report.
+
+Each sign request contains only:
+
+- The session's plan/bundle digests and protocol revision.
+- The supervisor's fresh 128-bit run nonce from the handshake, the child's
+  fresh 128-bit connection nonce, monotonically increasing request number,
+  normalized relay URL, and generation `1` or `2`.
+- The exact decoded challenge string.
+
+The supervisor independently compares every policy field, bounds the
+challenge, and enforces the per-relay generation/request budget. It generates
+`created_at` from its clock and constructs the event itself. The publisher
+cannot supply a kind, timestamp, tags, content, event id, or digest to sign.
+One request is outstanding at a time, matching the existing sequential relay
+loop. At most two requests per opted-in relay are allowed for the whole run.
+Close/retire a connection with an explicit control message; it cannot later
+be reactivated. No reconnect or auth retry opens an additional budget.
+
+The response echoes all correlation fields except the challenge and contains
+only a structured refusal code or the signed auth event. The event necessarily
+contains the challenge tag; there is no second challenge copy or secret
+response field. Both processes check current generation and request identity,
+and neither treats successful IPC or signer self-verification as relay
+authentication success.
+
+Cancellation on replacement invalidates the old request, even if its response
+is already in flight. A response for a retired request is discarded without
+sending `AUTH`; duplicate or otherwise unexpected responses fail the session.
+A signer refusal affects its relay; other relays continue. A persistent
+signing failure reported over a healthy channel disables authentication for
+remaining opted-in relays, while the publisher still attempts non-opted-in
+relays. Broken IPC, malformed session controls, or supervisor death instead
+cancel the whole session: no publisher is allowed to run orphaned. Never fall
+back to unsigned auth or secret ingestion.
+
+Startup, key input, and each complete IPC frame use `delivery.timeout_ms`,
+with non-renewing monotonic deadlines. Between requests the supervisor may
+wait while the child visits ordinary relays, but both enforce a **600,000 ms
+total session ceiling** from `begin`; progress cannot renew it. All relay
+and auth deadlines are clipped to that remaining budget. At this ceiling,
+stop new writes, report unfinished relays as `timeout` / `session-timeout`
+with remaining articles `not-attempted`, and preserve accepted evidence.
+This cap applies only to opt-in session mode. The supervisor erases custody,
+allows 1,000 ms for the child's report/exit, then terminates/reaps it if needed;
+an unfinished report is a system failure, not a fabricated completed verdict.
+
+On channel EOF or explicit cancellation, the supervisor erases custody and
+terminates/reaps its own child, escalating after **1,000 ms** if necessary.
+The child monitors supervisor/channel liveness during network and IPC waits
+and stops on loss. Teardown cannot turn cancellation into a success report.
+
+### Relay gate, challenge lifetime, and response verification
+
+**Choose proactive-only authentication for this first slice.** On an opted-in
+connection, wait for a valid challenge before sending any article. If the
+relay waits for a denied `EVENT` before issuing `AUTH`, this mode times out
+and sends no article; there is no speculative article, probe `REQ`, guessed
+challenge, or fallback to the NIP-42 denied-write/retry example. Such relays
+are a documented compatibility limitation. Supporting them would require a
+separate reviewed consent/acceptance change, because sending the initial
+article contradicts the requested pre-article gate.
+
+For each opted-in relay:
+
+1. Verify the existing WebSocket upgrade and, for production `wss://`, CA
+   chain and hostname before requesting a signature. Plain `ws://` remains
+   loopback-test-only, never evidence of an authenticated remote peer.
+   Bind the response to the **configured normalized URL**, including scheme,
+   non-default port, and path; no redirects, challenge-provided URL, DNS
+   address substitution, or domain-only match is allowed.
+2. Accept exactly a two-element `["AUTH", string]` message. Require valid
+   UTF-8 and 1–4,096 decoded bytes; reject C0 controls and DEL as a Boris
+   local safety policy, not a NIP-42 requirement. Do not trim, case-fold, or
+   Unicode-normalize the challenge. The auth-phase incoming message ceiling
+   is 32,768 bytes, including fragmented reassembly. Oversize declarations
+   fail before oversized allocation. Malformed frames/JSON fail this relay.
+3. Track `(run, connection, relay, generation, challenge)` in transient
+   memory. A challenge is active only on that live connection. Remember
+   challenge SHA-256 values per normalized relay for this run: seeing the
+   same decoded challenge again, even after replacement, fails as `replay`.
+   There is no durable replay database and no claim to detect reuse across
+   invocations or prove a relay's challenge randomness or issuance time.
+4. Use a monotonic deadline of `delivery.timeout_ms` to obtain the first
+   challenge, then one **non-renewing** auth deadline of
+   `min(3 * delivery.timeout_ms, 60_000)` ms from its receipt. Its local
+   lifetime covers signing, verification, sending `AUTH`, and receiving
+   the matching `OK`. Individual operations also retain their existing
+   read/write deadlines, clipped to the remaining auth budget. `NOTICE`,
+   Ping/Pong, fragments, partial IPC, and replacement never extend the
+   absolute deadline. This bounds trickle traffic as well as silence.
+5. Allow **one distinct replacement before the first article is sent**.
+   Retire generation 1, cancel its signer request/auth wait, and sign only
+   generation 2 under the original auth deadline. Ignore late `OK`s only
+   for the explicitly retired auth id, within that same bounded wait.
+   A third challenge, repeated challenge, or unrelated `OK` fails closed.
+   If the first auth had succeeded but no article has yet gone out, a
+   replacement closes the gate until its own positive `OK`.
+6. The supervisor constructs exactly the NIP-01 fields below. It computes
+   and self-verifies the id/signature using the existing pinned secp256k1
+   wrapper, fresh CSPRNG aux bytes, and randomized context:
+
+   ```text
+   pubkey     = plan.author.expected_pubkey
+   created_at = current Unix seconds from the supervisor
+   kind       = 22242
+   tags       = [["relay", normalized_relay_url], ["challenge", exact_challenge]]
+   content    = ""
+   id         = SHA256(UTF8 canonical JSON [0,pubkey,created_at,22242,tags,""])
+   sig        = BIP-340 signature of that 32-byte id
+   ```
+
+7. Before sending `AUTH`, the publisher independently checks the response's
+   exact correlation, active challenge/generation/connection, unexpired
+   monotonic deadline, expected public key, exact kind/content/two ordered
+   two-string tags, and absence of extra event fields. Require integer Unix
+   seconds within **60 seconds** of its current wall clock; a clock jump
+   outside that tolerance fails, never widens the bound. Recompute the
+   canonical NIP-01 preimage and lowercase 64-hex event id, and verify the
+   lowercase 128-hex BIP-340 signature. The stricter local freshness bound
+   is distinct from NIP-42's illustrative approximately ten-minute relay
+   check. Mismatch, stale response, id/signature failure, or oversized
+   signer output sends neither auth nor article.
+8. Send the verified event **once** as `["AUTH", event]` on that same
+   connection, never to other relays, never as `EVENT`, never persisted.
+   Accept only an exact four-element `["OK", auth_id, boolean, string]`;
+   `NOTICE`, signing completion, `auth-required:`, and an article's `OK`
+   are not auth success. Matching `true` opens the article gate; matching
+   `false` is rejection. Wrong id, malformed `OK`, Close, or deadline
+   failure closes this relay without sending an article.
+9. Only after that positive `OK`, send the exact already-verified NIP-23
+   wire event with the existing serializer. Never change its id, timestamp,
+   signature, tags, or content. Identical-byte article timeout retries may
+   run on this authenticated connection; `delivery.retries` does **not**
+   retry authentication, rejection, or protocol failure.
+
+While signing, the publisher must keep processing the live connection to
+observe replacement, Ping, and Close within the same budgets. Before each
+article write, process already-buffered relay control messages and check the
+gate. After any article write, a new `AUTH` terminates this slice's relay
+session rather than starting another signing round; an `auth-required:`
+article rejection also stops later writes. Preserve already accepted article
+evidence. If an article is in flight without an `OK`, report its acceptance
+as unknown (`timeout` with no further retry), not definitively rejected.
+Remaining articles are `not-attempted`.
+
+The no-article guarantee covers any failure **observed before the associated
+write**. A relay can send a replacement concurrently with a write or after
+receiving earlier articles; neither the protocol nor a local client can
+unsend those bytes. Do not claim atomic challenge validity across two peers,
+global replay prevention, or reversal of accepted articles.
+
+### Per-relay evidence, diagnostics, and run classification
+
+Schema-2 reports retain article outcomes separately from an `auth` object
+on each relay. A non-opted-in relay has auth status `not-requested`.
+The object records the public expected auth pubkey, final status, bounded
+reason code, phase, signing-request count, actual AUTH-send count, and up to
+two exchange records containing generation, public auth event id and
+`created_at` when available, and result (`authenticated`, `rejected`,
+`superseded`, `timeout`, `closed`, `protocol-error`, or `signer-error`).
+Missing facts are null, never fabricated. These are temporal publish
+observations, not deterministic plan/bundle facts.
+
+| Final auth status | Meaning | Relay delivery outcome before any article |
+|---|---|---|
+| `not-requested` | Relay outside opt-in subset | Existing v1 outcome |
+| `authenticated` | Matching positive auth `OK`; connection not subsequently invalidated | Determined only by article results |
+| `rejected` | Matching negative auth `OK` | `auth-required` for that prefix; otherwise `rejected` |
+| `timeout` | Challenge, signer, AUTH write, or auth `OK` missed its bounded deadline | `timeout` |
+| `closed` | Relay closed before authentication completed | `closed` |
+| `protocol-error` | Malformed, oversized, replayed, stale, or mismatched challenge/response/`OK`, or replacement policy violation | `error` |
+| `signer-error` | Key/signing/session refused or signer channel unavailable | `error` |
+
+Use a closed reason vocabulary: `not-opted-in`, `challenge-timeout`,
+`signer-timeout`, `auth-write-timeout`, `auth-ok-timeout`, `malformed`,
+`oversized`, `replay`, `stale`, `relay-mismatch`, `identity-mismatch`,
+`event-id-mismatch`, `signature-invalid`, `unexpected-ok`,
+`replacement-limit`, `replacement-after-event`, `auth-required`,
+`restricted`, `relay-rejected`, `relay-closed`, `session-timeout`, `signer-refused`,
+`signer-unavailable`, and `session-invalid`. Record standardized rejection
+prefixes, not arbitrary human text from auth replies. A later replacement
+or auth demand updates the final auth status without rewriting its earlier
+successful exchange or article acceptance.
+
+Continue to other relays after a local failure. Emit `ENOSTRRELAY` with
+relay URL, auth phase, and fixed reason/remediation text; never interpolate
+the challenge, key input, auth event, IPC payload, or signer error string.
+Auth event ids, signatures, and pubkeys are public, but signatures/full auth
+events and challenge hashes are deliberately not report fields. The
+supervisor's refusal diagnostics follow the same no-input-echo rule.
+
+Before the gate opens, every article is `not-attempted`, with zero article
+attempts; auth attempts do not inflate the existing `attempts` field.
+Schema-2 classification must also consider relay-level auth timeouts, so
+unsent articles cannot hide them: `complete` requires every article accepted
+by every relay; `partial` requires at least one accepted article without
+universal acceptance; with none accepted, `incomplete` means any unresolved
+relay/auth timeout, otherwise `failed`. **Auth success alone never counts
+as article acceptance.** A post-auth `restricted:` article result remains
+a publication rejection, with the successful auth exchange preserved.
+
+Startup usage/identity refusal retains the existing exit classes and opens
+no sockets. After a publish run begins, write the bounded per-relay report
+and retain publish exit 0 for a completed report regardless of verdict;
+report-write/system failure is exit 3. Session supervision relays that exit
+status, not a boolean meaning "auth worked." Cancellation is not a
+completed run and must not fabricate a final report.
+
+### Phase-2 test plan (no tests implemented in this phase)
+
+Extend `src/nostr_publish_matrix_test.zig` and focused Nostr signing/parser
+tests under the existing `zig build test-nostr` / `zig build test` gates.
+Use hostile loopback recording relays and injected clocks/aux bytes; retain
+the existing WebSocket/TLS mock paths. No public relay, author credential,
+credential store, browser, or required live-smoke gate belongs in the suite.
+"Secret-free" means no real credentials or secret-dependent configuration:
+positive signing tests may use public, disposable BIP-340 test scalars in
+memory, as the existing suite does. Never copy an operator key into a fixture.
+
+| Case | Required assertion |
+|---|---|
+| Proactive success, two articles | AUTH tags/id/signature verify under expected identity; matching auth `OK` precedes the first article; exact original article bytes; one auth session serves both |
+| Negative auth `OK`, including `auth-required:` / `restricted:` | Correct auth rejection and prefix; zero article writes; other relays continue |
+| Auth succeeds, article rejected | Separate successful auth and failed publication; never claim accepted article |
+| Malformed input | Reject non-string/empty/control-containing challenges, extra AUTH elements, invalid UTF-8/JSON, malformed/wrong-id `OK`, masked/invalid frames; zero pre-gate articles |
+| Oversized / fragmented input | Enforce decoded challenge, frame/reassembly, IPC, and auth-event bounds, including exact-limit/limit+1 cases, without excessive allocation |
+| Signer substitution | Wrong identity, URL/port/path, challenge, kind/content/tags, correlation, id, or signature fails before AUTH and EVENT; no arbitrary-event/hash signing request is accepted |
+| Freshness and replay | Deterministic fake monotonic/wall clocks cover expiry and skew; duplicate challenge and old response fail; no cross-connection/run response reuse |
+| Replacement | One pre-article replacement retires old request/id, tolerates its late reply/OK, and does not extend the deadline; repeated/third/post-article challenge stops the relay; already accepted evidence remains |
+| Silence / trickle / blocked signer | Challenge, signing, AUTH-write, auth-OK, partial-message and pipe deadlines all terminate; NOTICE/Ping floods cannot renew them; no pre-gate EVENT |
+| Operation-triggered challenge only | A relay waiting for EVENT sees none; explicit challenge-timeout, no fallback |
+| Close / cancellation / signer death | Relay-local Close/refusal keeps other relays usable; IPC EOF, malformed session controls, supervisor death and cancellation stop/reap the session; a hung request times out without granting extra signing budget |
+| Session ceiling | Fake clocks expire the non-renewing total budget even during ordinary-relay traffic; preserve prior acceptance, mark unfinished work honestly, and bound report/exit teardown |
+| Launch/custody | Prove child exec/ready precede key ingestion; child has no key stdin or key-bearing inherited memory/handles; supervisor alone reads the test scalar; no core dump or credential file |
+| Mixed relays | Auth success + unauthenticated success → complete; auth rejection/error + accepted plain relay → partial; no acceptance + any auth timeout → incomplete; definitive negatives only → failed |
+| Retry | Article timeout resends byte-identical events on the same authenticated connection; no auth resend/reconnect budget expansion; failure never authenticates a non-opted-in relay |
+| Compatibility / determinism | Schema-1 no-opt-in goldens and v1 auth-required matrix remain unchanged; repeated offline opt-in plans are byte-identical; old schema/absent-session preflight cannot ignore auth |
+| Output hygiene | Capture stdout/stderr/reports and generated files; no test key encoding, raw challenge, auth signature/event, IPC transcript, or raw helper error escapes; malicious reason text is not echoed |
+
+Phase-2 fixtures must cover opt-in schema/version rejection, deterministic
+policy serialization, schema-2 auth evidence, and mixed verdicts. A finite
+recording relay must assert **absence of EVENT**, not merely a failure report.
+Platform subprocess tests must prove actual custody and teardown rather than
+inferring them from an interface type.
+
+Phase 2 must implement against this approved boundary, especially custody/exec
+ordering, proactive-only compatibility, replacement policy, and schema
+negotiation; flag deviations rather than silently changing them. This document
+is not implementation authority without a separate phase-2 instruction.
+Public-relay demand, multi-identity authorization, remote signers, and
+reconnect/reauthentication after article delivery remain outside the first slice.
 
 ## Diagnostics
 
