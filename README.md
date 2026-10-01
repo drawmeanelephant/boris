@@ -120,6 +120,16 @@ boris nostr publish --plan PLAN.json --bundle BUNDLE.json  # online: exact signe
   classifies the run `complete` / `partial` / `failed` / `incomplete` with
   per-relay evidence, and a relay that demands NIP-42 authentication is
   reported honestly as unsupported rather than silently skipped.
+For explicit NIP-42 opt-in, configure `nostr.auth = {"mode":"nip42",
+"relays":[...]}` and run `boris nostr sign --auth-session --plan PLAN.json
+--bundle BUNDLE.json --key-stdin [--report-out REPORT.json]` after offline
+signing. The supervisor holds the key; its exec'd publisher child does not.
+Session mode currently supports macOS only. It requires a proactive relay
+challenge and sends no article before the matching positive auth `OK`.
+Reactive-only relays time out without an article probe. Opt-in artifacts
+negotiate schema 2; schema-1 consumers must refuse them.
+See the contract's phase-2 implementation notes for remaining verification
+obligations before this capability is release-ready.
 
 A bare `boris build` never needs a key, a relay, or the network, and a failed
 Nostr operation never invalidates a committed website. The normative

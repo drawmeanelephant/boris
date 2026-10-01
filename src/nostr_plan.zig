@@ -38,6 +38,7 @@ const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
 const json_out = @import("json_out.zig");
 const nostr = @import("nostr.zig");
+const auth = @import("nostr_auth.zig");
 const parser = @import("parser.zig");
 const pipeline = @import("pipeline.zig");
 const render = @import("render.zig");
@@ -69,6 +70,7 @@ pub const Options = struct {
     articles: []const []const u8,
     /// Normalized relay targets, pre-sorted by the profile parser.
     relays: []const []const u8,
+    auth_relays: []const []const u8 = &.{},
     timeout_ms: usize = nostr.default_timeout_ms,
     retries: usize = 0,
     timings: ?*timings.Recorder = null,
@@ -385,7 +387,7 @@ fn renderPlan(gpa: std.mem.Allocator, options: Options, intentions: []const Inte
     try out.appendSlice(gpa, "{\n  \"format\": ");
     try json_out.writeString(&out, gpa, artifact_format);
     try out.appendSlice(gpa, ",\n  \"schema_version\": ");
-    try json_out.writeUsize(&out, gpa, schema_version);
+    try json_out.writeUsize(&out, gpa, if (options.auth_relays.len == 0) schema_version else 2);
     try out.appendSlice(gpa, ",\n  \"protocol\": {\n    \"nips_revision\": ");
     try json_out.writeString(&out, gpa, nips_revision);
     try out.appendSlice(gpa, ",\n    \"research_date\": ");
@@ -415,6 +417,10 @@ fn renderPlan(gpa: std.mem.Allocator, options: Options, intentions: []const Inte
     try json_out.writeUsize(&out, gpa, options.timeout_ms);
     try out.appendSlice(gpa, ",\n    \"retries\": ");
     try json_out.writeUsize(&out, gpa, options.retries);
+    if (options.auth_relays.len > 0) {
+        try out.appendSlice(gpa, ",\n    \"auth\": ");
+        try auth.writeDeclaration(&out, gpa, options.auth_relays);
+    }
     try out.appendSlice(gpa, ",\n    \"config_digest\": ");
     try writeDeliveryDigest(&out, gpa, options);
     try out.appendSlice(gpa, "\n  },\n  \"articles\": [");
@@ -432,6 +438,13 @@ fn renderPlan(gpa: std.mem.Allocator, options: Options, intentions: []const Inte
 fn writeDeliveryDigest(out: *std.ArrayList(u8), gpa: std.mem.Allocator, options: Options) !void {
     var digest: [nostr.digest_hex_len]u8 = undefined;
     try nostr.deliveryDigestHex(gpa, options.relays, options.timeout_ms, options.retries, &digest);
+    if (options.auth_relays.len > 0) {
+        var policy: std.ArrayList(u8) = .empty;
+        defer policy.deinit(gpa);
+        try policy.appendSlice(gpa, &digest);
+        try auth.writeDeclaration(&policy, gpa, options.auth_relays);
+        nostr.digestHex(policy.items, &digest);
+    }
     try json_out.writeString(out, gpa, &digest);
 }
 
@@ -520,6 +533,7 @@ fn runFixture(profile_path: []const u8) !Result {
         .pubkey = config.pubkey,
         .articles = config.articles,
         .relays = config.relays,
+        .auth_relays = config.auth_relays,
         .timeout_ms = config.timeout_ms,
         .retries = config.retries,
     });
@@ -532,6 +546,29 @@ test "plan: eligible articles match the exact golden bytes" {
     defer result.deinit();
     try testing.expect(result.ok());
     try testing.expectEqualStrings(expected, result.plan.?);
+}
+
+test "NIP-42 fixture preserves article intention and emits deterministic schema 2" {
+    var before = try runFixture(fixture_root ++ "/profile.json");
+    defer before.deinit();
+    var after = try runFixture(fixture_root ++ "/profile-auth.json");
+    defer after.deinit();
+    var again = try runFixture(fixture_root ++ "/profile-auth.json");
+    defer again.deinit();
+    try testing.expectEqualStrings(after.plan.?, again.plan.?);
+    const Document = struct { schema_version: u32, articles: []const struct { entity_id: []const u8, intention_digest: []const u8, content: []const u8 }, delivery: struct { config_digest: []const u8, auth: ?auth.Declaration = null } };
+    var old = try std.json.parseFromSlice(Document, testing.allocator, before.plan.?, .{ .ignore_unknown_fields = true });
+    defer old.deinit();
+    var current = try std.json.parseFromSlice(Document, testing.allocator, after.plan.?, .{ .ignore_unknown_fields = true });
+    defer current.deinit();
+    try testing.expectEqual(@as(u32, 2), current.value.schema_version);
+    try testing.expectEqual(@as(usize, 1), current.value.delivery.auth.?.relays.len);
+    try testing.expect(!std.mem.eql(u8, old.value.delivery.config_digest, current.value.delivery.config_digest));
+    for (old.value.articles, current.value.articles) |a, b| {
+        try testing.expectEqualStrings(a.entity_id, b.entity_id);
+        try testing.expectEqualStrings(a.intention_digest, b.intention_digest);
+        try testing.expectEqualStrings(a.content, b.content);
+    }
 }
 
 test "plan: the artifact leaks no workspace, execution, or signing state" {

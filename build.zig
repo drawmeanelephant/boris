@@ -948,6 +948,9 @@ pub fn build(b: *std.Build) void {
     nostr_publish_matrix_mod.linkLibrary(secp.library);
     linkOliver(nostr_publish_matrix_mod, oliver_mod);
     const nostr_publish_matrix_tests = b.addTest(.{ .root_module = nostr_publish_matrix_mod });
+    const nostr_test_binary = b.addOptions();
+    nostr_test_binary.addOptionPath("path", exe.getEmittedBin());
+    nostr_publish_matrix_mod.addOptions("nostr_test_binary", nostr_test_binary);
     const run_nostr_publish_matrix_tests = b.addRunArtifact(nostr_publish_matrix_tests);
     run_nostr_publish_matrix_tests.setCwd(b.path("."));
     test_nostr_step.dependOn(&run_nostr_publish_matrix_tests.step);
@@ -1883,6 +1886,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_nostr_emit_tests.step);
     test_step.dependOn(&run_nostr_keys_tests.step);
     test_step.dependOn(&run_nostr_sign_tests.step);
+    test_step.dependOn(&run_nostr_publish_tests.step);
+    test_step.dependOn(&run_nostr_publish_matrix_tests.step);
     test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_publication_checks_tests.step);
     test_step.dependOn(&run_publication_claims_tests.step);

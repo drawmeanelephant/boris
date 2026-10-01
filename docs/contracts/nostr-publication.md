@@ -1,8 +1,9 @@
 # Nostr publication (NIP-23: plan, sign, publish)
 
 **Status:** normative contract for the three-command NIP-23 pipeline.
-The [approved NIP-42 boundary](#approved-nip-42-boundary-phase-1-1002) is a
-phase-1 design, not a shipped capability or an amendment to v1 behavior.
+The [approved NIP-42 boundary](#approved-nip-42-boundary-phase-1-1002)
+governs the opt-in phase-2 implementation. Its release-proof obligations
+remain in progress, as recorded below; it does not amend ordinary v1 behavior.
 `boris nostr plan --profile PATH` reads one explicitly selected local
 publication profile, selects the allowlisted pages that are eligible as
 NIP-23 long-form articles, derives the publication-safe Markdown and tag
@@ -49,7 +50,7 @@ report, never in a collapsed exit boolean.
 
 Explicit non-goals of the program as a whole:
 
-- No NIP-42 relay authentication and no NIP-09 deletion request.
+- No implicit NIP-42 relay authentication and no NIP-09 deletion request.
 - No key file, key flag, key environment variable, or key prompt. The only
   secret input is `--key-stdin` on `nostr sign`.
 - No Nostr client, relay, key manager, or wallet is vendored. Signing uses
@@ -640,9 +641,9 @@ messages, as a conforming server must.
 
 ## Approved NIP-42 boundary (phase 1, #1002)
 
-**Status: phase-1 boundary approved by the user on 2026-10-01; not implemented.**
-Approval covers the design and its publication for handoff. Implementation
-requires a separate phase-2 instruction; this change does not authorize code.
+**Status: phase-1 boundary approved on 2026-10-01; phase-2 implementation
+authorized separately and in progress.** The requirements below remain the
+approved boundary, not a reduced implementation acceptance checklist.
 Refs [#1002](https://github.com/drawmeanelephant/boris/issues/1002).
 The [#493 v1 decision](https://github.com/drawmeanelephant/boris/issues/493)
 stands: unsupported authentication is a **Documented limitation**, not a
@@ -700,7 +701,7 @@ bounded public requests and signed auth events over private anonymous pipes.
 No secret, derived secret, keypair, nonce seed, secp256k1 context, or signing
 auxiliary randomness is returned to the child.
 
-Proposed invocation, **not available today**:
+Explicit session invocation (currently macOS only):
 
 ```text
 boris nostr sign --auth-session --plan PLAN --bundle BUNDLE --key-stdin \
@@ -790,7 +791,9 @@ require a non-empty subset of `nostr.relays`, an enabled Nostr section, and
 URLs at most 1,024 UTF-8 bytes. The expected auth identity is
 `nostr.pubkey`; there is no separate credential or executable declaration.
 Unknown keys/modes, duplicate keys, wrong types, and out-of-bound values fail
-preflight. The existing limit of 256 relays still bounds the session.
+preflight. The existing implementation limit of **32 relays** still bounds
+the session. The phase-1 text incorrectly called the existing limit 256;
+phase 2 retains the actual limit rather than expanding v1 behavior.
 
 Carry the static subset as `delivery.auth` in opt-in Nostr plans. An opt-in
 plan, bundle, publish report, and general publication-plan declaration use a
@@ -1034,7 +1037,7 @@ report-write/system failure is exit 3. Session supervision relays that exit
 status, not a boolean meaning "auth worked." Cancellation is not a
 completed run and must not fabricate a final report.
 
-### Phase-2 test plan (no tests implemented in this phase)
+### Phase-2 test plan
 
 Extend `src/nostr_publish_matrix_test.zig` and focused Nostr signing/parser
 tests under the existing `zig build test-nostr` / `zig build test` gates.
@@ -1073,10 +1076,76 @@ inferring them from an interface type.
 
 Phase 2 must implement against this approved boundary, especially custody/exec
 ordering, proactive-only compatibility, replacement policy, and schema
-negotiation; flag deviations rather than silently changing them. This document
-is not implementation authority without a separate phase-2 instruction.
+negotiation; flag deviations rather than silently changing them. The separately
+supplied phase-2 instruction is implementation authority.
 Public-relay demand, multi-identity authorization, remote signers, and
 reconnect/reauthentication after article delivery remain outside the first slice.
+
+### Phase-2 implementation notes and release evidence boundary
+
+Re-read the complete official NIP-42 and NIP-01 texts at the exact pin above
+on 2026-10-01. No upstream-head equivalence or revision change is claimed.
+
+`nostr_auth.zig` owns public policy, correlation, generation/replay limits,
+narrow kind-22242 construction and independent verification.
+`nostr_auth_ipc.zig` owns anonymous-pipe framing; `nostr_auth_session.zig`
+owns custody. The existing publisher and RFC-6455 transport own all relay
+work. There are no target-registry or Proof Pack changes.
+
+The private message schema is
+[`nostr-auth-ipc-1.schema.json`](schemas/nostr-auth-ipc-1.schema.json).
+Every object is closed and every listed field is required, including explicit
+nulls in `response`. `ready` carries the fixed public policy; `begin` carries
+the fresh run nonce; `sign` carries only correlation plus challenge;
+`response` carries correlation and exactly one of event/refusal; `cancel`
+and `retire` carry current correlation; `finish` has only the envelope.
+Length, UTF-8 byte bounds, nesting, duplicate keys, policy/correlation and
+lifecycle checks are enforced in addition to JSON Schema. Complete-frame
+deadlines do not renew as partial bytes arrive. IPC transcripts are not outputs.
+
+The **one-replacement** budget permits two auth proofs per permitted relay
+while accommodating one connection-local challenge change. An unbounded
+replacement sequence would enlarge the signing oracle and permit indefinite
+challenge churn. This is not global replay protection, a claim about challenge
+randomness, or a way to unsend an article.
+
+macOS launches the resolved same executable with `posix_spawn` and
+`CLOEXEC_DEFAULT`, explicitly inheriting only stdout/stderr and two pipe
+endpoints, with `/dev/null` stdin and an empty environment. The publisher
+execs and reports `ready` before the supervisor reads key stdin. Other
+platforms refuse session mode rather than approximate this custody launcher.
+Process tests inspect the actual child executable, `/dev/null` stdin and
+descriptors before key input. They exercise SIGTERM cancellation and abrupt
+supervisor loss during key input, challenge wait, auth-OK wait and article-OK
+wait, with bounded child termination and no completed report. This is
+process/API separation, not a sandbox.
+
+Real recording-relay tests cover two-article proactive success, negative auth
+prefixes, separate article rejection, malformed/oversized challenges and OKs,
+masked frames, silence/NOTICE/Ping floods/partial traffic, replay, one replacement
+and late OK, third/post-article replacement, mixed relays, unchanged article
+retries, absent-session refusal and output hygiene. Focused verifier/policy
+tests cover identity/relay/challenge/kind/content/tag substitution, skew,
+event ID/signature failures and request budgets. Real pipe-to-publisher-to-relay
+tests inject malicious event/correlation substitutions, duplicate/late replies,
+signer refusal, hung signer and partial/oversized IPC. Injected transport and
+clock tests prove AUTH-write timeout without a teardown flush, and total-ceiling
+expiry during ordinary-relay traffic while preserving earlier article
+acceptance and skipping unstarted relays. Exact-limit fragmented auth/IPC and
+multibyte challenge cases test byte bounds. Offline article event bytes remain
+identical across schema negotiation.
+
+**Not yet fully proved:** the complete approved hostile plan still needs
+fault-injected exec/ready failures with a syscall-level no-key-read assertion,
+real-process forged handshakes and hostile control messages, cancellation/death
+specifically during blocked IPC/write operations, and entropy/secp256k1 failure
+injection. Current gates do not replace these missing auth-specific cases.
+Draft 2020-12 meta-schema checks pass for all three changed/new schemas.
+External validation covers the profile fixture, the actual emitted schema-2
+general declaration, schema-1 rejection, all eight IPC forms and omission/
+unknown-field rejection. This capability is not release-ready until the
+remaining process fault-injection obligations pass. This evidence limitation
+does not weaken the approved boundary.
 
 ## Diagnostics
 

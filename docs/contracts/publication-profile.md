@@ -156,6 +156,15 @@ tasks in schema v1. The one exception is the closed `nostr` section: it
 declares relay endpoints, `timeout_ms`, and `retries` as reviewable transport
 declarations ([nostr-publication.md](nostr-publication.md)) — parsing never
 probes a relay, and only `nostr publish` reads those controls for behavior.
+The additive schema-1 profile grammar also accepts a closed optional
+`nostr.auth` object with exactly `mode: "nip42"` and a non-empty normalized
+`relays` subset of the enabled Nostr relay list. URLs are bounded to 1,024
+UTF-8 bytes. Unknown/duplicate keys, disabled Nostr, unknown modes, wrong
+types and non-subsets fail preflight. The implementation's existing relay
+limit is **32**, not the 256 incorrectly described in the phase-1 handoff.
+This does not broaden the relay limit. A profile with authentication emits
+schema-2 plans so a schema-1 consumer cannot silently omit the requirement;
+old strict profile parsers reject the added `auth` key.
 The plan CLI is intentionally a declaration surface rather
 than a publication coordinator. Full profile execution remains deferred until
 a coordinator can execute every configured entry without silently ignoring any

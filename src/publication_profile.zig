@@ -12,6 +12,7 @@ const rss = @import("rss.zig");
 const sitemap = @import("sitemap.zig");
 const standard_site = @import("standard_site.zig");
 const nostr = @import("nostr.zig");
+const nostr_auth = @import("nostr_auth.zig");
 const target = @import("target.zig");
 const theme = @import("theme.zig");
 
@@ -154,6 +155,7 @@ pub const NostrPlan = struct {
     /// Normalized relay targets, sorted bytewise. Never a default list:
     /// where an article is published is the author's decision.
     relays: [][]u8 = &.{},
+    auth_relays: [][]u8 = &.{},
     timeout_ms: usize = nostr.default_timeout_ms,
     retries: usize = 0,
 
@@ -163,6 +165,8 @@ pub const NostrPlan = struct {
         if (self.articles.len > 0) allocator.free(self.articles);
         for (self.relays) |v| allocator.free(v);
         if (self.relays.len > 0) allocator.free(self.relays);
+        for (self.auth_relays) |v| allocator.free(v);
+        if (self.auth_relays.len > 0) allocator.free(self.auth_relays);
         self.* = undefined;
     }
 };
@@ -393,7 +397,7 @@ fn parsePlan(allocator: std.mem.Allocator, value: std.json.Value) Error!Publicat
 /// JSON shape, the allowlist canonicalization, and the ownership transfer.
 fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPlan {
     const obj = try object(value);
-    try only(obj, &.{ "enabled", "pubkey", "articles", "relays", "timeout_ms", "retries" });
+    try only(obj, &.{ "enabled", "pubkey", "articles", "relays", "timeout_ms", "retries", "auth" });
 
     var out = NostrPlan{};
     errdefer out.deinit(allocator);
@@ -425,6 +429,14 @@ fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPl
         const n = try integer(v);
         if (n > nostr.max_retries) return error.InvalidNostr;
         out.retries = n;
+    }
+    if (field(obj, "auth")) |v| {
+        if (!out.enabled) return error.InvalidNostr;
+        const auth = try object(v);
+        try only(auth, &.{ "mode", "relays" });
+        if (!std.mem.eql(u8, try string(try required(auth, "mode")), "nip42")) return error.InvalidNostr;
+        out.auth_relays = try parseNostrRelays(allocator, try required(auth, "relays"));
+        nostr_auth.validateDeclaration(allocator, .{ .mode = "nip42", .relays = out.auth_relays }, out.relays) catch return error.InvalidNostr;
     }
     return out;
 }

@@ -92,6 +92,7 @@ pub const Context = struct {
     /// secret key. Returns `InvalidSecretKey` if the key is out of range.
     pub fn keyPairFromSecretKey(self: Context, secret_key: SecretKey) Error!KeyPair {
         var kp: c.secp256k1_keypair = undefined;
+        defer std.crypto.secureZero(u8, std.mem.asBytes(&kp));
         if (c.secp256k1_keypair_create(self.ctx, &kp, &secret_key) != 1) {
             return error.InvalidSecretKey;
         }
@@ -116,6 +117,7 @@ pub const Context = struct {
     /// signs the 32-byte event id.
     pub fn signId(self: Context, id: [32]u8, keypair: KeyPair, aux_rand: ?[32]u8) Error!Signature {
         var kp: c.secp256k1_keypair = undefined;
+        defer std.crypto.secureZero(u8, std.mem.asBytes(&kp));
         if (c.secp256k1_keypair_create(self.ctx, &kp, &keypair.secret_key) != 1) {
             return error.InvalidSecretKey;
         }

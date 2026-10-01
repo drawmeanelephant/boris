@@ -33,6 +33,9 @@ const publication_plan = @import("publication_plan.zig");
 const nostr_plan = @import("nostr_plan.zig");
 const nostr_sign = @import("nostr_sign.zig");
 const nostr_publish = @import("nostr_publish.zig");
+const nostr_auth = @import("nostr_auth.zig");
+const nostr_auth_ipc = @import("nostr_auth_ipc.zig");
+const nostr_auth_session = @import("nostr_auth_session.zig");
 const init_mod = @import("init.zig");
 const timings = @import("timings.zig");
 const identity = @import("identity.zig");
@@ -634,6 +637,7 @@ pub fn runNostrPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*t
         .pubkey = config.pubkey,
         .articles = config.articles,
         .relays = config.relays,
+        .auth_relays = config.auth_relays,
         .timeout_ms = config.timeout_ms,
         .retries = config.retries,
         .timings = recorder,
@@ -1988,6 +1992,28 @@ fn standardSiteStatus(text: ?[]const u8) standard_site.Status {
 /// relay, and never publishes. The secret never enters argv, the profile, the
 /// environment, diagnostics, or any artifact.
 pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    if (opts.nostr_auth_session) {
+        const code = nostr_auth_session.supervise(io, gpa, opts.nostr_plan_path.?, opts.nostr_bundle_path.?, opts.nostr_report_out) catch |err| {
+            // No raw signer/parser error text or key input crosses output.
+            const reason: []const u8 = switch (@as(anyerror, err)) {
+                error.LaunchFailed => "launch-failed",
+                error.ChannelLost => "signer-unavailable",
+                error.SessionInvalid => "session-invalid",
+                error.Malformed => "malformed",
+                error.CustodyUnavailable => "custody-unavailable",
+                error.Timeout => "session-timeout",
+                error.InvalidKey, error.IdentityMismatch => "identity-refused",
+                else => "session-refused",
+            };
+            errPrint("error: Nostr authentication session refused ({s})\n", .{reason});
+            return switch (@as(anyerror, err)) {
+                error.InvalidKey, error.IdentityMismatch => .content_error,
+                error.InvalidAuth, error.UnsupportedPlatform, error.InvalidPlanSchema, error.InvalidBundle => .usage,
+                else => .io_error,
+            };
+        };
+        return @enumFromInt(code);
+    }
     const plan_path = opts.nostr_plan_path orelse return .usage;
     const plan_bytes = Io.Dir.cwd().readFileAlloc(
         io,
@@ -2139,20 +2165,46 @@ pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     };
     defer gpa.free(bundle_bytes);
 
-    var result = nostr_publish.run(io, gpa, .{
+    var channel: ?nostr_auth_ipc.Channel = null;
+    if (opts.nostr_auth_pipes) {
+        channel = nostr_auth_ipc.Channel.init(io, 3, 4) catch {
+            errPrint("error: invalid private auth descriptors\n", .{});
+            return .usage;
+        };
+        var arena_state = std.heap.ArenaAllocator.init(gpa);
+        defer arena_state.deinit();
+        const plan = nostr_publish.preflight(gpa, arena_state.allocator(), plan_bytes, bundle_bytes) catch {
+            errPrint("error: private auth preflight refused\n", .{});
+            return .usage;
+        };
+        const declaration = plan.delivery.auth orelse return .usage;
+        var plan_digest: [64]u8 = undefined;
+        var bundle_digest: [64]u8 = undefined;
+        @import("nostr.zig").digestHex(plan_bytes, &plan_digest);
+        @import("nostr.zig").digestHex(bundle_bytes, &bundle_digest);
+        nostr_auth_session.childBegin(&channel.?, gpa, .{ .plan_digest = &plan_digest, .bundle_digest = &bundle_digest, .nips_revision = nostr_auth.revision, .pubkey = plan.author.expected_pubkey, .relays = declaration.relays, .timeout_ms = plan.delivery.timeout_ms }) catch {
+            errPrint("error: private auth handshake refused\n", .{});
+            return .io_error;
+        };
+    }
+    var result = runNostrPublishGuarded(io, gpa, .{
         .plan = plan_bytes,
         .bundle = bundle_bytes,
+        .auth_channel = if (channel) |*c| c else null,
     }) catch |err| {
         errPrint("error: publishing failed: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
+    if (channel) |*c| {
+        c.send(gpa, nostr_auth.Finish{}, nostr_auth.Deadline.after(io, nostr_auth.teardown_ms)) catch return .io_error;
+    }
 
     if (result.diagnostics.items.len > 0) {
         pipeline.printDiagnostics(gpa, result.diagnostics.items, opts.quiet) catch return .io_error;
     }
 
-    const report = result.report orelse return .content_error;
+    const report = result.report orelse return if (result.usage_refusal) .usage else .content_error;
 
     if (opts.nostr_out_path) |out_path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = report }) catch |err| {
@@ -2181,6 +2233,28 @@ pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         std.debug.print("ok: wrote publish report ({s}) to stdout\n", .{label});
     }
     return .success;
+}
+
+fn runNostrPublishGuarded(io: Io, gpa: std.mem.Allocator, options: nostr_publish.Options) !nostr_publish.Result {
+    const channel = options.auth_channel orelse return nostr_publish.run(io, gpa, options);
+    const U = union(enum) { publish: anyerror!nostr_publish.Result, lost: anyerror!void };
+    var slots: [2]U = undefined;
+    var select: Io.Select(U) = .init(io, &slots);
+    defer while (select.cancel()) |pending| {
+        if (pending == .publish) {
+            if (pending.publish) |value| {
+                var cleanup = value;
+                cleanup.deinit();
+            } else |_| {}
+        }
+    };
+    try select.concurrent(.publish, nostr_publish.run, .{ io, gpa, options });
+    try select.concurrent(.lost, nostr_auth_ipc.Channel.monitor, .{channel});
+    const result = try select.await();
+    return switch (result) {
+        .publish => |value| value,
+        .lost => error.ChannelLost,
+    };
 }
 /// Deterministic provenance-rich AI context export (same compile + graph validation as IR/RAG).
 pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {

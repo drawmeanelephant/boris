@@ -285,6 +285,9 @@ pub const Options = struct {
     nostr_plan_path: ?[]const u8 = null,
     nostr_bundle_path: ?[]const u8 = null,
     nostr_key_stdin: bool = false,
+    nostr_auth_session: bool = false,
+    nostr_report_out: ?[]const u8 = null,
+    nostr_auth_pipes: bool = false,
     nostr_out_path: ?[]const u8 = null,
     nostr_prior_path: ?[]const u8 = null,
     nostr_created_at: ?i64 = null,
@@ -680,6 +683,12 @@ const ParseState = struct {
     saw_nostr_bundle: bool = false,
     nostr_key_stdin: bool = false,
     saw_nostr_key_stdin: bool = false,
+    nostr_auth_session: bool = false,
+    saw_nostr_auth_session: bool = false,
+    nostr_report_out: ?[]const u8 = null,
+    saw_nostr_report_out: bool = false,
+    nostr_auth_pipes: bool = false,
+    saw_nostr_auth_pipes: bool = false,
     nostr_out_path: ?[]const u8 = null,
     saw_nostr_out: bool = false,
     nostr_prior_path: ?[]const u8 = null,
@@ -1134,8 +1143,27 @@ fn parseNostrFlags(
     args: []const []const u8,
     i: *usize,
 ) ParseError!bool {
-    if (std.mem.eql(u8, a, "--bundle") or std.mem.startsWith(u8, a, "--bundle=")) {
+    if (std.mem.eql(u8, a, "--auth-session")) {
+        if (st.command != .nostr_sign) return error.ConflictingFlags;
+        try markSaw(&st.saw_nostr_auth_session);
+        st.nostr_auth_session = true;
+        return true;
+    }
+    if (std.mem.eql(u8, a, "--report-out") or std.mem.startsWith(u8, a, "--report-out=")) {
+        if (st.command != .nostr_sign) return error.ConflictingFlags;
+        try markSaw(&st.saw_nostr_report_out);
+        st.nostr_report_out = try takeValue(args, i, a, "--report-out");
+        return true;
+    }
+    if (std.mem.eql(u8, a, "--auth-pipes")) {
         if (st.command != .nostr_publish) return error.ConflictingFlags;
+        try markSaw(&st.saw_nostr_auth_pipes);
+        if (!std.mem.eql(u8, try takeValue(args, i, a, "--auth-pipes"), "3,4")) return error.InvalidValue;
+        st.nostr_auth_pipes = true;
+        return true;
+    }
+    if (std.mem.eql(u8, a, "--bundle") or std.mem.startsWith(u8, a, "--bundle=")) {
+        if (st.command != .nostr_publish and st.command != .nostr_sign) return error.ConflictingFlags;
         try markSaw(&st.saw_nostr_bundle);
         st.nostr_bundle_path = try takeValue(args, i, a, "--bundle");
         return true;
@@ -1849,6 +1877,10 @@ fn buildNostrSignOptions(st: *ParseState) ParseError!Options {
     // reserved for the signed-event bundle when --out is absent.
     if (st.nostr_plan_path == null) return error.MissingValue;
     if (!st.nostr_key_stdin) return error.MissingValue;
+    if (st.nostr_auth_session) {
+        if (st.nostr_bundle_path == null) return error.MissingValue;
+        if (st.saw_nostr_prior or st.saw_nostr_created_at or st.saw_nostr_out) return error.ConflictingFlags;
+    } else if (st.saw_nostr_bundle or st.saw_nostr_report_out) return error.ConflictingFlags;
     if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
         st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
@@ -1862,6 +1894,9 @@ fn buildNostrSignOptions(st: *ParseState) ParseError!Options {
         .command = .nostr_sign,
         .nostr_plan_path = st.nostr_plan_path,
         .nostr_key_stdin = st.nostr_key_stdin,
+        .nostr_auth_session = st.nostr_auth_session,
+        .nostr_report_out = st.nostr_report_out,
+        .nostr_bundle_path = st.nostr_bundle_path,
         .nostr_out_path = st.nostr_out_path,
         .nostr_prior_path = st.nostr_prior_path,
         .nostr_created_at = st.nostr_created_at,
@@ -1894,6 +1929,7 @@ fn buildNostrPublishOptions(st: *ParseState) ParseError!Options {
         .quiet = st.quiet,
         .timings = false,
         .command = .nostr_publish,
+        .nostr_auth_pipes = st.nostr_auth_pipes,
         .nostr_plan_path = st.nostr_plan_path,
         .nostr_bundle_path = st.nostr_bundle_path,
         .nostr_out_path = st.nostr_out_path,
@@ -2761,6 +2797,8 @@ pub const usage_text =
     \\  --prior PATH         Prior signed bundle to reuse unchanged evidence from (`nostr sign`)
     \\  --created-at N       Explicit signing-time override, unix seconds (`nostr sign`; test/recovery)
     \\  --bundle PATH        Signed-event bundle to publish (`nostr publish`)
+    \\  --auth-session       Explicit NIP-42 sign supervisor (macOS); requires --bundle
+    \\  --report-out PATH    Child publish report (`sign --auth-session`; default stdout)
     \\  --out PATH           Publish report output path (`nostr publish`; default: stdout)
     \\  -h, --help          Show this help and exit 0
     \\  -V, --version       Print the compiler version (`boris/<ver>`) and exit 0
@@ -3819,6 +3857,27 @@ test "parse: nostr sign rejects invalid values and foreign selectors" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--rag" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--timings" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--html-dir", "dist" }));
+}
+
+test "parse: NIP-42 session is explicit and cannot reuse offline signing overrides" {
+    var options = try parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--auth-session", "--plan", "p", "--bundle", "b", "--key-stdin", "--report-out", "report" });
+    defer options.deinit(std.testing.allocator);
+    try expect(options.nostr_auth_session);
+    try expectEqualStrings("b", options.nostr_bundle_path.?);
+    try expectEqualStrings("report", options.nostr_report_out.?);
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--auth-session", "--plan", "p", "--key-stdin" }));
+    for ([_][]const u8{ "--out", "--prior", "--created-at" }) |flag| {
+        try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--auth-session", "--plan", "p", "--bundle", "b", "--key-stdin", flag, "1" }));
+    }
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--auth-session" }));
+}
+
+test "parse: private auth descriptors cannot select an arbitrary helper channel" {
+    var options = try parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--auth-pipes", "3,4" });
+    defer options.deinit(std.testing.allocator);
+    try expect(options.nostr_auth_pipes);
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--auth-pipes", "5,6" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--auth-pipes", "3,4" }));
 }
 
 test "parse: nostr publish takes plan, bundle, and out" {

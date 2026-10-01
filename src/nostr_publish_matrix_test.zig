@@ -17,6 +17,8 @@ const np = @import("nostr_publish.zig");
 const keys = @import("nostr_keys.zig");
 const nostr = @import("nostr.zig");
 const ws = @import("ws_client.zig");
+const auth = @import("nostr_auth.zig");
+const auth_ipc = @import("nostr_auth_ipc.zig");
 
 const Io = std.Io;
 const posix = std.posix;
@@ -24,9 +26,820 @@ const testing = std.testing;
 
 const rfc_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+const auth_scalar = "0000000000000000000000000000000000000000000000000000000000000003";
+const auth_challenge = "raw-auth-challenge-test";
+
+const AuthScenario = enum {
+    success,
+    rejected,
+    auth_required,
+    restricted,
+    article_rejected,
+    empty,
+    non_string,
+    control,
+    extra,
+    invalid_utf8,
+    garbage,
+    oversized,
+    frame_oversized,
+    masked,
+    wrong_ok,
+    malformed_ok,
+    challenge_silence,
+    auth_silence,
+    notice_flood,
+    partial_message,
+    replay,
+    replacement,
+    third,
+    post_article,
+    inflight_replacement,
+    retry,
+    article_silence,
+    exact_fragmented,
+    oversized_fragmented,
+    ping_flood,
+    multibyte,
+    multibyte_oversized,
+};
+const AuthRelay = struct {
+    base: MockRelay,
+    scenario: AuthScenario,
+    expected: []const []const u8,
+    saw_auth: usize = 0,
+    auth_verified: bool = true,
+    exact_articles: bool = true,
+    auth_sig: [128]u8 = @splat(0),
+    phase: std.atomic.Value(u8) = .init(0),
+};
+
+fn makeAuthArtifacts(gpa: std.mem.Allocator, ports: []const u16, subset: []const u16, timeout_ms: u32) !MatrixArtifacts {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    var ctx = try keys.Context.init();
+    defer ctx.deinit();
+    const kp = try ctx.keyPairFromSecretKey([_]u8{0} ** 31 ++ [_]u8{3});
+    const pubkey = std.fmt.bytesToHex(kp.public_key, .lower);
+    const relays = try a.alloc([]const u8, ports.len);
+    for (ports, relays) |port, *url| url.* = try std.fmt.allocPrint(a, "ws://127.0.0.1:{d}", .{port});
+    const auth_relays = try a.alloc([]const u8, subset.len);
+    for (subset, auth_relays) |port, *url| url.* = try std.fmt.allocPrint(a, "ws://127.0.0.1:{d}", .{port});
+    std.mem.sort([]const u8, auth_relays, {}, struct {
+        fn less(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.order(u8, x, y) == .lt;
+        }
+    }.less);
+    const Article = struct { entity_id: []const u8, kind: u32 = 30023, tags: []const []const []const u8, content: []const u8, intention_digest: []const u8 };
+    var articles: [2]Article = undefined;
+    for ([_][]const u8{ "articles/first", "articles/second" }, &articles) |id, *article| {
+        const tags = [_]nostr.Tag{ .{ .name = "d", .value = id }, .{ .name = "published_at", .value = "1000" } };
+        var digest: [64]u8 = undefined;
+        try nostr.intentionDigestHex(a, &tags, "article bytes", &digest);
+        const pairs = try a.alloc([]const []const u8, 2);
+        pairs[0] = try a.dupe([]const u8, &.{ "d", id });
+        pairs[1] = try a.dupe([]const u8, &.{ "published_at", "1000" });
+        article.* = .{ .entity_id = id, .tags = pairs, .content = "article bytes", .intention_digest = try a.dupe(u8, &digest) };
+    }
+    const plan = try std.json.Stringify.valueAlloc(gpa, .{
+        .format = "boris-nostr-publication-plan",
+        .schema_version = @as(u32, 2),
+        .protocol = .{ .kind = @as(u32, 30023), .nips_revision = auth.revision },
+        .author = .{ .expected_pubkey = &pubkey },
+        .delivery = .{ .relays = relays, .timeout_ms = timeout_ms, .retries = @as(u8, 1), .auth = auth.Declaration{ .mode = "nip42", .relays = auth_relays } },
+        .articles = &articles,
+    }, .{});
+    errdefer gpa.free(plan);
+    var signed = try @import("nostr_sign.zig").run(testing.io, gpa, .{ .plan = plan, .key = auth_scalar, .created_at = 1700000000, .aux_rand = @splat(0) });
+    defer signed.deinit();
+    return .{ .plan = plan, .bundle = try gpa.dupe(u8, signed.bundle orelse return error.TestUnexpectedResult) };
+}
+
+fn expectedArticles(gpa: std.mem.Allocator, bundle: []const u8) ![][]u8 {
+    var parsed = try std.json.parseFromSlice(struct { articles: []const np.SignedArticle }, gpa, bundle, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    const out = try gpa.alloc([]u8, parsed.value.articles.len);
+    for (out, parsed.value.articles) |*wire, article| wire.* = try np.renderEventMessage(gpa, article);
+    return out;
+}
+
+fn serveAuthThread(relay: *AuthRelay, gpa: std.mem.Allocator) void {
+    serveAuth(relay, gpa) catch {};
+}
+fn acceptAuthRelay(base: *MockRelay) !Io.net.Stream {
+    return base.server.accept(base.io);
+}
+fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
+    const stream = try ws.raceDeadline(relay.base.io, 3000, acceptAuthRelay, .{&relay.base});
+    defer stream.close(relay.base.io);
+    const fd: std.c.fd_t = @intCast(stream.socket.handle);
+    var read_buf: [16384]u8 = undefined;
+    var write_buf: [4096]u8 = undefined;
+    if (!try performHandshakeFd(fd, &read_buf, &write_buf, .ok)) return;
+    relay.phase.store(1, .release);
+    switch (relay.scenario) {
+        .empty => try sendServerText(fd, "[\"AUTH\",\"\"]"),
+        .non_string => try sendServerText(fd, "[\"AUTH\",7]"),
+        .control => try sendServerText(fd, "[\"AUTH\",\"x\\n\"]"),
+        .extra => try sendServerText(fd, "[\"AUTH\",\"x\",0]"),
+        .invalid_utf8 => try sendServerText(fd, "[\"AUTH\",\"\xff\"]"),
+        .garbage => try sendServerText(fd, "garbage"),
+        .oversized => {
+            const text = "[\"AUTH\",\"" ++ "x" ** 4097 ++ "\"]";
+            var frame: [8192]u8 = undefined;
+            const n = try ws.encodeFrame(&frame, .text, text, @splat(0), true, false);
+            try writeAllFd(fd, frame[0..n]);
+        },
+        .frame_oversized => try writeAllFd(fd, &.{ 0x81, 126, 0x80, 0x01 }),
+        .masked => try sendMaskedServerText(fd, "[\"AUTH\",\"x\"]"),
+        .challenge_silence => {},
+        .notice_flood, .ping_flood => {
+            const end = auth.Deadline.after(relay.base.io, 250);
+            while (end.remaining(relay.base.io)) |_| {
+                if (relay.scenario == .ping_flood) sendServerPing(fd) catch break else sendServerText(fd, "[\"NOTICE\",\"ignored\"]") catch break;
+                std.Io.sleep(relay.base.io, .fromMilliseconds(5), .awake) catch break;
+            } else |_| {}
+        },
+        .partial_message => {
+            try writeAllFd(fd, &.{ 0x81, 126, 0, 100, '[' });
+            std.Io.sleep(relay.base.io, .fromMilliseconds(250), .awake) catch {};
+        },
+        .exact_fragmented, .oversized_fragmented => {
+            const text = try gpa.alloc(u8, auth.max_frame + @as(usize, if (relay.scenario == .oversized_fragmented) 1 else 0));
+            defer gpa.free(text);
+            @memset(text, ' ');
+            @memcpy(text[0..13], "[\"NOTICE\",\"\"]");
+            var frame: [auth.max_frame + 16]u8 = undefined;
+            const split = text.len / 2;
+            var n = try ws.encodeFrame(&frame, .text, text[0..split], @splat(0), false, false);
+            try writeAllFd(fd, frame[0..n]);
+            n = try ws.encodeFrame(&frame, .continuation, text[split..], @splat(0), true, false);
+            try writeAllFd(fd, frame[0..n]);
+            if (relay.scenario == .exact_fragmented) try sendServerText(fd, "[\"AUTH\",\"" ++ auth_challenge ++ "\"]");
+        },
+        .multibyte => try sendServerText(fd, "[\"AUTH\",\"" ++ "€" ** 1365 ++ "x\"]"),
+        .multibyte_oversized => try sendServerText(fd, "[\"AUTH\",\"" ++ "€" ** 1366 ++ "\"]"),
+        else => try sendServerText(fd, "[\"AUTH\",\"" ++ auth_challenge ++ "\"]"),
+    }
+    var scratch: std.ArrayList(u8) = .empty;
+    defer scratch.deinit(gpa);
+    while (true) {
+        scratch.clearRetainingCapacity();
+        const frame = readClientFrame(fd, gpa, &scratch, auth.max_frame) catch return;
+        if (frame.opcode == 8) return;
+        if (frame.opcode == 10) continue;
+        if (frame.opcode != 1 or !frame.fin) return error.Malformed;
+        if (std.mem.startsWith(u8, frame.payload, "[\"AUTH\"")) {
+            relay.saw_auth += 1;
+            relay.phase.store(2, .release);
+            var parsed = try std.json.parseFromSlice(std.json.Value, gpa, frame.payload, .{});
+            defer parsed.deinit();
+            const event_bytes = try std.json.Stringify.valueAlloc(gpa, parsed.value.array.items[1], .{});
+            defer gpa.free(event_bytes);
+            var event = try std.json.parseFromSlice(auth.Event, gpa, event_bytes, .{});
+            defer event.deinit();
+            var url_buf: [80]u8 = undefined;
+            const url = try std.fmt.bufPrint(&url_buf, "ws://127.0.0.1:{d}", .{relay.base.port});
+            auth.verify(gpa, event.value, "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9", url, if (relay.scenario == .multibyte) "€" ** 1365 ++ "x" else if (relay.saw_auth == 1) auth_challenge else "replacement-challenge", Io.Timestamp.now(relay.base.io, .real).toSeconds()) catch {
+                relay.auth_verified = false;
+            };
+            @memcpy(&relay.auth_sig, event.value.sig);
+            const id = event.value.id;
+            if (relay.scenario == .auth_silence) continue;
+            if (relay.scenario == .replay) {
+                try sendServerText(fd, "[\"AUTH\",\"" ++ auth_challenge ++ "\"]");
+                continue;
+            }
+            if ((relay.scenario == .replacement or relay.scenario == .third) and relay.saw_auth == 1) {
+                try sendServerText(fd, "[\"AUTH\",\"replacement-challenge\"]");
+            } else if (relay.scenario == .third and relay.saw_auth == 2) {
+                try sendServerText(fd, "[\"AUTH\",\"third-challenge\"]");
+                continue;
+            }
+            var ok_buf: [512]u8 = undefined;
+            const rejection: ?[]const u8 = switch (relay.scenario) {
+                .rejected => "blocked: " ++ auth_challenge,
+                .auth_required => "auth-required: " ++ auth_challenge,
+                .restricted => "restricted: " ++ auth_challenge,
+                else => null,
+            };
+            const ok = if (relay.scenario == .wrong_ok) "[\"OK\",\"" ++ "0" ** 64 ++ "\",true,\"\"]" else if (relay.scenario == .malformed_ok) "[\"OK\",\"" ++ "0" ** 64 ++ "\",true]" else try std.fmt.bufPrint(&ok_buf, "[\"OK\",\"{s}\",{s},\"{s}\"]", .{ id, if (rejection == null) "true" else "false", rejection orelse "" });
+            try sendServerText(fd, ok);
+        } else if (std.mem.startsWith(u8, frame.payload, "[\"EVENT\"")) {
+            relay.base.saw_events += 1;
+            relay.phase.store(3, .release);
+            if (relay.scenario == .article_silence) continue;
+            if (relay.saw_auth == 0) relay.auth_verified = false;
+            const index = if (relay.scenario == .retry) (relay.base.saw_events - 1) -| 1 else relay.base.saw_events - 1;
+            const wanted = if (relay.scenario == .retry and relay.base.saw_events <= 2) relay.expected[0] else relay.expected[@min(index, relay.expected.len - 1)];
+            if (!std.mem.eql(u8, wanted, frame.payload)) relay.exact_articles = false;
+            if (relay.scenario == .retry and relay.base.saw_events == 1) continue;
+            const id = try extractEventId(gpa, frame.payload);
+            defer gpa.free(id);
+            var ok_buf: [512]u8 = undefined;
+            if (relay.scenario == .inflight_replacement) {
+                try sendServerText(fd, "[\"AUTH\",\"after-write\"]");
+                continue;
+            }
+            const ok = try std.fmt.bufPrint(&ok_buf, "[\"OK\",\"{s}\",{s},\"{s}\"]", .{ id, if (relay.scenario == .article_rejected) "false" else "true", if (relay.scenario == .article_rejected) "restricted: " ++ auth_challenge else "" });
+            try sendServerText(fd, ok);
+            if (relay.scenario == .post_article) try sendServerText(fd, "[\"AUTH\",\"after-write\"]");
+        } else return error.Malformed;
+    }
+}
+
+fn runAuthProcess(gpa: std.mem.Allocator, plan: []const u8, bundle: []const u8) !std.process.RunResult {
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "plan.json", .data = plan });
+    try tmp.dir.writeFile(io, .{ .sub_path = "bundle.json", .data = bundle });
+    const plan_path = try tmp.dir.realPathFileAlloc(io, "plan.json", gpa);
+    defer gpa.free(plan_path);
+    const bundle_path = try tmp.dir.realPathFileAlloc(io, "bundle.json", gpa);
+    defer gpa.free(bundle_path);
+    var child = try std.process.spawn(io, .{ .argv = &.{ @import("nostr_test_binary").path, "nostr", "sign", "--auth-session", "--plan", plan_path, "--bundle", bundle_path, "--key-stdin" }, .stdin = .pipe, .stdout = .pipe, .stderr = .pipe });
+    defer child.kill(io);
+    var input_buffer: [256]u8 = undefined;
+    var writer = child.stdin.?.writer(io, &input_buffer);
+    try writer.interface.writeAll(auth_scalar ++ "\n");
+    try writer.interface.flush();
+    child.stdin.?.close(io);
+    child.stdin = null;
+    var buffer: Io.File.MultiReader.Buffer(2) = undefined;
+    var reader: Io.File.MultiReader = undefined;
+    reader.init(gpa, io, buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
+    defer reader.deinit();
+    while (reader.fill(4096, .{ .duration = .{ .clock = .awake, .raw = .fromMilliseconds(5000) } })) |_| {} else |err| {
+        if (err != error.EndOfStream) return err;
+    }
+    try reader.checkAnyError();
+    const term = try child.wait(io);
+    return .{ .term = term, .stdout = try reader.toOwnedSlice(0), .stderr = try reader.toOwnedSlice(1) };
+}
+
+fn authScenario(scenario: AuthScenario, expected_status: []const u8, expected_events: usize, expected_class: []const u8) !void {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    var threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
+    defer threaded.deinit();
+    var base = try MockRelay.init(threaded.io(), .ok);
+    defer base.deinit();
+    var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 150);
+    defer artifacts.deinit(gpa);
+    const expected = try expectedArticles(gpa, artifacts.bundle);
+    defer {
+        for (expected) |e| gpa.free(e);
+        gpa.free(expected);
+    }
+    var relay: AuthRelay = .{ .base = base, .scenario = scenario, .expected = expected };
+    const thread = try std.Thread.spawn(.{}, serveAuthThread, .{ &relay, gpa });
+    const output = runAuthProcess(gpa, artifacts.plan, artifacts.bundle) catch |err| {
+        // Cancel a listener if startup failed before connect.
+        relay.base.server.deinit(relay.base.io);
+        thread.join();
+        return err;
+    };
+    defer gpa.free(output.stdout);
+    defer gpa.free(output.stderr);
+    if (output.term != .exited or output.term.exited != 0) std.debug.print("auth test process failed: {any}: {s}\n", .{ output.term, output.stderr });
+    thread.join();
+    try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, output.term);
+    var report = try std.json.parseFromSlice(struct {
+        classification: []const u8,
+        schema_version: u32,
+        relays: []const struct { auth: struct { status: []const u8, signing_requests: usize, auth_sends: usize }, attempts: usize },
+    }, gpa, output.stdout, .{ .ignore_unknown_fields = true });
+    defer report.deinit();
+    try testing.expectEqual(@as(u32, 2), report.value.schema_version);
+    try testing.expectEqualStrings(expected_status, report.value.relays[0].auth.status);
+    try testing.expectEqualStrings(expected_class, report.value.classification);
+    // Recording-relay evidence is required, a failure report is not enough.
+    try testing.expectEqual(expected_events, relay.base.saw_events);
+    try testing.expect(relay.auth_verified);
+    try testing.expect(relay.exact_articles);
+    try testing.expect(report.value.relays[0].auth.signing_requests <= 2);
+    try testing.expect(report.value.relays[0].auth.auth_sends <= 2);
+    if (expected_events == 0) try testing.expectEqual(@as(usize, 0), report.value.relays[0].attempts);
+    for ([_][]const u8{ output.stdout, output.stderr }) |text| {
+        try testing.expect(std.mem.indexOf(u8, text, auth_scalar) == null);
+        try testing.expect(std.mem.indexOf(u8, text, auth_challenge) == null);
+        try testing.expect(std.mem.indexOf(u8, text, "\"sig\"") == null);
+        if (relay.saw_auth > 0) try testing.expect(std.mem.indexOf(u8, text, &relay.auth_sig) == null);
+    }
+}
+
+test "NIP-42 actual supervisor success sends two unchanged articles after auth OK" {
+    try authScenario(.success, "authenticated", 2, "complete");
+}
+test "NIP-42 rejected auth never writes EVENT, including standardized prefixes" {
+    for ([_]AuthScenario{ .rejected, .auth_required, .restricted }) |scenario| try authScenario(scenario, "rejected", 0, "failed");
+}
+test "NIP-42 auth success is separate from restricted article rejection" {
+    try authScenario(.article_rejected, "authenticated", 2, "failed");
+}
+test "NIP-42 malformed and oversized challenges and OKs write zero articles" {
+    for ([_]AuthScenario{ .empty, .non_string, .control, .extra, .invalid_utf8, .garbage, .oversized, .frame_oversized, .masked, .wrong_ok, .malformed_ok }) |scenario|
+        try authScenario(scenario, "protocol-error", 0, "failed");
+}
+test "NIP-42 proactive-only silence, notice floods, partial messages and auth silence expire" {
+    for ([_]AuthScenario{ .challenge_silence, .notice_flood, .ping_flood, .partial_message, .auth_silence }) |scenario| try authScenario(scenario, "timeout", 0, "incomplete");
+}
+test "NIP-42 exact-limit auth reassembly and multibyte challenge boundaries" {
+    try authScenario(.exact_fragmented, "authenticated", 2, "complete");
+    try authScenario(.multibyte, "authenticated", 2, "complete");
+    try authScenario(.oversized_fragmented, "protocol-error", 0, "failed");
+    try authScenario(.multibyte_oversized, "protocol-error", 0, "failed");
+}
+test "NIP-42 one replacement retires old OK; repeat and third challenges fail" {
+    try authScenario(.replacement, "authenticated", 2, "complete");
+    try authScenario(.replay, "protocol-error", 0, "failed");
+    try authScenario(.third, "protocol-error", 0, "failed");
+}
+test "NIP-42 post-write replacement preserves acceptance or unknown in-flight evidence" {
+    try authScenario(.post_article, "protocol-error", 1, "partial");
+    try authScenario(.inflight_replacement, "protocol-error", 1, "incomplete");
+}
+test "NIP-42 article retry is byte-identical and consumes no additional auth" {
+    try authScenario(.retry, "authenticated", 3, "complete");
+}
+
+test "NIP-42 mixed opted-in and ordinary relays retain separate evidence and verdicts" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    for ([_]AuthScenario{ .success, .rejected, .challenge_silence }) |scenario| {
+        var threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
+        defer threaded.deinit();
+        var auth_base = try MockRelay.init(threaded.io(), .ok);
+        defer auth_base.deinit();
+        var plain = try MockRelay.init(threaded.io(), .ok);
+        defer plain.deinit();
+        var artifacts = try makeAuthArtifacts(gpa, &.{ auth_base.port, plain.port }, &.{auth_base.port}, 150);
+        defer artifacts.deinit(gpa);
+        const expected = try expectedArticles(gpa, artifacts.bundle);
+        defer {
+            for (expected) |e| gpa.free(e);
+            gpa.free(expected);
+        }
+        var relay: AuthRelay = .{ .base = auth_base, .scenario = scenario, .expected = expected };
+        const first = try std.Thread.spawn(.{}, serveAuthThread, .{ &relay, gpa });
+        const second = try std.Thread.spawn(.{}, serveOneThread, .{ &plain, gpa });
+        const output = try runAuthProcess(gpa, artifacts.plan, artifacts.bundle);
+        defer gpa.free(output.stdout);
+        defer gpa.free(output.stderr);
+        first.join();
+        second.join();
+        try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, output.term);
+        var parsed = try std.json.parseFromSlice(struct { classification: []const u8, relays: []const struct { auth: struct { status: []const u8 } } }, gpa, output.stdout, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+        try testing.expectEqualStrings(if (scenario == .success) "complete" else "partial", parsed.value.classification);
+        try testing.expectEqualStrings("not-requested", parsed.value.relays[1].auth.status);
+        try testing.expectEqual(@as(usize, 2), plain.saw_events);
+        try testing.expectEqual(@as(usize, if (scenario == .success) 2 else 0), relay.base.saw_events);
+    }
+}
+
+extern "c" fn proc_listchildpids(pid: c_int, buffer: ?*anyopaque, length: c_int) c_int;
+extern "c" fn proc_pidinfo(pid: c_int, flavor: c_int, arg: u64, buffer: ?*anyopaque, length: c_int) c_int;
+extern "c" fn proc_pidpath(pid: c_int, buffer: ?*anyopaque, length: u32) c_int;
+extern "c" fn proc_pidfdinfo(pid: c_int, fd: c_int, flavor: c_int, buffer: ?*anyopaque, length: c_int) c_int;
+
+fn processRunning(pid: c_int) bool {
+    if (std.c.kill(pid, @enumFromInt(0)) != 0) return false;
+    var info: [64]u32 = @splat(0);
+    if (proc_pidinfo(pid, 3, 0, &info, @sizeOf(@TypeOf(info))) > 0 and info[1] == 5) return false; // SZOMB: terminated; reaping belongs to init after parent SIGKILL
+    return true;
+}
+
+test "NIP-42 actual exec custody, key-input cancellation and supervisor loss are bounded" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const io = testing.io;
+    const gpa = testing.allocator;
+    // No key is supplied: the child must already be exec'd and waiting for
+    // begin, with /dev/null stdin and exactly the two private pipe endpoints.
+    for ([_]std.posix.SIG{ .TERM, .KILL }) |sig| {
+        var tmp = testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var base = try MockRelay.init(io, .ok);
+        defer base.deinit();
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 2000);
+        defer artifacts.deinit(gpa);
+        try tmp.dir.writeFile(io, .{ .sub_path = "plan.json", .data = artifacts.plan });
+        try tmp.dir.writeFile(io, .{ .sub_path = "bundle.json", .data = artifacts.bundle });
+        const plan_path = try tmp.dir.realPathFileAlloc(io, "plan.json", gpa);
+        defer gpa.free(plan_path);
+        const bundle_path = try tmp.dir.realPathFileAlloc(io, "bundle.json", gpa);
+        defer gpa.free(bundle_path);
+        var process = try std.process.spawn(io, .{ .argv = &.{ @import("nostr_test_binary").path, "nostr", "sign", "--auth-session", "--plan", plan_path, "--bundle", bundle_path, "--key-stdin" }, .stdin = .pipe, .stdout = .ignore, .stderr = .ignore });
+        defer process.kill(io);
+        var children: [4]c_int = @splat(0);
+        const startup = auth.Deadline.after(io, 1000);
+        while (children[0] == 0) {
+            _ = proc_listchildpids(process.id.?, &children, @sizeOf(@TypeOf(children)));
+            _ = try startup.remaining(io);
+            try Io.sleep(io, .fromMilliseconds(5), .awake);
+        }
+        const child_pid = children[0];
+        var path: [4096]u8 = undefined;
+        try testing.expect(proc_pidpath(child_pid, &path, path.len) > 0);
+        const actual_path = std.mem.sliceTo(&path, 0);
+        try testing.expect(std.mem.endsWith(u8, actual_path, "/boris"));
+        const Fd = extern struct { number: i32, kind: u32 };
+        var fds: [64]Fd = undefined;
+        try Io.sleep(io, .fromMilliseconds(20), .awake);
+        const fd_bytes = proc_pidinfo(child_pid, 1, 0, &fds, @sizeOf(@TypeOf(fds)));
+        try testing.expect(fd_bytes > 0);
+        var stdin_null = false;
+        var in_pipe = false;
+        var out_pipe = false;
+        for (fds[0..@intCast(@divExact(fd_bytes, @sizeOf(Fd)))]) |fd| {
+            try testing.expect(fd.number <= 4);
+            if (fd.number == 0) stdin_null = fd.kind == 1; // vnode, not the key-input pipe
+            if (fd.number == 3) in_pipe = fd.kind == 6;
+            if (fd.number == 4) out_pipe = fd.kind == 6;
+        }
+        try testing.expect(stdin_null and in_pipe and out_pipe);
+        var vnode: [4096]u8 = @splat(0);
+        const vnode_bytes = proc_pidfdinfo(child_pid, 0, 2, &vnode, vnode.len);
+        try testing.expect(vnode_bytes > 0);
+        try testing.expect(std.mem.indexOf(u8, vnode[0..@intCast(vnode_bytes)], "/dev/null\x00") != null);
+        var listener = [_]std.c.pollfd{.{ .fd = @intCast(base.server.socket.handle), .events = posix.POLL.IN, .revents = 0 }};
+        try testing.expectEqual(@as(c_int, 0), std.c.poll(&listener, 1, 0)); // no socket before key/begin
+        const teardown = auth.Deadline.after(io, 1500);
+        try testing.expectEqual(@as(c_int, 0), std.c.kill(process.id.?, sig));
+        process.stdin.?.close(io);
+        process.stdin = null;
+        _ = try ws.raceDeadline(io, 1500, std.process.Child.wait, .{ &process, io });
+        while (processRunning(child_pid)) {
+            _ = try teardown.remaining(io);
+            try Io.sleep(io, .fromMilliseconds(10), .awake);
+        }
+    }
+}
+
+test "NIP-42 absent-session and schema downgrade refuse before any relay connect" {
+    const gpa = testing.allocator;
+    var base = try MockRelay.init(testing.io, .ok);
+    defer base.deinit();
+    var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 150);
+    defer artifacts.deinit(gpa);
+    var result = try np.run(testing.io, gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle });
+    defer result.deinit();
+    try testing.expect(result.usage_refusal and result.report == null);
+    var listener = [_]std.c.pollfd{.{ .fd = @intCast(base.server.socket.handle), .events = posix.POLL.IN, .revents = 0 }};
+    try testing.expectEqual(@as(c_int, 0), std.c.poll(&listener, 1, 0));
+    try testing.expectError(error.InvalidAuthSchema, auth.validateVersion(1, .{ .mode = "nip42", .relays = &.{"wss://r.example"} }));
+    try testing.expectError(error.InvalidAuthSchema, auth.validateVersion(2, null));
+}
+
+test "NIP-42 policy negotiation does not change offline article event bytes" {
+    const gpa = testing.allocator;
+    var base = try MockRelay.init(testing.io, .ok);
+    defer base.deinit();
+    var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 150);
+    defer artifacts.deinit(gpa);
+    var document = try std.json.parseFromSlice(std.json.Value, gpa, artifacts.plan, .{});
+    defer document.deinit();
+    try document.value.object.put(document.arena.allocator(), "schema_version", .{ .integer = 1 });
+    const delivery = document.value.object.getPtr("delivery").?;
+    _ = delivery.object.swapRemove("auth");
+    const ordinary = try std.json.Stringify.valueAlloc(gpa, document.value, .{});
+    defer gpa.free(ordinary);
+    var signed = try @import("nostr_sign.zig").run(testing.io, gpa, .{ .plan = ordinary, .key = auth_scalar, .created_at = 1700000000, .aux_rand = @splat(0) });
+    defer signed.deinit();
+    const before = try expectedArticles(gpa, signed.bundle.?);
+    defer {
+        for (before) |e| gpa.free(e);
+        gpa.free(before);
+    }
+    const after = try expectedArticles(gpa, artifacts.bundle);
+    defer {
+        for (after) |e| gpa.free(e);
+        gpa.free(after);
+    }
+    for (before, after) |a, b| try testing.expectEqualStrings(a, b);
+}
+
+test "NIP-42 cancellation and supervisor loss during live challenge, auth OK and article OK" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    const io = testing.io;
+    for ([_]AuthScenario{ .challenge_silence, .auth_silence, .article_silence }, [_]u8{ 1, 2, 3 }) |scenario, phase| {
+        for ([_]std.posix.SIG{ .TERM, .KILL }) |sig| {
+            var tmp = testing.tmpDir(.{});
+            defer tmp.cleanup();
+            var base = try MockRelay.init(io, .ok);
+            defer base.deinit();
+            var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 2000);
+            defer artifacts.deinit(gpa);
+            const expected = try expectedArticles(gpa, artifacts.bundle);
+            defer {
+                for (expected) |e| gpa.free(e);
+                gpa.free(expected);
+            }
+            var relay: AuthRelay = .{ .base = base, .scenario = scenario, .expected = expected };
+            const server = try std.Thread.spawn(.{}, serveAuthThread, .{ &relay, gpa });
+            defer server.join();
+            try tmp.dir.writeFile(io, .{ .sub_path = "plan.json", .data = artifacts.plan });
+            try tmp.dir.writeFile(io, .{ .sub_path = "bundle.json", .data = artifacts.bundle });
+            const plan_path = try tmp.dir.realPathFileAlloc(io, "plan.json", gpa);
+            defer gpa.free(plan_path);
+            const bundle_path = try tmp.dir.realPathFileAlloc(io, "bundle.json", gpa);
+            defer gpa.free(bundle_path);
+            const report_path = try std.fmt.allocPrint(gpa, "{s}report.json", .{plan_path[0 .. plan_path.len - "plan.json".len]});
+            defer gpa.free(report_path);
+            const log_file = try tmp.dir.createFile(io, "process.log", .{});
+            defer log_file.close(io);
+            var process = try std.process.spawn(io, .{ .argv = &.{ @import("nostr_test_binary").path, "nostr", "sign", "--auth-session", "--plan", plan_path, "--bundle", bundle_path, "--key-stdin", "--report-out", report_path }, .stdin = .pipe, .stdout = .ignore, .stderr = .{ .file = log_file } });
+            defer process.kill(io);
+            var children: [4]c_int = @splat(0);
+            try process.stdin.?.writeStreamingAll(io, auth_scalar ++ "\n");
+            process.stdin.?.close(io);
+            process.stdin = null;
+            const startup = auth.Deadline.after(io, 1500);
+            while (relay.phase.load(.acquire) < phase) {
+                _ = try startup.remaining(io);
+                try Io.sleep(io, .fromMilliseconds(5), .awake);
+            }
+            _ = proc_listchildpids(process.id.?, &children, @sizeOf(@TypeOf(children)));
+            try testing.expect(children[0] != 0);
+            const teardown = auth.Deadline.after(io, 1500);
+            try testing.expectEqual(@as(c_int, 0), std.c.kill(process.id.?, sig));
+            _ = try ws.raceDeadline(io, 1500, std.process.Child.wait, .{ &process, io });
+            while (processRunning(children[0])) {
+                _ = teardown.remaining(io) catch |err| {
+                    var info: [64]u32 = @splat(0);
+                    const rc = proc_pidinfo(children[0], 3, 0, &info, @sizeOf(@TypeOf(info)));
+                    std.debug.print("active custody teardown exceeded: scenario={s} signal={d} child={d} info={d} status={d}\n", .{ @tagName(scenario), @intFromEnum(sig), children[0], rc, info[1] });
+                    const log_bytes = try tmp.dir.readFileAlloc(io, "process.log", gpa, .limited(4096));
+                    defer gpa.free(log_bytes);
+                    std.debug.print("process refusal diagnostics: {s}\n", .{log_bytes});
+                    return err;
+                };
+                try Io.sleep(io, .fromMilliseconds(5), .awake);
+            }
+            try testing.expectError(error.FileNotFound, tmp.dir.openFile(io, "report.json", .{}));
+        }
+    }
+}
+
+const InvalidSigner = enum {
+    pubkey,
+    relay,
+    challenge,
+    kind,
+    content,
+    tags,
+    stale,
+    event_id,
+    signature,
+    run,
+    connection,
+    generation,
+    request,
+    plan_digest,
+    bundle_digest,
+    revision,
+    refusal,
+    hang,
+    oversized_frame,
+    partial_header,
+    valid,
+    duplicate,
+    late,
+    blocked_write,
+};
+
+const BlockingAuthWrite = struct {
+    var native: Io = undefined;
+    var writes: std.atomic.Value(usize) = .init(0);
+    fn write(userdata: ?*anyopaque, socket: Io.net.Socket.Handle, header: []const u8, data: []const []const u8, splat: usize) Io.net.Stream.Writer.Error!usize {
+        // First write is HTTP Upgrade. Stall the next complete AUTH write.
+        if (writes.fetchAdd(1, .acq_rel) == 1) {
+            try Io.sleep(native, .fromMilliseconds(10000), .awake);
+            return error.Unexpected;
+        }
+        return native.vtable.netWrite(userdata, socket, header, data, splat);
+    }
+};
+
+fn invalidSignerThread(channel: *auth_ipc.Channel, scenario: InvalidSigner, gpa: std.mem.Allocator) void {
+    invalidSigner(channel, scenario, gpa) catch {};
+}
+fn invalidSigner(channel: *auth_ipc.Channel, scenario: InvalidSigner, gpa: std.mem.Allocator) !void {
+    const bytes = try channel.read(gpa, auth.Deadline.after(channel.io, 2000));
+    defer gpa.free(bytes);
+    var parsed = try auth.parse(auth.Request, gpa, bytes, "sign");
+    defer parsed.deinit();
+    if (scenario == .hang) {
+        try Io.sleep(channel.io, .fromMilliseconds(180), .awake);
+        return;
+    }
+    if (scenario == .oversized_frame or scenario == .partial_header) {
+        const prefix: []const u8 = if (scenario == .oversized_frame) &.{ 0, 0, 0x80, 1 } else &.{0};
+        _ = std.c.write(channel.output, prefix.ptr, prefix.len);
+        if (scenario == .partial_header) try Io.sleep(channel.io, .fromMilliseconds(180), .awake);
+        return;
+    }
+    const request = parsed.value;
+    if (scenario == .late) try Io.sleep(channel.io, .fromMilliseconds(180), .awake);
+    var ctx = try keys.Context.init();
+    defer ctx.deinit();
+    const pair = try ctx.keyPairFromSecretKey([_]u8{0} ** 31 ++ [_]u8{3});
+    const pk = std.fmt.bytesToHex(pair.public_key, .lower);
+    const signed = try auth.sign(gpa, ctx, pair, &pk, request.correlation.relay, request.challenge, Io.Timestamp.now(channel.io, .real).toSeconds(), @splat(0));
+    defer gpa.free(signed);
+    var document = try std.json.parseFromSlice(auth.Event, gpa, signed, .{});
+    defer document.deinit();
+    var event = document.value;
+    var correlation = request.correlation;
+    switch (scenario) {
+        .pubkey => event.pubkey = "0" ** 64,
+        .relay => event.tags = &.{ &.{ "relay", "wss://wrong.example" }, &.{ "challenge", request.challenge } },
+        .challenge => event.tags = &.{ &.{ "relay", request.correlation.relay }, &.{ "challenge", "wrong" } },
+        .kind => event.kind = 30023,
+        .content => event.content = "forbidden",
+        .tags => event.tags = &.{ &.{ "relay", request.correlation.relay }, &.{ "challenge", request.challenge }, &.{"extra"} },
+        .stale => event.created_at -= 61,
+        .event_id => event.id = "0" ** 64,
+        .signature => event.sig = "0" ** 128,
+        .run => correlation.run = "f" ** 32,
+        .connection => correlation.connection = "f" ** 32,
+        .generation => correlation.generation = 2,
+        .request => correlation.request += 1,
+        .plan_digest => correlation.plan_digest = "f" ** 64,
+        .bundle_digest => correlation.bundle_digest = "f" ** 64,
+        .revision => correlation.nips_revision = "f" ** 40,
+        else => {},
+    }
+    const response: auth.Response = .{ .correlation = correlation, .refusal = if (scenario == .refusal) "signer-refused" else null, .event = if (scenario == .refusal) null else event };
+    if (scenario == .duplicate) {
+        const encoded = try std.json.Stringify.valueAlloc(gpa, response, .{});
+        defer gpa.free(encoded);
+        var frames: std.ArrayList(u8) = .empty;
+        defer frames.deinit(gpa);
+        var header: [4]u8 = undefined;
+        std.mem.writeInt(u32, &header, @intCast(encoded.len), .big);
+        for (0..2) |_| {
+            try frames.appendSlice(gpa, &header);
+            try frames.appendSlice(gpa, encoded);
+        }
+        if (std.c.write(channel.output, frames.items.ptr, frames.items.len) != frames.items.len) return error.WriteFailed;
+        return;
+    }
+    try channel.send(gpa, response, auth.Deadline.after(channel.io, 1000));
+}
+
+test "NIP-42 malicious signer substitutions, refusals and IPC stalls emit no AUTH or article" {
+    if (comptime !auth_ipc.supported) return error.SkipZigTest;
+    auth_ipc.canceled.store(false, .unordered);
+    const gpa = testing.allocator;
+    for (std.meta.tags(InvalidSigner)) |scenario| {
+        if (scenario == .valid) continue;
+        var threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
+        defer threaded.deinit();
+        var base = try MockRelay.init(threaded.io(), .ok);
+        defer base.deinit();
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 100);
+        defer artifacts.deinit(gpa);
+        const expected = try expectedArticles(gpa, artifacts.bundle);
+        defer {
+            for (expected) |e| gpa.free(e);
+            gpa.free(expected);
+        }
+        var relay: AuthRelay = .{ .base = base, .scenario = .success, .expected = expected };
+        const server = try std.Thread.spawn(.{}, serveAuthThread, .{ &relay, gpa });
+        var server_joined = false;
+        defer if (!server_joined) server.join();
+        var to_child: [2]std.c.fd_t = undefined;
+        var to_parent: [2]std.c.fd_t = undefined;
+        try testing.expectEqual(@as(c_int, 0), std.c.pipe(&to_child));
+        defer {
+            _ = std.c.close(to_child[0]);
+            _ = std.c.close(to_child[1]);
+        }
+        try testing.expectEqual(@as(c_int, 0), std.c.pipe(&to_parent));
+        defer {
+            _ = std.c.close(to_parent[0]);
+            _ = std.c.close(to_parent[1]);
+        }
+        var child = try auth_ipc.Channel.init(threaded.io(), to_child[0], to_parent[1]);
+        child.run = @splat('1');
+        child.ceiling = auth.Deadline.after(threaded.io(), auth.session_ms);
+        var signer = try auth_ipc.Channel.init(threaded.io(), to_parent[0], to_child[1]);
+        const signer_thread = try std.Thread.spawn(.{}, invalidSignerThread, .{ &signer, scenario, gpa });
+        if (scenario == .duplicate or (@intFromEnum(scenario) >= @intFromEnum(InvalidSigner.run) and @intFromEnum(scenario) <= @intFromEnum(InvalidSigner.revision))) {
+            try testing.expectError(error.SessionInvalid, np.run(threaded.io(), gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child }));
+            signer_thread.join();
+            server.join();
+            server_joined = true;
+            try testing.expectEqual(@as(u64, 1), child.request);
+            try testing.expectEqual(@as(usize, 0), relay.saw_auth);
+            try testing.expectEqual(@as(usize, 0), relay.base.saw_events);
+            continue;
+        }
+        var vtable = threaded.io().vtable.*;
+        if (scenario == .blocked_write) {
+            BlockingAuthWrite.native = threaded.io();
+            BlockingAuthWrite.writes.store(0, .release);
+            vtable.netWrite = BlockingAuthWrite.write;
+        }
+        const client_io: Io = .{ .userdata = threaded.io().userdata, .vtable = &vtable };
+        var result = try np.run(client_io, gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child });
+        defer result.deinit();
+        signer_thread.join();
+        server.join();
+        server_joined = true;
+        try testing.expect(result.report != null);
+        var parsed = try std.json.parseFromSlice(struct { relays: []const struct { auth: struct { status: []const u8, signing_requests: usize, auth_sends: usize } } }, gpa, result.report.?, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+        const evidence = parsed.value.relays[0].auth;
+        try testing.expectEqualStrings(if (scenario == .refusal) "signer-error" else if (scenario == .hang or scenario == .partial_header or scenario == .late or scenario == .blocked_write) "timeout" else "protocol-error", evidence.status);
+        try testing.expectEqual(@as(usize, 1), evidence.signing_requests);
+        try testing.expectEqual(@as(usize, 0), evidence.auth_sends);
+        try testing.expectEqual(@as(usize, 0), relay.saw_auth);
+        try testing.expectEqual(@as(usize, 0), relay.base.saw_events);
+    }
+}
+
 /// Relay URL format used by the plain loopback scenarios; the TLS scenarios
 /// use `wss://localhost:{d}` against the pinned test CA instead. The quotes
 /// are part of the JSON artifact (the plan embeds the URL as a string).
+const TestClock = struct {
+    var offset: std.atomic.Value(i64) = .init(0);
+    fn now(userdata: ?*anyopaque, clock: Io.Clock) Io.Timestamp {
+        var timestamp = testing.io.vtable.now(userdata, clock);
+        if (clock == .awake) timestamp.nanoseconds += offset.load(.acquire);
+        return timestamp;
+    }
+};
+
+test "NIP-42 injected total ceiling preserves acceptance and bounds ordinary-relay traffic" {
+    if (comptime !auth_ipc.supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    const io = testing.io;
+    TestClock.offset.store(0, .release);
+    defer TestClock.offset.store(0, .release);
+    var vtable = io.vtable.*;
+    vtable.now = TestClock.now;
+    const timed_io: Io = .{ .userdata = io.userdata, .vtable = &vtable };
+    var first_base = try MockRelay.init(io, .ok);
+    defer first_base.deinit();
+    var ordinary = try MockRelay.init(io, .clock_expiry);
+    defer ordinary.deinit();
+    var third = try MockRelay.init(io, .ok);
+    defer third.deinit();
+    var artifacts = try makeAuthArtifacts(gpa, &.{ first_base.port, ordinary.port, third.port }, &.{ first_base.port, third.port }, 200);
+    defer artifacts.deinit(gpa);
+    const expected = try expectedArticles(gpa, artifacts.bundle);
+    defer {
+        for (expected) |e| gpa.free(e);
+        gpa.free(expected);
+    }
+    var first: AuthRelay = .{ .base = first_base, .scenario = .success, .expected = expected };
+    const first_thread = try std.Thread.spawn(.{}, serveAuthThread, .{ &first, gpa });
+    defer first_thread.join();
+    const ordinary_thread = try std.Thread.spawn(.{}, serveOneThread, .{ &ordinary, gpa });
+    defer ordinary_thread.join();
+    var to_child: [2]std.c.fd_t = undefined;
+    var to_parent: [2]std.c.fd_t = undefined;
+    try testing.expectEqual(@as(c_int, 0), std.c.pipe(&to_child));
+    defer {
+        _ = std.c.close(to_child[0]);
+        _ = std.c.close(to_child[1]);
+    }
+    try testing.expectEqual(@as(c_int, 0), std.c.pipe(&to_parent));
+    defer {
+        _ = std.c.close(to_parent[0]);
+        _ = std.c.close(to_parent[1]);
+    }
+    var child = try auth_ipc.Channel.init(timed_io, to_child[0], to_parent[1]);
+    child.run = @splat('1');
+    child.ceiling = auth.Deadline.after(timed_io, auth.session_ms);
+    var signer = try auth_ipc.Channel.init(io, to_parent[0], to_child[1]);
+    const signer_thread = try std.Thread.spawn(.{}, invalidSignerThread, .{ &signer, InvalidSigner.valid, gpa });
+    defer signer_thread.join();
+    var result = try np.run(timed_io, gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child });
+    defer result.deinit();
+    try testing.expectEqual(np.Classification.partial, result.classification.?);
+    const Document = struct { relays: []const struct { outcome: []const u8, attempts: usize, auth: struct { status: []const u8, reason: []const u8 }, events: []const struct { result: []const u8 } } };
+    var parsed = try std.json.parseFromSlice(Document, gpa, result.report.?, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    const relays = parsed.value.relays;
+    try testing.expectEqualStrings("accepted", relays[0].outcome);
+    for (relays[0].events) |event| try testing.expectEqualStrings("accepted", event.result);
+    try testing.expectEqualStrings("not-requested", relays[1].auth.status);
+    try testing.expectEqualStrings("session-timeout", relays[1].auth.reason);
+    try testing.expectEqual(@as(usize, 1), relays[1].attempts);
+    try testing.expectEqualStrings("timeout", relays[2].auth.status);
+    try testing.expectEqualStrings("session-timeout", relays[2].auth.reason);
+    for (relays[2].events) |event| try testing.expectEqualStrings("not-attempted", event.result);
+    try testing.expectEqual(@as(u64, 1), child.request);
+    var listener = [_]std.c.pollfd{.{ .fd = @intCast(third.server.socket.handle), .events = posix.POLL.IN, .revents = 0 }};
+    try testing.expectEqual(@as(c_int, 0), std.c.poll(&listener, 1, 0));
+}
+
 const loopback_url_fmt = "\"ws://127.0.0.1:{d}\"";
 
 const Scenario = enum {
@@ -59,6 +872,7 @@ const Scenario = enum {
     /// Spray a deterministic stream of random frames (random opcodes, fin
     /// bits, lengths, payloads) plus raw garbage at the client.
     fuzz_stream,
+    clock_expiry,
 };
 
 const MockRelay = struct {
@@ -214,7 +1028,7 @@ fn performHandshakeFd(fd: std.c.fd_t, read_buf: *[16384]u8, write_buf: *[4096]u8
 }
 
 fn sendServerText(fd: std.c.fd_t, payload: []const u8) !void {
-    var frame_buf: [1024]u8 = undefined;
+    var frame_buf: [8192]u8 = undefined;
     const len = try ws.encodeFrame(&frame_buf, .text, payload, .{ 0, 0, 0, 0 }, true, false);
     try writeAllFd(fd, frame_buf[0..len]);
 }
@@ -322,6 +1136,10 @@ fn serveOne(self: *MockRelay, gpa: std.mem.Allocator) !void {
 
 fn actOnEvent(self: *MockRelay, fd: std.c.fd_t, id: []const u8) !void {
     switch (self.scenario) {
+        .clock_expiry => {
+            TestClock.offset.store(@as(i64, auth.session_ms) * std.time.ns_per_ms, .release);
+            try sendServerText(fd, "[\"NOTICE\",\"ordinary traffic cannot renew ceiling\"]");
+        },
         .ok, .notice_then_ok => {
             if (self.scenario == .notice_then_ok) {
                 try sendServerText(fd, "[\"NOTICE\",\"will accept\"]");
