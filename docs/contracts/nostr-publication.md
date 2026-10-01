@@ -639,6 +639,13 @@ handshake and then stops reading forces the client's flush to block, and the
 per-write deadline must interrupt it mid-flush (`WriteTimeout`) rather than
 hang. Both mock relays (in-repo and Python TLS) reassemble fragmented client
 messages, as a conforming server must.
+Deadline races reserve concurrent execution for both the operation and timer:
+`async` may otherwise run either inline when its worker pool is full. If either
+reservation fails, the race refuses as a timeout and cancels/drains any pending
+operation. Focused tests force eager async execution and unavailable concurrency
+to pin this behavior. The write-fuzz cross-product retains every payload and
+fragment boundary, using a safety-enabled, explicitly leak-checked allocator
+without per-allocation stack unwinding.
 
 ## Approved NIP-42 boundary (phase 1, #1002)
 
@@ -1179,14 +1186,19 @@ Draft 2020-12 meta-schema checks pass for all three changed/new schemas.
 External validation covers the profile fixture, the actual emitted schema-2
 general declaration, schema-1 rejection, all eight IPC forms and omission/
 unknown-field rejection. The scoped implementation and fault-injection evidence
-are complete on macOS; the PR remains draft and unmerged for human review.
+are complete on macOS; the PR remains unmerged pending review and required CI.
 Linux is cross-compiled, not session-tested, and refuses the custody launcher.
 No public-relay interoperability, sandbox or perfect-memory-erasure claim is
 made. These limits do not weaken the approved boundary.
 The default Debug standing gates and all 28 NIP-42-filtered native ReleaseSafe
-cases pass. The optional full ReleaseSafe Nostr suite exceeded 300 seconds
-in the existing high-volume write-fuzz case; that whole optimized suite is
-not claimed as passed.
+cases passed during the initial proof. An optional full ReleaseSafe run timed
+out, and the required macOS CI subsequently exceeded its 30-minute cap.
+Local profiling identified eager inline deadline timers and high-volume
+allocator stack unwinding in the write-fuzz case. The follow-up fixes concurrent
+deadline reservations and removes only that test's stack-unwinding overhead,
+retaining allocator safety, leak checks and all wire assertions. Local gate
+results and the current required CI result are recorded in the PR completion
+report; local timing does not substitute for green remote CI.
 
 ## Diagnostics
 

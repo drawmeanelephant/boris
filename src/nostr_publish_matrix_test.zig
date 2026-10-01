@@ -2278,11 +2278,16 @@ fn verifyRecordedMessages(relay: *const WriteRecorderRelay, sent: []const []cons
 }
 
 test "write fuzz: random payloads and fragmentation patterns arrive byte-exact" {
-    var relay_threaded = Io.Threaded.init(testing.allocator, .{ .environ = std.process.Environ.empty });
+    // Hundreds of thousands of frames allocate transport/task scratch. Keep
+    // allocator safety and leak checks without unwinding a stack per allocation.
+    var allocator: std.heap.DebugAllocator(.{ .stack_trace_frames = 0, .safety = true }) = .init;
+    defer if (allocator.deinit() == .leak) @panic("write-fuzz allocator leaked");
+    const gpa = allocator.allocator();
+    var relay_threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
     defer relay_threaded.deinit();
     const relay_io = relay_threaded.io();
 
-    var client_threaded = Io.Threaded.init(testing.allocator, .{ .environ = std.process.Environ.empty });
+    var client_threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
     defer client_threaded.deinit();
     const client_io = client_threaded.io();
 
@@ -2301,13 +2306,13 @@ test "write fuzz: random payloads and fragmentation patterns arrive byte-exact" 
 
     var payload_buf: [200_000]u8 = undefined;
     var sent: std.ArrayList([]u8) = .empty;
-    defer sent.deinit(testing.allocator);
+    defer sent.deinit(gpa);
 
     for (fragment_sizes) |frag_size| {
         sent.clearRetainingCapacity();
-        var relay = try WriteRecorderRelay.init(relay_io, testing.allocator);
+        var relay = try WriteRecorderRelay.init(relay_io, gpa);
         errdefer relay.deinit();
-        const relay_thread = try std.Thread.spawn(.{}, serveWriteRecorder, .{ &relay, testing.allocator });
+        const relay_thread = try std.Thread.spawn(.{}, serveWriteRecorder, .{ &relay, gpa });
         // pthread_join must run exactly once: the flag keeps the error path
         // from double-joining after the explicit join below.
         var joined = false;
@@ -2316,7 +2321,7 @@ test "write fuzz: random payloads and fragmentation patterns arrive byte-exact" 
         var url_buf: [64]u8 = undefined;
         const url = try std.fmt.bufPrint(&url_buf, "ws://127.0.0.1:{d}", .{relay.port});
         {
-            var client = try ws.Client.connect(client_io, testing.allocator, url, .{
+            var client = try ws.Client.connect(client_io, gpa, url, .{
                 .handshake_timeout_ms = 5_000,
                 .read_timeout_ms = 5_000,
                 .max_fragment_bytes = frag_size,
@@ -2336,8 +2341,8 @@ test "write fuzz: random payloads and fragmentation patterns arrive byte-exact" 
                     rand.intRangeAtMost(usize, 0, payload_buf.len);
                 rand.bytes(payload_buf[0..plen]);
                 try client.sendText(payload_buf[0..plen]);
-                const copy = try testing.allocator.dupe(u8, payload_buf[0..plen]);
-                try sent.append(testing.allocator, copy);
+                const copy = try gpa.dupe(u8, payload_buf[0..plen]);
+                try sent.append(gpa, copy);
             }
         } // client.deinit() sends Close; the relay reads it and exits
 
@@ -2345,7 +2350,7 @@ test "write fuzz: random payloads and fragmentation patterns arrive byte-exact" 
         relay_thread.join();
         joined = true;
         try verifyRecordedMessages(&relay, sent.items, frag_size);
-        for (sent.items) |item| testing.allocator.free(item);
+        for (sent.items) |item| gpa.free(item);
         relay.deinit();
     }
 }

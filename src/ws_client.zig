@@ -264,7 +264,8 @@ fn RaceErrors(comptime ReturnT: type) type {
 
 /// Run `target` under a single deadline budget. If the deadline fires first,
 /// the pending operation is cancelled and `error.Timeout` is returned; op
-/// errors propagate unchanged.
+/// errors propagate unchanged. If concurrency cannot be reserved, fail closed
+/// as a timeout rather than running a blocking operation or timer inline.
 pub fn raceDeadline(io: Io, timeout_ms: u32, comptime target: anytype, args: anytype) RaceErrors(@typeInfo(@TypeOf(target)).@"fn".return_type.?)!RacePayload(@typeInfo(@TypeOf(target)).@"fn".return_type.?) {
     const FnInfo = @typeInfo(@TypeOf(target)).@"fn";
     const ReturnT = FnInfo.return_type.?;
@@ -272,8 +273,10 @@ pub fn raceDeadline(io: Io, timeout_ms: u32, comptime target: anytype, args: any
     var slots: [2]U = undefined;
     var select: Io.Select(U) = .init(io, &slots);
     defer while (select.cancel()) |_| {};
-    select.async(.op, target, args);
-    select.async(.timer, deadlineSleep, .{ io, timeout_ms });
+    // async is allowed to run inline when the worker pool is saturated.
+    // Both sides must be concurrent or the caller cannot enforce the deadline.
+    select.concurrent(.op, target, args) catch return error.Timeout;
+    select.concurrent(.timer, deadlineSleep, .{ io, timeout_ms }) catch return error.Timeout;
     const result = try select.await();
     var op_result: ?ReturnT = null;
     switch (result) {
@@ -282,6 +285,71 @@ pub fn raceDeadline(io: Io, timeout_ms: u32, comptime target: anytype, args: any
     }
     if (op_result == null) return error.Timeout;
     return op_result.? catch |err| return err;
+}
+
+test "raceDeadline times out even when async execution would be eager" {
+    var threaded = Io.Threaded.init(std.testing.allocator, .{
+        .environ = std.process.Environ.empty,
+        .async_limit = .nothing,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    try std.testing.expectError(error.Timeout, raceDeadline(io, 20, deadlineSleep, .{ io, 500 }));
+}
+
+test "raceDeadline does not wait for an eager timer after a completed operation" {
+    var threaded = Io.Threaded.init(std.testing.allocator, .{
+        .environ = std.process.Environ.empty,
+        .async_limit = .nothing,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+    const start = Io.Clock.awake.now(io);
+
+    try raceDeadline(io, 2_000, deadlineSleep, .{ io, 5 });
+    try std.testing.expect(start.durationTo(Io.Clock.awake.now(io)).toMilliseconds() < 1_000);
+}
+
+test "raceDeadline fails closed before invoking an operation without concurrency" {
+    var threaded = Io.Threaded.init(std.testing.allocator, .{
+        .environ = std.process.Environ.empty,
+        .async_limit = .nothing,
+        .concurrent_limit = .nothing,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+    const Operation = struct {
+        fn run(called: *bool) Io.Cancelable!void {
+            called.* = true;
+        }
+    };
+    var called = false;
+
+    try std.testing.expectError(error.Timeout, raceDeadline(io, 20, Operation.run, .{&called}));
+    try std.testing.expect(!called);
+}
+
+test "raceDeadline drains the operation when the timer cannot reserve concurrency" {
+    var threaded = Io.Threaded.init(std.testing.allocator, .{
+        .environ = std.process.Environ.empty,
+        .async_limit = .nothing,
+        .concurrent_limit = .limited(1),
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+    const Operation = struct {
+        fn run(op_io: Io, drained: *std.atomic.Value(bool)) Io.Cancelable!void {
+            defer drained.store(true, .release);
+            try deadlineSleep(op_io, 10_000);
+        }
+    };
+    var drained: std.atomic.Value(bool) = .init(false);
+    const start = Io.Clock.awake.now(io);
+
+    try std.testing.expectError(error.Timeout, raceDeadline(io, 20, Operation.run, .{ io, &drained }));
+    try std.testing.expect(drained.load(.acquire));
+    try std.testing.expect(start.durationTo(Io.Clock.awake.now(io)).toMilliseconds() < 1_000);
 }
 
 fn connectStream(io: Io, address: Io.net.IpAddress) Io.net.IpAddress.ConnectError!Io.net.Stream {
