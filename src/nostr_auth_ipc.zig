@@ -2,6 +2,8 @@
 const std = @import("std");
 const auth = @import("nostr_auth.zig");
 const builtin = @import("builtin");
+const root = @import("root");
+const system = if (@hasDecl(root, "nostr_auth_faults")) root.nostr_auth_faults.Pipes else std.c;
 
 pub const supported = builtin.os.tag == .macos or builtin.os.tag == .linux;
 pub var canceled: std.atomic.Value(bool) = .init(false);
@@ -34,7 +36,7 @@ pub const Channel = struct {
             if (canceled.load(.unordered)) return error.Canceled;
             _ = try deadline.remaining(self.io);
             var fds = [_]std.c.pollfd{.{ .fd = fd, .events = if (writing) std.posix.POLL.OUT else std.posix.POLL.IN, .revents = 0 }};
-            const n = std.c.poll(&fds, 1, 0);
+            const n = system.poll(&fds, 1, 0);
             if (n < 0) return error.ChannelLost;
             if (fds[0].revents & (std.posix.POLL.ERR | std.posix.POLL.NVAL) != 0) return error.ChannelLost;
             if (fds[0].revents & (if (writing) @as(i16, std.posix.POLL.OUT) else std.posix.POLL.IN) != 0) return;
@@ -77,6 +79,7 @@ pub const Channel = struct {
         return bytes;
     }
     pub fn send(self: *Channel, gpa: std.mem.Allocator, value: anytype, deadline: auth.Deadline) !void {
+        if (comptime @hasDecl(root, "nostr_auth_faults")) try root.nostr_auth_faults.beforeSend(self, value.type);
         const bytes = try std.json.Stringify.valueAlloc(gpa, value, .{});
         defer gpa.free(bytes);
         try auth.checkJson(bytes);

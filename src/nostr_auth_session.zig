@@ -6,6 +6,7 @@ const ipc = @import("nostr_auth_ipc.zig");
 const publish = @import("nostr_publish.zig");
 const keys = @import("nostr_keys.zig");
 const nostr = @import("nostr.zig");
+const root = @import("root");
 
 // Custody is currently implemented with Darwin's explicit descriptor allowlist.
 // Other platforms must refuse, not approximate this security boundary.
@@ -43,7 +44,12 @@ fn pipe() ![2]std.c.fd_t {
 
 fn spawn(io: std.Io, gpa: std.mem.Allocator, plan: []const u8, bundle: []const u8, report: ?[]const u8, input: std.c.fd_t, output: std.c.fd_t) !std.c.pid_t {
     if (comptime !supported) return error.UnsupportedPlatform;
-    const executable = try std.process.executablePathAlloc(io, gpa);
+    // Only the separately built process-test root supplies this declaration.
+    // Production has no runtime executable override or fault configuration.
+    const executable = if (comptime @hasDecl(root, "nostr_auth_faults"))
+        try root.nostr_auth_faults.executablePathAlloc(io, gpa)
+    else
+        try std.process.executablePathAlloc(io, gpa);
     defer gpa.free(executable);
     const plan_z = try gpa.dupeZ(u8, plan);
     defer gpa.free(plan_z);
@@ -103,7 +109,10 @@ fn terminate(io: std.Io, pid: std.c.pid_t, deadline: auth.Deadline) void {
 }
 
 fn readKey(reader: *std.Io.Reader) !?[]const u8 {
-    return reader.takeDelimiter('\n');
+    return reader.takeDelimiter('\n') catch |err| switch (err) {
+        error.StreamTooLong => error.InvalidKey,
+        else => err,
+    };
 }
 
 fn readKeyGuarded(channel: *ipc.Channel, reader: *std.Io.Reader) !?[]const u8 {
@@ -165,6 +174,7 @@ pub fn supervise(io: std.Io, gpa: std.mem.Allocator, plan_path: []const u8, bund
     var ready = try auth.parse(auth.Ready, gpa, ready_bytes, "ready");
     defer ready.deinit();
     if (!auth.equalPolicy(policy, ready.value.policy)) return error.SessionInvalid;
+    if (comptime @hasDecl(root, "nostr_auth_faults")) root.nostr_auth_faults.readyValidated();
 
     // No key-bearing state existed at process creation or in the exec child.
     const no_core: std.c.rlimit = .{ .cur = 0, .max = 0 };
@@ -180,7 +190,10 @@ pub fn supervise(io: std.Io, gpa: std.mem.Allocator, plan_path: []const u8, bund
     if (!nostr.decodeSecretKey(key_text, &secret)) return error.InvalidKey;
     var ctx = try keys.Context.initRandomized(io);
     defer ctx.deinit();
-    var pair = try ctx.keyPairFromSecretKey(secret);
+    var pair = ctx.keyPairFromSecretKey(secret) catch |err| switch (err) {
+        error.InvalidSecretKey => return error.InvalidKey,
+        else => return err,
+    };
     defer std.crypto.secureZero(u8, &pair.secret_key);
     const pubkey = std.fmt.bytesToHex(pair.public_key, .lower);
     if (!std.mem.eql(u8, &pubkey, policy.pubkey)) return error.IdentityMismatch;

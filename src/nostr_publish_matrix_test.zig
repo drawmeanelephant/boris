@@ -35,6 +35,8 @@ const AuthScenario = enum {
     auth_required,
     restricted,
     article_rejected,
+    challenge_close,
+    auth_close,
     empty,
     non_string,
     control,
@@ -139,6 +141,7 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
     if (!try performHandshakeFd(fd, &read_buf, &write_buf, .ok)) return;
     relay.phase.store(1, .release);
     switch (relay.scenario) {
+        .challenge_close => try sendServerClose(fd),
         .empty => try sendServerText(fd, "[\"AUTH\",\"\"]"),
         .non_string => try sendServerText(fd, "[\"AUTH\",7]"),
         .control => try sendServerText(fd, "[\"AUTH\",\"x\\n\"]"),
@@ -206,6 +209,10 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
             };
             @memcpy(&relay.auth_sig, event.value.sig);
             const id = event.value.id;
+            if (relay.scenario == .auth_close) {
+                try sendServerClose(fd);
+                continue;
+            }
             if (relay.scenario == .auth_silence) continue;
             if (relay.scenario == .replay) {
                 try sendServerText(fd, "[\"AUTH\",\"" ++ auth_challenge ++ "\"]");
@@ -231,6 +238,10 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
             relay.phase.store(3, .release);
             if (relay.scenario == .article_silence) continue;
             if (relay.saw_auth == 0) relay.auth_verified = false;
+            if (relay.expected.len == 0) {
+                relay.exact_articles = false;
+                continue;
+            }
             const index = if (relay.scenario == .retry) (relay.base.saw_events - 1) -| 1 else relay.base.saw_events - 1;
             const wanted = if (relay.scenario == .retry and relay.base.saw_events <= 2) relay.expected[0] else relay.expected[@min(index, relay.expected.len - 1)];
             if (!std.mem.eql(u8, wanted, frame.payload)) relay.exact_articles = false;
@@ -339,6 +350,10 @@ test "NIP-42 rejected auth never writes EVENT, including standardized prefixes" 
 test "NIP-42 auth success is separate from restricted article rejection" {
     try authScenario(.article_rejected, "authenticated", 2, "failed");
 }
+test "NIP-42 relay Close during challenge or auth OK writes zero articles" {
+    for ([_]AuthScenario{ .challenge_close, .auth_close }) |scenario|
+        try authScenario(scenario, "closed", 0, "failed");
+}
 test "NIP-42 malformed and oversized challenges and OKs write zero articles" {
     for ([_]AuthScenario{ .empty, .non_string, .control, .extra, .invalid_utf8, .garbage, .oversized, .frame_oversized, .masked, .wrong_ok, .malformed_ok }) |scenario|
         try authScenario(scenario, "protocol-error", 0, "failed");
@@ -368,7 +383,7 @@ test "NIP-42 article retry is byte-identical and consumes no additional auth" {
 test "NIP-42 mixed opted-in and ordinary relays retain separate evidence and verdicts" {
     if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
     const gpa = testing.allocator;
-    for ([_]AuthScenario{ .success, .rejected, .challenge_silence }) |scenario| {
+    for ([_]AuthScenario{ .success, .rejected, .challenge_silence, .challenge_close, .auth_close }) |scenario| {
         var threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
         defer threaded.deinit();
         var auth_base = try MockRelay.init(threaded.io(), .ok);
@@ -405,11 +420,351 @@ extern "c" fn proc_pidinfo(pid: c_int, flavor: c_int, arg: u64, buffer: ?*anyopa
 extern "c" fn proc_pidpath(pid: c_int, buffer: ?*anyopaque, length: u32) c_int;
 extern "c" fn proc_pidfdinfo(pid: c_int, fd: c_int, flavor: c_int, buffer: ?*anyopaque, length: c_int) c_int;
 
+fn spawnFaultProcess(tmp: *testing.TmpDir, scenario: []const u8, artifacts: MatrixArtifacts, stdin: std.process.SpawnOptions.StdIo) !std.process.Child {
+    const gpa = testing.allocator;
+    const name = try std.fmt.allocPrint(gpa, "{s}.json", .{scenario});
+    defer gpa.free(name);
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = name, .data = artifacts.plan });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "bundle.json", .data = artifacts.bundle });
+    const plan_path = try tmp.dir.realPathFileAlloc(testing.io, name, gpa);
+    defer gpa.free(plan_path);
+    const bundle_path = try tmp.dir.realPathFileAlloc(testing.io, "bundle.json", gpa);
+    defer gpa.free(bundle_path);
+    return std.process.spawn(testing.io, .{
+        .argv = &.{ @import("nostr_fault_binary").path, "nostr", "sign", "--auth-session", "--plan", plan_path, "--bundle", bundle_path, "--key-stdin" },
+        .stdin = stdin,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    });
+}
+
+fn collectFaultProcess(child: *std.process.Child) !std.process.RunResult {
+    const gpa = testing.allocator;
+    var buffer: Io.File.MultiReader.Buffer(2) = undefined;
+    var reader: Io.File.MultiReader = undefined;
+    reader.init(gpa, testing.io, buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
+    defer reader.deinit();
+    const deadline = auth.Deadline.after(testing.io, 5000);
+    while (reader.fill(4096, .{ .duration = .{ .clock = .awake, .raw = .fromMilliseconds(try deadline.remaining(testing.io)) } })) |_| {} else |err| {
+        if (err != error.EndOfStream) return err;
+    }
+    try reader.checkAnyError();
+    return .{ .term = try child.wait(testing.io), .stdout = try reader.toOwnedSlice(0), .stderr = try reader.toOwnedSlice(1) };
+}
+
+fn fixtureCounter(log: []const u8, child: bool, name: []const u8) !usize {
+    const prefix: []const u8 = if (child) "fixture-stats child=1 " else "fixture-stats child=0 ";
+    const start = std.mem.indexOf(u8, log, prefix) orelse return error.MissingFixtureStats;
+    const tail = log[start..];
+    const line = tail[0 .. std.mem.indexOfScalar(u8, tail, '\n') orelse tail.len];
+    var fields = std.mem.tokenizeScalar(u8, line, ' ');
+    while (fields.next()) |field| {
+        const eq = std.mem.indexOfScalar(u8, field, '=') orelse continue;
+        if (std.mem.eql(u8, field[0..eq], name)) return std.fmt.parseInt(usize, field[eq + 1 ..], 10);
+    }
+    return error.MissingFixtureCounter;
+}
+
+fn expectFaultHygiene(output: std.process.RunResult) !void {
+    for ([_][]const u8{ output.stdout, output.stderr }) |text| {
+        for ([_][]const u8{ auth_scalar, auth_challenge, "process-fixture-challenge", "\"sig\"", "\"correlation\"", "\"boris-nostr-auth-ipc\"" }) |forbidden|
+            try testing.expect(std.mem.indexOf(u8, text, forbidden) == null);
+    }
+    try testing.expectEqual(@as(usize, 0), try fixtureCounter(output.stderr, false, "contexts"));
+    if (try fixtureCounter(output.stderr, false, "reads") > 0)
+        try testing.expectEqual(@as(usize, 1), try fixtureCounter(output.stderr, false, "cores"));
+}
+
+fn expectNoConnect(base: *MockRelay) !void {
+    var listener = [_]std.c.pollfd{.{ .fd = @intCast(base.server.socket.handle), .events = posix.POLL.IN, .revents = 0 }};
+    try testing.expectEqual(@as(c_int, 0), std.c.poll(&listener, 1, 0));
+}
+
+test "NIP-42 process exec and forged ready failures never read queued key stdin" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    for ([_][]const u8{ "exec_fail", "ready_eof", "ready_silence", "ready_policy", "ready_author", "ready_digest", "ready_relay", "ready_revision", "ready_version", "ready_unknown", "ready_truncated" }) |scenario| {
+        var tmp = testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var base = try MockRelay.init(testing.io, .ok);
+        defer base.deinit();
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 200);
+        defer artifacts.deinit(gpa);
+        // Retain a read endpoint for FIONREAD after the supervisor exits.
+        // This independently observes the kernel queue, not just a mock count.
+        var pipe: [2]std.c.fd_t = undefined;
+        try testing.expectEqual(@as(c_int, 0), std.c.pipe(&pipe));
+        defer for (pipe) |fd| {
+            _ = std.c.close(fd);
+        };
+        try testing.expectEqual(@as(isize, 65), std.c.write(pipe[1], auth_scalar ++ "\n", 65));
+        const file: Io.File = .{ .handle = pipe[0], .flags = .{ .nonblocking = false } };
+        var child = try spawnFaultProcess(&tmp, scenario, artifacts, .{ .file = file });
+        defer child.kill(testing.io);
+        const output = try collectFaultProcess(&child);
+        defer gpa.free(output.stdout);
+        defer gpa.free(output.stderr);
+        try testing.expectEqual(std.process.Child.Term{ .exited = 3 }, output.term);
+        try testing.expectEqual(@as(usize, 0), output.stdout.len);
+        try testing.expectEqual(@as(usize, 0), try fixtureCounter(output.stderr, false, "reads"));
+        var queued: c_int = 0;
+        try testing.expectEqual(@as(c_int, 0), std.c.ioctl(pipe[0], 0x4004667f, &queued)); // Darwin FIONREAD
+        try testing.expectEqual(@as(c_int, 65), queued);
+        try expectNoConnect(&base);
+        try expectFaultHygiene(output);
+    }
+}
+
+test "NIP-42 process context and seed failures destroy custody before begin" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    for ([_][]const u8{ "seed_entropy", "context_fail", "randomize_fail", "keypair_fail" }) |scenario| {
+        var tmp = testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var base = try MockRelay.init(testing.io, .ok);
+        defer base.deinit();
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 200);
+        defer artifacts.deinit(gpa);
+        var child = try spawnFaultProcess(&tmp, scenario, artifacts, .pipe);
+        defer child.kill(testing.io);
+        try child.stdin.?.writeStreamingAll(testing.io, auth_scalar ++ "\n");
+        child.stdin.?.close(testing.io);
+        child.stdin = null;
+        const output = try collectFaultProcess(&child);
+        defer gpa.free(output.stdout);
+        defer gpa.free(output.stderr);
+        try testing.expectEqual(std.process.Child.Term{ .exited = if (std.mem.eql(u8, scenario, "keypair_fail")) 1 else 3 }, output.term);
+        try testing.expectEqual(@as(usize, 0), output.stdout.len);
+        try testing.expectEqual(@as(usize, 1), try fixtureCounter(output.stderr, false, "reads"));
+        try testing.expectEqual(@as(usize, 0), try fixtureCounter(output.stderr, false, "signs"));
+        try expectNoConnect(&base);
+        try expectFaultHygiene(output);
+    }
+}
+
+test "NIP-42 process invalid or wrong-identity key is a content refusal before begin" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    for ([_][]const u8{ "invalid-key\n", "0" ** 64 ++ "\n", "0" ** 63 ++ "4\n", "x" ** 130 ++ "\n" }) |input| {
+        var tmp = testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var base = try MockRelay.init(testing.io, .ok);
+        defer base.deinit();
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 200);
+        defer artifacts.deinit(gpa);
+        var child = try spawnFaultProcess(&tmp, "key_input", artifacts, .pipe);
+        defer child.kill(testing.io);
+        try child.stdin.?.writeStreamingAll(testing.io, input);
+        child.stdin.?.close(testing.io);
+        child.stdin = null;
+        const output = try collectFaultProcess(&child);
+        defer gpa.free(output.stdout);
+        defer gpa.free(output.stderr);
+        try testing.expectEqual(std.process.Child.Term{ .exited = 1 }, output.term);
+        try testing.expectEqual(@as(usize, 0), output.stdout.len);
+        try testing.expect(std.mem.indexOf(u8, output.stderr, std.mem.trimEnd(u8, input, "\n")) == null);
+        try testing.expectEqual(@as(usize, 0), try fixtureCounter(output.stderr, false, "signs"));
+        try expectNoConnect(&base);
+        try expectFaultHygiene(output);
+    }
+}
+
+test "NIP-42 process hostile requests and controls terminate without relay writes" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    for ([_][]const u8{
+        "request_extra",     "request_hash",     "request_run",    "request_connection",    "request_relay", "request_generation",
+        "request_revision",  "request_digest",   "request_number", "cancel_before_request", "cancel_wrong",  "cancel_duplicate",
+        "retire_wrong",      "retire_duplicate", "sign_retired",   "control_unknown",       "finish_extra",  "request_eof",
+        "request_truncated", "begin_run",        "begin_version",  "begin_unknown",
+    }) |scenario| {
+        var tmp = testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var base = try MockRelay.init(testing.io, .ok);
+        defer base.deinit();
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 200);
+        defer artifacts.deinit(gpa);
+        var child = try spawnFaultProcess(&tmp, scenario, artifacts, .pipe);
+        defer child.kill(testing.io);
+        try child.stdin.?.writeStreamingAll(testing.io, auth_scalar ++ "\n");
+        child.stdin.?.close(testing.io);
+        child.stdin = null;
+        const output = try collectFaultProcess(&child);
+        defer gpa.free(output.stdout);
+        defer gpa.free(output.stderr);
+        try testing.expectEqual(std.process.Child.Term{ .exited = 3 }, output.term);
+        try testing.expectEqual(@as(usize, 0), output.stdout.len);
+        try testing.expectEqual(@as(usize, 1), try fixtureCounter(output.stderr, false, "reads"));
+        if (std.mem.startsWith(u8, scenario, "begin_"))
+            try testing.expectEqual(@as(usize, 0), try fixtureCounter(output.stderr, true, "reads"));
+        const signed = std.mem.eql(u8, scenario, "cancel_wrong") or std.mem.eql(u8, scenario, "cancel_duplicate") or
+            std.mem.eql(u8, scenario, "retire_wrong") or std.mem.eql(u8, scenario, "retire_duplicate") or std.mem.eql(u8, scenario, "sign_retired");
+        try testing.expectEqual(@as(usize, if (signed) 1 else 0), try fixtureCounter(output.stderr, false, "signs"));
+        try expectNoConnect(&base);
+        try expectFaultHygiene(output);
+    }
+}
+
+test "NIP-42 process transient signing failures persist while plain relays still publish" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    const gpa = testing.allocator;
+    for ([_][]const u8{ "aux_entropy", "sign_fail", "verify_fail" }) |scenario| {
+        var tmp = testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
+        defer threaded.deinit();
+        var first = try MockRelay.init(threaded.io(), .ok);
+        defer first.deinit();
+        var second = try MockRelay.init(threaded.io(), .ok);
+        defer second.deinit();
+        var plain = try MockRelay.init(threaded.io(), .ok);
+        defer plain.deinit();
+        var artifacts = try makeAuthArtifacts(gpa, &.{ first.port, second.port, plain.port }, &.{ first.port, second.port }, 250);
+        defer artifacts.deinit(gpa);
+        var first_auth: AuthRelay = .{ .base = first, .scenario = .success, .expected = &.{} };
+        var second_auth: AuthRelay = .{ .base = second, .scenario = .success, .expected = &.{} };
+        var joined = false;
+        const one = try std.Thread.spawn(.{}, serveAuthThread, .{ &first_auth, gpa });
+        defer if (!joined) one.join();
+        const two = try std.Thread.spawn(.{}, serveAuthThread, .{ &second_auth, gpa });
+        defer if (!joined) two.join();
+        const three = try std.Thread.spawn(.{}, serveOneThread, .{ &plain, gpa });
+        defer if (!joined) three.join();
+        var child = try spawnFaultProcess(&tmp, scenario, artifacts, .pipe);
+        defer child.kill(testing.io);
+        try child.stdin.?.writeStreamingAll(testing.io, auth_scalar ++ "\n");
+        child.stdin.?.close(testing.io);
+        child.stdin = null;
+        const output = try collectFaultProcess(&child);
+        defer gpa.free(output.stdout);
+        defer gpa.free(output.stderr);
+        try testing.expectEqual(std.process.Child.Term{ .exited = 0 }, output.term);
+        var report = try std.json.parseFromSlice(struct {
+            classification: []const u8,
+            relays: []const struct { attempts: usize, auth: struct { status: []const u8, reason: []const u8, signing_requests: usize, auth_sends: usize } },
+        }, gpa, output.stdout, .{ .ignore_unknown_fields = true });
+        defer report.deinit();
+        try testing.expectEqualStrings("partial", report.value.classification);
+        for (report.value.relays[0..2]) |r| {
+            try testing.expectEqualStrings("signer-error", r.auth.status);
+            try testing.expectEqualStrings("signer-refused", r.auth.reason);
+            try testing.expectEqual(@as(usize, 1), r.auth.signing_requests);
+            try testing.expectEqual(@as(usize, 0), r.auth.auth_sends);
+            try testing.expectEqual(@as(usize, 0), r.attempts);
+        }
+        try testing.expectEqualStrings("not-requested", report.value.relays[2].auth.status);
+        try testing.expectEqual(@as(usize, if (std.mem.eql(u8, scenario, "aux_entropy")) 0 else 1), try fixtureCounter(output.stderr, false, "signs"));
+        try testing.expectEqual(@as(usize, if (std.mem.eql(u8, scenario, "verify_fail")) 1 else 0), try fixtureCounter(output.stderr, false, "verifies"));
+        try testing.expectEqual(@as(usize, 3), try fixtureCounter(output.stderr, false, "entropy"));
+        try testing.expectEqual(@as(usize, 0), try fixtureCounter(output.stderr, true, "reads"));
+        try expectFaultHygiene(output);
+        // Process exit closes the sockets. Join before reading relay counters.
+        one.join();
+        two.join();
+        three.join();
+        joined = true;
+        try testing.expectEqual(@as(usize, 0), first_auth.saw_auth + second_auth.saw_auth);
+        try testing.expectEqual(@as(usize, 0), first_auth.base.saw_events + second_auth.base.saw_events);
+        try testing.expectEqual(@as(usize, 2), plain.saw_events);
+    }
+}
+
 fn processRunning(pid: c_int) bool {
     if (std.c.kill(pid, @enumFromInt(0)) != 0) return false;
     var info: [64]u32 = @splat(0);
     if (proc_pidinfo(pid, 3, 0, &info, @sizeOf(@TypeOf(info))) > 0 and info[1] == 5) return false; // SZOMB: terminated; reaping belongs to init after parent SIGKILL
     return true;
+}
+
+const BlockedExit = enum { cancel, supervisor_death, publisher_death, deadline };
+
+fn blockedProcessFault(scenario: []const u8, target: BlockedExit) !void {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
+    defer threaded.deinit();
+    var base = try MockRelay.init(threaded.io(), .ok);
+    defer base.deinit();
+    var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, if (target == .deadline) 200 else 2000);
+    defer artifacts.deinit(gpa);
+    var relay: AuthRelay = .{ .base = base, .scenario = .success, .expected = &.{} };
+    const networked = std.mem.eql(u8, scenario, "block_request") or std.mem.eql(u8, scenario, "block_network");
+    const server = if (networked) try std.Thread.spawn(.{}, serveAuthThread, .{ &relay, gpa }) else null;
+    var joined = false;
+    defer if (!joined) {
+        if (server) |thread| thread.join();
+    };
+    var process = try spawnFaultProcess(&tmp, scenario, artifacts, .pipe);
+    defer process.kill(io);
+    try process.stdin.?.writeStreamingAll(io, auth_scalar ++ "\n");
+    process.stdin.?.close(io);
+    process.stdin = null;
+    var buffer: Io.File.MultiReader.Buffer(2) = undefined;
+    var reader: Io.File.MultiReader = undefined;
+    reader.init(gpa, io, buffer.toStreams(), &.{ process.stdout.?, process.stderr.? });
+    defer reader.deinit();
+    const marker = try std.fmt.allocPrint(gpa, "fixture-blocked-{s}\n", .{scenario});
+    defer gpa.free(marker);
+    const startup = auth.Deadline.after(io, 1500);
+    while (std.mem.indexOf(u8, reader.reader(1).buffered(), marker) == null) {
+        try reader.fill(4096, .{ .duration = .{ .clock = .awake, .raw = .fromMilliseconds(try startup.remaining(io)) } });
+    }
+    var children: [4]c_int = @splat(0);
+    _ = proc_listchildpids(process.id.?, &children, @sizeOf(@TypeOf(children)));
+    try testing.expect(children[0] != 0);
+    const child_pid = children[0];
+    const teardown = auth.Deadline.after(io, 1500);
+    switch (target) {
+        .cancel => try testing.expectEqual(@as(c_int, 0), std.c.kill(process.id.?, .TERM)),
+        .supervisor_death => try testing.expectEqual(@as(c_int, 0), std.c.kill(process.id.?, .KILL)),
+        .publisher_death => try testing.expectEqual(@as(c_int, 0), std.c.kill(child_pid, .KILL)),
+        .deadline => {},
+    }
+    while (reader.fill(4096, .{ .duration = .{ .clock = .awake, .raw = .fromMilliseconds(try teardown.remaining(io)) } })) |_| {} else |err| {
+        if (err != error.EndOfStream) return err;
+    }
+    try reader.checkAnyError();
+    const output: std.process.RunResult = .{
+        .term = try process.wait(io),
+        .stdout = try reader.toOwnedSlice(0),
+        .stderr = try reader.toOwnedSlice(1),
+    };
+    defer gpa.free(output.stdout);
+    defer gpa.free(output.stderr);
+    while (processRunning(child_pid)) {
+        _ = try teardown.remaining(io);
+        try Io.sleep(io, .fromMilliseconds(5), .awake);
+    }
+    if (target == .supervisor_death) {
+        try testing.expect(output.term == .signal);
+        for ([_][]const u8{ auth_scalar, auth_challenge, "process-fixture-challenge", "\"sig\"", "\"correlation\"" }) |forbidden|
+            try testing.expect(std.mem.indexOf(u8, output.stderr, forbidden) == null);
+    } else {
+        try testing.expectEqual(std.process.Child.Term{ .exited = 3 }, output.term);
+        try expectFaultHygiene(output);
+    }
+    try testing.expectEqual(@as(usize, 0), output.stdout.len); // no fabricated completed report
+    if (server) |thread| thread.join();
+    joined = true;
+    if (!networked) try expectNoConnect(&base);
+    try testing.expectEqual(@as(usize, 0), relay.saw_auth);
+    try testing.expectEqual(@as(usize, 0), relay.base.saw_events);
+}
+
+test "NIP-42 process cancellation and death during blocked IPC and transport writes" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    for ([_][]const u8{ "block_begin", "block_request", "block_response", "block_network" }) |scenario| {
+        for ([_]BlockedExit{ .cancel, .supervisor_death, .publisher_death }) |target|
+            try blockedProcessFault(scenario, target);
+    }
+}
+
+test "NIP-42 process full kernel pipes retain bounded startup and complete-frame writes" {
+    if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
+    for ([_][]const u8{ "block_begin", "block_request", "block_response" }) |scenario|
+        try blockedProcessFault(scenario, .deadline);
 }
 
 test "NIP-42 actual exec custody, key-input cancellation and supervisor loss are bounded" {

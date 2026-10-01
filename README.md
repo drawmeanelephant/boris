@@ -128,8 +128,9 @@ Session mode currently supports macOS only. It requires a proactive relay
 challenge and sends no article before the matching positive auth `OK`.
 Reactive-only relays time out without an article probe. Opt-in artifacts
 negotiate schema 2; schema-1 consumers must refuse them.
-See the contract's phase-2 implementation notes for remaining verification
-obligations before this capability is release-ready.
+The scoped macOS process/fault tests pass; this capability remains unreleased
+in a draft PR awaiting review. See the contract's phase-2 implementation notes
+for evidence and limitations.
 
 A bare `boris build` never needs a key, a relay, or the network, and a failed
 Nostr operation never invalidates a committed website. The normative

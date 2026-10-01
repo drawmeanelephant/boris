@@ -2,8 +2,9 @@
 
 **Status:** normative contract for the three-command NIP-23 pipeline.
 The [approved NIP-42 boundary](#approved-nip-42-boundary-phase-1-1002)
-governs the opt-in phase-2 implementation. Its release-proof obligations
-remain in progress, as recorded below; it does not amend ordinary v1 behavior.
+governs the opt-in phase-2 implementation. Its scoped macOS fault-injection
+proof passes, as recorded below. It remains unreleased and does not amend
+ordinary v1 behavior.
 `boris nostr plan --profile PATH` reads one explicitly selected local
 publication profile, selects the allowlisted pages that are eligible as
 NIP-23 long-form articles, derives the publication-safe Markdown and tag
@@ -642,7 +643,8 @@ messages, as a conforming server must.
 ## Approved NIP-42 boundary (phase 1, #1002)
 
 **Status: phase-1 boundary approved on 2026-10-01; phase-2 implementation
-authorized separately and in progress.** The requirements below remain the
+authorized separately; implemented and tested on macOS, awaiting review.**
+The requirements below remain the
 approved boundary, not a reduced implementation acceptance checklist.
 Refs [#1002](https://github.com/drawmeanelephant/boris/issues/1002).
 The [#493 v1 decision](https://github.com/drawmeanelephant/boris/issues/493)
@@ -1135,17 +1137,56 @@ acceptance and skipping unstarted relays. Exact-limit fragmented auth/IPC and
 multibyte challenge cases test byte bounds. Offline article event bytes remain
 identical across schema negotiation.
 
-**Not yet fully proved:** the complete approved hostile plan still needs
-fault-injected exec/ready failures with a syscall-level no-key-read assertion,
-real-process forged handshakes and hostile control messages, cancellation/death
-specifically during blocked IPC/write operations, and entropy/secp256k1 failure
-injection. Current gates do not replace these missing auth-specific cases.
+The remaining process fault cases now run in the same matrix. A separate,
+non-installed Zig test root imports the production CLI/supervisor/publisher
+and execs itself through the production launcher. Compile-time seams replace
+only executable resolution, pipe-read readiness and selected secp256k1 calls;
+an Io wrapper counts stdin operations and injects entropy/write faults.
+No production flag, environment override, helper selection or alternate
+publisher is added.
+
+- Failed exec, EOF/silent/truncated `ready`, wrong version, unknown fields,
+  and mismatched timeout/identity/digest/relay/revision all leave the 65 queued
+  stdin bytes untouched. Darwin `FIONREAD` checks the actual kernel queue,
+  independently of a zero-stdin-operation counter. Valid sessions assert
+  `ready` before their first stdin syscall and observe both core limits zero.
+- Forged `begin` and hostile sign/control messages reject extra event/hash
+  input, foreign policy/correlation, bad generation/request number, controls
+  without a request, wrong/duplicate cancel or retire, signing after retirement,
+  unknown controls, extra finish fields, EOF and truncated frames. They emit
+  no completed report and open no relay socket. Signing-call counts distinguish
+  immediate refusal from rejection after one valid proof.
+- Seed entropy, context creation/randomization and keypair failures stop before
+  `begin`. One-shot aux entropy, signing and self-verification failures remain
+  disabled on the next opted-in relay even though the injected primitive can
+  recover; a plain relay still receives both unchanged articles. The recording
+  auth relays receive zero AUTH/EVENT. All handled exits destroy their contexts.
+- Real anonymous pipes are filled until kernel `POLLOUT` is absent during
+  `begin`, sign-request and response writes. Their complete-frame deadlines
+  terminate. SIGTERM cancellation, supervisor SIGKILL and publisher SIGKILL
+  during these waits and an injected pending socket write terminate both
+  processes within the teardown bound, with no AUTH/EVENT or completed report.
+  Socket-write cancellation uses the actual transport's Io path with an
+  injected pending write; native socket backpressure/deadline coverage remains
+  in the standing WebSocket test. SIGKILL discards the address space, not a claim
+  that cleanup handlers ran.
+- Invalid encoding, invalid secret scalar, wrong identity and overlong key
+  input refuse before `begin` with content exit 1, no key echo and no sockets.
+  Relay Close during challenge/auth-OK remains local: zero article writes
+  there, while a plain relay still publishes.
+
 Draft 2020-12 meta-schema checks pass for all three changed/new schemas.
 External validation covers the profile fixture, the actual emitted schema-2
 general declaration, schema-1 rejection, all eight IPC forms and omission/
-unknown-field rejection. This capability is not release-ready until the
-remaining process fault-injection obligations pass. This evidence limitation
-does not weaken the approved boundary.
+unknown-field rejection. The scoped implementation and fault-injection evidence
+are complete on macOS; the PR remains draft and unmerged for human review.
+Linux is cross-compiled, not session-tested, and refuses the custody launcher.
+No public-relay interoperability, sandbox or perfect-memory-erasure claim is
+made. These limits do not weaken the approved boundary.
+The default Debug standing gates and all 28 NIP-42-filtered native ReleaseSafe
+cases pass. The optional full ReleaseSafe Nostr suite exceeded 300 seconds
+in the existing high-volume write-fuzz case; that whole optimized suite is
+not claimed as passed.
 
 ## Diagnostics
 

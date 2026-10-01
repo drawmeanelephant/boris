@@ -503,7 +503,9 @@ custody. `--auth-pipes 3,4` is a private launcher control, not a signer plugin
 or public helper-command interface. The child gets `/dev/null` stdin.
 Cancellation/channel loss is exit 3, not a fabricated publish report. See
 the [approved boundary and implementation notes](nostr-publication.md#approved-nip-42-boundary-phase-1-1002)
-for proactive-only compatibility and remaining release-proof obligations.
+for proactive-only compatibility and scoped macOS process-test evidence.
+Malformed/overlong key input, invalid secret scalars and wrong identity are
+content refusals (exit 1) before `begin`, with no report or relay connection.
 
 `nostr sign` options: `--plan PATH` (required), `--key-stdin` (required; the
 key is 64 hex digits or a NIP-19 `nsec`, read once and zeroed best-effort —
