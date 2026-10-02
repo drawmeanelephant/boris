@@ -1197,9 +1197,9 @@ Draft 2020-12 meta-schema checks pass for all three changed/new schemas.
 External validation covers the profile fixture, the actual emitted schema-2
 general declaration, schema-1 rejection, all eight IPC forms and omission/
 unknown-field rejection. The scoped implementation and fault-injection evidence
-are complete on macOS. PR #1016 merged on 2026-10-01; its canonical completion
-report records the acceptance-review follow-up and distinguishes locally tested
-fixes from merged implementation and remote CI evidence.
+are complete on macOS. PR #1016 merged on 2026-10-01; acceptance-review follow-up
+PR #1017 records the scoped fixes and exact local/CI evidence in its canonical
+completion report, distinguishing tested fixes from merged implementation.
 Linux is cross-compiled, not session-tested, and refuses the custody launcher.
 No public-relay interoperability, sandbox or perfect-memory-erasure claim is
 made. These limits do not weaken the approved boundary.
