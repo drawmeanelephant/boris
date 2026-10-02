@@ -64,6 +64,12 @@ const AuthScenario = enum {
     ping_flood,
     multibyte,
     multibyte_oversized,
+    acceptance_close,
+    acceptance_large,
+    acceptance_auth_required,
+    acceptance_rejected,
+    acceptance_closed,
+    acceptance_premature,
 };
 const AuthRelay = struct {
     base: MockRelay,
@@ -74,9 +80,14 @@ const AuthRelay = struct {
     exact_articles: bool = true,
     auth_sig: [128]u8 = @splat(0),
     phase: std.atomic.Value(u8) = .init(0),
+    acceptance: ?*AcceptanceSync = null,
 };
 
 fn makeAuthArtifacts(gpa: std.mem.Allocator, ports: []const u16, subset: []const u16, timeout_ms: u32) !MatrixArtifacts {
+    return makeAuthArtifactsWithContent(gpa, ports, subset, timeout_ms, "article bytes");
+}
+
+fn makeAuthArtifactsWithContent(gpa: std.mem.Allocator, ports: []const u16, subset: []const u16, timeout_ms: u32, content: []const u8) !MatrixArtifacts {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const a = arena_state.allocator();
@@ -98,11 +109,11 @@ fn makeAuthArtifacts(gpa: std.mem.Allocator, ports: []const u16, subset: []const
     for ([_][]const u8{ "articles/first", "articles/second" }, &articles) |id, *article| {
         const tags = [_]nostr.Tag{ .{ .name = "d", .value = id }, .{ .name = "published_at", .value = "1000" } };
         var digest: [64]u8 = undefined;
-        try nostr.intentionDigestHex(a, &tags, "article bytes", &digest);
+        try nostr.intentionDigestHex(a, &tags, content, &digest);
         const pairs = try a.alloc([]const []const u8, 2);
         pairs[0] = try a.dupe([]const u8, &.{ "d", id });
         pairs[1] = try a.dupe([]const u8, &.{ "published_at", "1000" });
-        article.* = .{ .entity_id = id, .tags = pairs, .content = "article bytes", .intention_digest = try a.dupe(u8, &digest) };
+        article.* = .{ .entity_id = id, .tags = pairs, .content = content, .intention_digest = try a.dupe(u8, &digest) };
     }
     const plan = try std.json.Stringify.valueAlloc(gpa, .{
         .format = "boris-nostr-publication-plan",
@@ -136,6 +147,7 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
     const stream = try ws.raceDeadline(relay.base.io, 3000, acceptAuthRelay, .{&relay.base});
     defer stream.close(relay.base.io);
     const fd: std.c.fd_t = @intCast(stream.socket.handle);
+    if (relay.acceptance) |sync| sync.relay_fd.store(fd, .release);
     var read_buf: [16384]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
     if (!try performHandshakeFd(fd, &read_buf, &write_buf, .ok)) return;
@@ -189,7 +201,7 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
     defer scratch.deinit(gpa);
     while (true) {
         scratch.clearRetainingCapacity();
-        const frame = readClientFrame(fd, gpa, &scratch, auth.max_frame) catch return;
+        const frame = readClientFrame(fd, gpa, &scratch, if (relay.scenario == .acceptance_large) 65536 else auth.max_frame) catch return;
         if (frame.opcode == 8) return;
         if (frame.opcode == 10) continue;
         if (frame.opcode != 1 or !frame.fin) return error.Malformed;
@@ -209,7 +221,7 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
             };
             @memcpy(&relay.auth_sig, event.value.sig);
             const id = event.value.id;
-            if (relay.scenario == .auth_close) {
+            if (relay.scenario == .auth_close or (relay.scenario == .acceptance_closed and relay.saw_auth == 2)) {
                 try sendServerClose(fd);
                 continue;
             }
@@ -229,6 +241,8 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
                 .rejected => "blocked: " ++ auth_challenge,
                 .auth_required => "auth-required: " ++ auth_challenge,
                 .restricted => "restricted: " ++ auth_challenge,
+                .acceptance_auth_required => if (relay.saw_auth == 2) "auth-required: " ++ auth_challenge else null,
+                .acceptance_rejected => if (relay.saw_auth == 2) "blocked: " ++ auth_challenge else null,
                 else => null,
             };
             const ok = if (relay.scenario == .wrong_ok) "[\"OK\",\"" ++ "0" ** 64 ++ "\",true,\"\"]" else if (relay.scenario == .malformed_ok) "[\"OK\",\"" ++ "0" ** 64 ++ "\",true]" else try std.fmt.bufPrint(&ok_buf, "[\"OK\",\"{s}\",{s},\"{s}\"]", .{ id, if (rejection == null) "true" else "false", rejection orelse "" });
@@ -378,6 +392,330 @@ test "NIP-42 post-write replacement preserves acceptance or unknown in-flight ev
 }
 test "NIP-42 article retry is byte-identical and consumes no additional auth" {
     try authScenario(.retry, "authenticated", 3, "complete");
+}
+
+// The acceptance regressions reuse the recording relay and anonymous-pipe
+// interface. Only test Io callbacks schedule the hostile message ordering.
+const AcceptanceSync = struct {
+    scenario: AuthScenario,
+    native: Io,
+    owner: std.Thread.Id,
+    relay_fd: std.atomic.Value(std.c.fd_t) = .init(-1),
+    client_fd: std.atomic.Value(std.c.fd_t) = .init(-1),
+    premature_armed: std.atomic.Value(bool) = .init(false),
+    verification_seen: bool = false,
+    injected: bool = false,
+    ok_payload_finished: std.atomic.Value(bool) = .init(false),
+    awake_after_ok: usize = 0,
+    signer_requests: usize = 0,
+    retire_seen: usize = 0,
+    signer_error: ?anyerror = null,
+    hook_error: ?anyerror = null,
+    // netRead deliberately returns one byte, so the final OK payload byte
+    // cannot be prefetched before the publisher actually consumes the frame.
+    incoming: [256]u8 = undefined,
+    incoming_len: usize = 0,
+    premature_ok: [128]u8 = undefined,
+    premature_ok_len: usize = 0,
+
+    var current: *AcceptanceSync = undefined;
+
+    fn read(userdata: ?*anyopaque, socket: Io.net.Socket.Handle, data: [][]u8) Io.net.Stream.Reader.Error!usize {
+        current.client_fd.store(@intCast(socket), .release);
+        var one = [_][]u8{data[0][0..1]};
+        const n = try current.native.vtable.netRead(userdata, socket, &one);
+        if (n == 1) {
+            const byte = one[0][0];
+            if (current.incoming_len < current.incoming.len) {
+                current.incoming[current.incoming_len] = byte;
+                current.incoming_len += 1;
+            } else {
+                std.mem.copyForwards(u8, &current.incoming, current.incoming[1..]);
+                current.incoming[current.incoming.len - 1] = byte;
+            }
+            if (!current.ok_payload_finished.load(.acquire) and std.mem.endsWith(u8, current.incoming[0..current.incoming_len], ",true,\"\"]")) {
+                current.ok_payload_finished.store(true, .release);
+            }
+        }
+        return n;
+    }
+
+    fn now(userdata: ?*anyopaque, clock: Io.Clock) Io.Timestamp {
+        const self = current;
+        const timestamp = self.native.vtable.now(userdata, clock);
+        if (std.Thread.getCurrentId() != self.owner) return timestamp;
+        if (clock == .real and self.premature_armed.load(.acquire)) self.verification_seen = true;
+        if (clock != .awake or self.injected) return timestamp;
+        if (self.verification_seen) {
+            self.injected = true;
+            // This is the deadline check immediately after independent event
+            // verification. The next loop has active_id, but AUTH is unsent.
+            self.queueControl(self.premature_ok[0..self.premature_ok_len]) catch |err| {
+                self.hook_error = err;
+            };
+        } else if (self.ok_payload_finished.load(.acquire) and self.scenario != .acceptance_close) {
+            self.awake_after_ok += 1;
+            // First: authenticate's next loop checks its original deadline,
+            // observes gate=true and returns. Second: publishToRelay checks
+            // the session ceiling, strictly before calling beforeArticle.
+            if (self.awake_after_ok == 2) {
+                self.injected = true;
+                self.queueControl("[\"AUTH\",\"replacement-challenge\"]") catch |err| {
+                    self.hook_error = err;
+                };
+            }
+        }
+        return timestamp;
+    }
+
+    fn queueControl(self: *AcceptanceSync, text: []const u8) !void {
+        try sendServerText(self.relay_fd.load(.acquire), text);
+        // A successful server write alone does not prove arrival at the
+        // client. Wait for kernel readability before returning to its gate.
+        var fds = [_]std.c.pollfd{.{ .fd = self.client_fd.load(.acquire), .events = posix.POLL.IN, .revents = 0 }};
+        if (std.c.poll(&fds, 1, 1000) != 1 or fds[0].revents & posix.POLL.IN == 0) return error.ControlNotQueued;
+    }
+};
+
+fn acceptanceSignerThread(channel: *auth_ipc.Channel, sync: *AcceptanceSync, policy: auth.Policy, gpa: std.mem.Allocator) void {
+    acceptanceSigner(channel, sync, policy, gpa) catch |err| {
+        sync.signer_error = err;
+    };
+}
+
+fn acceptanceSigner(channel: *auth_ipc.Channel, sync: *AcceptanceSync, policy: auth.Policy, gpa: std.mem.Allocator) !void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var ctx = try keys.Context.init();
+    defer ctx.deinit();
+    const pair = try ctx.keyPairFromSecretKey([_]u8{0} ** 31 ++ [_]u8{3});
+    var budget: auth.Budget = .{};
+    var last: ?auth.Correlation = null;
+    const deadline = auth.Deadline.after(channel.io, 3000);
+    while (true) {
+        const bytes = try channel.read(gpa, deadline);
+        defer gpa.free(bytes);
+        var envelope = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+        defer envelope.deinit();
+        const kind = envelope.value.object.get("type").?.string;
+        if (std.mem.eql(u8, kind, "retire") or std.mem.eql(u8, kind, "cancel")) {
+            const control = try auth.parse(auth.Control, arena.allocator(), bytes, kind);
+            if (last == null or !auth.equalCorrelation(last.?, control.value.correlation)) return error.SessionInvalid;
+            if (std.mem.eql(u8, kind, "retire")) {
+                sync.retire_seen += 1;
+                for (policy.relays, 0..) |relay, i| {
+                    if (std.mem.eql(u8, relay, control.value.correlation.relay)) budget.retired[i] = true;
+                }
+                if (sync.scenario != .acceptance_close or sync.retire_seen == 2) return;
+            }
+            continue;
+        }
+        const request = try auth.parse(auth.Request, arena.allocator(), bytes, "sign");
+        _ = try budget.admit(policy, "1" ** 32, request.value);
+        last = request.value.correlation;
+        sync.signer_requests += 1;
+        const signed = try auth.sign(gpa, ctx, pair, policy.pubkey, request.value.correlation.relay, request.value.challenge, Io.Timestamp.now(channel.io, .real).toSeconds(), @splat(0));
+        defer gpa.free(signed);
+        var event = try std.json.parseFromSlice(auth.Event, gpa, signed, .{});
+        defer event.deinit();
+        if (sync.scenario == .acceptance_close and sync.signer_requests == 1) {
+            // The request is outstanding and no response has crossed the pipe.
+            try sendServerClose(sync.relay_fd.load(.acquire));
+            const retired_bytes = try channel.read(gpa, deadline);
+            defer gpa.free(retired_bytes);
+            var retired = try auth.parse(auth.Control, gpa, retired_bytes, "retire");
+            defer retired.deinit();
+            if (!auth.equalCorrelation(last.?, retired.value.correlation)) return error.SessionInvalid;
+            sync.retire_seen += 1;
+            for (policy.relays, 0..) |relay, i| {
+                if (std.mem.eql(u8, relay, retired.value.correlation.relay)) budget.retired[i] = true;
+            }
+            // Deliberately return the already-computed proof after retirement,
+            // just as a synchronous supervisor's in-flight reply can arrive.
+        }
+        if (sync.scenario == .acceptance_premature) {
+            const ok = try std.fmt.bufPrint(&sync.premature_ok, "[\"OK\",\"{s}\",true,\"\"]", .{event.value.id});
+            sync.premature_ok_len = ok.len;
+            sync.premature_armed.store(true, .release);
+        }
+        try channel.send(gpa, auth.Response{ .correlation = request.value.correlation, .refusal = null, .event = event.value }, deadline);
+    }
+}
+
+const AcceptanceReport = struct {
+    classification: []const u8,
+    relays: []const struct {
+        outcome: []const u8,
+        attempts: usize,
+        auth: struct {
+            status: []const u8,
+            reason: []const u8,
+            signing_requests: usize,
+            auth_sends: usize,
+            exchanges: []const struct { generation: u8, result: []const u8 },
+        },
+        events: []const struct { result: []const u8 },
+    },
+};
+
+fn acceptanceScenario(scenario: AuthScenario) !void {
+    if (comptime !auth_ipc.supported) return error.SkipZigTest;
+    auth_ipc.canceled.store(false, .unordered);
+    const gpa = testing.allocator;
+    var threaded = Io.Threaded.init(gpa, .{ .environ = std.process.Environ.empty });
+    defer threaded.deinit();
+    const native = threaded.io();
+    var base = try MockRelay.init(native, .ok);
+    defer base.deinit();
+    var second_base = try MockRelay.init(native, .ok);
+    defer second_base.deinit();
+    const ports: []const u16 = if (scenario == .acceptance_close) &.{ base.port, second_base.port } else &.{base.port};
+    var artifacts = try makeAuthArtifactsWithContent(gpa, ports, ports, 1000, if (scenario == .acceptance_large) "x" ** 40000 else "article bytes");
+    defer artifacts.deinit(gpa);
+    const expected = try expectedArticles(gpa, artifacts.bundle);
+    defer {
+        for (expected) |wire| gpa.free(wire);
+        gpa.free(expected);
+    }
+    if (scenario == .acceptance_large) try testing.expect(expected[0].len > auth.max_frame);
+    var sync: AcceptanceSync = .{ .scenario = scenario, .native = native, .owner = std.Thread.getCurrentId() };
+    AcceptanceSync.current = &sync;
+    var vtable = native.vtable.*;
+    vtable.netRead = AcceptanceSync.read;
+    vtable.now = AcceptanceSync.now;
+    const client_io: Io = .{ .userdata = native.userdata, .vtable = &vtable };
+    var first: AuthRelay = .{ .base = base, .scenario = scenario, .expected = expected, .acceptance = &sync };
+    var second: AuthRelay = .{ .base = second_base, .scenario = .success, .expected = expected };
+    var to_child: [2]std.c.fd_t = undefined;
+    var to_parent: [2]std.c.fd_t = undefined;
+    try testing.expectEqual(@as(c_int, 0), std.c.pipe(&to_child));
+    defer for (to_child) |fd| {
+        _ = std.c.close(fd);
+    };
+    try testing.expectEqual(@as(c_int, 0), std.c.pipe(&to_parent));
+    defer for (to_parent) |fd| {
+        _ = std.c.close(fd);
+    };
+    var child = try auth_ipc.Channel.init(client_io, to_child[0], to_parent[1]);
+    child.run = @splat('1');
+    child.ceiling = auth.Deadline.after(client_io, auth.session_ms);
+    child.frame_timeout_ms = 1000;
+    var signer = try auth_ipc.Channel.init(native, to_parent[0], to_child[1]);
+    signer.frame_timeout_ms = 1000;
+    var plan_digest: [64]u8 = undefined;
+    var bundle_digest: [64]u8 = undefined;
+    nostr.digestHex(artifacts.plan, &plan_digest);
+    nostr.digestHex(artifacts.bundle, &bundle_digest);
+    var parsed_plan = try std.json.parseFromSlice(np.PlanJson, gpa, artifacts.plan, .{ .ignore_unknown_fields = true });
+    defer parsed_plan.deinit();
+    const policy: auth.Policy = .{ .plan_digest = &plan_digest, .bundle_digest = &bundle_digest, .nips_revision = auth.revision, .pubkey = parsed_plan.value.author.expected_pubkey, .relays = parsed_plan.value.delivery.auth.?.relays, .timeout_ms = 1000 };
+    const server = try std.Thread.spawn(.{}, serveAuthThread, .{ &first, gpa });
+    var joined = false;
+    defer if (!joined) server.join();
+    const second_server = if (scenario == .acceptance_close) try std.Thread.spawn(.{}, serveAuthThread, .{ &second, gpa }) else null;
+    defer if (!joined) {
+        if (second_server) |thread| thread.join();
+    };
+    const signer_thread = try std.Thread.spawn(.{}, acceptanceSignerThread, .{ &signer, &sync, policy, gpa });
+    defer if (!joined) signer_thread.join();
+    var result = np.run(client_io, gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child }) catch |err| {
+        signer_thread.join();
+        server.join();
+        if (second_server) |thread| thread.join();
+        joined = true;
+        std.debug.print("acceptance {s}: run={s}, requests={d}, retired={d}, AUTH={d}/{d}, EVENT={d}/{d}\n", .{ @tagName(scenario), @errorName(err), sync.signer_requests, sync.retire_seen, first.saw_auth, second.saw_auth, first.base.saw_events, second.base.saw_events });
+        return err;
+    };
+    defer result.deinit();
+    signer_thread.join();
+    server.join();
+    if (second_server) |thread| thread.join();
+    joined = true;
+    try testing.expect(sync.hook_error == null);
+    try testing.expect(sync.signer_error == null);
+    var report = try std.json.parseFromSlice(AcceptanceReport, gpa, result.report.?, .{ .ignore_unknown_fields = true });
+    defer report.deinit();
+    const relay = report.value.relays[0];
+    try testing.expectEqual(first.saw_auth, relay.auth.auth_sends);
+    for (result.diagnostics.items) |diagnostic| {
+        for ([_][]const u8{ auth_scalar, auth_challenge, "replacement-challenge", "\"sig\"", "\"correlation\"" }) |forbidden| {
+            try testing.expect(std.mem.indexOf(u8, diagnostic.message, forbidden) == null);
+            try testing.expect(std.mem.indexOf(u8, diagnostic.remediation, forbidden) == null);
+        }
+    }
+    for ([_][]const u8{ auth_scalar, auth_challenge, "replacement-challenge", "\"sig\"", "\"correlation\"" }) |forbidden|
+        try testing.expect(std.mem.indexOf(u8, result.report.?, forbidden) == null);
+    if (first.saw_auth > 0) try testing.expect(std.mem.indexOf(u8, result.report.?, &first.auth_sig) == null);
+    if (scenario == .acceptance_close) {
+        try testing.expectEqual(@as(usize, 0), first.saw_auth);
+        try testing.expectEqual(@as(usize, 0), first.base.saw_events);
+        try testing.expectEqualStrings("closed", relay.auth.status);
+        try testing.expectEqualStrings("closed", relay.outcome);
+        try testing.expectEqual(@as(usize, 0), relay.attempts);
+        for (relay.events) |event| try testing.expectEqualStrings("not-attempted", event.result);
+        try testing.expectEqual(@as(usize, 1), second.saw_auth);
+        try testing.expectEqual(@as(usize, 2), second.base.saw_events);
+        try testing.expect(second.auth_verified and second.exact_articles);
+        try testing.expectEqualStrings("authenticated", report.value.relays[1].auth.status);
+        try testing.expectEqualStrings("partial", report.value.classification);
+        return;
+    }
+    try testing.expect(sync.injected);
+    if (scenario == .acceptance_premature) {
+        try testing.expect(sync.verification_seen);
+        try testing.expectEqual(@as(usize, 0), first.saw_auth);
+        try testing.expectEqual(@as(usize, 0), first.base.saw_events);
+        try testing.expectEqualStrings("protocol-error", relay.auth.status);
+        try testing.expectEqualStrings("unexpected-ok", relay.auth.reason);
+        try testing.expectEqualStrings("error", relay.outcome);
+        try testing.expectEqual(@as(usize, 0), relay.attempts);
+        for (relay.events) |event| try testing.expectEqualStrings("not-attempted", event.result);
+        return;
+    }
+    try testing.expectEqual(@as(usize, 2), sync.awake_after_ok);
+    try testing.expectEqual(@as(usize, 2), first.saw_auth);
+    try testing.expect(first.auth_verified);
+    try testing.expectEqual(@as(usize, 2), relay.auth.signing_requests);
+    try testing.expectEqual(@as(usize, 2), relay.auth.auth_sends);
+    try testing.expectEqual(@as(usize, 2), relay.auth.exchanges.len);
+    try testing.expectEqualStrings("superseded", relay.auth.exchanges[0].result);
+    try testing.expectEqual(@as(u8, 2), relay.auth.exchanges[1].generation);
+    if (scenario == .acceptance_large) {
+        try testing.expectEqual(@as(usize, 2), first.base.saw_events);
+        try testing.expect(first.exact_articles);
+        try testing.expectEqualStrings("authenticated", relay.auth.status);
+        try testing.expectEqualStrings("accepted", relay.outcome);
+        try testing.expectEqualStrings("complete", report.value.classification);
+    } else {
+        try testing.expectEqual(@as(usize, 0), first.base.saw_events);
+        try testing.expectEqual(@as(usize, 0), relay.attempts);
+        for (relay.events) |event| try testing.expectEqualStrings("not-attempted", event.result);
+        try testing.expectEqualStrings(if (scenario == .acceptance_closed) "closed" else "rejected", relay.auth.status);
+        try testing.expectEqualStrings(if (scenario == .acceptance_closed) "relay-closed" else if (scenario == .acceptance_auth_required) "auth-required" else "relay-rejected", relay.auth.reason);
+        try testing.expect(result.diagnostics.items.len > 0);
+        try testing.expectEqual(@import("diag.zig").Code.ENOSTRRELAY, result.diagnostics.items[0].code);
+        try testing.expectEqualStrings(if (scenario == .acceptance_closed) "closed" else if (scenario == .acceptance_auth_required) "auth-required" else "rejected", relay.outcome);
+        try testing.expectEqualStrings("failed", report.value.classification);
+    }
+}
+
+test "NIP-42 acceptance retired signer reply stays local to a closed relay" {
+    try acceptanceScenario(.acceptance_close);
+}
+test "NIP-42 acceptance post-success replacement preserves large article bytes" {
+    try acceptanceScenario(.acceptance_large);
+}
+test "NIP-42 acceptance matching OK before AUTH writes no AUTH or EVENT" {
+    try acceptanceScenario(.acceptance_premature);
+}
+test "NIP-42 acceptance post-success replacement retains auth-required outcome" {
+    try acceptanceScenario(.acceptance_auth_required);
+}
+test "NIP-42 acceptance post-success replacement retains rejected outcome" {
+    try acceptanceScenario(.acceptance_rejected);
+}
+test "NIP-42 acceptance post-success replacement retains closed outcome" {
+    try acceptanceScenario(.acceptance_closed);
 }
 
 test "NIP-42 mixed opted-in and ordinary relays retain separate evidence and verdicts" {

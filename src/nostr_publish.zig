@@ -407,9 +407,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
 
     var relay_outcomes: std.ArrayList(RelayOutcome) = .empty;
     defer relay_outcomes.deinit(arena);
+    var retired: RetiredReplies = .{};
+    defer retired.items.deinit(arena);
+    if (plan.delivery.auth) |declaration| try retired.items.ensureTotalCapacity(arena, 2 * declaration.relays.len);
 
     for (relays) |relay_url| {
-        relay_outcomes.append(arena, try publishToRelay(io, gpa, arena, &result, relay_url, bundle.articles, timeout_ms, retries, options.tls, options.auth_channel, if (plan.delivery.auth) |declaration| auth.contains(declaration.relays, relay_url) else false, .{ .plan_digest = &plan_digest, .bundle_digest = &bundle_digest, .nips_revision = auth.revision, .pubkey = bundle.signer.pubkey, .relays = if (plan.delivery.auth) |declaration| declaration.relays else &.{}, .timeout_ms = timeout_ms })) catch |err| {
+        relay_outcomes.append(arena, try publishToRelay(io, gpa, arena, &result, relay_url, bundle.articles, timeout_ms, retries, options.tls, options.auth_channel, if (plan.delivery.auth) |declaration| auth.contains(declaration.relays, relay_url) else false, .{ .plan_digest = &plan_digest, .bundle_digest = &bundle_digest, .nips_revision = auth.revision, .pubkey = bundle.signer.pubkey, .relays = if (plan.delivery.auth) |declaration| declaration.relays else &.{}, .timeout_ms = timeout_ms }, &retired)) catch |err| {
             // Out of memory mid-report is an I/O-class failure; the relay
             // loop itself never escapes other errors.
             return err;
@@ -527,15 +530,43 @@ fn authFailure(evidence: *AuthEvidence, err: anyerror) void {
     if (evidence.count > 0) evidence.exchanges[evidence.count - 1].result = evidence.status;
 }
 
+fn authRelayStatus(evidence: AuthEvidence) RelayStatus {
+    if (std.mem.eql(u8, evidence.status, "timeout")) return .timeout;
+    if (std.mem.eql(u8, evidence.status, "closed")) return .closed;
+    if (std.mem.eql(u8, evidence.status, "rejected"))
+        return if (std.mem.eql(u8, evidence.reason, "auth-required")) .auth_required else .rejected;
+    return .failed;
+}
+
+const RetiredReplies = struct {
+    items: std.ArrayList(auth.Correlation) = .empty,
+
+    fn remember(self: *RetiredReplies, correlation: auth.Correlation) void {
+        // Capacity is the unchanged two-request budget for each opted-in relay.
+        self.items.appendAssumeCapacity(correlation);
+    }
+
+    fn consume(self: *RetiredReplies, correlation: auth.Correlation) bool {
+        for (self.items.items, 0..) |old, i| {
+            if (auth.equalCorrelation(old, correlation)) {
+                _ = self.items.swapRemove(i);
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
 const Gate = struct {
     deadline: ?auth.Deadline = null,
     pending_challenge: ?[]const u8 = null,
     seen: [2][32]u8 = undefined,
     retired_id: ?[]const u8 = null,
-    retired_correlation: ?auth.Correlation = null,
+    outstanding: ?auth.Correlation = null,
+    retired: *RetiredReplies,
 };
 
-fn drainRetiredReply(gpa: std.mem.Allocator, channel: *ipc.Channel, gate: *Gate, deadline: auth.Deadline) !void {
+fn drainRetiredReply(gpa: std.mem.Allocator, channel: *ipc.Channel, retired: *RetiredReplies, deadline: auth.Deadline) !void {
     while (true) {
         var fds = [_]std.c.pollfd{.{ .fd = channel.input, .events = std.posix.POLL.IN, .revents = 0 }};
         if (std.c.poll(&fds, 1, 0) < 0 or fds[0].revents & (std.posix.POLL.HUP | std.posix.POLL.ERR | std.posix.POLL.NVAL) != 0) return error.ChannelLost;
@@ -544,17 +575,24 @@ fn drainRetiredReply(gpa: std.mem.Allocator, channel: *ipc.Channel, gate: *Gate,
         defer gpa.free(bytes);
         var response = try auth.parse(auth.Response, gpa, bytes, "response");
         defer response.deinit();
-        if (gate.retired_correlation) |old| {
-            if (auth.equalCorrelation(old, response.value.correlation)) {
-                gate.retired_correlation = null;
-                continue;
-            }
-        }
+        if (retired.consume(response.value.correlation)) continue;
         return error.SessionInvalid;
     }
 }
 
 fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client: *ws.Client, channel: *ipc.Channel, policy: auth.Policy, correlation: *auth.Correlation, evidence: *AuthEvidence, gate_state: *Gate) !bool {
+    const message_limit = client.limits.max_message_bytes;
+    const frame_limit = client.limits.max_frame_payload;
+    defer {
+        client.limits.max_message_bytes = message_limit;
+        client.limits.max_frame_payload = frame_limit;
+        // A relay-local failure cannot make its in-flight reply foreign to
+        // the next relay. Only the exact retired correlation is discarded.
+        if (gate_state.outstanding) |old| {
+            gate_state.retired.remember(old);
+            gate_state.outstanding = null;
+        }
+    }
     client.limits.max_message_bytes = auth.max_frame;
     client.limits.max_frame_payload = auth.max_frame;
     const first_deadline = auth.Deadline.after(io, policy.timeout_ms).clip(channel.ceiling.?);
@@ -577,6 +615,7 @@ fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client
     client.limits.deadline_ns = deadline.end;
     var retired_id: ?[]const u8 = gate_state.retired_id;
     var active_id: ?[]const u8 = null;
+    var auth_sent = false;
     var waiting_response = false;
     var response_deadline = deadline;
     var gate = false;
@@ -595,6 +634,7 @@ fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client
             evidence.exchanges[evidence.count] = .{ .generation = correlation.generation };
             evidence.count += 1;
             try channel.send(gpa, auth.Request{ .correlation = correlation.*, .challenge = challenge }, auth.Deadline.after(io, policy.timeout_ms).clip(deadline));
+            gate_state.outstanding = correlation.*;
             response_deadline = auth.Deadline.after(io, policy.timeout_ms).clip(deadline);
             waiting_response = true;
             send_request = false;
@@ -610,13 +650,17 @@ fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client
                     for (gate_state.seen[0..correlation.generation]) |old| if (std.mem.eql(u8, &old, &hash)) return error.Replay;
                     if (correlation.generation == 2) return error.ReplacementLimit;
                     evidence.exchanges[evidence.count - 1].result = "superseded";
-                    gate_state.retired_correlation = correlation.*;
+                    if (gate_state.outstanding) |old| {
+                        gate_state.retired.remember(old);
+                        gate_state.outstanding = null;
+                    }
                     try channel.control(gpa, correlation.*, "cancel", policy.timeout_ms);
                     retired_id = active_id;
                     gate_state.retired_id = active_id;
                     if (ready_wire) |wire| gpa.free(wire);
                     ready_wire = null;
                     active_id = null;
+                    auth_sent = false;
                     correlation.generation = 2;
                     challenge = replacement;
                     gate = false;
@@ -625,7 +669,7 @@ fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client
                 },
                 .ok => |ok| {
                     if (retired_id) |old| if (std.mem.eql(u8, old, ok.id)) continue;
-                    if (active_id == null or !std.mem.eql(u8, active_id.?, ok.id)) return error.UnexpectedOk;
+                    if (!auth_sent or active_id == null or !std.mem.eql(u8, active_id.?, ok.id)) return error.UnexpectedOk;
                     evidence.exchanges[evidence.count - 1].result = if (ok.accepted) "authenticated" else "rejected";
                     evidence.status = if (ok.accepted) "authenticated" else "rejected";
                     evidence.reason = if (ok.accepted) "" else rejectPrefix(ok.reason);
@@ -636,14 +680,15 @@ fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client
             }
         }
         if (gate) {
-            try drainRetiredReply(gpa, channel, gate_state, deadline);
+            try drainRetiredReply(gpa, channel, gate_state.retired, deadline);
             return true;
         }
         if (ready_wire) |wire| {
-            try drainRetiredReply(gpa, channel, gate_state, deadline);
+            try drainRetiredReply(gpa, channel, gate_state.retired, deadline);
             _ = try deadline.remaining(io);
             evidence.phase = "auth-write";
             try client.sendText(wire);
+            auth_sent = true;
             evidence.auth_sends += 1;
             evidence.phase = "auth-ok";
             gpa.free(wire);
@@ -660,11 +705,9 @@ fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client
                 defer gpa.free(bytes);
                 var response = try auth.parse(auth.Response, gpa, bytes, "response");
                 defer response.deinit();
-                if (gate_state.retired_correlation) |old| if (auth.equalCorrelation(old, response.value.correlation)) {
-                    gate_state.retired_correlation = null;
-                    continue;
-                };
+                if (gate_state.retired.consume(response.value.correlation)) continue;
                 if (!auth.equalCorrelation(correlation.*, response.value.correlation)) return error.SessionInvalid;
+                gate_state.outstanding = null;
                 if (response.value.refusal != null) {
                     if (response.value.event != null or !std.mem.eql(u8, response.value.refusal.?, "signer-refused")) return error.SessionInvalid;
                     return error.SignerRefused;
@@ -691,7 +734,7 @@ fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client
 }
 
 fn beforeArticle(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client: *ws.Client, channel: *ipc.Channel, policy: auth.Policy, correlation: *auth.Correlation, evidence: *AuthEvidence, gate: *Gate, attempts: usize) !bool {
-    try drainRetiredReply(gpa, channel, gate, auth.Deadline.after(io, policy.timeout_ms).clip(channel.ceiling.?));
+    try drainRetiredReply(gpa, channel, gate.retired, auth.Deadline.after(io, policy.timeout_ms).clip(channel.ceiling.?));
     while (client.hasPending()) {
         switch (try readAuth(arena, client)) {
             .notice => continue,
@@ -760,6 +803,7 @@ fn publishToRelay(
     channel: ?*ipc.Channel,
     opted_in: bool,
     policy: auth.Policy,
+    retired: *RetiredReplies,
 ) !RelayOutcome {
     // The array list and its items live in the run arena (freed with the
     // result); the items slice escapes into the RelayOutcome, so it must not
@@ -802,7 +846,7 @@ fn publishToRelay(
     defer client.deinit();
 
     var correlation: ?auth.Correlation = null;
-    var gate: Gate = .{};
+    var gate: Gate = .{ .retired = retired };
     if (opted_in) {
         var nonce: [16]u8 = undefined;
         io.random(&nonce);
@@ -813,13 +857,13 @@ fn publishToRelay(
             if (err == error.ChannelLost or err == error.SessionInvalid or err == error.Canceled) return err;
             authFailure(&evidence, err);
             try emitRelayDiagnostic(result, relay_url, evidence.reason, null);
-            const gate_status: RelayStatus = if (std.mem.eql(u8, evidence.status, "timeout")) .timeout else if (std.mem.eql(u8, evidence.status, "closed")) .closed else .failed;
+            const gate_status = authRelayStatus(evidence);
             for (articles) |a| try events.append(arena, .{ .entity_id = a.entity_id, .event_id = a.event_id, .result = .not_attempted });
             if (correlation.?.request != 0) try channel.?.control(gpa, correlation.?, "retire", timeout_ms);
             return .{ .url = relay_url, .status = gate_status, .attempts = 0, .events = events.items, .auth_evidence = evidence };
         };
         if (!outcome) {
-            const gate_status: RelayStatus = if (std.mem.eql(u8, evidence.reason, "auth-required")) .auth_required else .rejected;
+            const gate_status = authRelayStatus(evidence);
             for (articles) |a| try events.append(arena, .{ .entity_id = a.entity_id, .event_id = a.event_id, .result = .not_attempted });
             try emitRelayDiagnostic(result, relay_url, evidence.reason, null);
             try channel.?.control(gpa, correlation.?, "retire", timeout_ms);
@@ -850,12 +894,12 @@ fn publishToRelay(
                 if (err == error.ChannelLost or err == error.SessionInvalid or err == error.Canceled) return err;
                 authFailure(&evidence, err);
                 if (err == error.ReplacementAfterEvent) evidence.reason = "replacement-after-event";
-                try emitRelayDiagnostic(result, relay_url, evidence.reason, null);
                 break :blk false;
             };
             if (!open) {
                 abort_relay = true;
-                status = if (std.mem.eql(u8, evidence.status, "timeout")) .timeout else .failed;
+                status = authRelayStatus(evidence);
+                try emitRelayDiagnostic(result, relay_url, evidence.reason, null);
                 try events.append(arena, .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .not_attempted });
                 continue;
             }
