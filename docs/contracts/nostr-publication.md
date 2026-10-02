@@ -1181,12 +1181,25 @@ publisher is added.
   input refuse before `begin` with content exit 1, no key echo and no sockets.
   Relay Close during challenge/auth-OK remains local: zero article writes
   there, while a plain relay still publishes.
+- Acceptance-review regressions also queue a matching auth `OK` after signer
+  verification but before AUTH transmission: it is a protocol error with zero
+  AUTH/EVENT. A late signer response from a closed relay is discarded exactly
+  once by its retired correlation across relay boundaries; the next opted-in
+  relay still authenticates and receives both unchanged articles. Replacement
+  after the first positive auth `OK`, before any article, restores the article
+  transport limits after generation 2 succeeds (two exact 40,402-byte EVENTs).
+  Replacement rejection and Close retain `auth-required` / `rejected` / `closed`
+  outcomes and `ENOSTRRELAY` diagnostics with zero article attempts. These six
+  offline recording-relay cases use synchronized test-only Io callbacks and
+  private pipes, not public relays or production ordering hooks.
 
 Draft 2020-12 meta-schema checks pass for all three changed/new schemas.
 External validation covers the profile fixture, the actual emitted schema-2
 general declaration, schema-1 rejection, all eight IPC forms and omission/
 unknown-field rejection. The scoped implementation and fault-injection evidence
-are complete on macOS; the PR remains unmerged pending review and required CI.
+are complete on macOS. PR #1016 merged on 2026-10-01; acceptance-review follow-up
+PR #1017 records the scoped fixes and exact local/CI evidence in its canonical
+completion report, distinguishing tested fixes from merged implementation.
 Linux is cross-compiled, not session-tested, and refuses the custody launcher.
 No public-relay interoperability, sandbox or perfect-memory-erasure claim is
 made. These limits do not weaken the approved boundary.
