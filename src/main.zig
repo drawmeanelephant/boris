@@ -1393,6 +1393,8 @@ fn htmlProfileMismatch(
                 return .{ .field = "sitemap", .target_name = name };
         } else if (opts.sitemap_path != null) return .{ .field = "sitemap", .target_name = name };
         if (declared.rss != null) return .{ .field = "rss", .target_name = name };
+        if (declared.head != null) return .{ .field = "head (requires profile-driven HTML)", .target_name = name };
+        if (declared.html_profile != null) return .{ .field = "html_profile (requires profile-driven HTML)", .target_name = name };
         if (declared.llms != null) return .{ .field = "llms", .target_name = name };
     }
     if (opts.publication_location) |location| {
@@ -2538,7 +2540,7 @@ fn runHtmlProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*tim
         return .usage;
     }
     for (plan.targets) |t| {
-        if (t.rss != null) {
+        if (t.rss != null and (t.head == null or !t.head.?.value.enabled or plan.targets.len != 1)) {
             errPrint("error: --profile target '{s}' declares rss; this HTML coordinator does not execute feeds\n", .{t.name});
             return .usage;
         }
@@ -2585,7 +2587,7 @@ fn runHtmlProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*tim
     defer config_arena.deinit();
     const config = config_arena.allocator();
     var specs: std.ArrayList(target.TargetSpec) = .empty;
-    for (plan.targets) |declared| {
+    for (plan.targets) |*declared| {
         const output = std.fs.path.resolve(config, &.{ workspace, declared.output }) catch return .io_error;
         const profile_layout: []const u8 = if (declared.theme) |theme_root|
             std.fmt.allocPrint(config, "{s}/layouts/main.html", .{theme_root}) catch return .io_error
@@ -2596,6 +2598,14 @@ fn runHtmlProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*tim
             .output_dir = output,
             .layout_path = profile_layout,
             .layout_rules = declared.layout_rules,
+            .html_profile = declared.html_profile,
+            .head = if (declared.head) |*head| &head.value else null,
+            .feed = if (declared.rss) |feed| .{
+                .path = feed.path,
+                .title = plan.site.?.title.?,
+                .description = plan.site.?.description.?,
+                .limit = feed.limit,
+            } else null,
         }) catch return .io_error;
     }
 

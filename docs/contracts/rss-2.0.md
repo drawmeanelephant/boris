@@ -71,3 +71,8 @@ parent directories, rejects workspace escape and content-root collisions, and
 preserves the existing destination on failure. RSS metadata is intentionally
 not added to the base JSON IR in this slice, so existing IR/RAG/Context/HTML
 bytes remain unchanged for content that does not use it.
+
+The opt-in [head-metadata rider](head-metadata.md#bounded-rss-rider-and-execution-boundary)
+also stages the same RSS renderer inside one declared HTML target and emits
+RSS autodiscovery. The standalone CLI mode and existing configurations remain
+unchanged; this is not general multi-target profile RSS execution.

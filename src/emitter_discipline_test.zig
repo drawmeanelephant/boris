@@ -58,6 +58,8 @@ const Module = struct {
 const legacy_budget = 4;
 
 const modules = [_]Module{
+    .{ .name = "head_metadata.zig", .class = .{ .emitter = .{ .encoder = .sink } }, .source = @embedFile("head_metadata.zig") },
+    .{ .name = "compile_head_test.zig", .class = .other },
     .{ .name = "nostr_auth.zig", .class = .other },
     .{ .name = "nostr_auth_ipc.zig", .class = .other },
     .{ .name = "nostr_auth_session.zig", .class = .other },

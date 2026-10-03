@@ -125,6 +125,8 @@ pub const Code = enum {
     /// document AT-URI links. Warning: the build still succeeds and the
     /// verification report records those pages as `not_verified`.
     EVERIFICATIONHEAD,
+    EHEAD,
+    WHEADOGP,
     /// Nostr head emit is configured but a selected layout omits the
     /// compiler-owned `{{head}}` slot, so an eligible allowlisted page cannot
     /// carry its `nostr:naddr` alternate link. Warning: the HTML build still

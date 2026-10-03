@@ -210,6 +210,58 @@ pub fn hasAttr(tag: []const u8, wanted: []const u8) bool {
     return false;
 }
 
+/// Compare the closed ASCII tokens used by metadata ownership, including
+/// numeric character references and the named separators that can spell them.
+/// This is not a general HTML text decoder.
+pub fn attributeMatches(raw: []const u8, wanted: []const u8, mode: enum { exact, prefix, token }) bool {
+    var i: usize = 0;
+    var matched: usize = 0;
+    var mismatch = false;
+    while (i < raw.len) {
+        var c: u32 = raw[i];
+        i += 1;
+        if (c == '&') {
+            const start = i;
+            if (i < raw.len and raw[i] == '#') {
+                i += 1;
+                const hex = i < raw.len and (raw[i] == 'x' or raw[i] == 'X');
+                if (hex) i += 1;
+                const digits = i;
+                while (i < raw.len and (if (hex) std.ascii.isHex(raw[i]) else std.ascii.isDigit(raw[i]))) : (i += 1) {}
+                if (i > digits) {
+                    c = std.fmt.parseInt(u32, raw[digits..i], if (hex) 16 else 10) catch 0xfffd;
+                    if (i < raw.len and raw[i] == ';') i += 1;
+                } else i = start;
+            } else if (std.mem.indexOfScalarPos(u8, raw, i, ';')) |semi| {
+                const name = raw[i..semi];
+                inline for (.{
+                    .{ "colon", ':' }, .{ "lowbar", '_' }, .{ "sol", '/' },
+                    .{ "plus", '+' },  .{ "Tab", '\t' },   .{ "NewLine", '\n' },
+                }) |entity| {
+                    if (std.mem.eql(u8, name, entity[0])) {
+                        c = entity[1];
+                        i = semi + 1;
+                    }
+                }
+            }
+        }
+        if (mode == .token and c <= 0x7f and std.ascii.isWhitespace(@intCast(c))) {
+            if (!mismatch and matched == wanted.len) return true;
+            matched = 0;
+            mismatch = false;
+            continue;
+        }
+        if (matched >= wanted.len or c > 0x7f or
+            std.ascii.toLower(@as(u8, @intCast(@min(c, 0x7f)))) != std.ascii.toLower(wanted[matched]))
+        {
+            if (mode != .token) return false;
+            mismatch = true;
+        } else matched += 1;
+        if (mode == .prefix and matched == wanted.len) return true;
+    }
+    return !mismatch and matched == wanted.len;
+}
+
 /// Elements whose text content is not markup. A reference written inside one of
 /// these is documentation or script data, never a published link.
 pub fn isRawTextElement(name: []const u8) bool {
@@ -341,6 +393,15 @@ test "void elements are identified case-insensitively" {
     try std.testing.expect(isVoidElement("img"));
     try std.testing.expect(!isVoidElement("div"));
     try std.testing.expect(!isVoidElement("aside"));
+}
+
+test "metadata attribute token comparison decodes ASCII character references" {
+    try std.testing.expect(attributeMatches("&#99;anonical", "canonical", .exact));
+    try std.testing.expect(attributeMatches("OG&colon;title", "og:", .prefix));
+    try std.testing.expect(attributeMatches("alternate&Tab;&#x63;anonical", "canonical", .token));
+    try std.testing.expect(!attributeMatches("notcanonical", "canonical", .token));
+    try std.testing.expect(!attributeMatches("descriptionx", "description", .exact));
+    try std.testing.expect(!attributeMatches("&copy;description", "description", .exact));
 }
 
 test "a quoted angle bracket does not terminate the tag" {

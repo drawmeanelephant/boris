@@ -49,6 +49,9 @@ const timings = @import("timings.zig");
 const compile_stage = @import("compile_stage.zig");
 const compile_cache = @import("compile_cache.zig");
 const compile_heading = @import("compile_heading.zig");
+const head_metadata = @import("head_metadata.zig");
+const rss = @import("rss.zig");
+const image_dimensions = @import("image_dimensions.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -319,6 +322,8 @@ pub const CompileOptions = struct {
     /// allowlisted pages emit one link into the compiler-owned `{{head}}`
     /// slot. The caller owns the pointed-to config for the compile run.
     nostr_head: ?*const nostr_emit.HeadConfig = null,
+    head: ?*const head_metadata.Declaration = null,
+    feed: ?head_metadata.Feed = null,
     /// Allow the output link audit to accept literal `.md`/`.mdx` hrefs that the
     /// pre-render rewriter deliberately leaves in place (see
     /// docs/contracts/documentation-links.md). Off by default; suppresses only
@@ -992,12 +997,26 @@ fn renderPageSlots(
             try nostr_emit.pageHeadFragment(arena, cfg, page)
         else
             "";
-        if (ss.len == 0) {
+        const social = if (options.head) |cfg|
+            try head_metadata.emit(arena, cfg, page, options.output_profile, options.feed)
+        else
+            "";
+        if (options.head) |cfg| if (cfg.enabled and page.status != .draft) {
+            head_metadata.rejectOwnedTagsProfile(html, options.output_profile) catch |err| {
+                reportHeadFailure(gpa, options, page.source_path, page.entity_id, err);
+                return err;
+            };
+            head_metadata.rejectOwnedTagsProfile(slots.footer, options.output_profile) catch |err| {
+                reportHeadFailure(gpa, options, render_opts.selected_layout_path orelse options.layout_path, page.entity_id, err);
+                return err;
+            };
+        };
+        if (social.len == 0 and ss.len == 0) {
             slots.head = nostr_bytes;
-        } else if (nostr_bytes.len == 0) {
+        } else if (social.len == 0 and nostr_bytes.len == 0) {
             slots.head = ss;
         } else {
-            slots.head = try std.fmt.allocPrint(arena, "{s}{s}", .{ ss, nostr_bytes });
+            slots.head = try std.fmt.allocPrint(arena, "{s}{s}{s}", .{ ss, nostr_bytes, social });
         }
     }
 
@@ -1357,6 +1376,15 @@ pub fn isContentCompileFailure(err: anyerror) bool {
         error.AssetUnsafeSvg,
         error.LinkAuditFailed,
         error.Html4StrictFailed,
+        error.InvalidHead,
+        error.HeadBaseMismatch,
+        error.HeadPageMissing,
+        error.HeadImageMissing,
+        error.HeadImageInvalid,
+        error.HeadLayoutInvalid,
+        error.HeadOwnedTagConflict,
+        error.HeadOgpUnsupported,
+        error.InvalidXml,
         error.ThemeRootMissing,
         error.InvalidThemePath,
         error.ThemeSymlink,
@@ -1455,7 +1483,8 @@ pub fn compileHtmlSiteMulti(
         } else |err| {
             if (err != error.IncludeFailed and err != error.ReferenceFailed and err != error.Html4StrictFailed and
                 err != error.ComponentFailed and err != error.GraphValidationFailed and err != error.AmbiguousGlob and
-                err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
+                err != error.MixedThemeRoots and err != error.LayoutSelectionFailed and
+                !head_metadata.isFailure(err))
             {
                 if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
                 const msg = try std.fmt.allocPrint(gpa, "target '{s}' compilation failed: {s}", .{ plan.name, @errorName(err) });
@@ -1625,6 +1654,8 @@ fn compileOneTarget(
     target_options.layout_path = plan.layout_path;
     target_options.layout_rules = plan.layout_rules;
     target_options.output_profile = plan.html_profile orelse base_options.output_profile;
+    target_options.head = plan.head;
+    target_options.feed = plan.feed;
     return try compilePagesWithSharedAndSite(io, gpa, db, cached.layout, target_options, shared, cached.bytes, site);
 }
 
@@ -2058,6 +2089,7 @@ fn validatePrepublicationTarget(
     for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
     for (static_entries) |entry| try audit_assets.append(gpa, entry.rel_path);
     if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
+    if (options.feed) |feed| try audit_assets.append(gpa, feed.path);
 
     var intended: std.StringHashMapUnmanaged(void) = .{};
     defer intended.deinit(gpa);
@@ -2386,6 +2418,150 @@ fn prepareThemeBundle(
         try theme_mod.checkAssetPageCollisions(theme_bundle.assets, outs.items);
     }
     return theme_bundle;
+}
+
+fn reportHeadFailure(gpa: std.mem.Allocator, options: CompileOptions, path: []const u8, id: ?[]const u8, err: anyerror) void {
+    const message = std.fmt.allocPrint(gpa, "target '{s}' compiler-owned head metadata: {s}", .{ options.target_name, @errorName(err) }) catch return;
+    defer gpa.free(message);
+    const d: diag.Diagnostic = .{
+        .severity = .error_,
+        .code = .EHEAD,
+        .message = message,
+        .source_path = path,
+        .id = id orelse "",
+        .remediation = "Use a target-local public base and declared image, put {{head}} directly inside <head>, and remove hand-authored owned tags",
+    };
+    appendHtmlDiagnostic(&options, d);
+    diag.printText(d, gpa);
+}
+
+fn requireHeadImage(io: Io, gpa: std.mem.Allocator, cwd: Io.Dir, options: CompileOptions, image: head_metadata.Image, theme: *const theme_mod.ThemeBundle, content: *const content_asset.SiteAssetInventory, static: []const static_files.Entry) !void {
+    switch (image.source) {
+        .theme => for (theme.assets) |a| {
+            if (!std.mem.eql(u8, a.rel_path, image.path)) continue;
+            if (image_dimensions.dimensions(image.path, a.bytes) == null) return error.HeadImageInvalid;
+            return;
+        },
+        .static => for (static) |a| {
+            if (!std.mem.eql(u8, a.rel_path, image.path)) continue;
+            var dir = try cwd.openDir(io, options.static_dir.?, .{});
+            defer dir.close(io);
+            const bytes = try readFileAlloc(io, dir, image.path, gpa);
+            defer gpa.free(bytes);
+            if (image_dimensions.dimensions(image.path, bytes) == null) return error.HeadImageInvalid;
+            return;
+        },
+        .content => for (content.pages) |p| {
+            for (p.entries) |a| {
+                if (!std.mem.eql(u8, a.output_rel, image.path)) continue;
+                if (image_dimensions.dimensions(image.path, a.bytes) == null) return error.HeadImageInvalid;
+                return;
+            }
+        },
+    }
+    return error.HeadImageMissing;
+}
+
+fn renderTargetFeed(gpa: std.mem.Allocator, db: *const PageDb, options: CompileOptions) ![]u8 {
+    const feed = options.feed orelse return error.InvalidHead;
+    const head = options.head orelse return error.InvalidHead;
+    if (!head.enabled) return error.InvalidHead;
+    const nodes = try gpa.alloc(graph_mod.Node, db.len());
+    defer gpa.free(nodes);
+    for (db.items(), 0..) |p, i| nodes[i] = .{
+        .id = p.entity_id,
+        .source_path = p.source_path,
+        .output_path = p.output_path,
+        .title = p.title,
+        .status = if (p.status) |s| s.name() else null,
+        .published_at = p.published_at,
+        .summary = p.summary,
+        .tags = p.tags,
+    };
+    return rss.render(gpa, nodes, .{
+        .site_url = head.base_url orelse return error.InvalidHead,
+        .title = feed.title,
+        .description = feed.description,
+        .limit = feed.limit,
+        .publication_location = options.publication_location,
+    });
+}
+
+fn preflightHead(
+    io: Io,
+    cwd: Io.Dir,
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    layouts: *const PageLayoutSelection,
+    options: CompileOptions,
+    theme: *const theme_mod.ThemeBundle,
+    content: *const content_asset.SiteAssetInventory,
+    static: []const static_files.Entry,
+) !void {
+    const cfg = options.head orelse {
+        if (options.feed != null) return error.InvalidHead;
+        return;
+    };
+    if (!cfg.enabled) {
+        if (options.feed != null) return error.InvalidHead;
+        return;
+    }
+    const base = cfg.base_url orelse return error.InvalidHead;
+    const normalized = try site_url.normalized(gpa, base);
+    defer gpa.free(normalized);
+    if (!std.mem.eql(u8, base, normalized)) return error.InvalidHead;
+    if (options.site_url) |url| {
+        const normalized_site = try site_url.normalized(gpa, url);
+        defer gpa.free(normalized_site);
+        if (!std.mem.eql(u8, base, normalized_site)) return error.HeadBaseMismatch;
+    }
+    if (options.publication_location) |location| {
+        if (!std.mem.eql(u8, base, location.base_url)) return error.HeadBaseMismatch;
+    }
+    if (cfg.defaults.image) |image| try requireHeadImage(io, gpa, cwd, options, image, theme, content, static);
+    for (cfg.pages) |override| {
+        var found = false;
+        for (db.items()) |p| if (std.mem.eql(u8, p.entity_id, override.id)) {
+            found = true;
+            break;
+        };
+        if (!found) return error.HeadPageMissing;
+        if (override.values.image) |image| try requireHeadImage(io, gpa, cwd, options, image, theme, content, static);
+    }
+    if (options.output_profile == .html4_strict) {
+        if (cfg.ogp == .required) return error.HeadOgpUnsupported;
+        const d: diag.Diagnostic = .{
+            .severity = .warning,
+            .code = .WHEADOGP,
+            .message = "HTML 4.01 Strict omits optional OpenGraph and article property tags; canonical, description, Twitter and RSS links remain available",
+            .source_path = options.layout_path,
+        };
+        appendHtmlDiagnostic(&options, d);
+        diag.printText(d, gpa);
+    }
+    for (db.items(), 0..) |*p, i| {
+        if (p.status == .draft) continue;
+        head_metadata.validateLayoutProfile(layouts.page_layouts[i].raw, options.output_profile) catch |err| {
+            reportHeadFailure(gpa, options, layouts.page_sel_paths[i], p.entity_id, err);
+            return err;
+        };
+        _ = try head_metadata.resolve(cfg, p);
+    }
+    if (options.feed) |feed| {
+        try sitemap.validateOutputPath(feed.path);
+        if (std.mem.startsWith(u8, feed.path, "_boris/")) return error.InvalidHead;
+        var paths: std.ArrayList([]const u8) = .empty;
+        defer paths.deinit(gpa);
+        for (db.items()) |p| try paths.append(gpa, p.output_path);
+        for (theme.assets) |a| try paths.append(gpa, a.rel_path);
+        for (content.pages) |p| for (p.entries) |a| try paths.append(gpa, a.output_rel);
+        for (static) |a| try paths.append(gpa, a.rel_path);
+        try paths.append(gpa, search_index.output_path);
+        if (options.sitemap_path) |path| try paths.append(gpa, path);
+        try sitemap.rejectOutputCollisions(feed.path, paths.items);
+        const bytes = try renderTargetFeed(gpa, db, options);
+        gpa.free(bytes);
+    }
 }
 
 /// Located EASSET diagnostic for a published-path collision (#868): names the
@@ -2887,9 +3063,15 @@ fn fingerprintPage(
         if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
     }
 
+    const head_material = if (options.head) |cfg|
+        try head_metadata.emit(gpa, cfg, &page, options.output_profile, options.feed)
+    else
+        try gpa.dupe(u8, "");
+    defer gpa.free(head_material);
     var inc_with_ref = try gpa.alloc([]const u8, inc_views.len +
         (if (ref_material.len > 0) @as(usize, 1) else 0) +
         (if (relation_material.len > 0) @as(usize, 1) else 0) +
+        (if (head_material.len > 0) @as(usize, 1) else 0) +
         (if (options.output_profile == .html) @as(usize, 0) else 1));
     defer gpa.free(inc_with_ref);
     @memcpy(inc_with_ref[0..inc_views.len], inc_views);
@@ -2904,6 +3086,10 @@ fn fingerprintPage(
     }
     if (options.output_profile != .html) {
         inc_with_ref[inc_with_ref_count] = options.output_profile.jsonName();
+        inc_with_ref_count += 1;
+    }
+    if (head_material.len > 0) {
+        inc_with_ref[inc_with_ref_count] = head_material;
     }
 
     // Fingerprint uses the effective selected layout identity and bytes.
@@ -3316,6 +3502,12 @@ fn writeSearchSitemapAndStandardSite(
     dist_dir: Io.Dir,
     prior_sitemap_marker_present: bool,
 ) !SiteOverlay {
+    if (options.feed) |feed| {
+        const bytes = try renderTargetFeed(gpa, db, options);
+        defer gpa.free(bytes);
+        if (std.fs.path.dirname(feed.path)) |parent| try stage_dir.createDirPath(io, parent);
+        try stage_dir.writeFile(io, .{ .sub_path = feed.path, .data = bytes });
+    }
     var live_page_paths = try gpa.alloc([]const u8, db.len());
     errdefer gpa.free(live_page_paths);
     for (db.items(), 0..) |page, page_idx| live_page_paths[page_idx] = page.output_path;
@@ -3388,6 +3580,7 @@ fn auditOutputLinks(
     for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
     for (static_entries) |entry| try audit_assets.append(gpa, entry.rel_path);
     if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
+    if (options.feed) |feed| try audit_assets.append(gpa, feed.path);
 
     var findings: std.ArrayList(link_audit.Finding) = .empty;
     defer link_audit.freeFindings(gpa, &findings);
@@ -3467,6 +3660,15 @@ fn writeInventoryOverlay(
             .producer = "sitemap",
             .required = true,
             .format_version = "1",
+        });
+    }
+    if (options.feed) |feed| {
+        try inventory_specs.append(gpa, .{
+            .path = feed.path,
+            .kind = .rss,
+            .producer = "rss",
+            .required = true,
+            .format_version = "2.0",
         });
     }
     for (static_entries) |entry| {
@@ -3592,6 +3794,7 @@ fn cleanupStaleOutputs(
         try live_paths.put(gpa, p.output_path, {});
     }
     if (options.sitemap_path) |path| try live_paths.put(gpa, path, {});
+    if (options.feed) |feed| try live_paths.put(gpa, feed.path, {});
 
     if (parsed_manifest) |pm| {
         for (pm.value.entries) |entry| {
@@ -3743,6 +3946,12 @@ fn compilePagesInner(
     defer content_assets.deinit();
     const static_entries = try discoverStaticFiles(io, gpa, cwd, db, options, &theme_bundle, &content_assets);
     defer static_files.freeInventory(gpa, static_entries);
+    preflightHead(io, cwd, gpa, db, &layouts, options, &theme_bundle, &content_assets, static_entries) catch |err| {
+        // Layout failures already name their selected page/layout.
+        if (err != error.HeadLayoutInvalid and err != error.HeadOwnedTagConflict)
+            reportHeadFailure(gpa, options, options.layout_path, null, err);
+        return err;
+    };
     if (options.output_profile == .html4_strict) {
         // Opaque HTML assets are copied verbatim and have no page/layout
         // provenance or renderer pass. Refuse them rather than claiming the
@@ -3906,8 +4115,37 @@ fn compilePagesInner(
     // commit (#804). An unreadable inventory declares no static ownership.
     const prior_static_paths = try static_files.readPriorStaticPaths(io, gpa, dist_dir, options.target_name);
     defer static_files.freePriorStaticPaths(gpa, prior_static_paths);
+    const prior_feed_paths = try static_files.readPriorKindPaths(io, gpa, dist_dir, options.target_name, .rss);
+    defer static_files.freePriorStaticPaths(gpa, prior_feed_paths);
 
     try commitStagedTree(io, gpa, cwd, stage_dir, dist_dir, prior_sitemap.path, options.sitemap_path, options.dist_dir);
+    for (prior_feed_paths) |path| {
+        // Do not remove a route that another current producer now owns.
+        if (options.feed) |feed| if (std.mem.eql(u8, path, feed.path)) continue;
+        var owned_now = false;
+        for (db.items()) |p| if (std.mem.eql(u8, path, p.output_path)) {
+            owned_now = true;
+        };
+        for (theme_bundle.assets) |a| if (std.mem.eql(u8, path, a.rel_path)) {
+            owned_now = true;
+        };
+        for (content_assets.pages) |p| for (p.entries) |a| if (std.mem.eql(u8, path, a.output_rel)) {
+            owned_now = true;
+        };
+        for (static_entries) |a| if (std.mem.eql(u8, path, a.rel_path)) {
+            owned_now = true;
+        };
+        if (options.sitemap_path) |s| if (std.mem.eql(u8, path, s)) {
+            owned_now = true;
+        };
+        if (!owned_now) {
+            if (std.fs.path.dirname(path)) |parent| try compile_stage.ensureValidParentDirs(io, dist_dir, parent);
+            dist_dir.deleteFile(io, path) catch |err| switch (err) {
+                error.FileNotFound => {},
+                else => return err,
+            };
+        }
+    }
 
     static_files.scrubStaleStaticFiles(io, dist_dir, prior_static_paths, static_entries);
 
@@ -3986,6 +4224,7 @@ test {
     _ = @import("compile_search_sitemap_test.zig");
     _ = @import("compile_assets_themes_test.zig");
     _ = @import("compile_static_files_test.zig");
+    _ = @import("compile_head_test.zig");
     _ = @import("compile_publication_evidence_test.zig");
     _ = @import("compile_standard_site_test.zig");
 }

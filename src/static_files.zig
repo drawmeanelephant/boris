@@ -175,6 +175,16 @@ pub fn readPriorStaticPaths(
     dist_dir: Io.Dir,
     target_name: []const u8,
 ) ![][]const u8 {
+    return readPriorKindPaths(io, gpa, dist_dir, target_name, .static_file);
+}
+
+pub fn readPriorKindPaths(
+    io: Io,
+    gpa: std.mem.Allocator,
+    dist_dir: Io.Dir,
+    target_name: []const u8,
+    kind: artifact_inventory.Kind,
+) ![][]const u8 {
     const bytes = dist_dir.readFileAlloc(io, artifact_inventory.output_path, gpa, .unlimited) catch
         return try gpa.alloc([]const u8, 0);
     defer gpa.free(bytes);
@@ -189,7 +199,7 @@ pub fn readPriorStaticPaths(
         paths.deinit(gpa);
     }
     for (inventory.records) |record| {
-        if (record.kind != .static_file) continue;
+        if (record.kind != kind) continue;
         const copy = try gpa.dupe(u8, record.path);
         errdefer gpa.free(copy);
         try paths.append(gpa, copy);

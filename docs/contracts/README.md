@@ -59,6 +59,7 @@ per topic:
 | Frontmatter grammar | [frontmatter.md](frontmatter.md) |
 | RSS 2.0 export | [rss-2.0.md](rss-2.0.md) |
 | XML sitemap for HTML | [xml-sitemap.md](xml-sitemap.md) |
+| Opt-in canonical/social head metadata and RSS autodiscovery | [head-metadata.md](head-metadata.md) |
 | Source paths and entity IDs | [identity-and-paths.md](identity-and-paths.md) |
 | Discovery / scanning | [scanner.md](scanner.md) |
 | In-memory / filesystem source provider | [source-provider.md](source-provider.md) |

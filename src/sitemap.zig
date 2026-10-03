@@ -63,7 +63,7 @@ pub fn rejectOutputCollisions(
     }
 }
 
-fn absoluteUrl(
+pub fn absoluteUrl(
     allocator: std.mem.Allocator,
     normalized_base: []const u8,
     output_path: []const u8,

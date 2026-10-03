@@ -5,6 +5,7 @@ const Io = std.Io;
 const layout_select = @import("layout_select.zig");
 const render = @import("render.zig");
 const theme_mod = @import("theme.zig");
+const head_metadata = @import("head_metadata.zig");
 
 /// User-configured target specification from the CLI.
 pub const TargetSpec = struct {
@@ -19,6 +20,8 @@ pub const TargetSpec = struct {
     /// `.xhtml` opts into the XML-compatible output profile, #448). When null,
     /// the target renders with the default `.html` profile.
     html_profile: ?render.OutputProfile = null,
+    head: ?*const head_metadata.Declaration = null,
+    feed: ?head_metadata.Feed = null,
 };
 
 /// Fully resolved and validated execution target plan.
@@ -32,6 +35,8 @@ pub const TargetPlan = struct {
     layout_rules: []const layout_select.LayoutRule = &.{},
     /// Effective per-target serialization profile (spec override, else default).
     html_profile: ?render.OutputProfile = null,
+    head: ?*const head_metadata.Declaration = null,
+    feed: ?head_metadata.Feed = null,
 };
 
 /// Effective layout for a target given the global default.
@@ -342,6 +347,8 @@ pub fn validateTargets(
             .layout_path = layout,
             .layout_rules = target.layout_rules,
             .html_profile = target.html_profile,
+            .head = target.head,
+            .feed = target.feed,
         });
     }
 
