@@ -15,6 +15,8 @@ const nostr = @import("nostr.zig");
 const nostr_auth = @import("nostr_auth.zig");
 const target = @import("target.zig");
 const theme = @import("theme.zig");
+const head_metadata = @import("head_metadata.zig");
+const render = @import("render.zig");
 
 pub const max_profile_bytes: usize = 256 * 1024;
 pub const max_json_depth: usize = 16;
@@ -72,6 +74,8 @@ pub const Error = error{
     /// Nostr publication needs the canonical page URL, which only the
     /// publication location provides.
     NostrRequiresPublication,
+    InvalidHead,
+    HeadBaseMismatch,
 } || std.mem.Allocator.Error;
 
 pub const InputFormat = enum { markdown, textile, cook };
@@ -182,6 +186,8 @@ pub const HtmlTargetPlan = struct {
     rss: ?RssPlan = null,
     llms: ?LlmsPlan = null,
     static: ?StaticPlan = null,
+    head: ?std.json.Parsed(head_metadata.Declaration) = null,
+    html_profile: ?render.OutputProfile = null,
 
     fn deinit(self: *HtmlTargetPlan, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
@@ -197,6 +203,7 @@ pub const HtmlTargetPlan = struct {
         if (self.rss) |v| allocator.free(v.path);
         if (self.llms) |v| allocator.free(v.path);
         if (self.static) |v| allocator.free(v.dir);
+        if (self.head) |*v| v.deinit();
         self.* = undefined;
     }
 };
@@ -627,7 +634,7 @@ fn parseTargets(allocator: std.mem.Allocator, value: std.json.Value) Error![]Htm
 }
 fn parseTarget(allocator: std.mem.Allocator, value: std.json.Value) Error!HtmlTargetPlan {
     const obj = try object(value);
-    try only(obj, &.{ "name", "output", "public", "theme", "layout", "layout_rules", "sitemap", "rss", "llms", "static" });
+    try only(obj, &.{ "name", "output", "public", "theme", "layout", "layout_rules", "sitemap", "rss", "llms", "static", "head", "html_profile" });
     const name = try string(try required(obj, "name"));
     if (name.len > max_target_name_bytes or !target.isValidTargetName(name)) return error.InvalidTarget;
     var out = HtmlTargetPlan{ .name = try dup(allocator, name), .output = try dup(allocator, try checkedPath(try required(obj, "output"))) };
@@ -645,6 +652,13 @@ fn parseTarget(allocator: std.mem.Allocator, value: std.json.Value) Error!HtmlTa
     if (field(obj, "rss")) |v| out.rss = try parseRss(allocator, v);
     if (field(obj, "llms")) |v| out.llms = try parseLlms(allocator, v);
     if (field(obj, "static")) |v| out.static = try parseStatic(allocator, v);
+    if (field(obj, "head")) |v| out.head = head_metadata.parse(allocator, v) catch |err| {
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        return error.InvalidHead;
+    };
+    if (field(obj, "html_profile")) |v| {
+        out.html_profile = std.meta.stringToEnum(render.OutputProfile, try string(v)) orelse return error.InvalidHead;
+    }
     return out;
 }
 fn parseRules(allocator: std.mem.Allocator, value: std.json.Value) Error![]layout_select.LayoutRule {
@@ -778,6 +792,20 @@ pub fn validatePlan(plan: *const PublicationPlan) Error!void {
     if (plan.targets.len == 0 and plan.ir == null and plan.rag == null and plan.context == null) return error.NoPublicationOutput;
     var public_count: usize = 0;
     for (plan.targets, 0..) |t, i| {
+        if (t.head) |head| if (head.value.enabled) {
+            const base = head.value.base_url orelse return error.InvalidHead;
+            if (t.sitemap != null or t.rss != null) {
+                const site = plan.site orelse return error.HeadBaseMismatch;
+                if (!std.mem.eql(u8, base, site.url orelse return error.HeadBaseMismatch)) return error.HeadBaseMismatch;
+            }
+            if (plan.publication) |publication| {
+                const location = switch (publication) {
+                    .github_pages => |v| v.base_url,
+                    .standard_site => |v| v.location.base_url,
+                };
+                if (!std.mem.eql(u8, base, location)) return error.HeadBaseMismatch;
+            }
+        };
         if (t.public) public_count += 1;
         for (plan.targets[i + 1 ..]) |other| if (std.mem.eql(u8, t.name, other.name)) return error.InvalidTarget;
         if (t.theme) |theme_root| {

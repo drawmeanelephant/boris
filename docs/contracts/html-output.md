@@ -157,6 +157,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
    | `{{relations}}` | Outgoing validated semantic relations (or empty) |
    | `{{backlinks}}` | Incoming relations derived from the validated set (or empty) |
    | `{{footer}}` | Theme `footer.html` contents, or empty when the theme has none |
+   | `{{head}}` | Compiler-owned Standard.site/Nostr fragments plus opt-in [canonical/social metadata and RSS autodiscovery](head-metadata.md) |
 
    The `{{asset-url PATH}}` helper is **repeatable** — it may appear more
    than once (up to 16 occurrences per layout; total layout segments ≤ 32;

@@ -93,6 +93,7 @@ test "standard-site verification emits head links, well-known file, and report" 
     );
     try writeTreeFile(io, work, "content/index.md",
         \\---
+        \\id: index
         \\title: Home
         \\published_at: 2026-08-15T00:00:00Z
         \\summary: The front page.
@@ -170,6 +171,12 @@ test "standard-site verification emits head links, well-known file, and report" 
         gpa.free(surfaces.document_links);
     }
     const vctx: standard_site_emit.VerificationContext = .{ .surfaces = &surfaces, .projection = &projection };
+    const social: @import("head_metadata.zig").Declaration = .{ .enabled = true, .base_url = "https://example.com" };
+    const ncfg: nostr_emit.HeadConfig = .{
+        .pubkey = "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919",
+        .articles = &.{"index"},
+        .relays = &.{"wss://relay.example.test"},
+    };
 
     const stats = try compilePages(io, gpa, &db, layout, .{
         .content_root = content,
@@ -177,6 +184,8 @@ test "standard-site verification emits head links, well-known file, and report" 
         .layout_path = layout_path,
         .quiet = true,
         .standard_site_verification = &vctx,
+        .head = &social,
+        .nostr_head = &ncfg,
     });
     try std.testing.expectEqual(@as(usize, 3), stats.pages_written);
 
@@ -189,6 +198,8 @@ test "standard-site verification emits head links, well-known file, and report" 
     const body_open = std.mem.indexOf(u8, index_html, "<body>").?;
     const link_pos = std.mem.indexOf(u8, index_html, "site.standard.document").?;
     try std.testing.expect(link_pos > head_open and link_pos < body_open);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "nostr:naddr") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "property=\"og:url\" content=\"https://example.com/index.html\"") != null);
 
     // The well-known file matches the configured publication location.
     const well_known_bytes = try readTargetPayload(io, gpa, dist, standard_site.well_known_path);

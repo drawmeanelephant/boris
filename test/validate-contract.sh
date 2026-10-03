@@ -242,4 +242,35 @@ test -f "${BUILD_OUT}/sitemap.xml"
 test -f "${BUILD_OUT}/_boris/search/search-index.json"
 test -f "${BUILD_OUT}/_boris/proof/artifacts.json"
 
+# #1015: one shared opt-in profile drives the zero-write validator and staged
+# HTML/RSS coordinator, including all three image inventories.
+SOCIAL="${TMP}/social"
+cp -R docs/contracts/fixtures/head-metadata "${SOCIAL}"
+run_expect 0 "${TMP}/logs/social-validate.stdout" "${TMP}/logs/social-validate.stderr" \
+  "${BORIS}" validate --profile "${SOCIAL}/profile.json" --quiet
+assert_no_target "${SOCIAL}/dist"
+run_expect 0 "${TMP}/logs/social-build.stdout" "${TMP}/logs/social-build.stderr" \
+  "${BORIS}" build --profile "${SOCIAL}/profile.json" --incremental --jobs 4 --quiet
+grep -q 'rel="canonical" href="https://owner.github.io/project/guides/caf%C3%A9.html"' "${SOCIAL}/dist/guides/café.html"
+grep -q 'property="og:url" content="https://owner.github.io/project/guides/caf%C3%A9.html"' "${SOCIAL}/dist/guides/café.html"
+grep -q 'name="twitter:card" content="summary_large_image"' "${SOCIAL}/dist/index.html"
+grep -q 'property="article:modified_time"' "${SOCIAL}/dist/guides/café.html"
+grep -q 'type="application/rss+xml"' "${SOCIAL}/dist/index.html"
+grep -q 'https://owner.github.io/project/guides/caf%C3%A9.html' "${SOCIAL}/dist/feeds/rss.xml"
+grep -q 'https://owner.github.io/project/guides/caf%C3%A9.html' "${SOCIAL}/dist/sitemap.xml"
+if grep -Eq 'canonical|og:|twitter:|application/rss' "${SOCIAL}/dist/draft.html"; then
+  echo 'draft unexpectedly contains compiler-owned advertising metadata' >&2
+  exit 1
+fi
+cp "${SOCIAL}/dist/guides/café.html" "${TMP}/social-last-good.html"
+# Prove the CLI/parser did not silently drop head configuration and that missing
+# assets fail even when the page was previously cacheable.
+rm "${SOCIAL}/content/guides/café.assets/hero.svg"
+run_expect 1 "${TMP}/logs/social-missing.stdout" "${TMP}/logs/social-missing.stderr" \
+  "${BORIS}" validate --profile "${SOCIAL}/profile.json" --quiet --report "${TMP}/social-report.json"
+grep -q EHEAD "${TMP}/social-report.json"
+run_expect 1 "${TMP}/logs/social-missing-build.stdout" "${TMP}/logs/social-missing-build.stderr" \
+  "${BORIS}" build --profile "${SOCIAL}/profile.json" --incremental --quiet
+cmp "${TMP}/social-last-good.html" "${SOCIAL}/dist/guides/café.html"
+
 printf 'Validation contract process tests: PASS\n'

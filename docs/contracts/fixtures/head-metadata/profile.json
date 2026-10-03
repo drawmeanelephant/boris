@@ -1,0 +1,38 @@
+{
+  "format": "boris-publication-profile",
+  "schema_version": 1,
+  "input": "content",
+  "site": {
+    "url": "https://owner.github.io/project",
+    "title": "Example",
+    "description": "Example updates"
+  },
+  "publication": {
+    "target": "github-pages",
+    "base_url": "https://owner.github.io/project",
+    "origin": "https://owner.github.io",
+    "base_path": "/project"
+  },
+  "targets": [{
+    "name": "public",
+    "output": "dist",
+    "public": true,
+    "theme": "theme",
+    "static": { "dir": "static" },
+    "sitemap": { "path": "sitemap.xml" },
+    "rss": { "path": "feeds/rss.xml", "limit": 20 },
+    "head": {
+      "enabled": true,
+      "base_url": "https://owner.github.io/project/",
+      "ogp": "required",
+      "defaults": {
+        "image": { "source": "theme", "path": "assets/social.svg", "alt": "A square" },
+        "twitter_card": "summary_large_image"
+      },
+      "pages": [
+        { "id": "index", "values": { "image": { "source": "static", "path": "social.svg", "alt": "Static square" } } },
+        { "id": "guides/café", "values": { "image": { "source": "content", "path": "guides/café.assets/hero.svg", "alt": "Content square" } }, "modified_time": "2026-10-03T00:00:00Z" }
+      ]
+    }
+  }]
+}

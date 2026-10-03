@@ -12,6 +12,7 @@ const nostr_mod = @import("nostr.zig");
 const nostr_auth = @import("nostr_auth.zig");
 const publication_profile = @import("publication_profile.zig");
 const standard_site = @import("standard_site.zig");
+const head_metadata = @import("head_metadata.zig");
 
 pub const artifact_format = "boris-publication-plan";
 pub const schema_version: u32 = 1;
@@ -28,7 +29,11 @@ pub fn render(gpa: std.mem.Allocator, plan: *const publication_profile.Publicati
     try out.appendSlice(gpa, "{\n  \"format\": ");
     try json_out.writeString(&out, gpa, artifact_format);
     try out.appendSlice(gpa, ",\n  \"schema_version\": ");
-    try json_out.writeUsize(&out, gpa, if (plan.nostr != null and plan.nostr.?.auth_relays.len > 0) 2 else schema_version);
+    var version: usize = if (plan.nostr != null and plan.nostr.?.auth_relays.len > 0) 2 else schema_version;
+    for (plan.targets) |t| if (t.head != null or t.html_profile != null) {
+        version = 3;
+    };
+    try json_out.writeUsize(&out, gpa, version);
     try out.appendSlice(gpa, ",\n  \"input\": ");
     try json_out.writeString(&out, gpa, plan.input);
     try out.appendSlice(gpa, ",\n  \"input_format\": ");
@@ -185,7 +190,77 @@ fn renderTarget(out: *std.ArrayList(u8), gpa: std.mem.Allocator, target: publica
     if (target.layout_rules.len > 0) try out.appendSlice(gpa, "\n      ");
     try out.appendSlice(gpa, "],\n      \"projections\": ");
     try renderProjections(out, gpa, target);
+    if (target.html_profile) |profile| {
+        try out.appendSlice(gpa, ",\n      \"html_profile\": ");
+        try json_out.writeString(out, gpa, profile.jsonName());
+    }
+    if (target.head) |head| {
+        try out.appendSlice(gpa, ",\n      \"head\": ");
+        try renderHead(out, gpa, head.value);
+    }
     try out.appendSlice(gpa, "\n    }");
+}
+
+fn renderHeadFields(out: *std.ArrayList(u8), gpa: std.mem.Allocator, fields: head_metadata.Fields) !void {
+    try out.appendSlice(gpa, "{");
+    var comma = false;
+    inline for (.{ "title", "description" }) |name| {
+        if (@field(fields, name)) |value| {
+            if (comma) try out.appendSlice(gpa, ", ");
+            try json_out.writeString(out, gpa, name);
+            try out.appendSlice(gpa, ": ");
+            try json_out.writeString(out, gpa, value);
+            comma = true;
+        }
+    }
+    if (fields.image) |image| {
+        if (comma) try out.appendSlice(gpa, ", ");
+        try out.appendSlice(gpa, "\"image\": {\"source\": ");
+        try json_out.writeString(out, gpa, @tagName(image.source));
+        try out.appendSlice(gpa, ", \"path\": ");
+        try json_out.writeString(out, gpa, image.path);
+        try out.appendSlice(gpa, ", \"alt\": ");
+        try json_out.writeString(out, gpa, image.alt);
+        try out.appendSlice(gpa, "}");
+        comma = true;
+    }
+    inline for (.{ "type", "twitter_card" }) |name| {
+        if (@field(fields, name)) |value| {
+            if (comma) try out.appendSlice(gpa, ", ");
+            try json_out.writeString(out, gpa, name);
+            try out.appendSlice(gpa, ": ");
+            try json_out.writeString(out, gpa, @tagName(value));
+            comma = true;
+        }
+    }
+    try out.appendSlice(gpa, "}");
+}
+
+fn renderHead(out: *std.ArrayList(u8), gpa: std.mem.Allocator, head: head_metadata.Declaration) !void {
+    try out.appendSlice(gpa, "{\"enabled\": ");
+    try json_out.writeBool(out, gpa, head.enabled);
+    if (head.base_url) |url| {
+        try out.appendSlice(gpa, ", \"base_url\": ");
+        try json_out.writeString(out, gpa, url);
+    }
+    try out.appendSlice(gpa, ", \"ogp\": ");
+    try json_out.writeString(out, gpa, @tagName(head.ogp));
+    try out.appendSlice(gpa, ", \"defaults\": ");
+    try renderHeadFields(out, gpa, head.defaults);
+    try out.appendSlice(gpa, ", \"pages\": [");
+    for (head.pages, 0..) |p, i| {
+        if (i > 0) try out.appendSlice(gpa, ", ");
+        try out.appendSlice(gpa, "{\"id\": ");
+        try json_out.writeString(out, gpa, p.id);
+        try out.appendSlice(gpa, ", \"values\": ");
+        try renderHeadFields(out, gpa, p.values);
+        if (p.modified_time) |date| {
+            try out.appendSlice(gpa, ", \"modified_time\": ");
+            try json_out.writeString(out, gpa, date);
+        }
+        try out.appendSlice(gpa, "}");
+    }
+    try out.appendSlice(gpa, "]}");
 }
 
 fn writeSelector(out: *std.ArrayList(u8), gpa: std.mem.Allocator, rule: anytype) !void {
@@ -567,12 +642,19 @@ test "publication-plan schema-1 consumer refuses explicit auth schema-2 declarat
 
 const SchemaValidator = struct {
     root: std.json.Value,
+    externals: []const External = &.{},
+    const External = struct { name: []const u8, root: std.json.Value };
 
     fn resolve(self: @This(), schema: std.json.Value) SchemaError!std.json.Value {
         const ref = schema.object.get("$ref") orelse return schema;
-        if (ref != .string or !std.mem.startsWith(u8, ref.string, "#/$defs/")) return error.UnsupportedRef;
-        const defs = self.root.object.get("$defs") orelse return error.MissingDefs;
-        return defs.object.get(ref.string["#/$defs/".len..]) orelse error.MissingDef;
+        if (ref != .string or !std.mem.startsWith(u8, ref.string, "#/")) return error.UnsupportedRef;
+        var node = self.root;
+        var segments = std.mem.splitScalar(u8, ref.string[2..], '/');
+        while (segments.next()) |segment| {
+            if (node != .object) return error.MissingDef;
+            node = node.object.get(segment) orelse return error.MissingDef;
+        }
+        return node;
     }
 
     fn typeMatches(name: []const u8, value: std.json.Value) bool {
@@ -610,7 +692,32 @@ const SchemaValidator = struct {
     }
 
     fn validate(self: @This(), schema_in: std.json.Value, document: std.json.Value) SchemaError!void {
+        if (schema_in.object.get("$ref")) |ref| {
+            if (ref == .string and !std.mem.startsWith(u8, ref.string, "#/")) {
+                const hash = std.mem.indexOfScalar(u8, ref.string, '#') orelse return error.UnsupportedRef;
+                for (self.externals) |external| {
+                    if (!std.mem.eql(u8, external.name, ref.string[0..hash])) continue;
+                    const next: SchemaValidator = .{ .root = external.root, .externals = self.externals };
+                    var node = external.root;
+                    var segments = std.mem.splitScalar(u8, ref.string[hash + 2 ..], '/');
+                    while (segments.next()) |segment| {
+                        if (node != .object) return error.MissingDef;
+                        node = node.object.get(segment) orelse return error.MissingDef;
+                    }
+                    return next.validate(node, document);
+                }
+                return error.UnsupportedRef;
+            }
+        }
         const schema = try self.resolve(schema_in);
+        if (schema.object.get("allOf")) |parts| {
+            for (parts.array.items) |part| try self.validate(part, document);
+        }
+        if (schema.object.get("required")) |required| {
+            if (document == .object) for (required.array.items) |name| {
+                if (document.object.get(name.string) == null) return error.SchemaViolation;
+            };
+        }
         if (schema.object.get("oneOf")) |alternatives| {
             var matched = false;
             for (alternatives.array.items) |alternative| {
@@ -664,3 +771,31 @@ const SchemaValidator = struct {
         }
     }
 };
+
+test "head fixture plan negotiates schema 3 and conforms, old consumers refuse it" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const source = try readFixture("docs/contracts/fixtures/head-metadata/profile.json");
+    defer std.testing.allocator.free(source);
+    var request = try parseProfile(source, .{});
+    defer request.deinit(std.testing.allocator);
+    const bytes = try render(a, &request.plan);
+    const doc = try std.json.parseFromSlice(std.json.Value, a, bytes, .{});
+    try std.testing.expectEqual(@as(i64, 3), doc.value.object.get("schema_version").?.integer);
+    var externals: std.ArrayList(SchemaValidator.External) = .empty;
+    for ([_][]const u8{ "publication-plan-1.schema.json", "publication-plan-2.schema.json", "publication-profile-1.schema.json" }) |name| {
+        const path = try std.mem.concat(a, u8, &.{ "docs/contracts/schemas/", name });
+        const schema = try std.json.parseFromSlice(std.json.Value, a, try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, a, .unlimited), .{});
+        try externals.append(a, .{ .name = name, .root = schema.value });
+    }
+    const schema_bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "docs/contracts/schemas/publication-plan-3.schema.json", a, .unlimited);
+    const schema = try std.json.parseFromSlice(std.json.Value, a, schema_bytes, .{});
+    const validator: SchemaValidator = .{ .root = schema.value, .externals = externals.items };
+    try validator.validate(schema.value, doc.value);
+    const old: SchemaValidator = .{ .root = externals.items[0].root };
+    try std.testing.expectError(error.SchemaViolation, old.validate(old.root, doc.value));
+    const profile_validator: SchemaValidator = .{ .root = externals.items[2].root };
+    const profile_doc = try std.json.parseFromSlice(std.json.Value, a, source, .{});
+    try profile_validator.validate(profile_validator.root, profile_doc.value);
+}

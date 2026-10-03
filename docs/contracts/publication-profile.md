@@ -91,8 +91,10 @@ equal the normalized publication `base_url`; this prevents sitemap/RSS and
 Pages metadata from silently naming different locations.
 
 Each target requires `name` and `output`; optional fields are `public`, exactly
-one of `theme`/`layout`, `layout_rules`, `sitemap`, `rss`, `llms`, and
-`static`.
+one of `theme`/`layout`, `layout_rules`, `sitemap`, `rss`, `llms`,
+`static`, `head`, and `html_profile`. The closed opt-in `head` declaration,
+target-local base and exact-page overrides, HTML profile selection, and plan
+schema-3 negotiation are defined by [head-metadata.md](head-metadata.md).
 `layout_rules` entries contain exactly `selector` and `layout` and use the
 existing closed selector grammar and canonical ordering. A target's `sitemap`,
 `rss`, `llms`, and `static` objects respectively allow only `path`,
@@ -192,7 +194,8 @@ and are validated again; paths remain workspace-relative. `--quiet`, `--jobs`,
 Validation still rejects build execution controls and competing HTML selectors.
 `--report` retains its normal CWD-relative explicit-file meaning.
 
-This slice refuses profile editions (`ir`, `rag`, `context`), target RSS/llms,
+This slice refuses profile editions (`ir`, `rag`, `context`), target RSS/llms
+(except the single-target enabled-head RSS rider in [head-metadata.md](head-metadata.md)),
 multi-target sitemap/static or publication metadata, and sitemap without
 `site.url`. Watch also refuses Standard.site verification (its projection
 cannot yet be refreshed each cycle); Standard.site verification refuses input

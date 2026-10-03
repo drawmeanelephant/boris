@@ -1,5 +1,13 @@
 # Publication plan (schema v1)
 
+Targets declaring `head` or `html_profile` negotiate **schema 3**, including
+that closed target-local configuration after `projections`. The
+[head contract](head-metadata.md) defines precedence and execution boundaries;
+[publication-plan-3.schema.json](schemas/publication-plan-3.schema.json) retains
+explicit NIP-42 declarations when also configured. Older consumers must reject
+schema 3 rather than silently discard head/profile policy. Existing schema-1/2
+plans without the new fields retain their exact bytes.
+
 An explicit `nostr.auth` declaration negotiates **schema 2**, with the same
 static declaration plus `nostr.auth`. Its schema is
 [`publication-plan-2.schema.json`](schemas/publication-plan-2.schema.json).
