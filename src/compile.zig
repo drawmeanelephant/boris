@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const page_mod = @import("page.zig");
 const parser = @import("parser.zig");
@@ -507,7 +508,11 @@ pub fn compileHtmlToSink(
     defer site.deinit();
 
     var stats: CompileStats = .{};
-    const dummy_dir: Io.Dir = .{ .handle = 0 };
+    // POSIX fakes a never-used fd; Windows needs a handle literal instead.
+    const dummy_dir: Io.Dir = if (comptime builtin.os.tag == .windows)
+        .{ .handle = undefined }
+    else
+        .{ .handle = 0 };
     for (db.items(), 0..) |*page, page_index| {
         var doc_arena = std.heap.ArenaAllocator.init(gpa);
         defer doc_arena.deinit();
@@ -3839,18 +3844,33 @@ fn cleanupStaleOutputs(
         defer walker.deinit();
         while (try walker.next(io)) |entry| {
             if (entry.kind != .file) continue;
-            if (!std.mem.endsWith(u8, entry.path, ".html")) continue;
-            if (std.mem.startsWith(u8, entry.path, ".boris-cache")) continue;
-            if (theme_html_assets.contains(entry.path)) continue;
-            if (content_html_assets.contains(entry.path)) continue;
-            if (static_html_paths.contains(entry.path)) continue;
-            if (content_asset.isContentLocalOutputPath(entry.path)) continue;
+            // The walk reports native separators; page outputs, asset
+            // inventories, and the skip-lists below are all authored in the
+            // '/'-separated output-path grammar. Compare against a
+            // normalized path or every nested output looks stale (and gets
+            // deleted) on Windows.
+            var rel: []const u8 = entry.path;
+            var rel_buf: ?[]u8 = null;
+            defer if (rel_buf) |buf| gpa.free(buf);
+            if (comptime builtin.os.tag == .windows) {
+                rel_buf = try gpa.dupe(u8, entry.path);
+                for (rel_buf.?) |*c| {
+                    if (c.* == '\\') c.* = '/';
+                }
+                rel = rel_buf.?;
+            }
+            if (!std.mem.endsWith(u8, rel, ".html")) continue;
+            if (std.mem.startsWith(u8, rel, ".boris-cache")) continue;
+            if (theme_html_assets.contains(rel)) continue;
+            if (content_html_assets.contains(rel)) continue;
+            if (static_html_paths.contains(rel)) continue;
+            if (content_asset.isContentLocalOutputPath(rel)) continue;
             // The Proof Pack presentation pair is a committed generation,
             // not a stale page output: the pair transaction snapshots the
             // exact prior state and restores it on failure, so the walker
             // must never delete `index.html` out from under it.
-            if (std.mem.eql(u8, entry.path, artifact_inventory.proof_index_output_path)) continue;
-            if (!live_paths.contains(entry.path)) {
+            if (std.mem.eql(u8, rel, artifact_inventory.proof_index_output_path)) continue;
+            if (!live_paths.contains(rel)) {
                 dist_dir.deleteFile(io, entry.path) catch {};
             }
         }

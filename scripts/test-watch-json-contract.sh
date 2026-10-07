@@ -14,6 +14,13 @@
 # NOTE: bash 3.2 compatibility is deliberate (macOS /bin/bash); no
 # associative arrays, no bash-4+isms.
 set -euo pipefail
+# Native Windows executables cannot receive POSIX signals: under
+# MSYS/Cygwin/Git-Bash `kill -TERM` terminates the process outright
+# (exit 128+15) and no graceful-shutdown event can be emitted.
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) WINDOWS_SHELL=yes ;;
+    *) WINDOWS_SHELL=no ;;
+esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
@@ -164,14 +171,24 @@ pass "build-failed recoverable=true with structured diagnostics"
 # reach this point is a live process.
 kill -0 "$WATCH_PID" 2>/dev/null || fail "watcher exited after a recoverable content failure"
 
-note "SIGTERM shuts down cleanly with watch-stopped (exit 0)"
-kill -TERM "$WATCH_PID"
-RC=0
-wait "$WATCH_PID" || RC=$?
-WATCH_PID=""
-[[ "$RC" == "0" ]] || fail "watch exited $RC on SIGTERM (expected 0)"
-expect_line '{"event":"watch-stopped","reason":"signal"}'
-pass "clean SIGTERM shutdown with watch-stopped event"
+if [[ "$WINDOWS_SHELL" == yes ]]; then
+    note "SIGTERM terminates the watcher (Windows forced kill)"
+    kill -TERM "$WATCH_PID"
+    RC=0
+    wait "$WATCH_PID" || RC=$?
+    WATCH_PID=""
+    [[ "$RC" == "143" ]] || fail "watch exited $RC on SIGTERM (expected 143)"
+    pass "watcher terminated on SIGTERM (Windows forced kill)"
+else
+    note "SIGTERM shuts down cleanly with watch-stopped (exit 0)"
+    kill -TERM "$WATCH_PID"
+    RC=0
+    wait "$WATCH_PID" || RC=$?
+    WATCH_PID=""
+    [[ "$RC" == "0" ]] || fail "watch exited $RC on SIGTERM (expected 0)"
+    expect_line '{"event":"watch-stopped","reason":"signal"}'
+    pass "clean SIGTERM shutdown with watch-stopped event"
+fi
 
 note "events are on stderr only; stdout stays empty"
 [[ ! -s "$STDOUT" ]] || fail "stdout is not empty: $(head -1 "$STDOUT")"
@@ -180,6 +197,10 @@ pass "stdout empty"
 note "the event sequence is deterministic"
 SEQ="$(grep -o '"event":"[a-z-]*"' "$ERR" | sed 's/"event"://; s/"//g' | tr '\n' ' ')"
 EXPECTED="hello build-started build-succeeded watcher-started build-started build-succeeded build-started build-failed watch-stopped "
+if [[ "$WINDOWS_SHELL" == yes ]]; then
+    # A forced Windows kill cannot emit the terminal watch-stopped event.
+    EXPECTED="hello build-started build-succeeded watcher-started build-started build-succeeded build-started build-failed "
+fi
 [[ "$SEQ" == "$EXPECTED" ]] || fail "unexpected event sequence: $SEQ"
 pass "event sequence pinned"
 
@@ -240,14 +261,24 @@ note "the validate daemon writes no output tree (zero-write)"
 [[ ! -e "$OUT/validate-site" ]] || fail "validate --watch created an output tree"
 pass "zero-write daemon leaves no output tree"
 
-note "SIGTERM stops the validate daemon with watch-stopped (exit 0)"
-kill -TERM "$VPID"
-RC=0
-wait "$VPID" || RC=$?
-VPID=""
-[[ "$RC" == "0" ]] || fail "validate watch exited $RC on SIGTERM (expected 0)"
-expect_line '{"event":"watch-stopped","reason":"signal"}' "$VERR"
-pass "validate clean SIGTERM shutdown"
+if [[ "$WINDOWS_SHELL" == yes ]]; then
+    note "SIGTERM terminates the validate daemon (Windows forced kill)"
+    kill -TERM "$VPID"
+    RC=0
+    wait "$VPID" || RC=$?
+    VPID=""
+    [[ "$RC" == "143" ]] || fail "validate watch exited $RC on SIGTERM (expected 143)"
+    pass "validate daemon terminated on SIGTERM (Windows forced kill)"
+else
+    note "SIGTERM stops the validate daemon with watch-stopped (exit 0)"
+    kill -TERM "$VPID"
+    RC=0
+    wait "$VPID" || RC=$?
+    VPID=""
+    [[ "$RC" == "0" ]] || fail "validate watch exited $RC on SIGTERM (expected 0)"
+    expect_line '{"event":"watch-stopped","reason":"signal"}' "$VERR"
+    pass "validate clean SIGTERM shutdown"
+fi
 
 note "validate stream is exclusively NDJSON; stdout empty"
 if grep -vE '^\{"event":"' "$VERR" | grep -q .; then
@@ -316,12 +347,15 @@ JSON_DOCS="$(grep -c '^{' "$REPORT")"
 [[ "$JSON_DOCS" == "1" ]] || fail "report file has $JSON_DOCS JSON documents (expected 1 replacement)"
 pass "report rewritten per cycle as a single document"
 
-note "SIGTERM stops the report daemon cleanly (exit 0)"
 kill -TERM "$RPID"
 RC=0
 wait "$RPID" || RC=$?
 RPID=""
-[[ "$RC" == "0" ]] || fail "report watch exited $RC on SIGTERM (expected 0)"
-pass "report daemon clean SIGTERM shutdown"
+if [[ "$WINDOWS_SHELL" == yes ]]; then
+    [[ "$RC" == "143" ]] || fail "report watch exited $RC on SIGTERM (expected 143)"
+else
+    [[ "$RC" == "0" ]] || fail "report watch exited $RC on SIGTERM (expected 0)"
+fi
+pass "report daemon terminated on SIGTERM"
 
 echo "watch-json-contract: all assertions passed"

@@ -1,6 +1,7 @@
 //! Fixture generation and Boris subprocess evidence.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const barbs = @import("barbs.zig");
 const graph = @import("graph.zig");
 const manifest = @import("manifest.zig");
@@ -669,6 +670,17 @@ pub const RunOptions = struct {
     allow_markdown_literals: bool = false,
 };
 
+/// The boris binary under test keeps the host's executable name: callers
+/// pass the suffix-less `zig-out/bin/boris`, Windows needs `boris.exe`.
+fn exeName(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    if (comptime builtin.os.tag == .windows) {
+        if (!std.ascii.endsWithIgnoreCase(path, ".exe")) {
+            return std.fmt.allocPrint(allocator, "{s}.exe", .{path});
+        }
+    }
+    return allocator.dupe(u8, path);
+}
+
 pub fn runFixture(options: RunOptions) !void {
     try validateJobs(options.jobs);
     const cwd_path = try std.process.currentPathAlloc(options.io, options.allocator);
@@ -677,7 +689,9 @@ pub fn runFixture(options: RunOptions) !void {
     defer options.allocator.free(fixture_abs);
     const parent = std.fs.path.dirname(fixture_abs) orelse return error.InvalidFixture;
     const base = std.fs.path.basename(fixture_abs);
-    const boris_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, options.boris_path });
+    const boris_path = try exeName(options.allocator, options.boris_path);
+    defer options.allocator.free(boris_path);
+    const boris_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, boris_path });
     defer options.allocator.free(boris_abs);
 
     const input_arg = try std.fmt.allocPrint(options.allocator, "{s}/content", .{base});
@@ -763,7 +777,9 @@ pub fn republishCleanFixture(options: RunOptions) !void {
     defer options.allocator.free(fixture_abs);
     const parent = std.fs.path.dirname(fixture_abs) orelse return error.InvalidFixture;
     const base = std.fs.path.basename(fixture_abs);
-    const boris_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, options.boris_path });
+    const boris_path = try exeName(options.allocator, options.boris_path);
+    defer options.allocator.free(boris_path);
+    const boris_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, boris_path });
     defer options.allocator.free(boris_abs);
 
     var expected = try readExpectedFixture(options.io, options.allocator, fixture_abs);

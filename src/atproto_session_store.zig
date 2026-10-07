@@ -12,6 +12,7 @@
 //! before unlink. Nothing here ever prints or logs token material.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const authorization = @import("atproto_authorization.zig");
 const password = @import("atproto_password.zig");
 const json_out = @import("json_out.zig");
@@ -95,6 +96,17 @@ fn decodeHex(allocator: std.mem.Allocator, hex: []const u8) Error![]u8 {
     return out;
 }
 
+/// Owner-only permission bits for the session store. POSIX mode bits do not
+/// exist on Windows, where user-scope isolation comes from the profile
+/// directory's ACL instead; the attributes default is the honest equivalent.
+fn ownerOnlyDirPermissions() std.Io.File.Permissions {
+    return if (comptime builtin.os.tag == .windows) .default_dir else std.Io.File.Permissions.fromMode(0o700);
+}
+
+fn ownerOnlyFilePermissions() std.Io.File.Permissions {
+    return if (comptime builtin.os.tag == .windows) .default_file else std.Io.File.Permissions.fromMode(0o600);
+}
+
 fn nibbleOf(digit: u8) Error!u8 {
     return switch (digit) {
         '0'...'9' => digit - '0',
@@ -114,7 +126,7 @@ pub const Store = struct {
     pub fn open(allocator: std.mem.Allocator, io: std.Io, root_path: []const u8) Error!Store {
         if (!std.fs.path.isAbsolute(root_path)) return error.StoreUnexpected;
         const cwd = std.Io.Dir.cwd();
-        _ = cwd.createDirPathStatus(io, root_path, std.Io.File.Permissions.fromMode(0o700)) catch |err| return mapError(err);
+        _ = cwd.createDirPathStatus(io, root_path, ownerOnlyDirPermissions()) catch |err| return mapError(err);
         const dir = std.Io.Dir.openDirAbsolute(io, root_path, .{ .iterate = true }) catch |err| return mapError(err);
         return .{ .allocator = allocator, .io = io, .dir = dir };
     }
@@ -122,7 +134,7 @@ pub const Store = struct {
     /// Open a store rooted at `sub_path` inside an already-open parent
     /// directory (used by tests; the root is created owner-only).
     pub fn openIn(allocator: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, sub_path: []const u8) Error!Store {
-        _ = parent.createDirPathStatus(io, sub_path, std.Io.File.Permissions.fromMode(0o700)) catch |err| return mapError(err);
+        _ = parent.createDirPathStatus(io, sub_path, ownerOnlyDirPermissions()) catch |err| return mapError(err);
         const dir = parent.openDir(io, sub_path, .{ .iterate = true }) catch |err| return mapError(err);
         return .{ .allocator = allocator, .io = io, .dir = dir };
     }
@@ -159,7 +171,7 @@ pub const Store = struct {
         const file = self.dir.createFile(self.io, lock_name, .{
             .lock = .exclusive,
             .truncate = false,
-            .permissions = std.Io.File.Permissions.fromMode(0o600),
+            .permissions = ownerOnlyFilePermissions(),
         }) catch |err| return mapError(err);
         return .{ .store = self, .file = file };
     }
@@ -202,7 +214,7 @@ pub const Store = struct {
         defer self.allocator.free(file_name);
         var atomic = self.dir.createFileAtomic(self.io, file_name, .{
             .replace = true,
-            .permissions = std.Io.File.Permissions.fromMode(0o600),
+            .permissions = ownerOnlyFilePermissions(),
         }) catch |err| return mapError(err);
         defer atomic.deinit(self.io);
         var write_buffer: [4096]u8 = undefined;
@@ -759,7 +771,7 @@ test "app-password sessions save, load, remove, and fail closed on tamper" {
     defer gpa.free(raw);
     const tampered = try std.mem.replaceOwned(u8, gpa, raw, "access-jwt.example", "bad token");
     defer gpa.free(tampered);
-    try store.dir.writeFile(io, .{ .sub_path = file_name, .data = tampered, .flags = .{ .truncate = true, .permissions = std.Io.File.Permissions.fromMode(0o600) } });
+    try store.dir.writeFile(io, .{ .sub_path = file_name, .data = tampered, .flags = .{ .truncate = true, .permissions = ownerOnlyFilePermissions() } });
     try std.testing.expectError(error.StoreCorrupt, store.loadPassword(test_did));
 
     // restore a clean copy so remove can prove the erase path.
@@ -786,7 +798,7 @@ test "tampered session documents fail closed" {
     defer gpa.free(raw);
     const tampered = try std.mem.replaceOwned(u8, gpa, raw, "access-token", "bad token");
     defer gpa.free(tampered);
-    try store.dir.writeFile(io, .{ .sub_path = file_name, .data = tampered, .flags = .{ .truncate = true, .permissions = std.Io.File.Permissions.fromMode(0o600) } });
+    try store.dir.writeFile(io, .{ .sub_path = file_name, .data = tampered, .flags = .{ .truncate = true, .permissions = ownerOnlyFilePermissions() } });
 
     try std.testing.expectError(error.InvalidSessionWire, store.load(test_did));
 }

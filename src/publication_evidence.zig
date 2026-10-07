@@ -28,7 +28,9 @@ pub fn EvidenceInput(comptime E: type) type {
             self.* = .{};
             self.file = publication_checks.openFileNoFollow(io, root, path) catch
                 return missing_error;
-            self.pass1 = self.file.readerStreaming(io, &self.pass1_buffer);
+            // Positional readers: no-follow handles are asynchronous on
+            // Windows, so offset-less streaming reads cannot succeed there.
+            self.pass1 = self.file.reader(io, &self.pass1_buffer);
         }
 
         pub fn hashPass(self: *Self, fail_error: E) E!void {
@@ -45,7 +47,7 @@ pub fn EvidenceInput(comptime E: type) type {
         pub fn rewindForParse(self: *Self, io: Io, fail_error: E) E!void {
             io.vtable.fileSeekTo(io.userdata, self.file, 0) catch
                 return fail_error;
-            self.pass2 = self.file.readerStreaming(io, &self.pass2_buffer);
+            self.pass2 = self.file.reader(io, &self.pass2_buffer);
         }
 
         pub fn close(self: *Self, io: Io) void {

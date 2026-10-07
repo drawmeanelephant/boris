@@ -110,7 +110,9 @@ while IFS=$'\t' read -r path expected_bytes expected_sha; do
   total_bytes=$((total_bytes + expected_bytes))
   [[ "$total_bytes" -le "$MAX_BYTES" ]] || fail "public artifact exceeds ${MAX_BYTES}-byte limit"
   [[ "$path" == "index.html" ]] && index_seen=1
-done < <(jq -r '.artifacts[] | [.path, (.bytes | tostring), .sha256] | @tsv' "$INVENTORY_JSON")
+# `tr -d '\r'`: a native Windows jq writes CRLF line endings, which would
+# otherwise leave a carriage return glued onto each row's sha256 value.
+done < <(jq -r '.artifacts[] | [.path, (.bytes | tostring), .sha256] | @tsv' "$INVENTORY_JSON" | tr -d '\r')
 
 [[ "$index_seen" == 1 ]] || fail "inventory does not include top-level index.html"
 [[ -f "$DEST_DIR/index.html" && ! -L "$DEST_DIR/index.html" ]] || fail "public artifact lacks top-level index.html"

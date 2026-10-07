@@ -491,6 +491,19 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    // POSIX-named launcher next to boris.exe: POSIX shell tooling (Git Bash,
+    // WSL bash, the scripts/ harnesses, docs) addresses the binary as
+    // `boris`, but Windows only stores `boris.exe`, so `-x`/`-f` checks miss
+    // it and an extensionless PE copy cannot exec under WSL.
+    if (target.result.os.tag == .windows) {
+        const shim = b.addWriteFiles();
+        const shim_path = shim.add(
+            "boris.sh",
+            "#!/bin/sh\nexec \"$(dirname \"$0\")/boris.exe\" \"$@\"\n",
+        );
+        b.getInstallStep().dependOn(&b.addInstallBinFile(shim_path, "boris").step);
+    }
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
@@ -939,39 +952,47 @@ pub fn build(b: *std.Build) void {
     run_nostr_publish_tests.setCwd(b.path("."));
     test_nostr_step.dependOn(&run_nostr_publish_tests.step);
 
-    const nostr_publish_matrix_mod = b.createModule(.{
-        .root_source_file = b.path("src/nostr_publish_matrix_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    nostr_publish_matrix_mod.addImport("secp256k1", secp.c_module);
-    nostr_publish_matrix_mod.linkLibrary(secp.library);
-    linkOliver(nostr_publish_matrix_mod, oliver_mod);
-    const nostr_publish_matrix_tests = b.addTest(.{ .root_module = nostr_publish_matrix_mod });
-    const nostr_test_binary = b.addOptions();
-    nostr_test_binary.addOptionPath("path", exe.getEmittedBin());
-    nostr_publish_matrix_mod.addOptions("nostr_test_binary", nostr_test_binary);
-    // Fault controls exist only in this non-installed test root. It execs
-    // itself through the same production custody launcher.
-    const nostr_process_fixture_mod = b.createModule(.{
-        .root_source_file = b.path("src/nostr_auth_process_fixture.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    nostr_process_fixture_mod.addOptions("build_info", build_info);
-    nostr_process_fixture_mod.addImport("secp256k1", secp.c_module);
-    nostr_process_fixture_mod.linkLibrary(secp.library);
-    linkOliver(nostr_process_fixture_mod, oliver_mod);
-    const nostr_process_fixture = b.addExecutable(.{
-        .name = "nostr-auth-process-fixture",
-        .root_module = nostr_process_fixture_mod,
-    });
-    const nostr_fault_binary = b.addOptions();
-    nostr_fault_binary.addOptionPath("path", nostr_process_fixture.getEmittedBin());
-    nostr_publish_matrix_mod.addOptions("nostr_fault_binary", nostr_fault_binary);
-    const run_nostr_publish_matrix_tests = b.addRunArtifact(nostr_publish_matrix_tests);
-    run_nostr_publish_matrix_tests.setCwd(b.path("."));
-    test_nostr_step.dependOn(&run_nostr_publish_matrix_tests.step);
+    // The publish matrix drives the production custody launcher over POSIX
+    // descriptors and a hostile mock relay; those channels do not exist on
+    // Windows (nostr_auth_ipc.supported), so the whole slice is gated.
+    const nostr_matrix_supported = target.result.os.tag == .macos or target.result.os.tag == .linux;
+    var run_nostr_publish_matrix_tests: ?*std.Build.Step.Run = null;
+    if (nostr_matrix_supported) {
+        const nostr_publish_matrix_mod = b.createModule(.{
+            .root_source_file = b.path("src/nostr_publish_matrix_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        nostr_publish_matrix_mod.addImport("secp256k1", secp.c_module);
+        nostr_publish_matrix_mod.linkLibrary(secp.library);
+        linkOliver(nostr_publish_matrix_mod, oliver_mod);
+        const nostr_publish_matrix_tests = b.addTest(.{ .root_module = nostr_publish_matrix_mod });
+        const nostr_test_binary = b.addOptions();
+        nostr_test_binary.addOptionPath("path", exe.getEmittedBin());
+        nostr_publish_matrix_mod.addOptions("nostr_test_binary", nostr_test_binary);
+        // Fault controls exist only in this non-installed test root. It execs
+        // itself through the same production custody launcher.
+        const nostr_process_fixture_mod = b.createModule(.{
+            .root_source_file = b.path("src/nostr_auth_process_fixture.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        nostr_process_fixture_mod.addOptions("build_info", build_info);
+        nostr_process_fixture_mod.addImport("secp256k1", secp.c_module);
+        nostr_process_fixture_mod.linkLibrary(secp.library);
+        linkOliver(nostr_process_fixture_mod, oliver_mod);
+        const nostr_process_fixture = b.addExecutable(.{
+            .name = "nostr-auth-process-fixture",
+            .root_module = nostr_process_fixture_mod,
+        });
+        const nostr_fault_binary = b.addOptions();
+        nostr_fault_binary.addOptionPath("path", nostr_process_fixture.getEmittedBin());
+        nostr_publish_matrix_mod.addOptions("nostr_fault_binary", nostr_fault_binary);
+        const matrix_tests_run = b.addRunArtifact(nostr_publish_matrix_tests);
+        matrix_tests_run.setCwd(b.path("."));
+        run_nostr_publish_matrix_tests = matrix_tests_run;
+        test_nostr_step.dependOn(&matrix_tests_run.step);
+    }
 
     // --- Runtime publication artifact inventory ---------------------------
     const artifact_inventory_mod = b.createModule(.{
@@ -1905,7 +1926,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_nostr_keys_tests.step);
     test_step.dependOn(&run_nostr_sign_tests.step);
     test_step.dependOn(&run_nostr_publish_tests.step);
-    test_step.dependOn(&run_nostr_publish_matrix_tests.step);
+    // The custody-launcher matrix only exists on platforms with the POSIX
+    // auth channels (same predicate as its registration above).
+    if (run_nostr_publish_matrix_tests) |matrix_run| {
+        test_step.dependOn(&matrix_run.step);
+    }
     test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_publication_checks_tests.step);
     test_step.dependOn(&run_publication_claims_tests.step);

@@ -461,6 +461,8 @@ test "connection target policy rejects local, unique-local, link-local, multicas
 }
 
 test "native adapter initializes without ambient proxy configuration" {
+    // The native adapter only exists where the OS HTTP transport does.
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const adapter = try StdTransport.create(std.testing.allocator, std.testing.io);
     defer adapter.destroy();
     try std.testing.expect(adapter.http.http_proxy == null);

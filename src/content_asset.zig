@@ -16,6 +16,7 @@
 //! Normative: `docs/contracts/content-local-assets.md`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
@@ -304,12 +305,15 @@ pub fn loadPageAssets(
 
         // A literal backslash in a walked file name is rejected, not
         // reinterpreted as a nested path (#870): the normalized path would
-        // name a file that does not exist on disk.
-        if (std.mem.indexOfScalar(u8, entry.path, '\\') != null) {
-            const located = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ asset_root, entry.path });
-            defer gpa.free(located);
-            setAssetFail(fail_out, located, "file name contains a backslash");
-            return error.AssetPath;
+        // name a file that does not exist on disk. Windows cannot produce
+        // one: '\\' is the walk's own path separator there, normalized below.
+        if (comptime builtin.os.tag != .windows) {
+            if (std.mem.indexOfScalar(u8, entry.path, '\\') != null) {
+                const located = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ asset_root, entry.path });
+                defer gpa.free(located);
+                setAssetFail(fail_out, located, "file name contains a backslash");
+                return error.AssetPath;
+            }
         }
 
         // Normalize separators from the walk.
@@ -1100,6 +1104,9 @@ fn writeTreeFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !v
 }
 
 test "loadPageAssets rejects a backslash asset file name naming the file (#870)" {
+    // Windows cannot store a literal '\\' in a file name: the fixture the
+    // scenario needs cannot exist there.
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
