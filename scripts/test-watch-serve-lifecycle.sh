@@ -13,6 +13,13 @@
 # NOTE: bash 3.2 compatibility is deliberate (macOS /bin/bash); no
 # associative arrays, no bash-4+isms.
 set -euo pipefail
+# Native Windows executables cannot receive POSIX signals: under
+# MSYS/Cygwin/Git-Bash `kill -TERM` terminates the process outright
+# (exit 128+15) and no graceful-shutdown event can be emitted.
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) WINDOWS_SHELL=yes ;;
+    *) WINDOWS_SHELL=no ;;
+esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT"
@@ -119,14 +126,24 @@ pass "SSE reload event delivered after rebuild"
 kill "$SSE_PID" 2>/dev/null || true
 wait "$SSE_PID" 2>/dev/null || true
 
-note "SIGTERM shuts the watcher down cleanly (exit 0)"
-kill -TERM "$WATCH_PID"
-RC=0
-wait "$WATCH_PID" || RC=$?
-WATCH_PID=""
-[[ "$RC" == "0" ]] || fail "watch process exited $RC on SIGTERM (expected 0)"
-grep -q "watch: received shutdown signal" "$WATCH_LOG" || fail "no shutdown message in watch log"
-pass "clean SIGTERM shutdown (exit 0, signal message logged)"
+if [[ "$WINDOWS_SHELL" == yes ]]; then
+    note "SIGTERM terminates the watcher (Windows forced kill)"
+    kill -TERM "$WATCH_PID"
+    RC=0
+    wait "$WATCH_PID" || RC=$?
+    WATCH_PID=""
+    [[ "$RC" == "143" ]] || fail "watch process exited $RC on SIGTERM (expected 143)"
+    pass "watcher terminated on SIGTERM (Windows forced kill)"
+else
+    note "SIGTERM shuts the watcher down cleanly (exit 0)"
+    kill -TERM "$WATCH_PID"
+    RC=0
+    wait "$WATCH_PID" || RC=$?
+    WATCH_PID=""
+    [[ "$RC" == "0" ]] || fail "watch process exited $RC on SIGTERM (expected 0)"
+    grep -q "watch: received shutdown signal" "$WATCH_LOG" || fail "no shutdown message in watch log"
+    pass "clean SIGTERM shutdown (exit 0, signal message logged)"
+fi
 
 note "profile-driven watch selects its layout and static directory"
 mkdir -p "$OUT/static"
@@ -221,7 +238,11 @@ kill -TERM "$WATCH_PID"
 RC=0
 wait "$WATCH_PID" || RC=$?
 WATCH_PID=""
-[[ "$RC" == 0 ]] || fail "profile watcher exited $RC on SIGTERM"
+if [[ "$WINDOWS_SHELL" == yes ]]; then
+    [[ "$RC" == 143 ]] || fail "profile watcher exited $RC on SIGTERM (expected 143)"
+else
+    [[ "$RC" == 0 ]] || fail "profile watcher exited $RC on SIGTERM"
+fi
 pass "profile watcher recovered and shut down cleanly"
 
 rm -rf "$OUT"

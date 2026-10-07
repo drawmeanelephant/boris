@@ -567,6 +567,9 @@ const Gate = struct {
 };
 
 fn drainRetiredReply(gpa: std.mem.Allocator, channel: *ipc.Channel, retired: *RetiredReplies, deadline: auth.Deadline) !void {
+    // The auth channel only exists where ipc.Channel.init can succeed; the
+    // POSIX poll surface below must not analyze on other targets.
+    if (comptime !ipc.supported) return error.UnsupportedPlatform;
     while (true) {
         var fds = [_]std.c.pollfd{.{ .fd = channel.input, .events = std.posix.POLL.IN, .revents = 0 }};
         if (std.c.poll(&fds, 1, 0) < 0 or fds[0].revents & (std.posix.POLL.HUP | std.posix.POLL.ERR | std.posix.POLL.NVAL) != 0) return error.ChannelLost;
@@ -581,6 +584,7 @@ fn drainRetiredReply(gpa: std.mem.Allocator, channel: *ipc.Channel, retired: *Re
 }
 
 fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client: *ws.Client, channel: *ipc.Channel, policy: auth.Policy, correlation: *auth.Correlation, evidence: *AuthEvidence, gate_state: *Gate) !bool {
+    if (comptime !ipc.supported) return error.UnsupportedPlatform;
     const message_limit = client.limits.max_message_bytes;
     const frame_limit = client.limits.max_frame_payload;
     defer {
@@ -734,6 +738,7 @@ fn authenticate(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client
 }
 
 fn beforeArticle(io: Io, gpa: std.mem.Allocator, arena: std.mem.Allocator, client: *ws.Client, channel: *ipc.Channel, policy: auth.Policy, correlation: *auth.Correlation, evidence: *AuthEvidence, gate: *Gate, attempts: usize) !bool {
+    if (comptime !ipc.supported) return error.UnsupportedPlatform;
     try drainRetiredReply(gpa, channel, gate.retired, auth.Deadline.after(io, policy.timeout_ms).clip(channel.ceiling.?));
     while (client.hasPending()) {
         switch (try readAuth(arena, client)) {

@@ -1375,6 +1375,9 @@ test "FakeWatcher and Coordinator Event Coalescing" {
 }
 
 test "poll keeps snapshot on transient root scan failure" {
+    // The transient root-loss moment is simulated with chmod-style mode bits;
+    // Windows has no setFilePermissions (std panics TODO) and ACLs do not map.
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
@@ -1407,13 +1410,13 @@ test "poll keeps snapshot on transient root scan failure" {
 
     // Transient unreadable-root moment: no mass delete events.
     try cwd.setFilePermissions(io, root, @enumFromInt(0), .{});
-    defer cwd.setFilePermissions(io, root, std.Io.File.Permissions.fromMode(0o755), .{}) catch {};
+    defer cwd.setFilePermissions(io, root, restorePermissions(), .{}) catch {};
     try w.poll(&events);
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
 
     // After recovery the preserved snapshot diffs clean: no create storm
     // from a poisoned intermediate map either.
-    try cwd.setFilePermissions(io, root, std.Io.File.Permissions.fromMode(0o755), .{});
+    try cwd.setFilePermissions(io, root, restorePermissions(), .{});
     try w.poll(&events);
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
 }
@@ -1971,6 +1974,13 @@ test "single-target watch: unsafe SVG rebuild recovers in-session without restar
     const svg_v3 = try readWatchTreeFile(io, gpa, dist, "index.assets/logo.svg");
     defer gpa.free(svg_v3);
     try std.testing.expectEqualStrings("<svg id=\"v2\"/>", svg_v3);
+}
+
+/// Permissions to restore after the unreadable-root flap test. POSIX mode
+/// bits do not exist on Windows, where the attributes default is the honest
+/// equivalent.
+fn restorePermissions() std.Io.File.Permissions {
+    return if (comptime builtin.os.tag == .windows) .default_dir else std.Io.File.Permissions.fromMode(0o755);
 }
 
 fn writeWatchTreeFile(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8) !void {

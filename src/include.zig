@@ -276,6 +276,11 @@ pub fn readSourceAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem
         .resolve_beneath = true,
     }) catch return error.IncludeMissing;
     defer file.close(io);
+    // Windows opens no-follow files asynchronously (OPEN_REPARSE_POINT), but
+    // the returned File still reports nonblocking = false, which sends reads
+    // down the synchronous path that panics on PENDING. Reconcile the flag
+    // with the actual handle mode; positional reads then take the APC path.
+    if (comptime builtin.os.tag == .windows) file.flags.nonblocking = true;
     var reader = file.reader(io, &.{});
     return reader.interface.allocRemaining(allocator, .limited(max_expanded_bytes)) catch |err| switch (err) {
         error.StreamTooLong => error.ExpansionBudgetExceeded,

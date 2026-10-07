@@ -12,6 +12,7 @@
 //! directory, not a code change.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const invariants = @import("artifact_invariants.zig");
 const rag = @import("rag.zig");
@@ -43,15 +44,27 @@ fn auditTree(gpa: std.mem.Allocator, io: Io, root: []const u8, allowed_keys: []c
     defer walker.deinit();
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
-        if (std.mem.startsWith(u8, entry.path, "content/") or std.mem.startsWith(u8, entry.path, "system/")) continue;
+        // The exclusion prefixes and extension checks below speak the
+        // '/'-separated output grammar; the walk emits native separators.
+        var rel: []const u8 = entry.path;
+        var rel_buf: ?[]u8 = null;
+        defer if (rel_buf) |buf| gpa.free(buf);
+        if (builtin.os.tag == .windows) {
+            rel_buf = try gpa.dupe(u8, entry.path);
+            for (rel_buf.?) |*c| {
+                if (c.* == '\\') c.* = '/';
+            }
+            rel = rel_buf.?;
+        }
+        if (std.mem.startsWith(u8, rel, "content/") or std.mem.startsWith(u8, rel, "system/")) continue;
         // Working packs are complete verbatim authoring documents; only the
         // emitter-generated machine files are audited in working mode.
-        if (!std.mem.endsWith(u8, entry.path, ".md") and !std.mem.endsWith(u8, entry.path, ".jsonl") and !std.mem.endsWith(u8, entry.path, ".json")) continue;
-        if (std.mem.startsWith(u8, entry.path, "working-") and !std.mem.endsWith(u8, entry.path, ".json")) continue;
-        const owned_path = try gpa.dupe(u8, entry.path);
+        if (!std.mem.endsWith(u8, rel, ".md") and !std.mem.endsWith(u8, rel, ".jsonl") and !std.mem.endsWith(u8, rel, ".json")) continue;
+        if (std.mem.startsWith(u8, rel, "working-") and !std.mem.endsWith(u8, rel, ".json")) continue;
+        const owned_path = try gpa.dupe(u8, rel);
         try paths.append(gpa, owned_path);
 
-        var file = try dir.openFile(io, entry.path, .{});
+        var file = try dir.openFile(io, rel, .{});
         defer file.close(io);
         var reader = file.reader(io, &.{});
         const bytes = try reader.interface.allocRemaining(gpa, .unlimited);

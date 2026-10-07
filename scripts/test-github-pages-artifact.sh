@@ -55,7 +55,10 @@ if scripts/prepare-github-pages-artifact.sh "$SOURCE" "$ROOT/missing-index" "$RO
   exit 1
 fi
 
-if ln -s "index.html" "$SOURCE/symlink.html" 2>/dev/null; then
+# MSYS/Git-Bash `ln -s` can "succeed" by producing a plain copy, which is not
+# a symlink at all; only exercise the rejection path when a real symlink
+# (or a genuine platform link) actually materialized.
+if ln -s "index.html" "$SOURCE/symlink.html" 2>/dev/null && [[ -L "$SOURCE/symlink.html" ]]; then
   if scripts/prepare-github-pages-artifact.sh "$SOURCE" "$ROOT/symlink" "$INVENTORY" public >/dev/null 2>&1; then
     echo "symlinked source was accepted" >&2
     exit 1

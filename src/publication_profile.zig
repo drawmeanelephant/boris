@@ -5,6 +5,7 @@
 //! and argv views stop at `parseBytes` / `applyOverrides`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const github_pages = @import("github_pages.zig");
 const identity = @import("identity.zig");
 const layout_select = @import("layout_select.zig");
@@ -1059,7 +1060,11 @@ test "unknown publication target fails closed (#900)" {
 test "profile workspace is selected parent and has no discovery" {
     var workspace = try profileWorkspace(std.testing.allocator, "/tmp", "/work/project/boris.publication.json");
     defer workspace.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("/work/project", workspace.root);
+    // workspace.root is a native filesystem path: separators follow the host.
+    try std.testing.expectEqualStrings(
+        if (builtin.os.tag == .windows) "\\work\\project" else "/work/project",
+        workspace.root,
+    );
 }
 
 // --- the `nostr` NIP-23 publication surface --------------------------------

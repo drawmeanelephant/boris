@@ -1009,6 +1009,8 @@ const EchoGuard = struct {
     }
 
     fn deinit(self: *EchoGuard) void {
+        // Same platform scope as init: no termios outside macOS/Linux.
+        if (comptime builtin.os.tag != .macos and builtin.os.tag != .linux) return;
         if (!self.active) return;
         std.posix.tcsetattr(std.posix.STDIN_FILENO, .NOW, self.original) catch {};
         self.active = false;
@@ -2169,6 +2171,10 @@ pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
     var channel: ?nostr_auth_ipc.Channel = null;
     if (opts.nostr_auth_pipes) {
+        if (comptime !nostr_auth_ipc.supported) {
+            errPrint("error: private auth descriptors are unsupported on this platform\n", .{});
+            return .usage;
+        }
         channel = nostr_auth_ipc.Channel.init(io, 3, 4) catch {
             errPrint("error: invalid private auth descriptors\n", .{});
             return .usage;
@@ -3666,7 +3672,8 @@ fn fileInode(io: Io, path: []const u8) !u64 {
     var file = try Io.Dir.cwd().openFile(io, path, .{});
     defer file.close(io);
     const st = try file.stat(io);
-    return st.inode;
+    // stat's inode is signed on Windows, unsigned elsewhere.
+    return @intCast(st.inode);
 }
 
 test "runHtml threads --refresh-evidence into the compile options (#728)" {

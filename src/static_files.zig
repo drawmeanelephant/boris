@@ -23,6 +23,7 @@
 //!   deployment-owned files are never touched.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const artifact_inventory = @import("artifact_inventory.zig");
 
@@ -110,6 +111,15 @@ pub fn loadInventory(
 
         const rel = try joinRel(gpa, "", entry.path);
         errdefer gpa.free(rel);
+        // The walk emits native separators; the passthrough grammar is '/'.
+        // On Windows every nested path arrives with '\\' and must be
+        // normalized; elsewhere '\\' stays literal so a POSIX backslash file
+        // name still fails validation instead of being reinterpreted.
+        if (comptime builtin.os.tag == .windows) {
+            for (rel) |*c| {
+                if (c.* == '\\') c.* = '/';
+            }
+        }
         try validatePassthroughPath(rel);
         try entries.append(gpa, .{ .rel_path = rel });
     }

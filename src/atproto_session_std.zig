@@ -438,7 +438,10 @@ test "userRoot honors override and derives from HOME" {
     try environ.put("HOME", "/home/tester");
     const derived = try Sessions.userRoot(gpa, environ, null);
     defer gpa.free(derived);
-    try std.testing.expectEqualStrings("/home/tester/.local/share/boris/sessions", derived);
+    // userRoot is a native filesystem path: separators follow the host.
+    const expected = try std.fs.path.join(gpa, &.{ "/home/tester", ".local", "share", "boris", "sessions" });
+    defer gpa.free(expected);
+    try std.testing.expectEqualStrings(expected, derived);
     const overridden = try Sessions.userRoot(gpa, environ, "/tmp/custom-sessions");
     defer gpa.free(overridden);
     try std.testing.expectEqualStrings("/tmp/custom-sessions", overridden);

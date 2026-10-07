@@ -7,6 +7,7 @@
 //! `assemble.zig` (ASCII-only under `assets/`, no `..`, no symlinks).
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const assemble = @import("assemble.zig");
 const diag = @import("diag.zig");
@@ -215,16 +216,20 @@ pub fn loadThemeBundle(
             if (entry.kind == .sym_link) return error.AssetSymlink;
             if (entry.kind != .file) continue;
 
-            // Reject before the separator normalization below (#870).
-            if (std.mem.indexOfScalar(u8, entry.path, '\\') != null) {
-                emitBackslashNameDiagnostic(gpa, theme_root, entry.path, sink);
-                return error.AssetBackslashName;
+            // Reject a literal backslash in a file name before the separator
+            // normalization below (#870). Windows cannot produce one: '\\' is
+            // the walk's own path separator there, normalized just after.
+            if (comptime builtin.os.tag != .windows) {
+                if (std.mem.indexOfScalar(u8, entry.path, '\\') != null) {
+                    emitBackslashNameDiagnostic(gpa, theme_root, entry.path, sink);
+                    return error.AssetBackslashName;
+                }
             }
 
             // entry.path is relative to assets/; prefix with assets/
             const rel = try std.fmt.allocPrint(gpa, "assets/{s}", .{entry.path});
             errdefer gpa.free(rel);
-            // Normalize backslashes if any
+            // Normalize the host walk's separators to '/' (Windows emits '\\').
             for (rel) |*c| {
                 if (c.* == '\\') c.* = '/';
             }
@@ -493,6 +498,9 @@ test "validateAssetUrlPath rejects escapes and non-ASCII" {
 }
 
 test "loadThemeBundle rejects a backslash asset file name naming the file (#870)" {
+    // Windows cannot store a literal '\\' in a file name: the fixture the
+    // scenario needs cannot exist there.
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();

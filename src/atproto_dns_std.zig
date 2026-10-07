@@ -305,6 +305,8 @@ test "DNS wire parser rejects spoofed IDs, truncated packets, and malformed TXT 
 }
 
 test "native DNS adapter initializes without process or subprocess state" {
+    // The native adapter only exists where the OS resolver transport does.
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     var adapter = try StdDns.init(std.testing.io);
     _ = adapter.client();
 }

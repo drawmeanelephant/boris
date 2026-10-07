@@ -1445,6 +1445,11 @@ fn readFileNoFollow(
         .resolve_beneath = true,
     });
     defer file.close(io);
+    // Windows opens no-follow files asynchronously (OPEN_REPARSE_POINT), but
+    // the returned File still reports nonblocking = false, which sends reads
+    // down the synchronous path that panics on PENDING. Reconcile the flag
+    // with the actual handle mode; positional reads then take the APC path.
+    if (comptime @import("builtin").os.tag == .windows) file.flags.nonblocking = true;
     var reader = file.reader(io, &.{});
     return reader.interface.allocRemaining(gpa, .limited(64 * 1024 * 1024));
 }

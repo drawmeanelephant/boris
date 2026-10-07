@@ -17,7 +17,9 @@ pub const Channel = struct {
     frame_timeout_ms: u32 = 60000,
 
     pub fn init(io: std.Io, input: std.c.fd_t, output: std.c.fd_t) !Channel {
-        if (!supported) return error.UnsupportedPlatform;
+        // Comptime gate: POSIX pipe/fcntl/poll surface below does not exist
+        // on unsupported targets, so the rest of this body must not analyze.
+        if (comptime !supported) return error.UnsupportedPlatform;
         if (input == output) return error.SessionInvalid;
         inline for (.{ input, output }) |fd| {
             if (fd < 3) return error.SessionInvalid;
@@ -64,6 +66,7 @@ pub const Channel = struct {
         }
     }
     pub fn read(self: *Channel, gpa: std.mem.Allocator, deadline: auth.Deadline) ![]u8 {
+        if (comptime !supported) return error.UnsupportedPlatform;
         var header: [4]u8 = undefined;
         // Idle supervisor waits may use the session ceiling; once a frame
         // starts, no partial-byte traffic can renew its shorter budget.
@@ -79,6 +82,7 @@ pub const Channel = struct {
         return bytes;
     }
     pub fn send(self: *Channel, gpa: std.mem.Allocator, value: anytype, deadline: auth.Deadline) !void {
+        if (comptime !supported) return error.UnsupportedPlatform;
         if (comptime @hasDecl(root, "nostr_auth_faults")) try root.nostr_auth_faults.beforeSend(self, value.type);
         const bytes = try std.json.Stringify.valueAlloc(gpa, value, .{});
         defer gpa.free(bytes);
@@ -89,10 +93,12 @@ pub const Channel = struct {
         try self.writeExact(bytes, deadline);
     }
     pub fn control(self: *Channel, gpa: std.mem.Allocator, correlation: auth.Correlation, kind: []const u8, timeout: u32) !void {
+        if (comptime !supported) return error.UnsupportedPlatform;
         if (self.ceiling.?.remaining(self.io)) |_| {} else |_| return;
         try self.send(gpa, auth.Control{ .type = kind, .correlation = correlation }, auth.Deadline.after(self.io, timeout).clip(self.ceiling.?));
     }
     pub fn monitor(self: *Channel) !void {
+        if (comptime !supported) return error.UnsupportedPlatform;
         while (true) {
             if (canceled.load(.unordered)) return error.Canceled;
             // Darwin suppresses pipe HUP with an empty requested-event mask.

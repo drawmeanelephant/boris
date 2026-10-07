@@ -6,6 +6,7 @@
 //! the exact HTML bytes into Doctor, and atomically publishes one report.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const artifact_inventory = @import("artifact_inventory.zig");
 const cache = @import("cache.zig");
@@ -178,10 +179,16 @@ pub fn openFileNoFollow(
     const basename = if (last_slash) |last| path[last + 1 ..] else path;
     const stat = try current_dir.statFile(io, basename, .{ .follow_symlinks = false });
     if (stat.kind == .sym_link or stat.kind != .file) return error.UnsafeArtifactPath;
-    return current_dir.openFile(io, basename, .{
+    var file = try current_dir.openFile(io, basename, .{
         .follow_symlinks = false,
         .resolve_beneath = true,
     });
+    // Windows opens no-follow files asynchronously (OPEN_REPARSE_POINT), but
+    // the returned File still reports nonblocking = false, which sends reads
+    // down the synchronous path that panics on PENDING. Reconcile the flag
+    // with the actual handle mode; positional reads then take the APC path.
+    if (comptime builtin.os.tag == .windows) file.flags.nonblocking = true;
+    return file;
 }
 
 const StreamedFile = struct {
@@ -208,7 +215,9 @@ pub fn streamFileNoFollow(
     defer if (collect) payload.deinit(payload_gpa);
     var reader_buffer: [64 * 1024]u8 = undefined;
     var input_buffer: [64 * 1024]u8 = undefined;
-    var reader = file.readerStreaming(io, &reader_buffer);
+    // Positional reads: a no-follow handle is opened asynchronously on
+    // Windows, where offset-less streaming reads fail with INVALID_PARAMETER.
+    var reader = file.reader(io, &reader_buffer);
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var bytes: usize = 0;
     while (true) {
@@ -236,7 +245,7 @@ fn parseInventoryFile(
     var file = openFileNoFollow(io, root, artifact_inventory.output_path) catch return error.InvalidInventory;
     defer file.close(io);
     var reader_buffer: [64 * 1024]u8 = undefined;
-    var file_reader = file.readerStreaming(io, &reader_buffer);
+    var file_reader = file.reader(io, &reader_buffer);
     return artifact_inventory.parseStream(gpa, &file_reader.interface, target) catch |err| switch (err) {
         error.OutOfMemory => error.OutOfMemory,
         else => error.InvalidInventory,

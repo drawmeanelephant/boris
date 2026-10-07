@@ -306,7 +306,18 @@ fn verifyStarter(io: Io, gpa: std.mem.Allocator, target_dir: []const u8) !ProbeR
 
     const content_root = try std.fs.path.join(gpa, &.{ base, "content" });
     defer gpa.free(content_root);
-    const layout_path = try std.fs.path.join(gpa, &.{ base, "themes/boris/layouts/main.html" });
+    // Layout paths obey a lexical grammar: workspace-relative, '/'-separated
+    // (layout_select.validateLayoutPath). `base` is a native path spelling, so
+    // on Windows it arrives with '\\' separators that the grammar rejects.
+    const base_lexical = try gpa.dupe(u8, base);
+    defer gpa.free(base_lexical);
+    for (base_lexical) |*c| {
+        if (c.* == '\\') c.* = '/';
+    }
+    const layout_path = if (base_lexical.len == 0)
+        try gpa.dupe(u8, "themes/boris/layouts/main.html")
+    else
+        try std.fmt.allocPrint(gpa, "{s}/themes/boris/layouts/main.html", .{base_lexical});
     defer gpa.free(layout_path);
     const probe_dist = try std.fs.path.join(gpa, &.{ base, ".boris-init-probe" });
     defer gpa.free(probe_dist);

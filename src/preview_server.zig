@@ -21,6 +21,7 @@
 //! backslashes, percent escapes, or non-ASCII bytes.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const http = std.http;
 const Io = std.Io;
 
@@ -131,8 +132,21 @@ pub const Server = struct {
         // still closed afterwards (harmless once the loop is gone).
         if (!self.listener_closed) {
             self.listener_closed = true;
-            self.wakeAccept();
-            self.listener.socket.close(self.io);
+            if (comptime builtin.os.tag == .windows) {
+                // Windows accept is overlapped: closing the socket while an
+                // accept is in flight completes it with INVALID_HANDLE and
+                // panics inside std's cleanup path. Wake with a
+                // self-connect, join the loop first, then close.
+                self.wakeAccept();
+                if (self.accept_thread) |t| {
+                    t.join();
+                    self.accept_thread = null;
+                }
+                self.listener.socket.close(self.io);
+            } else {
+                self.wakeAccept();
+                self.listener.socket.close(self.io);
+            }
         }
         if (self.accept_thread) |t| {
             t.join();
@@ -161,13 +175,22 @@ pub const Server = struct {
 };
 
 fn acceptLoop(self: *Server) void {
+    var consecutive_failures: usize = 0;
     while (!self.shutdown.load(.monotonic)) {
         const stream = self.listener.accept(self.io) catch {
             if (self.shutdown.load(.monotonic)) break;
             // Transient accept failures (fd pressure, etc.): back off briefly.
+            // On Windows a listener that has gone bad keeps returning
+            // INVALID_HANDLE forever — bound the retries instead of spinning
+            // on an unusable socket. POSIX keeps retrying indefinitely.
+            consecutive_failures += 1;
+            if (comptime builtin.os.tag == .windows) {
+                if (consecutive_failures >= 32) break;
+            }
             Io.sleep(self.io, .{ .nanoseconds = 10 * std.time.ns_per_ms }, .awake) catch {};
             continue;
         };
+        consecutive_failures = 0;
         if (self.shutdown.load(.monotonic)) {
             stream.close(self.io);
             break;
