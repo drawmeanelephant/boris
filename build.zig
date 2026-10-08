@@ -1684,7 +1684,7 @@ pub fn build(b: *std.Build) void {
         \\
         \\mode="${1:-}"
         \\case "$mode" in
-        \\  ReleaseSafe | ReleaseFast | ReleaseSmall) ;;
+        \\  safe | fast | small) ;;
         \\  *)
         \\    echo "test-release-html-smoke: refusing to run against a ${mode:-Debug} build."
         \\    echo "This guard only has value against a release binary: Debug tolerates the"

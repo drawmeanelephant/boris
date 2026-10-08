@@ -194,7 +194,7 @@ pub const Daemon = struct {
             return;
         }
         if (comptime builtin.os.tag == .windows) return;
-        var status: if (builtin.link_libc) c_int else u32 = undefined;
+        var status: i32 = undefined;
         const raw_rc = std.posix.system.wait4(child.id.?, &status, std.posix.W.NOHANG, null);
         switch (std.posix.errno(raw_rc)) {
             .SUCCESS => {},
