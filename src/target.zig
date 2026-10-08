@@ -291,7 +291,7 @@ pub fn validateTargets(
     }
 
     const cwd_owned = if (options.workspace_root) |root|
-        try gpa.dupeZ(u8, root)
+        try gpa.dupeSentinel(u8, root, 0)
     else
         try std.process.currentPathAlloc(io, gpa);
     defer gpa.free(cwd_owned);

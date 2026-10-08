@@ -56,23 +56,23 @@ pub fn main(init: std.process.Init) u8 {
     const cold = init.arena.allocator();
     const args_z = init.minimal.args.toSlice(cold) catch {
         std.debug.print("boris-testdata: unable to read process arguments\n", .{});
-        return @intFromEnum(ExitCode.usage);
+        return @backingInt(ExitCode.usage);
     };
     const options = parseOptions(cold, args_z) catch |err| {
         std.debug.print("boris-testdata: {s}\n", .{@errorName(err)});
         printUsage();
-        return @intFromEnum(ExitCode.usage);
+        return @backingInt(ExitCode.usage);
     };
     if (options.help) {
         printUsage();
-        return @intFromEnum(ExitCode.success);
+        return @backingInt(ExitCode.success);
     }
     if (options.version) {
         var stdout_buffer: [128]u8 = undefined;
         var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
         stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
         stdout_writer.interface.flush() catch {};
-        return @intFromEnum(ExitCode.success);
+        return @backingInt(ExitCode.success);
     }
 
     switch (options.command) {
@@ -97,12 +97,12 @@ pub fn main(init: std.process.Init) u8 {
                 result.profile.name,
                 result.assignments.len,
             });
-            return @intFromEnum(ExitCode.success);
+            return @backingInt(ExitCode.success);
         },
         .validate, .inspect => {
             if (options.fixture.len == 0) {
                 std.debug.print("boris-testdata: --fixture is required\n", .{});
-                return @intFromEnum(ExitCode.usage);
+                return @backingInt(ExitCode.usage);
             }
             const report = validator.validate(init.io, init.gpa, options.fixture) catch |err| return reportError(err);
             defer {
@@ -110,12 +110,12 @@ pub fn main(init: std.process.Init) u8 {
                 owned_report.deinit(init.gpa);
             }
             printReport(report, options.format, options.command == .inspect);
-            return if (report.ok) @intFromEnum(ExitCode.success) else @intFromEnum(ExitCode.content_failure);
+            return if (report.ok) @backingInt(ExitCode.success) else @backingInt(ExitCode.content_failure);
         },
         .run => {
             if (options.fixture.len == 0) {
                 std.debug.print("boris-testdata: --fixture is required for run\n", .{});
-                return @intFromEnum(ExitCode.usage);
+                return @backingInt(ExitCode.usage);
             }
             generator.runFixture(.{
                 .io = init.io,
@@ -125,12 +125,12 @@ pub fn main(init: std.process.Init) u8 {
                 .jobs = options.jobs,
             }) catch |err| return reportError(err);
             std.debug.print("ran Boris fixture: {s}\n", .{options.fixture});
-            return @intFromEnum(ExitCode.success);
+            return @backingInt(ExitCode.success);
         },
         .republish_clean => {
             if (options.fixture.len == 0) {
                 std.debug.print("boris-testdata: --fixture is required for republish-clean\n", .{});
-                return @intFromEnum(ExitCode.usage);
+                return @backingInt(ExitCode.usage);
             }
             generator.republishCleanFixture(.{
                 .io = init.io,
@@ -140,7 +140,7 @@ pub fn main(init: std.process.Init) u8 {
                 .jobs = options.jobs,
             }) catch |err| return reportError(err);
             std.debug.print("republished clean Boris fixture: {s}\n", .{options.fixture});
-            return @intFromEnum(ExitCode.success);
+            return @backingInt(ExitCode.success);
         },
     }
 }
@@ -344,10 +344,10 @@ test "page count parser accepts positive usize workloads without a named ceiling
 fn reportError(err: anyerror) u8 {
     std.debug.print("boris-testdata: failed: {s}\n", .{@errorName(err)});
     return switch (err) {
-        error.BorisExpectationMismatch => @intFromEnum(ExitCode.content_failure),
-        error.InvalidFixture, error.OutputExists, error.ProfileNotFound, error.InvalidProfile => @intFromEnum(ExitCode.content_failure),
-        error.InvalidPageCount, error.InvalidSeed, error.InvalidOutputPath, error.UnknownBarb, error.IncompatibleBarbCombination => @intFromEnum(ExitCode.usage),
-        else => @intFromEnum(ExitCode.system_failure),
+        error.BorisExpectationMismatch => @backingInt(ExitCode.content_failure),
+        error.InvalidFixture, error.OutputExists, error.ProfileNotFound, error.InvalidProfile => @backingInt(ExitCode.content_failure),
+        error.InvalidPageCount, error.InvalidSeed, error.InvalidOutputPath, error.UnknownBarb, error.IncompatibleBarbCombination => @backingInt(ExitCode.usage),
+        else => @backingInt(ExitCode.system_failure),
     };
 }
 

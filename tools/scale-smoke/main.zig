@@ -259,37 +259,37 @@ pub fn main(init: std.process.Init) u8 {
     const cold = init.arena.allocator();
     const args_z = init.minimal.args.toSlice(cold) catch {
         std.debug.print("scale-smoke: unable to read process arguments\n", .{});
-        return @intFromEnum(ExitCode.usage);
+        return @backingInt(ExitCode.usage);
     };
     var args: std.ArrayList([]const u8) = .empty;
     defer args.deinit(cold);
-    args.ensureTotalCapacity(cold, args_z.len) catch return @intFromEnum(ExitCode.usage);
+    args.ensureTotalCapacity(cold, args_z.len) catch return @backingInt(ExitCode.usage);
     for (args_z) |arg| args.appendAssumeCapacity(arg);
 
     const options = parseOptions(args.items) catch |err| {
         std.debug.print("scale-smoke: {s}\n", .{@errorName(err)});
         printUsage();
-        return @intFromEnum(ExitCode.usage);
+        return @backingInt(ExitCode.usage);
     };
     if (options.version) {
         var stdout_buffer: [128]u8 = undefined;
         var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
         stdout_writer.interface.writeAll(tool_id ++ "\n") catch {};
         stdout_writer.interface.flush() catch {};
-        return @intFromEnum(ExitCode.success);
+        return @backingInt(ExitCode.success);
     }
     if (options.help) {
         printUsage();
-        return @intFromEnum(ExitCode.success);
+        return @backingInt(ExitCode.success);
     }
 
     const cwd = Io.Dir.cwd();
     defer cwd.deleteTree(init.io, generated_root) catch {};
     runSmoke(init.io, init.gpa, options) catch |err| {
         std.debug.print("scale-smoke: failed: {s}\n", .{@errorName(err)});
-        return @intFromEnum(ExitCode.failed);
+        return @backingInt(ExitCode.failed);
     };
-    return @intFromEnum(ExitCode.success);
+    return @backingInt(ExitCode.success);
 }
 
 test "parse options has a modest default and accepts a large page count" {

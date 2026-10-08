@@ -53,19 +53,19 @@ else
   pass "host Zig ${ZIG_VER} matches package major.minor ${ZON_MM}"
 fi
 if ! grep -q "${ZON_MIN}" README.md; then
-  # README says 0.16+ ; require the minor family
-  if ! grep -qE '0\.16' README.md; then
-    fail "README.md does not mention Zig 0.16"
+  # README says 0.17+ ; require the minor family
+  if ! grep -qE "${ZON_MM//./\\.}" README.md; then
+    fail "README.md does not mention Zig ${ZON_MM}"
   else
-    pass "README.md documents Zig 0.16 family"
+    pass "README.md documents Zig ${ZON_MM} family"
   fi
 else
   pass "README.md mentions ${ZON_MIN}"
 fi
-if ! grep -qE '0\.16' docs/STATUS.md; then
-  fail "docs/STATUS.md does not mention Zig 0.16"
+if ! grep -qE "${ZON_MM//./\\.}" docs/STATUS.md; then
+  fail "docs/STATUS.md does not mention Zig ${ZON_MM}"
 else
-  pass "docs/STATUS.md documents Zig 0.16 family"
+  pass "docs/STATUS.md documents Zig ${ZON_MM} family"
 fi
 
 # --- 1. Build ------------------------------------------------------------

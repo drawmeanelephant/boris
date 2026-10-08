@@ -1,6 +1,17 @@
 //! NIP-42 public policy, narrow signing interface and independent verification.
 //! No transport, process launch or key ingestion lives here.
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const nostr = @import("nostr.zig");
 const keys = @import("nostr_keys.zig");
 const json_out = @import("json_out.zig");
@@ -151,8 +162,8 @@ pub fn parse(comptime T: type, gpa: std.mem.Allocator, bytes: []const u8, wanted
     var shape = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return error.Malformed;
     defer shape.deinit();
     if (shape.value != .object) return error.Malformed;
-    inline for (std.meta.fields(T)) |field| {
-        if (!shape.value.object.contains(field.name)) return error.Malformed;
+    inline for (@typeInfo(T).@"struct".field_names) |f_name| {
+        if (!shape.value.object.contains(f_name)) return error.Malformed;
     }
     const parsed = std.json.parseFromSlice(T, gpa, bytes, .{ .allocate = .alloc_always }) catch return error.Malformed;
     errdefer parsed.deinit();
@@ -260,8 +271,8 @@ test "auth IPC rejects duplicates, unknown fields, trailing bytes and nesting" {
 }
 
 test "auth local challenge and non-renewing deadline boundaries" {
-    try challengeValid("x" ** max_challenge);
-    try std.testing.expectError(error.Oversized, challengeValid("x" ** (max_challenge + 1)));
+    try challengeValid(rep("x", max_challenge));
+    try std.testing.expectError(error.Oversized, challengeValid(rep("x", max_challenge + 1)));
     for ([_][]const u8{ "", "x\n", "\xff", "\x7f" }) |bad| try std.testing.expectError(error.Malformed, challengeValid(bad));
     const deadline: Deadline = .{ .end = 600000 * std.time.ns_per_ms };
     try std.testing.expectEqual(@as(u32, 1), try deadline.at(deadline.end - 1));

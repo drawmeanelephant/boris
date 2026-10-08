@@ -5,6 +5,17 @@
 //! and argv views stop at `parseBytes` / `applyOverrides`.
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const builtin = @import("builtin");
 const github_pages = @import("github_pages.zig");
 const identity = @import("identity.zig");
@@ -1019,8 +1030,8 @@ test "Standard.site publication fails closed on invalid did and pds origin (#900
 test "Standard.site name and description honor the contract bounds (#895)" {
     const gpa = std.testing.allocator;
     // 5000-byte name is contract-legal and now parses (was InvalidSite).
-    const name_ok = "N" ** 5000;
-    const source_ok = try std.fmt.allocPrint(gpa, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"name\":\"{s}\",\"description\":\"{s}\",\"show_in_discover\":true,\"include\":[\"guides/*\"],\"exclude\":[\"guides/private*\"],\"prune\":false}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{ name_ok, "D" ** 30000 });
+    const name_ok = rep("N", 5000);
+    const source_ok = try std.fmt.allocPrint(gpa, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"name\":\"{s}\",\"description\":\"{s}\",\"show_in_discover\":true,\"include\":[\"guides/*\"],\"exclude\":[\"guides/private*\"],\"prune\":false}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{ name_ok, rep("D", 30000) });
     defer gpa.free(source_ok);
     var request = try parseBytes(gpa, .{ .root = try gpa.dupe(u8, "/work") }, source_ok, .{});
     defer request.deinit(gpa);
@@ -1029,12 +1040,12 @@ test "Standard.site name and description honor the contract bounds (#895)" {
     try std.testing.expectEqual(@as(usize, 30000), config.description.?.len);
 
     // One byte over each cap fails closed.
-    const name_over = "N" ** 5001;
+    const name_over = rep("N", 5001);
     const source_over = try std.fmt.allocPrint(gpa, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"name\":\"{s}\"}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{name_over});
     defer gpa.free(source_over);
     try std.testing.expectError(error.InvalidSite, parseBytes(gpa, .{ .root = try gpa.dupe(u8, "/work") }, source_over, .{}));
 
-    const description_over = "D" ** 30001;
+    const description_over = rep("D", 30001);
     const source_desc_over = try std.fmt.allocPrint(gpa, "{{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com/\",\"origin\":\"https://docs.example.com/\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"description\":\"{s}\"}},\"targets\":[{{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}}]}}", .{description_over});
     defer gpa.free(source_desc_over);
     try std.testing.expectError(error.InvalidSite, parseBytes(gpa, .{ .root = try gpa.dupe(u8, "/work") }, source_desc_over, .{}));

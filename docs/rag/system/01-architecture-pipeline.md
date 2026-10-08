@@ -76,7 +76,7 @@ main
 
 ## Entry point facts
 
-- Language: Zig **0.16** (`build.zig.zon` `minimum_zig_version = "0.16.0"`; CI pins the same)
+- Language: Zig **0.17** (`build.zig.zon` `minimum_zig_version = "0.17.0"`; CI pins the same)
 - I/O: `std.Io` (`Dir`, `File`, walkers require `iterate: true`)
 - Lists: unmanaged `std.ArrayList`
 - Binary name: `boris` (`zig-out/bin/boris`)

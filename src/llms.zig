@@ -4,6 +4,17 @@
 //! It deliberately does not invent a second parser or URL/frontmatter dialect.
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const Io = std.Io;
 const github_pages = @import("github_pages.zig");
 const identity = @import("identity.zig");
@@ -340,8 +351,8 @@ test "summary skips thematic breaks instead of describing them (#879)" {
 
 test "summary truncates to the 240-byte contract on a UTF-8 scalar boundary" {
     const gpa = std.testing.allocator;
-    const a237 = "a" ** 237;
-    const a238 = "a" ** 238;
+    const a237 = rep("a", 237);
+    const a238 = rep("a", 238);
     const em_dash = [_]u8{ 0xE2, 0x80, 0x94 }; // U+2014 EM DASH, 3 bytes
     const emoji = [_]u8{ 0xF0, 0x9F, 0x98, 0x80 }; // U+1F600 GRINNING FACE, 4 bytes
 
@@ -393,7 +404,7 @@ test "two llms runs over identical input emit byte-identical output" {
 
     try tmp.dir.createDirPath(io, "content");
     const em_dash = [_]u8{ 0xE2, 0x80, 0x94 };
-    const body = ("a" ** 238) ++ em_dash; // paragraph crosses byte 240 inside a scalar
+    const body = (rep("a", 238)) ++ em_dash; // paragraph crosses byte 240 inside a scalar
     const page = "---\nid: utf8-check\ntitle: Utf8 Check\nstatus: published\n---\n\n# Utf8 Check\n\n" ++ body ++ "\n";
     try tmp.dir.writeFile(io, .{ .sub_path = "content/utf8-check.md", .data = page });
 

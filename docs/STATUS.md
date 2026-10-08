@@ -10,7 +10,7 @@ via PR **#790**. Topic branches target `main`, and
 **Product metadata:** released **`v0.8.2`** / `boris/0.8.2`; base IR `schemaVersion` **`0.2.0`**.
 **Phase:** v0.8.2 shipped; post-release maintenance on `main`.
 **Line state:** `main` carries the former `afterparty` line — past **#532**, through PR **#788** (Editor segmentation, #670 slices 1–6). It is not "the merge set through #318."
-**Build baseline:** Zig **0.16** and the Oliver library pinned in `build.zig.zon` (pure Zig; no CMake or other host tools).
+**Build baseline:** Zig **0.17** and the Oliver library pinned in `build.zig.zon` (pure Zig; no CMake or other host tools).
 
 Boris is a **graph-native publication compiler** ([publisher platform](https://github.com/drawmeanelephant/boris/issues/538)): Markdown in → validated Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the default target, not the whole product. Normative behavior lives in [`docs/contracts/`](contracts/).
 

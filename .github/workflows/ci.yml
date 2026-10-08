@@ -72,7 +72,7 @@ jobs:
       - name: Install Zig
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
           use-cache: false
 
       - name: Format check
@@ -163,7 +163,7 @@ jobs:
       - name: Install Zig
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       - name: Install Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -228,7 +228,7 @@ jobs:
       - name: Install Zig
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       # The one-shot gate (scripts/gate-standalone-tools.sh) runs this lane's
       # tool suites and ends with one machine-readable NDJSON line; the step
@@ -266,7 +266,7 @@ jobs:
       - name: Install Zig
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       - name: Bounded companion tests
         run: zig build --build-file tools/testdata-generator/build.zig test
@@ -284,7 +284,7 @@ jobs:
       - name: Install Zig
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       - name: Native --once smoke
         run: bash scripts/test-job-runner-image.sh
@@ -307,7 +307,7 @@ jobs:
       - name: Install Zig
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       - name: Build image and diff artifacts vs native
         run: bash scripts/test-job-runner-image-parity.sh
@@ -333,7 +333,7 @@ jobs:
       - name: Install Zig
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       # Markdown rendering is Oliver, a pure-Zig library pinned by content
       # hash in build.zig.zon: no CMake, no host tools, nothing to install.

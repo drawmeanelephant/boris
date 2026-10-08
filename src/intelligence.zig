@@ -16,7 +16,7 @@ pub const Endpoint = struct {
     value: []const u8,
 
     pub fn less(a: Endpoint, b: Endpoint) bool {
-        if (a.type != b.type) return @intFromEnum(a.type) < @intFromEnum(b.type);
+        if (a.type != b.type) return @backingInt(a.type) < @backingInt(b.type);
         return std.mem.order(u8, a.value, b.value) == .lt;
     }
 
@@ -253,7 +253,7 @@ fn lessEndpoint(_: void, a: Endpoint, b: Endpoint) bool {
 }
 
 fn lessFinding(_: void, a: Finding, b: Finding) bool {
-    if (a.endpoint.eql(b.endpoint)) return @intFromEnum(a.code) < @intFromEnum(b.code);
+    if (a.endpoint.eql(b.endpoint)) return @backingInt(a.code) < @backingInt(b.code);
     return Endpoint.less(a.endpoint, b.endpoint);
 }
 

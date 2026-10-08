@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
 
     const run = b.addRunArtifact(exe);
     run.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs();
     const run_step = b.step("run", "Audit one deployed Boris GitHub Pages publication");
     run_step.dependOn(&run.step);
 

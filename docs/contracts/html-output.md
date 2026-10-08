@@ -24,7 +24,7 @@ validation and changed chrome; see [html4-strict.md](html4-strict.md).
 | Whiteboard per-page arena lifecycle | Generic component HTML / MDX |
 | Ordered body stream: pre-render link/image rewrites + Oliver(markdown) + Aside HTML | Mega-string assembly |
 | Three-write layout splice | Cross-volume atomic rename claims |
-| Temp-file publish via Zig 0.16 Atomic API | Full YAML frontmatter / MDX |
+| Temp-file publish via Zig 0.17 Atomic API | Full YAML frontmatter / MDX |
 | PageDb durable metadata only | Multi-OS CI atomicity matrix for every FS |
 | Fixture goldens under `test/fixtures/html/` | |
 | Bare `boris` default → `dist/` (Feature 2) | |
@@ -400,7 +400,7 @@ When `{{toc}}` is present, after body render (Oliver + Aside stream):
 
 ## Publication
 
-### API used (Zig 0.16)
+### API used (Zig 0.17)
 
 1. `Io.Dir.createFileAtomic(io, output_path, .{ .replace = true, .make_path = true })`
    — unique temp basename (hex `u64`) in the **destination directory**.

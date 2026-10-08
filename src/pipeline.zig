@@ -161,7 +161,7 @@ fn edgeEql(a: DependencyEdge, b: DependencyEdge) bool {
 const ReverseEndpointContext = struct {
     pub fn hash(_: @This(), endpoint: Endpoint) u64 {
         var hasher = std.hash.Wyhash.init(0);
-        hasher.update(&[_]u8{@intCast(@intFromEnum(endpoint.type))});
+        hasher.update(&[_]u8{@intCast(@backingInt(endpoint.type))});
         hasher.update(endpoint.value);
         return hasher.final();
     }
@@ -1988,7 +1988,7 @@ test "per-file read failure remains EIO with I/O failure classification" {
     var content = try tmp.dir.openDir(io, "content", .{ .iterate = true });
     defer content.close(io);
     try content.writeFile(io, .{ .sub_path = "unreadable.md", .data = "# unreadable\n" });
-    try content.setFilePermissions(io, "unreadable.md", @enumFromInt(0), .{});
+    try content.setFilePermissions(io, "unreadable.md", @fromBackingInt(@intCast(0)), .{});
     defer content.setFilePermissions(io, "unreadable.md", .default_file, .{}) catch {};
 
     // Privileged test processes may still read mode-000 files; in that
@@ -2064,12 +2064,12 @@ test "compile with a --timings recorder records core phases and counters" {
     try std.testing.expect(result.ok);
 
     // Core compiler phases ran on the IR path; HTML-only phases did not.
-    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.scan)] > 0);
-    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.parse)] > 0);
-    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.graph_validate)] > 0);
-    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.dependency_resolve)] > 0);
-    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.render)] == 0);
-    try std.testing.expectEqual(@as(u64, 3), recorder.counters[@intFromEnum(timings.Counter.page_reads)]);
+    try std.testing.expect(recorder.phase_ns[@backingInt(timings.Phase.scan)] > 0);
+    try std.testing.expect(recorder.phase_ns[@backingInt(timings.Phase.parse)] > 0);
+    try std.testing.expect(recorder.phase_ns[@backingInt(timings.Phase.graph_validate)] > 0);
+    try std.testing.expect(recorder.phase_ns[@backingInt(timings.Phase.dependency_resolve)] > 0);
+    try std.testing.expect(recorder.phase_ns[@backingInt(timings.Phase.render)] == 0);
+    try std.testing.expectEqual(@as(u64, 3), recorder.counters[@backingInt(timings.Counter.page_reads)]);
 
     // The report is well-formed JSON with only recorded phases.
     const report = try recorder.renderJson(gpa, "ir");

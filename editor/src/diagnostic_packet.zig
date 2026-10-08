@@ -3,6 +3,16 @@
 
 const std = @import("std");
 
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 pub const max_packet_bytes = 4096;
 
 pub const Input = struct {
@@ -118,7 +128,7 @@ fn safeRelativePath(path: []const u8) bool {
 test "packet is bounded, metadata-only, and redacts the project identity" {
     const allocator = std.testing.allocator;
     const private_root = "/Users/author/private-site";
-    const long_message = private_root ++ "/content/index.md: " ++ ("diagnostic " ** 700);
+    const long_message = private_root ++ "/content/index.md: " ++ rep("diagnostic ", 700);
     const packet = try build(allocator, .{
         .compiler_id = "boris/0.8.2",
         .editor_id = "boris-editor/0.1.0",

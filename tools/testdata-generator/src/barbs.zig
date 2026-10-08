@@ -54,10 +54,7 @@ pub const Assignment = struct {
 };
 
 pub fn parse(text: []const u8) !Kind {
-    inline for (std.meta.fields(Kind)) |field| {
-        if (std.mem.eql(u8, text, field.name)) return @field(Kind, field.name);
-    }
-    return error.UnknownBarb;
+    return std.meta.stringToEnum(Kind, text) orelse error.UnknownBarb;
 }
 
 pub fn name(kind: Kind) []const u8 {

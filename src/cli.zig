@@ -278,7 +278,7 @@ pub const Options = struct {
     /// single-target compile path. Null → `.html`.
     html_profile: ?render.OutputProfile = null,
     /// Dynamic target list.
-    targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
+    targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .empty,
     /// `nostr sign` inputs: the plan artifact path, whether the secret key is
     /// read from stdin, the signed-bundle output path, an optional prior
     /// signed bundle, and an optional explicit signing-time override.
@@ -453,7 +453,7 @@ fn parseOptionsAccumulate(gpa: std.mem.Allocator, args: []const []const u8, st: 
                 .bundles_only = false,
                 .llms_path = null,
                 .html_dir = null,
-                .targets = .{ .items = &.{}, .capacity = 0 },
+                .targets = .empty,
             };
         }
 
@@ -721,12 +721,12 @@ const ParseState = struct {
     saw_graph_out: bool = false,
 
     // Heap-backed accumulators and moved-ownership results.
-    targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
+    targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .empty,
     publication_location: ?github_pages.Location = null,
     allow_markdown_links: bool = false,
-    target_layouts: std.ArrayListUnmanaged(PendingTargetLayout) = .{ .items = &.{}, .capacity = 0 },
-    target_profiles: std.ArrayListUnmanaged(PendingTargetProfile) = .{ .items = &.{}, .capacity = 0 },
-    pending_rules: std.ArrayListUnmanaged(PendingLayoutRule) = .{ .items = &.{}, .capacity = 0 },
+    target_layouts: std.ArrayListUnmanaged(PendingTargetLayout) = .empty,
+    target_profiles: std.ArrayListUnmanaged(PendingTargetProfile) = .empty,
+    pending_rules: std.ArrayListUnmanaged(PendingLayoutRule) = .empty,
 
     /// Diagnostic detail recorded by failing paths that know more than the
     /// argv scan can guess (#761, #764). Copied out by

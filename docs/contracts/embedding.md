@@ -132,8 +132,9 @@ Failed graph/content validation still emits no HTML. Incremental cache,
 `zig-out/bin/boris-embed.wasm` (ReleaseSafe) and `boris-embed-small.wasm`
 (ReleaseSmall).
 
-Zig 0.16 `std.Io` cannot compile for `wasm32-freestanding` (PATH_MAX,
-posix.AT, Threaded). The product target is therefore **`wasm32-wasi`**.
+Zig 0.17 `std.Io.Threaded` cannot compile for `wasm32-freestanding` (it
+references `posix` facilities the freestanding target lacks, e.g.
+`getrandom`, `IOV_MAX`). The product target is therefore **`wasm32-wasi`**.
 The module lists `wasi_snapshot_preview1` imports because the standard
 library is linked. The memory compile path must not call them. Hosts
 instantiate with **trap stubs**. A stub being called is an ABI failure.

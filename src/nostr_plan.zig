@@ -28,6 +28,17 @@
 //! Every rejection names the entity, the defect, and the remediation.
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const aside = @import("aside.zig");
 const content_asset = @import("content_asset.zig");
 const diag = @import("diag.zig");
@@ -687,14 +698,14 @@ test "plan: a bad pubkey or an empty selection is refused before any compile" {
     try testing.expectError(error.InvalidNostrConfig, run(testing.io, testing.allocator, .{
         .content_root = fixture_root ++ "/content",
         .location = &location,
-        .pubkey = "a" ** 64,
+        .pubkey = rep("a", 64),
         .articles = &.{},
         .relays = &relays,
     }));
     try testing.expectError(error.AbsolutePath, run(testing.io, testing.allocator, .{
         .content_root = "/etc",
         .location = &location,
-        .pubkey = "a" ** 64,
+        .pubkey = rep("a", 64),
         .articles = &articles,
         .relays = &relays,
     }));

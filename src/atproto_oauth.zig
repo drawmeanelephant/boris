@@ -308,7 +308,7 @@ test "RFC 9449 example public key has the published JWK thumbprint" {
 }
 
 test "DPoP proof has canonical claims and a raw ES256 signature" {
-    const key_pair = try keyPairFromEntropy([_]u8{0x41} ** Scheme.KeyPair.seed_length);
+    const key_pair = try keyPairFromEntropy(@as([Scheme.KeyPair.seed_length]u8, @splat(0x41)));
     const input: DpopInput = .{
         .method = "post",
         .target_uri = "https://server.example.com/token?ignored=yes#fragment",
@@ -317,7 +317,7 @@ test "DPoP proof has canonical claims and a raw ES256 signature" {
         .nonce = "nonce-value",
         .access_token = "access-token",
     };
-    const noise = [_]u8{0x93} ** Scheme.noise_length;
+    const noise = @as([Scheme.noise_length]u8, @splat(0x93));
     const proof = try buildDpopProof(std.testing.allocator, key_pair, input, noise);
     defer std.testing.allocator.free(proof);
     const repeated = try buildDpopProof(std.testing.allocator, key_pair, input, noise);
@@ -356,8 +356,8 @@ test "DPoP proof has canonical claims and a raw ES256 signature" {
 }
 
 test "signing boundary rejects ambiguous request values" {
-    const key_pair = try keyPairFromEntropy([_]u8{0x21} ** Scheme.KeyPair.seed_length);
-    const noise = [_]u8{0x52} ** Scheme.noise_length;
+    const key_pair = try keyPairFromEntropy(@as([Scheme.KeyPair.seed_length]u8, @splat(0x21)));
+    const noise = @as([Scheme.noise_length]u8, @splat(0x52));
     const base: DpopInput = .{
         .method = "POST",
         .target_uri = "https://example.com/token",

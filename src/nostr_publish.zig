@@ -39,6 +39,17 @@
 //! file mutates nothing remotely.
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const diag = @import("diag.zig");
 const json_out = @import("json_out.zig");
 const keys = @import("nostr_keys.zig");
@@ -1267,7 +1278,7 @@ fn renderReport(
 const testing = std.testing;
 
 test "auth verification refuses a short expected pubkey before hex decoding" {
-    const event: auth.Event = .{ .id = "0" ** 64, .pubkey = "00", .created_at = 0, .kind = 22242, .tags = &.{}, .content = "", .sig = "0" ** 128 };
+    const event: auth.Event = .{ .id = rep("0", 64), .pubkey = "00", .created_at = 0, .kind = 22242, .tags = &.{}, .content = "", .sig = rep("0", 128) };
     try testing.expectError(error.IdentityMismatch, auth.verify(testing.allocator, event, "00", "wss://r.example", "challenge", 0));
 }
 
@@ -1339,7 +1350,7 @@ test "NIP-42 verifier refuses signer substitution, skew, invalid IDs and signatu
     const gpa = testing.allocator;
     var ctx = try keys.Context.init();
     defer ctx.deinit();
-    const pair = try ctx.keyPairFromSecretKey([_]u8{0} ** 31 ++ [_]u8{3});
+    const pair = try ctx.keyPairFromSecretKey(@as([31]u8, @splat(0)) ++ [_]u8{3});
     const pubkey = std.fmt.bytesToHex(pair.public_key, .lower);
     const bytes = try auth.sign(gpa, ctx, pair, &pubkey, "wss://relay.example:444/path", "challenge", 1000, @splat(0));
     defer gpa.free(bytes);
@@ -1349,7 +1360,7 @@ test "NIP-42 verifier refuses signer substitution, skew, invalid IDs and signatu
     try auth.verify(gpa, event, &pubkey, "wss://relay.example:444/path", "challenge", 1060);
     try testing.expectError(error.Stale, auth.verify(gpa, event, &pubkey, "wss://relay.example:444/path", "challenge", 1061));
     try testing.expectError(error.Stale, auth.verify(gpa, event, &pubkey, "wss://relay.example:444/path", "challenge", 939));
-    try testing.expectError(error.IdentityMismatch, auth.verify(gpa, event, "0" ** 64, "wss://relay.example:444/path", "challenge", 1000));
+    try testing.expectError(error.IdentityMismatch, auth.verify(gpa, event, rep("0", 64), "wss://relay.example:444/path", "challenge", 1000));
     for ([_][]const u8{ "wss://relay.example:445/path", "wss://relay.example:444/other", "wss://other.example:444/path" }) |relay|
         try testing.expectError(error.RelayMismatch, auth.verify(gpa, event, &pubkey, relay, "challenge", 1000));
     try testing.expectError(error.Malformed, auth.verify(gpa, event, &pubkey, "wss://relay.example:444/path", "different", 1000));
@@ -1363,38 +1374,38 @@ test "NIP-42 verifier refuses signer substitution, skew, invalid IDs and signatu
     bad.tags = &.{ event.tags[1], event.tags[0] };
     try testing.expectError(error.Malformed, auth.verify(gpa, bad, &pubkey, "wss://relay.example:444/path", "challenge", 1000));
     bad = event;
-    bad.id = "0" ** 64;
+    bad.id = rep("0", 64);
     try testing.expectError(error.EventIdMismatch, auth.verify(gpa, bad, &pubkey, "wss://relay.example:444/path", "challenge", 1000));
     bad = event;
-    bad.sig = "0" ** 128;
+    bad.sig = rep("0", 128);
     try testing.expectError(error.SignatureInvalid, auth.verify(gpa, bad, &pubkey, "wss://relay.example:444/path", "challenge", 1000));
 }
 
 test "NIP-42 signer policy limits generations, retirement, replay and correlation" {
-    const policy: auth.Policy = .{ .plan_digest = "1" ** 64, .bundle_digest = "2" ** 64, .nips_revision = auth.revision, .pubkey = "3" ** 64, .relays = &.{"wss://relay.example"}, .timeout_ms = 100 };
-    var request: auth.Request = .{ .correlation = .{ .plan_digest = policy.plan_digest, .bundle_digest = policy.bundle_digest, .nips_revision = auth.revision, .run = "a" ** 32, .connection = "b" ** 32, .request = 1, .relay = policy.relays[0], .generation = 1 }, .challenge = "first" };
+    const policy: auth.Policy = .{ .plan_digest = rep("1", 64), .bundle_digest = rep("2", 64), .nips_revision = auth.revision, .pubkey = rep("3", 64), .relays = &.{"wss://relay.example"}, .timeout_ms = 100 };
+    var request: auth.Request = .{ .correlation = .{ .plan_digest = policy.plan_digest, .bundle_digest = policy.bundle_digest, .nips_revision = auth.revision, .run = rep("a", 32), .connection = rep("b", 32), .request = 1, .relay = policy.relays[0], .generation = 1 }, .challenge = "first" };
     var budget: auth.Budget = .{};
-    _ = try budget.admit(policy, "a" ** 32, request);
-    try testing.expectError(error.SessionInvalid, budget.admit(policy, "a" ** 32, request));
+    _ = try budget.admit(policy, rep("a", 32), request);
+    try testing.expectError(error.SessionInvalid, budget.admit(policy, rep("a", 32), request));
     request.correlation.request = 2;
     request.correlation.generation = 2;
-    try testing.expectError(error.Replay, budget.admit(policy, "a" ** 32, request));
+    try testing.expectError(error.Replay, budget.admit(policy, rep("a", 32), request));
     request.challenge = "second";
     var wrong = request;
-    wrong.correlation.run = "c" ** 32;
-    try testing.expectError(error.SessionInvalid, budget.admit(policy, "a" ** 32, wrong));
+    wrong.correlation.run = rep("c", 32);
+    try testing.expectError(error.SessionInvalid, budget.admit(policy, rep("a", 32), wrong));
     wrong = request;
-    wrong.correlation.connection = "d" ** 32;
-    try testing.expectError(error.SessionInvalid, budget.admit(policy, "a" ** 32, wrong));
+    wrong.correlation.connection = rep("d", 32);
+    try testing.expectError(error.SessionInvalid, budget.admit(policy, rep("a", 32), wrong));
     wrong = request;
     wrong.correlation.relay = "wss://other.example";
-    try testing.expectError(error.RelayMismatch, budget.admit(policy, "a" ** 32, wrong));
-    _ = try budget.admit(policy, "a" ** 32, request);
+    try testing.expectError(error.RelayMismatch, budget.admit(policy, rep("a", 32), wrong));
+    _ = try budget.admit(policy, rep("a", 32), request);
     request.correlation.request = 3;
     request.correlation.generation = 3;
-    try testing.expectError(error.ReplacementLimit, budget.admit(policy, "a" ** 32, request));
+    try testing.expectError(error.ReplacementLimit, budget.admit(policy, rep("a", 32), request));
     budget.retired[0] = true;
-    try testing.expectError(error.ReplacementLimit, budget.admit(policy, "a" ** 32, request));
+    try testing.expectError(error.ReplacementLimit, budget.admit(policy, rep("a", 32), request));
     inline for (.{ "event", "digest", "kind", "content", "tags", "created_at" }) |field| {
         const arbitrary = "{\"format\":\"boris-nostr-auth-ipc\",\"version\":1,\"type\":\"sign\",\"correlation\":{},\"challenge\":\"x\",\"" ++ field ++ "\":0}";
         try testing.expectError(error.Malformed, auth.parse(auth.Request, testing.allocator, arbitrary, "sign"));
@@ -1403,7 +1414,7 @@ test "NIP-42 signer policy limits generations, retirement, replay and correlatio
 
 const test_secret_key = "b7e151628aed2a6abf7158809cf4f3c762e7160f38b4da56a784d9045190cfef";
 const test_pubkey = "dff1d77f2a671c5f36183726db2341be58feae1da2deced843240f7b502ba659";
-const test_aux = [_]u8{0} ** 32;
+const test_aux = @as([32]u8, @splat(0));
 const test_created_at: i64 = 1705762000;
 
 fn signedPair(gpa: std.mem.Allocator) !struct { plan: []u8, bundle: []u8 } {

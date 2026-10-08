@@ -506,9 +506,7 @@ pub fn build(b: *std.Build) void {
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     const run_step = b.step("run", "Run Boris");
     run_step.dependOn(&run_cmd.step);
@@ -1384,9 +1382,7 @@ pub fn build(b: *std.Build) void {
 
     const source_rag_run = b.addRunArtifact(source_rag_exe);
     source_rag_run.setCwd(b.path("."));
-    if (b.args) |args| {
-        source_rag_run.addArgs(args);
-    }
+    source_rag_run.addPassthruArgs();
 
     const source_rag_step = b.step(
         "source-rag",
@@ -1479,9 +1475,7 @@ pub fn build(b: *std.Build) void {
     const package_run = b.addRunArtifact(package_exe);
     package_run.setCwd(b.path("."));
     package_run.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        package_run.addArgs(args);
-    }
+    package_run.addPassthruArgs();
 
     const package_step = b.step(
         "package",
@@ -1511,9 +1505,7 @@ pub fn build(b: *std.Build) void {
     const job_runner_run = b.addRunArtifact(job_runner_exe);
     job_runner_run.setCwd(b.path("."));
     job_runner_run.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        job_runner_run.addArgs(args);
-    }
+    job_runner_run.addPassthruArgs();
     const job_runner_step = b.step(
         "job-runner",
         "Run boris-job-runner (hosted archive → native boris)",
@@ -1692,7 +1684,7 @@ pub fn build(b: *std.Build) void {
         \\
         \\mode="${1:-}"
         \\case "$mode" in
-        \\  ReleaseSafe | ReleaseFast | ReleaseSmall) ;;
+        \\  safe | fast | small) ;;
         \\  *)
         \\    echo "test-release-html-smoke: refusing to run against a ${mode:-Debug} build."
         \\    echo "This guard only has value against a release binary: Debug tolerates the"

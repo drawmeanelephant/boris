@@ -140,7 +140,7 @@ the plan, signed-bundle, and report artifacts; the CLI surface is in
 
 ## Quick start
 
-Building Boris requires [Zig 0.16+](https://ziglang.org/) only. Markdown
+Building Boris requires [Zig 0.17+](https://ziglang.org/) only. Markdown
 rendering is Oliver, a pure-Zig library pinned by content hash in
 `build.zig.zon` and fetched by Zig at build time; it is not part of the
 authoring or publishing workflow.
@@ -390,7 +390,7 @@ Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase ban
 
 ## Honest limitations
 
-- Zig 0.16+ is required to build Boris itself.
+- Zig 0.17+ is required to build Boris itself.
 - Frontmatter is intentionally closed; Boris is not a general YAML parser.
 - Unrestricted MDX and executable JavaScript components are out of scope.
 - Raw HTML is trusted input and is not sanitized by default.

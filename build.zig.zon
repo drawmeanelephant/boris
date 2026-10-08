@@ -2,14 +2,14 @@
     .name = .boris,
     .version = "0.8.2",
     .fingerprint = 0x6cd378330da76efc, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         // Oliver #131: opt-in HTML 4.01 Strict fragment serialization. The
         // shared pin also carries the Cooklang and Markdown extensions.
         // See docs/contracts/oliver-renderer.md for the pin and boundary.
         .oliver = .{
-            .url = "https://github.com/drawmeanelephant/oliver/archive/80d53b2118005b314d4c551d18a023f293eecc75.tar.gz",
-            .hash = "oliver-1.1.0-LOsZkBWrJwAXanVPCdrIH78YlOL63fgQUUSBhIBLXwhm",
+            .url = "https://github.com/drawmeanelephant/oliver/archive/2a0a1e9.tar.gz",
+            .hash = "oliver-1.1.0-LOsZkOeMKAB1o3ynv6PTycxCt3nzpYB6l_hz-J3lVvxF",
         },
         .secp256k1 = .{
             .url = "git+https://github.com/bitcoin-core/secp256k1#6e2c8bc4ecdc6e71dbe7a368f360d8d453ce435d",

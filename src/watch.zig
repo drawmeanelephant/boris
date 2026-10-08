@@ -1409,7 +1409,7 @@ test "poll keeps snapshot on transient root scan failure" {
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
 
     // Transient unreadable-root moment: no mass delete events.
-    try cwd.setFilePermissions(io, root, @enumFromInt(0), .{});
+    try cwd.setFilePermissions(io, root, @fromBackingInt(@intCast(0)), .{});
     defer cwd.setFilePermissions(io, root, restorePermissions(), .{}) catch {};
     try w.poll(&events);
     try std.testing.expectEqual(@as(usize, 0), events.items.len);
@@ -1465,8 +1465,8 @@ test "watch rebuild records timings phases and counters (#877)" {
     try coord.triggerRebuild();
 
     // Without the recorder threading this stays an all-zero report (#877).
-    try std.testing.expect(recorder.ever_started[@intFromEnum(timings.Phase.render)]);
-    try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.page_reads)] > 0);
+    try std.testing.expect(recorder.ever_started[@backingInt(timings.Phase.render)]);
+    try std.testing.expect(recorder.counters[@backingInt(timings.Counter.page_reads)] > 0);
 }
 
 test "processEvents ignores output and staging paths" {

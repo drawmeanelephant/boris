@@ -32,7 +32,7 @@ pub const ExitCode = enum(u8) {
     session = 9,
 
     pub fn int(self: ExitCode) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 

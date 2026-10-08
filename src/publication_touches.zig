@@ -8,6 +8,17 @@
 //! deployment state, or the target tree, and it never invents provenance.
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const Io = std.Io;
 const artifact_inventory = @import("artifact_inventory.zig");
 const cache = @import("cache.zig");
@@ -5374,7 +5385,7 @@ test "edge derivation is edge-kind-major with artifact index then check index" {
     }
 }
 
-const wrong_digest_64 = "0" ** 64;
+const wrong_digest_64 = rep("0", 64);
 
 /// Semantic-tamper control: rebuild the evidence tree from a spec whose check
 /// semantics are invalid while every root byte binding stays self-consistent,

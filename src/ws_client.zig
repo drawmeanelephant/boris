@@ -459,7 +459,7 @@ pub fn encodeFrame(
     if (total > buf.len) return error.ProtocolError;
 
     var i: usize = 0;
-    buf[i] = (@as(u8, if (fin) 0x80 else 0x00)) | @as(u8, @intFromEnum(opcode));
+    buf[i] = (@as(u8, if (fin) 0x80 else 0x00)) | @as(u8, @backingInt(opcode));
     i += 1;
     if (payload.len < 126) {
         buf[i] = @as(u8, @intCast(payload.len));
@@ -1202,7 +1202,7 @@ test "frame: fuzz — random bytes never panic and parsed frames satisfy invaria
             try testing.expect(payload_start >= buf_start);
             try testing.expect(payload_start + frame.payload.len <= buf_start + len);
             try testing.expectEqual(frame.fin, (buf[0] & 0x80) != 0);
-            try testing.expectEqual(@as(u4, @intCast(buf[0] & 0x0F)), @intFromEnum(frame.opcode));
+            try testing.expectEqual(@as(u4, @intCast(buf[0] & 0x0F)), @backingInt(frame.opcode));
             try testing.expect((buf[1] & 0x80) == 0); // server frames are never masked
             switch (frame.opcode) {
                 .close, .ping, .pong => {

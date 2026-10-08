@@ -65,7 +65,7 @@ No `prefix ++ html ++ suffix` allocation exists in application memory.
 
 | Property | Behavior |
 |----------|----------|
-| Temp naming | Unique per operation via Zig 0.16 `createFileAtomic` (not fixed `*.tmp`) |
+| Temp naming | Unique per operation via Zig 0.17 `createFileAtomic` (not fixed `*.tmp`) |
 | Collision | Independent Boris processes use distinct temp basenames in the dest dir |
 | On write failure | Only the current temp is cleaned; prior final file is preserved |
 | Destination replace | Same-directory rename replace; exercised by unit tests on the **host OS** running `zig build test` |

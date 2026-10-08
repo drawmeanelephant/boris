@@ -546,7 +546,7 @@ pub fn runGraph(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timin
 
 pub fn runInit(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     const target_dir = opts.init_dir orelse ".";
-    return @enumFromInt(init_mod.run(io, gpa, target_dir, opts.quiet));
+    return @fromBackingInt(@intCast(init_mod.run(io, gpa, target_dir, opts.quiet)));
 }
 
 pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
@@ -2016,7 +2016,7 @@ pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
                 else => .io_error,
             };
         };
-        return @enumFromInt(code);
+        return @fromBackingInt(@intCast(code));
     }
     const plan_path = opts.nostr_plan_path orelse return .usage;
     const plan_bytes = Io.Dir.cwd().readFileAlloc(
@@ -2430,8 +2430,8 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
     edges.ensureTotalCapacity(gpa, result.edges.items.len) catch return .io_error;
     for (result.edges.items) |edge| {
         edges.appendAssumeCapacity(.{
-            .from = .{ .type = @enumFromInt(@intFromEnum(edge.from.type)), .value = edge.from.value },
-            .to = .{ .type = @enumFromInt(@intFromEnum(edge.to.type)), .value = edge.to.value },
+            .from = .{ .type = @fromBackingInt(@intCast(@backingInt(edge.from.type))), .value = edge.from.value },
+            .to = .{ .type = @fromBackingInt(@intCast(@backingInt(edge.to.type))), .value = edge.to.value },
             .kind = edge.kind,
         });
     }
@@ -2651,7 +2651,7 @@ fn runHtmlProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*tim
         .textile => .textile,
         .cook => .cook,
     };
-    effective.targets = .{ .items = specs.items, .capacity = specs.capacity };
+    effective.targets = .{ .items = specs.items, .capacity = specs.capacity, .pointer_stability = .{} };
     effective.html_dir = profile_report_out_dir(specs.items);
     effective.html_layout = target.effectiveLayout(specs.items[0], default_layout);
     effective.sitemap_path = sitemap_path;
@@ -3978,7 +3978,7 @@ test "runPipeline: multi-target reports omit proofPack (#741)" {
     const rep = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/multi-report.json", .{tmp.sub_path});
     defer gpa.free(rep);
 
-    var targets: std.ArrayListUnmanaged(target.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
+    var targets: std.ArrayListUnmanaged(target.TargetSpec) = .empty;
     defer targets.deinit(gpa);
     try targets.append(gpa, .{ .name = "one", .output_dir = one });
     try targets.append(gpa, .{ .name = "two", .output_dir = two });
