@@ -37,7 +37,7 @@ pub fn build(b: *std.Build) void {
 
     const run_editor = b.addRunArtifact(editor);
     run_editor.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_editor.addArgs(args);
+    run_editor.addPassthruArgs();
     const run_step = b.step("run", "Run the Boris Editor loopback host");
     run_step.dependOn(&run_editor.step);
 

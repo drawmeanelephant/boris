@@ -540,7 +540,7 @@ fn resolveRedirect(gpa: std.mem.Allocator, current: []const u8, location: []cons
 fn htmlAttribute(tag: []const u8, name: []const u8) ?[]const u8 {
     var cursor: usize = 0;
     while (cursor < tag.len) {
-        const at = std.ascii.indexOfIgnoreCasePos(tag, cursor, name) orelse return null;
+        const at = std.ascii.findIgnoreCasePos(tag, cursor, name) orelse return null;
         if (at > 0 and (std.ascii.isAlphanumeric(tag[at - 1]) or tag[at - 1] == '-' or tag[at - 1] == '_')) {
             cursor = at + name.len;
             continue;
@@ -588,7 +588,7 @@ fn inspectHtml(
         const start = std.mem.indexOfScalarPos(u8, body, cursor, '<') orelse break;
         const end = std.mem.indexOfScalarPos(u8, body, start + 1, '>') orelse break;
         const tag = body[start .. end + 1];
-        if (std.ascii.indexOfIgnoreCase(tag, "<link") != null and tagHasToken(tag, "rel", "canonical")) {
+        if (std.ascii.findIgnoreCase(tag, "<link") != null and tagHasToken(tag, "rel", "canonical")) {
             found_metadata = true;
             const href = htmlAttribute(tag, "href") orelse {
                 metadata_bad = true;
@@ -616,7 +616,7 @@ fn inspectHtml(
                 else => metadata_bad = true,
             }
         }
-        if (std.ascii.indexOfIgnoreCase(tag, "<meta") != null) {
+        if (std.ascii.findIgnoreCase(tag, "<meta") != null) {
             const property = htmlAttribute(tag, "property") orelse htmlAttribute(tag, "name") orelse "";
             if (std.ascii.eqlIgnoreCase(property, "og:url") or std.ascii.eqlIgnoreCase(property, "twitter:url")) {
                 found_metadata = true;
@@ -699,13 +699,13 @@ fn scanSitemap(
     var cursor: usize = 0;
     var count: usize = 0;
     while (cursor < body.len and count < max_urls) {
-        const start = std.ascii.indexOfIgnoreCasePos(body, cursor, "<loc") orelse break;
+        const start = std.ascii.findIgnoreCasePos(body, cursor, "<loc") orelse break;
         const open_end = std.mem.indexOfScalarPos(u8, body, start, '>') orelse {
             scan.result = .failed;
             scan.detail = "sitemap contains an unterminated loc element";
             return scan;
         };
-        const end = std.ascii.indexOfIgnoreCasePos(body, open_end + 1, "</loc>") orelse {
+        const end = std.ascii.findIgnoreCasePos(body, open_end + 1, "</loc>") orelse {
             scan.result = .failed;
             scan.detail = "sitemap contains an unterminated loc element";
             return scan;
@@ -723,7 +723,7 @@ fn scanSitemap(
     if (count == 0) {
         scan.result = .failed;
         scan.detail = "sitemap did not contain a bounded loc sample";
-    } else if (cursor < body.len and std.ascii.indexOfIgnoreCasePos(body, cursor, "<loc") != null) {
+    } else if (cursor < body.len and std.ascii.findIgnoreCasePos(body, cursor, "<loc") != null) {
         scan.result = .incomplete;
         scan.detail = "sitemap URL sampling reached max_projection_urls";
     }
@@ -860,7 +860,7 @@ fn scanRss(
     max_urls: usize,
 ) !ProjectionScan {
     var scan = ProjectionScan{};
-    if (std.ascii.indexOfIgnoreCase(body, "<rss") == null or std.ascii.indexOfIgnoreCase(body, "<channel") == null) {
+    if (std.ascii.findIgnoreCase(body, "<rss") == null or std.ascii.findIgnoreCase(body, "<channel") == null) {
         scan.result = .failed;
         scan.detail = "RSS root or channel was missing";
         return scan;
@@ -868,13 +868,13 @@ fn scanRss(
     var cursor: usize = 0;
     var count: usize = 0;
     while (cursor < body.len and count < max_urls) {
-        const start = std.ascii.indexOfIgnoreCasePos(body, cursor, "<link") orelse break;
+        const start = std.ascii.findIgnoreCasePos(body, cursor, "<link") orelse break;
         const end = std.mem.indexOfScalarPos(u8, body, start, '>') orelse {
             scan.result = .failed;
             scan.detail = "RSS contains an unterminated link element";
             return scan;
         };
-        const close = std.ascii.indexOfIgnoreCasePos(body, end + 1, "</link>") orelse {
+        const close = std.ascii.findIgnoreCasePos(body, end + 1, "</link>") orelse {
             scan.result = .failed;
             scan.detail = "RSS contains an unterminated link element";
             return scan;
@@ -970,7 +970,7 @@ fn fetchSingle(
 
     try request.sendBodiless();
     var response = try request.receiveHead(&.{});
-    const status = @intFromEnum(response.head.status);
+    const status = @backingInt(response.head.status);
     const content_encoding = response.head.content_encoding;
     const content_length = response.head.content_length;
     const location = try copyOptional(gpa, response.head.location);

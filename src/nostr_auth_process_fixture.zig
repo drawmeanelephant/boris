@@ -1,6 +1,17 @@
 //! Compile-time-only fault root for the existing Nostr process matrix.
 //! Never installed. No production flag, environment override, or helper API.
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const boris = @import("main.zig");
 const auth = @import("nostr_auth.zig");
 const ipc = @import("nostr_auth_ipc.zig");
@@ -73,7 +84,7 @@ var ready_validated: std.atomic.Value(bool) = .init(false);
 
 pub const nostr_auth_faults = struct {
     pub fn executablePathAlloc(io: Io, gpa: std.mem.Allocator) ![:0]u8 {
-        if (scenario == .exec_fail) return gpa.dupeZ(u8, "/nonexistent/boris-nip42-process-fixture");
+        if (scenario == .exec_fail) return gpa.dupeSentinel(u8, "/nonexistent/boris-nip42-process-fixture", 0);
         return std.process.executablePathAlloc(io, gpa);
     }
     pub fn readyValidated() void {
@@ -82,8 +93,8 @@ pub const nostr_auth_faults = struct {
     pub fn beforeSend(channel: *ipc.Channel, kind: []const u8) !void {
         if (!child_process and std.mem.eql(u8, kind, "begin")) switch (scenario) {
             .begin_run => try sendRaw(channel, "{\"format\":\"boris-nostr-auth-ipc\",\"version\":1,\"type\":\"begin\",\"run\":\"not-hex\"}"),
-            .begin_version => try sendRaw(channel, "{\"format\":\"boris-nostr-auth-ipc\",\"version\":2,\"type\":\"begin\",\"run\":\"" ++ "a" ** 32 ++ "\"}"),
-            .begin_unknown => try sendRaw(channel, "{\"format\":\"boris-nostr-auth-ipc\",\"version\":1,\"type\":\"begin\",\"run\":\"" ++ "a" ** 32 ++ "\",\"extra\":true}"),
+            .begin_version => try sendRaw(channel, "{\"format\":\"boris-nostr-auth-ipc\",\"version\":2,\"type\":\"begin\",\"run\":\"" ++ rep("a", 32) ++ "\"}"),
+            .begin_unknown => try sendRaw(channel, "{\"format\":\"boris-nostr-auth-ipc\",\"version\":1,\"type\":\"begin\",\"run\":\"" ++ rep("a", 32) ++ "\",\"extra\":true}"),
             else => {},
         };
         if (!child_process and scenario == .block_request and std.mem.eql(u8, kind, "begin")) block_input = true;
@@ -153,21 +164,20 @@ fn operate(_: ?*anyopaque, op: Io.Operation) Io.Cancelable!Io.Operation.Result {
         std.debug.assert(std.c.getrlimit(.CORE, &limits) == 0);
         cores_disabled.store(limits.cur == 0 and limits.max == 0, .unordered);
     }
+    if (op == .net_write) {
+        const call = writes.fetchAdd(1, .monotonic) + 1;
+        if (scenario == .block_network and call > 1) {
+            std.debug.print("fixture-blocked-block_network\n", .{});
+            while (!ipc.canceled.load(.unordered)) try Io.sleep(underlying, .fromMilliseconds(5), .awake);
+            return error.Canceled;
+        }
+    }
     return underlying.vtable.operate(underlying.userdata, op);
 }
 fn randomSecure(_: ?*anyopaque, bytes: []u8) Io.RandomSecureError!void {
     const call = entropy.fetchAdd(1, .monotonic) + 1;
     if ((scenario == .seed_entropy and call == 1) or (scenario == .aux_entropy and call == 2)) return error.EntropyUnavailable;
     return underlying.randomSecure(bytes);
-}
-fn netWrite(_: ?*anyopaque, fd: Io.net.Socket.Handle, header: []const u8, data: []const []const u8, splat: usize) Io.net.Stream.Writer.Error!usize {
-    const call = writes.fetchAdd(1, .monotonic) + 1;
-    if (scenario == .block_network and call > 1) {
-        std.debug.print("fixture-blocked-block_network\n", .{});
-        while (!ipc.canceled.load(.unordered)) try Io.sleep(underlying, .fromMilliseconds(5), .awake);
-        return error.Canceled;
-    }
-    return underlying.vtable.netWrite(underlying.userdata, fd, header, data, splat);
 }
 
 fn sendRaw(channel: *ipc.Channel, bytes: []const u8) !void {
@@ -200,10 +210,10 @@ fn hostileChild(io: Io, gpa: std.mem.Allocator, plan_path: []const u8, bundle_pa
             return;
         },
         .ready_policy => policy.timeout_ms += 1,
-        .ready_author => policy.pubkey = "b" ** 64,
-        .ready_digest => policy.bundle_digest = "b" ** 64,
+        .ready_author => policy.pubkey = rep("b", 64),
+        .ready_digest => policy.bundle_digest = rep("b", 64),
         .ready_relay => policy.relays = &.{"wss://unconsented.example/"},
-        .ready_revision => policy.nips_revision = "b" ** 40,
+        .ready_revision => policy.nips_revision = rep("b", 40),
         .ready_version => {
             try channel.send(gpa, .{ .format = "boris-nostr-auth-ipc", .version = @as(u32, 2), .type = "ready", .policy = policy }, auth.Deadline.after(io, 1000));
             try channel.monitor();
@@ -238,7 +248,7 @@ fn hostileChild(io: Io, gpa: std.mem.Allocator, plan_path: []const u8, bundle_pa
         .bundle_digest = &bd,
         .nips_revision = auth.revision,
         .run = &channel.run,
-        .connection = "a" ** 32,
+        .connection = rep("a", 32),
         .request = 1,
         .relay = policy.relays[0],
         .generation = 1,
@@ -251,19 +261,19 @@ fn hostileChild(io: Io, gpa: std.mem.Allocator, plan_path: []const u8, bundle_pa
         try sendRaw(&channel, "{\"format\":\"boris-nostr-auth-ipc\",\"version\":1,\"type\":\"finish\",\"extra\":true}");
     } else {
         switch (scenario) {
-            .request_run => correlation.run = "b" ** 32,
+            .request_run => correlation.run = rep("b", 32),
             .request_connection => correlation.connection = "not-hex",
             .request_relay => correlation.relay = "wss://unconsented.example/",
             .request_generation => correlation.generation = 2,
-            .request_revision => correlation.nips_revision = "b" ** 40,
-            .request_digest => correlation.plan_digest = "b" ** 64,
+            .request_revision => correlation.nips_revision = rep("b", 40),
+            .request_digest => correlation.plan_digest = rep("b", 64),
             .request_number => correlation.request = 0,
             else => {},
         }
         const request: auth.Request = .{ .correlation = correlation, .challenge = "process-fixture-challenge" };
         if (scenario == .request_extra or scenario == .request_hash) {
             const bytes = try std.json.Stringify.valueAlloc(a, request, .{});
-            const poisoned = try std.fmt.allocPrint(a, "{s},\"{s}\":\"{s}\"}}", .{ bytes[0 .. bytes.len - 1], if (scenario == .request_hash) "hash" else "event", "0" ** 64 });
+            const poisoned = try std.fmt.allocPrint(a, "{s},\"{s}\":\"{s}\"}}", .{ bytes[0 .. bytes.len - 1], if (scenario == .request_hash) "hash" else "event", rep("0", 64) });
             try sendRaw(&channel, poisoned);
         } else {
             try channel.send(gpa, request, auth.Deadline.after(io, 1000));
@@ -271,7 +281,7 @@ fn hostileChild(io: Io, gpa: std.mem.Allocator, plan_path: []const u8, bundle_pa
                 try channel.monitor();
                 return;
             }
-            if (@intFromEnum(scenario) >= @intFromEnum(Scenario.cancel_wrong) and @intFromEnum(scenario) <= @intFromEnum(Scenario.sign_retired)) {
+            if (@backingInt(scenario) >= @backingInt(Scenario.cancel_wrong) and @backingInt(scenario) <= @backingInt(Scenario.sign_retired)) {
                 const response = try channel.read(gpa, auth.Deadline.after(io, 1000));
                 defer gpa.free(response);
                 var parsed = try auth.parse(auth.Response, gpa, response, "response");
@@ -308,11 +318,10 @@ pub fn main(init: std.process.Init) u8 {
     var vtable = init.io.vtable.*;
     vtable.operate = operate;
     vtable.randomSecure = randomSecure;
-    vtable.netWrite = netWrite;
     var wrapped = init;
     wrapped.io.vtable = &vtable;
-    const malicious = @intFromEnum(scenario) <= @intFromEnum(Scenario.ready_truncated) or
-        (@intFromEnum(scenario) >= @intFromEnum(Scenario.request_extra) and @intFromEnum(scenario) <= @intFromEnum(Scenario.request_truncated)) or
+    const malicious = @backingInt(scenario) <= @backingInt(Scenario.ready_truncated) or
+        (@backingInt(scenario) >= @backingInt(Scenario.request_extra) and @backingInt(scenario) <= @backingInt(Scenario.request_truncated)) or
         scenario == .block_begin or scenario == .block_response;
     const code = if (child_process and malicious) blk: {
         hostileChild(wrapped.io, init.gpa, plan_path, bundle_path) catch break :blk @as(u8, 3);

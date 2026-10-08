@@ -13,6 +13,17 @@
 //! artifact.
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const np = @import("nostr_publish.zig");
 const keys = @import("nostr_keys.zig");
 const nostr = @import("nostr.zig");
@@ -93,7 +104,7 @@ fn makeAuthArtifactsWithContent(gpa: std.mem.Allocator, ports: []const u16, subs
     const a = arena_state.allocator();
     var ctx = try keys.Context.init();
     defer ctx.deinit();
-    const kp = try ctx.keyPairFromSecretKey([_]u8{0} ** 31 ++ [_]u8{3});
+    const kp = try ctx.keyPairFromSecretKey(@as([31]u8, @splat(0)) ++ [_]u8{3});
     const pubkey = std.fmt.bytesToHex(kp.public_key, .lower);
     const relays = try a.alloc([]const u8, ports.len);
     for (ports, relays) |port, *url| url.* = try std.fmt.allocPrint(a, "ws://127.0.0.1:{d}", .{port});
@@ -161,7 +172,7 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
         .invalid_utf8 => try sendServerText(fd, "[\"AUTH\",\"\xff\"]"),
         .garbage => try sendServerText(fd, "garbage"),
         .oversized => {
-            const text = "[\"AUTH\",\"" ++ "x" ** 4097 ++ "\"]";
+            const text = "[\"AUTH\",\"" ++ rep("x", 4097) ++ "\"]";
             var frame: [8192]u8 = undefined;
             const n = try ws.encodeFrame(&frame, .text, text, @splat(0), true, false);
             try writeAllFd(fd, frame[0..n]);
@@ -193,8 +204,8 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
             try writeAllFd(fd, frame[0..n]);
             if (relay.scenario == .exact_fragmented) try sendServerText(fd, "[\"AUTH\",\"" ++ auth_challenge ++ "\"]");
         },
-        .multibyte => try sendServerText(fd, "[\"AUTH\",\"" ++ "€" ** 1365 ++ "x\"]"),
-        .multibyte_oversized => try sendServerText(fd, "[\"AUTH\",\"" ++ "€" ** 1366 ++ "\"]"),
+        .multibyte => try sendServerText(fd, "[\"AUTH\",\"" ++ rep("\u{20ac}", 1365) ++ "x\"]"),
+        .multibyte_oversized => try sendServerText(fd, "[\"AUTH\",\"" ++ rep("\u{20ac}", 1366) ++ "\"]"),
         else => try sendServerText(fd, "[\"AUTH\",\"" ++ auth_challenge ++ "\"]"),
     }
     var scratch: std.ArrayList(u8) = .empty;
@@ -216,7 +227,7 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
             defer event.deinit();
             var url_buf: [80]u8 = undefined;
             const url = try std.fmt.bufPrint(&url_buf, "ws://127.0.0.1:{d}", .{relay.base.port});
-            auth.verify(gpa, event.value, "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9", url, if (relay.scenario == .multibyte) "€" ** 1365 ++ "x" else if (relay.saw_auth == 1) auth_challenge else "replacement-challenge", Io.Timestamp.now(relay.base.io, .real).toSeconds()) catch {
+            auth.verify(gpa, event.value, "f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9", url, if (relay.scenario == .multibyte) rep("\u{20ac}", 1365) ++ "x" else if (relay.saw_auth == 1) auth_challenge else "replacement-challenge", Io.Timestamp.now(relay.base.io, .real).toSeconds()) catch {
                 relay.auth_verified = false;
             };
             @memcpy(&relay.auth_sig, event.value.sig);
@@ -245,7 +256,7 @@ fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
                 .acceptance_rejected => if (relay.saw_auth == 2) "blocked: " ++ auth_challenge else null,
                 else => null,
             };
-            const ok = if (relay.scenario == .wrong_ok) "[\"OK\",\"" ++ "0" ** 64 ++ "\",true,\"\"]" else if (relay.scenario == .malformed_ok) "[\"OK\",\"" ++ "0" ** 64 ++ "\",true]" else try std.fmt.bufPrint(&ok_buf, "[\"OK\",\"{s}\",{s},\"{s}\"]", .{ id, if (rejection == null) "true" else "false", rejection orelse "" });
+            const ok = if (relay.scenario == .wrong_ok) "[\"OK\",\"" ++ rep("0", 64) ++ "\",true,\"\"]" else if (relay.scenario == .malformed_ok) "[\"OK\",\"" ++ rep("0", 64) ++ "\",true]" else try std.fmt.bufPrint(&ok_buf, "[\"OK\",\"{s}\",{s},\"{s}\"]", .{ id, if (rejection == null) "true" else "false", rejection orelse "" });
             try sendServerText(fd, ok);
         } else if (std.mem.startsWith(u8, frame.payload, "[\"EVENT\"")) {
             relay.base.saw_events += 1;
@@ -411,8 +422,8 @@ const AcceptanceSync = struct {
     retire_seen: usize = 0,
     signer_error: ?anyerror = null,
     hook_error: ?anyerror = null,
-    // netRead deliberately returns one byte, so the final OK payload byte
-    // cannot be prefetched before the publisher actually consumes the frame.
+    // The operate hook narrows net_read to one byte, so the final OK payload
+    // byte cannot be prefetched before the publisher actually consumes the frame.
     incoming: [256]u8 = undefined,
     incoming_len: usize = 0,
     premature_ok: [128]u8 = undefined,
@@ -420,11 +431,16 @@ const AcceptanceSync = struct {
 
     var current: *AcceptanceSync = undefined;
 
-    fn read(userdata: ?*anyopaque, socket: Io.net.Socket.Handle, data: [][]u8) Io.net.Stream.Reader.Error!usize {
-        current.client_fd.store(@intCast(socket), .release);
-        var one = [_][]u8{data[0][0..1]};
-        const n = try current.native.vtable.netRead(userdata, socket, &one);
-        if (n == 1) {
+    fn operate(userdata: ?*anyopaque, op: Io.Operation) Io.Cancelable!Io.Operation.Result {
+        if (op != .net_read) return current.native.vtable.operate(userdata, op);
+        const net_read = op.net_read;
+        current.client_fd.store(@intCast(net_read.socket_handle), .release);
+        var one = [_][]u8{net_read.data[0][0..1]};
+        var narrowed = op;
+        narrowed.net_read.data = &one;
+        const result = try current.native.vtable.operate(userdata, narrowed);
+        const read_result = result.net_read catch |err| return .{ .net_read = err };
+        if (read_result.data_len == 1) {
             const byte = one[0][0];
             if (current.incoming_len < current.incoming.len) {
                 current.incoming[current.incoming_len] = byte;
@@ -437,7 +453,7 @@ const AcceptanceSync = struct {
                 current.ok_payload_finished.store(true, .release);
             }
         }
-        return n;
+        return result;
     }
 
     fn now(userdata: ?*anyopaque, clock: Io.Clock) Io.Timestamp {
@@ -488,7 +504,7 @@ fn acceptanceSigner(channel: *auth_ipc.Channel, sync: *AcceptanceSync, policy: a
     defer arena.deinit();
     var ctx = try keys.Context.init();
     defer ctx.deinit();
-    const pair = try ctx.keyPairFromSecretKey([_]u8{0} ** 31 ++ [_]u8{3});
+    const pair = try ctx.keyPairFromSecretKey(@as([31]u8, @splat(0)) ++ [_]u8{3});
     var budget: auth.Budget = .{};
     var last: ?auth.Correlation = null;
     const deadline = auth.Deadline.after(channel.io, 3000);
@@ -511,7 +527,7 @@ fn acceptanceSigner(channel: *auth_ipc.Channel, sync: *AcceptanceSync, policy: a
             continue;
         }
         const request = try auth.parse(auth.Request, arena.allocator(), bytes, "sign");
-        _ = try budget.admit(policy, "1" ** 32, request.value);
+        _ = try budget.admit(policy, rep("1", 32), request.value);
         last = request.value.correlation;
         sync.signer_requests += 1;
         const signed = try auth.sign(gpa, ctx, pair, policy.pubkey, request.value.correlation.relay, request.value.challenge, Io.Timestamp.now(channel.io, .real).toSeconds(), @splat(0));
@@ -570,7 +586,7 @@ fn acceptanceScenario(scenario: AuthScenario) !void {
     var second_base = try MockRelay.init(native, .ok);
     defer second_base.deinit();
     const ports: []const u16 = if (scenario == .acceptance_close) &.{ base.port, second_base.port } else &.{base.port};
-    var artifacts = try makeAuthArtifactsWithContent(gpa, ports, ports, 1000, if (scenario == .acceptance_large) "x" ** 40000 else "article bytes");
+    var artifacts = try makeAuthArtifactsWithContent(gpa, ports, ports, 1000, if (scenario == .acceptance_large) rep("x", 40000) else "article bytes");
     defer artifacts.deinit(gpa);
     const expected = try expectedArticles(gpa, artifacts.bundle);
     defer {
@@ -581,7 +597,7 @@ fn acceptanceScenario(scenario: AuthScenario) !void {
     var sync: AcceptanceSync = .{ .scenario = scenario, .native = native, .owner = std.Thread.getCurrentId() };
     AcceptanceSync.current = &sync;
     var vtable = native.vtable.*;
-    vtable.netRead = AcceptanceSync.read;
+    vtable.operate = AcceptanceSync.operate;
     vtable.now = AcceptanceSync.now;
     const client_io: Io = .{ .userdata = native.userdata, .vtable = &vtable };
     var first: AuthRelay = .{ .base = base, .scenario = scenario, .expected = expected, .acceptance = &sync };
@@ -883,7 +899,7 @@ test "NIP-42 process context and seed failures destroy custody before begin" {
 test "NIP-42 process invalid or wrong-identity key is a content refusal before begin" {
     if (comptime !@import("nostr_auth_session.zig").supported) return error.SkipZigTest;
     const gpa = testing.allocator;
-    for ([_][]const u8{ "invalid-key\n", "0" ** 64 ++ "\n", "0" ** 63 ++ "4\n", "x" ** 130 ++ "\n" }) |input| {
+    for ([_][]const u8{ "invalid-key\n", rep("0", 64) ++ "\n", rep("0", 63) ++ "4\n", rep("x", 130) ++ "\n" }) |input| {
         var tmp = testing.tmpDir(.{});
         defer tmp.cleanup();
         var base = try MockRelay.init(testing.io, .ok);
@@ -1008,7 +1024,7 @@ test "NIP-42 process transient signing failures persist while plain relays still
 }
 
 fn processRunning(pid: c_int) bool {
-    if (std.c.kill(pid, @enumFromInt(0)) != 0) return false;
+    if (std.c.kill(pid, @fromBackingInt(@intCast(0))) != 0) return false;
     var info: [64]u32 = @splat(0);
     if (proc_pidinfo(pid, 3, 0, &info, @sizeOf(@TypeOf(info))) > 0 and info[1] == 5) return false; // SZOMB: terminated; reaping belongs to init after parent SIGKILL
     return true;
@@ -1264,7 +1280,7 @@ test "NIP-42 cancellation and supervisor loss during live challenge, auth OK and
                 _ = teardown.remaining(io) catch |err| {
                     var info: [64]u32 = @splat(0);
                     const rc = proc_pidinfo(children[0], 3, 0, &info, @sizeOf(@TypeOf(info)));
-                    std.debug.print("active custody teardown exceeded: scenario={s} signal={d} child={d} info={d} status={d}\n", .{ @tagName(scenario), @intFromEnum(sig), children[0], rc, info[1] });
+                    std.debug.print("active custody teardown exceeded: scenario={s} signal={d} child={d} info={d} status={d}\n", .{ @tagName(scenario), @backingInt(sig), children[0], rc, info[1] });
                     const log_bytes = try tmp.dir.readFileAlloc(io, "process.log", gpa, .limited(4096));
                     defer gpa.free(log_bytes);
                     std.debug.print("process refusal diagnostics: {s}\n", .{log_bytes});
@@ -1307,13 +1323,13 @@ const InvalidSigner = enum {
 const BlockingAuthWrite = struct {
     var native: Io = undefined;
     var writes: std.atomic.Value(usize) = .init(0);
-    fn write(userdata: ?*anyopaque, socket: Io.net.Socket.Handle, header: []const u8, data: []const []const u8, splat: usize) Io.net.Stream.Writer.Error!usize {
+    fn operate(userdata: ?*anyopaque, op: Io.Operation) Io.Cancelable!Io.Operation.Result {
         // First write is HTTP Upgrade. Stall the next complete AUTH write.
-        if (writes.fetchAdd(1, .acq_rel) == 1) {
+        if (op == .net_write and writes.fetchAdd(1, .acq_rel) == 1) {
             try Io.sleep(native, .fromMilliseconds(10000), .awake);
-            return error.Unexpected;
+            return .{ .net_write = error.Unexpected };
         }
-        return native.vtable.netWrite(userdata, socket, header, data, splat);
+        return native.vtable.operate(userdata, op);
     }
 };
 
@@ -1339,7 +1355,7 @@ fn invalidSigner(channel: *auth_ipc.Channel, scenario: InvalidSigner, gpa: std.m
     if (scenario == .late) try Io.sleep(channel.io, .fromMilliseconds(180), .awake);
     var ctx = try keys.Context.init();
     defer ctx.deinit();
-    const pair = try ctx.keyPairFromSecretKey([_]u8{0} ** 31 ++ [_]u8{3});
+    const pair = try ctx.keyPairFromSecretKey(@as([31]u8, @splat(0)) ++ [_]u8{3});
     const pk = std.fmt.bytesToHex(pair.public_key, .lower);
     const signed = try auth.sign(gpa, ctx, pair, &pk, request.correlation.relay, request.challenge, Io.Timestamp.now(channel.io, .real).toSeconds(), @splat(0));
     defer gpa.free(signed);
@@ -1348,22 +1364,22 @@ fn invalidSigner(channel: *auth_ipc.Channel, scenario: InvalidSigner, gpa: std.m
     var event = document.value;
     var correlation = request.correlation;
     switch (scenario) {
-        .pubkey => event.pubkey = "0" ** 64,
+        .pubkey => event.pubkey = rep("0", 64),
         .relay => event.tags = &.{ &.{ "relay", "wss://wrong.example" }, &.{ "challenge", request.challenge } },
         .challenge => event.tags = &.{ &.{ "relay", request.correlation.relay }, &.{ "challenge", "wrong" } },
         .kind => event.kind = 30023,
         .content => event.content = "forbidden",
         .tags => event.tags = &.{ &.{ "relay", request.correlation.relay }, &.{ "challenge", request.challenge }, &.{"extra"} },
         .stale => event.created_at -= 61,
-        .event_id => event.id = "0" ** 64,
-        .signature => event.sig = "0" ** 128,
-        .run => correlation.run = "f" ** 32,
-        .connection => correlation.connection = "f" ** 32,
+        .event_id => event.id = rep("0", 64),
+        .signature => event.sig = rep("0", 128),
+        .run => correlation.run = rep("f", 32),
+        .connection => correlation.connection = rep("f", 32),
         .generation => correlation.generation = 2,
         .request => correlation.request += 1,
-        .plan_digest => correlation.plan_digest = "f" ** 64,
-        .bundle_digest => correlation.bundle_digest = "f" ** 64,
-        .revision => correlation.nips_revision = "f" ** 40,
+        .plan_digest => correlation.plan_digest = rep("f", 64),
+        .bundle_digest => correlation.bundle_digest = rep("f", 64),
+        .revision => correlation.nips_revision = rep("f", 40),
         else => {},
     }
     const response: auth.Response = .{ .correlation = correlation, .refusal = if (scenario == .refusal) "signer-refused" else null, .event = if (scenario == .refusal) null else event };
@@ -1422,7 +1438,7 @@ test "NIP-42 malicious signer substitutions, refusals and IPC stalls emit no AUT
         child.ceiling = auth.Deadline.after(threaded.io(), auth.session_ms);
         var signer = try auth_ipc.Channel.init(threaded.io(), to_parent[0], to_child[1]);
         const signer_thread = try std.Thread.spawn(.{}, invalidSignerThread, .{ &signer, scenario, gpa });
-        if (scenario == .duplicate or (@intFromEnum(scenario) >= @intFromEnum(InvalidSigner.run) and @intFromEnum(scenario) <= @intFromEnum(InvalidSigner.revision))) {
+        if (scenario == .duplicate or (@backingInt(scenario) >= @backingInt(InvalidSigner.run) and @backingInt(scenario) <= @backingInt(InvalidSigner.revision))) {
             try testing.expectError(error.SessionInvalid, np.run(threaded.io(), gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child }));
             signer_thread.join();
             server.join();
@@ -1436,7 +1452,7 @@ test "NIP-42 malicious signer substitutions, refusals and IPC stalls emit no AUT
         if (scenario == .blocked_write) {
             BlockingAuthWrite.native = threaded.io();
             BlockingAuthWrite.writes.store(0, .release);
-            vtable.netWrite = BlockingAuthWrite.write;
+            vtable.operate = BlockingAuthWrite.operate;
         }
         const client_io: Io = .{ .userdata = threaded.io().userdata, .vtable = &vtable };
         var result = try np.run(client_io, gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child });

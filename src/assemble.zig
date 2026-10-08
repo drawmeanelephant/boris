@@ -579,9 +579,9 @@ pub fn renderPageAlloc(
 /// `writeAll` detect invalidation (e.g. Whiteboard wipe / in-place destroy)
 /// before flush — without relying on use-after-free reads of freed pages.
 pub const HoldUntilFlush = struct {
-    parts: [max_segments]?[]const u8 = .{null} ** max_segments,
+    parts: [max_segments]?[]const u8 = @splat(null),
     /// Wyhash of each part at `writeAll` time (stable fingerprint).
-    fingerprints: [max_segments]u64 = .{0} ** max_segments,
+    fingerprints: [max_segments]u64 = @splat(0),
     n: usize = 0,
     materialized: ?[]u8 = null,
     gpa: std.mem.Allocator,

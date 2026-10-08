@@ -19,7 +19,7 @@ record means).
 
 ## 1. Prerequisites
 
-Zig 0.16+ and Node 18+. Install the CLI globally — with `sudo` you do not need
+Zig 0.17+ and Node 18+. Install the CLI globally — with `sudo` you do not need
 and should not want:
 
 ```bash
@@ -209,7 +209,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2.2.1
         with:
-          version: 0.16.0
+          version: 0.17.0
       - uses: actions/setup-node@v4
         with:
           node-version: 20

@@ -251,6 +251,6 @@ test "bip340: an out-of-range secret key is refused" {
     // n and above are invalid secp256k1 secrets.
     const out_of_range = hex64("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141");
     try testing.expectError(error.InvalidSecretKey, ctx.keyPairFromSecretKey(out_of_range));
-    const zero = [_]u8{0} ** 32;
+    const zero = @as([32]u8, @splat(0));
     try testing.expectError(error.InvalidSecretKey, ctx.keyPairFromSecretKey(zero));
 }

@@ -56,20 +56,20 @@ pub const Counter = enum {
     fast_path_hits,
 };
 
-const PhaseCount = @typeInfo(Phase).@"enum".fields.len;
-const CounterCount = @typeInfo(Counter).@"enum".fields.len;
+const PhaseCount = @typeInfo(Phase).@"enum".field_names.len;
+const CounterCount = @typeInfo(Counter).@"enum".field_names.len;
 
 pub const Recorder = struct {
     /// I/O handle used to read the monotonic clock. Plain value copy; the
     /// recorder never performs file or stream I/O.
     io: Io,
     /// Accumulated nanoseconds per phase.
-    phase_ns: [PhaseCount]u64 = [_]u64{0} ** PhaseCount,
+    phase_ns: [PhaseCount]u64 = @splat(0),
     /// Monotonic start timestamp per phase (null when not currently running).
-    active: [PhaseCount]?Io.Timestamp = [_]?Io.Timestamp{null} ** PhaseCount,
+    active: [PhaseCount]?Io.Timestamp = @splat(null),
     /// True once a phase has been started; only these appear in the report.
-    ever_started: [PhaseCount]bool = [_]bool{false} ** PhaseCount,
-    counters: [CounterCount]u64 = [_]u64{0} ** CounterCount,
+    ever_started: [PhaseCount]bool = @splat(false),
+    counters: [CounterCount]u64 = @splat(0),
     /// Monotonic start of the recorded run (report `totalNs` baseline).
     run_start: Io.Timestamp = Io.Timestamp.zero,
 
@@ -80,7 +80,7 @@ pub const Recorder = struct {
     }
 
     pub fn start(self: *Recorder, phase: Phase) void {
-        const idx = @intFromEnum(phase);
+        const idx = @backingInt(phase);
         if (self.active[idx] == null) {
             self.active[idx] = Io.Timestamp.now(self.io, .awake);
             self.ever_started[idx] = true;
@@ -88,7 +88,7 @@ pub const Recorder = struct {
     }
 
     pub fn stop(self: *Recorder, phase: Phase) void {
-        const idx = @intFromEnum(phase);
+        const idx = @backingInt(phase);
         const started = self.active[idx] orelse return;
         const elapsed = Io.Timestamp.durationTo(started, Io.Timestamp.now(self.io, .awake));
         if (elapsed.nanoseconds > 0) {
@@ -100,17 +100,17 @@ pub const Recorder = struct {
     /// Stop every still-active phase so an error path that returns mid-phase
     /// still contributes its elapsed tail to the report.
     pub fn stopAll(self: *Recorder) void {
-        inline for (@typeInfo(Phase).@"enum".fields, 0..) |_, i| self.stop(@enumFromInt(i));
+        inline for (@typeInfo(Phase).@"enum".field_names, 0..) |_, i| self.stop(@fromBackingInt(@intCast(i)));
     }
 
     pub fn bump(self: *Recorder, counter: Counter, amount: u64) void {
-        self.counters[@intFromEnum(counter)] += amount;
+        self.counters[@backingInt(counter)] += amount;
     }
 
     /// Direct pointer to a counter, for callees that increment without holding
     /// a `Recorder` (e.g. the link audit's per-reference hot path).
     pub fn counterPtr(self: *Recorder, counter: Counter) *u64 {
-        return &self.counters[@intFromEnum(counter)];
+        return &self.counters[@backingInt(counter)];
     }
 
     pub fn totalNs(self: *const Recorder) u64 {
@@ -134,12 +134,12 @@ pub const Recorder = struct {
         try json_out.indent(&buf, gpa, 1);
         try buf.appendSlice(gpa, "\"phases\": {\n");
         var first_phase = true;
-        inline for (@typeInfo(Phase).@"enum".fields, 0..) |field, i| {
+        inline for (@typeInfo(Phase).@"enum".field_names, 0..) |field, i| {
             if (self.ever_started[i]) {
                 if (!first_phase) try buf.appendSlice(gpa, ",\n");
                 first_phase = false;
                 try json_out.indent(&buf, gpa, 2);
-                try json_out.writeString(&buf, gpa, field.name);
+                try json_out.writeString(&buf, gpa, field);
                 try buf.appendSlice(gpa, ": ");
                 try appendU64(&buf, gpa, self.phase_ns[i]);
             }
@@ -151,11 +151,11 @@ pub const Recorder = struct {
         try json_out.indent(&buf, gpa, 1);
         try buf.appendSlice(gpa, "\"counters\": {\n");
         var first_counter = true;
-        inline for (@typeInfo(Counter).@"enum".fields, 0..) |field, i| {
+        inline for (@typeInfo(Counter).@"enum".field_names, 0..) |field, i| {
             if (!first_counter) try buf.appendSlice(gpa, ",\n");
             first_counter = false;
             try json_out.indent(&buf, gpa, 2);
-            try json_out.writeString(&buf, gpa, field.name);
+            try json_out.writeString(&buf, gpa, field);
             try buf.appendSlice(gpa, ": ");
             try appendU64(&buf, gpa, self.counters[i]);
         }
@@ -204,8 +204,8 @@ test "recorder accumulates elapsed time and counters" {
     recorder.stop(.scan);
     recorder.bump(.page_reads, 3);
     recorder.bump(.page_reads, 2);
-    try std.testing.expect(recorder.phase_ns[@intFromEnum(Phase.scan)] > 0);
-    try std.testing.expectEqual(@as(u64, 5), recorder.counters[@intFromEnum(Counter.page_reads)]);
+    try std.testing.expect(recorder.phase_ns[@backingInt(Phase.scan)] > 0);
+    try std.testing.expectEqual(@as(u64, 5), recorder.counters[@backingInt(Counter.page_reads)]);
     try std.testing.expect(recorder.totalNs() > 0);
 }
 
@@ -217,13 +217,13 @@ test "double start is idempotent and stop without start is a no-op" {
     try sleepOneMs();
     recorder.stop(.parse);
     recorder.stop(.parse); // no-op
-    try std.testing.expect(recorder.phase_ns[@intFromEnum(Phase.parse)] > 0);
+    try std.testing.expect(recorder.phase_ns[@backingInt(Phase.parse)] > 0);
 }
 
 test "counterPtr points into the recorder" {
     var recorder = Recorder.init(std.testing.io);
     recorder.counterPtr(.link_resolutions).* += 7;
-    try std.testing.expectEqual(@as(u64, 7), recorder.counters[@intFromEnum(Counter.link_resolutions)]);
+    try std.testing.expectEqual(@as(u64, 7), recorder.counters[@backingInt(Counter.link_resolutions)]);
 }
 
 test "stopAll closes phases left active by an error path" {
@@ -231,8 +231,8 @@ test "stopAll closes phases left active by an error path" {
     recorder.start(.render);
     try sleepOneMs();
     recorder.stopAll();
-    try std.testing.expect(recorder.phase_ns[@intFromEnum(Phase.render)] > 0);
-    try std.testing.expect(recorder.active[@intFromEnum(Phase.render)] == null);
+    try std.testing.expect(recorder.phase_ns[@backingInt(Phase.render)] > 0);
+    try std.testing.expect(recorder.active[@backingInt(Phase.render)] == null);
 }
 
 test "renderJson reports only started phases in canonical order" {

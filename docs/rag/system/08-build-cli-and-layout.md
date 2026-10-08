@@ -15,7 +15,7 @@ related:
 
 ## Zig package
 
-- `build.zig` / `build.zig.zon` — package name `boris`, minimum Zig `0.16.0`
+- `build.zig` / `build.zig.zon` — package name `boris`, minimum Zig `0.17.0`
 - Executable artifact: `boris`
 - Steps:
   - `zig build` — compile/install

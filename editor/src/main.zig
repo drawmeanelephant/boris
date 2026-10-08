@@ -163,7 +163,7 @@ fn printUsage() void {
 /// value is canonicalized against the editor's current directory so that child
 /// processes spawned with a different cwd (the project root) still find it.
 fn resolveBorisPath(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![:0]u8 {
-    if (std.mem.indexOfAny(u8, path, "/\\") == null) return allocator.dupeZ(u8, path);
+    if (std.mem.indexOfAny(u8, path, "/\\") == null) return allocator.dupeSentinel(u8, path, 0);
     return std.Io.Dir.cwd().realPathFileAlloc(io, path, allocator) catch return error.BorisPathUnresolvable;
 }
 

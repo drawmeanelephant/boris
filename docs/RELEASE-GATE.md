@@ -28,7 +28,7 @@ skip cleanliness there. The approved/generated path policy is unchanged.
 `./scripts/test-release-gate-git-detection.sh` creates a temporary linked
 worktree and asserts the Git-native predicate still enables the check.
 
-CI (`.github/workflows/ci.yml`) pins **Zig 0.16.0** and runs `zig build`,
+CI (`.github/workflows/ci.yml`) pins **Zig 0.17.0** and runs `zig build`,
 `zig build test`, and `zig build test-render` on `ubuntu-latest` and
 `macos-latest`. The root aggregate deliberately excludes standalone tools;
 changes under `tools/search-index/`, `tools/docs-maintenance/`, or the shared
@@ -48,7 +48,7 @@ Items stay unchecked until the corresponding work is implemented **and**
 verified. Do not check an item because a design doc exists.
 
 - [x] **Build configuration** — reproducible `build.zig` / `build.zig.zon`,
-      executable name `boris`, Zig 0.16.0 pin aligned across package metadata
+      executable name `boris`, Zig 0.17.0 pin aligned across package metadata
       and CI
 - [x] **Scanner / parser tests** — discovery and frontmatter grammar covered by
       automated tests against fixtures (`src/scanner.zig`, `src/parser.zig`)

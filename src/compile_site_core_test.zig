@@ -782,12 +782,12 @@ test "--timings recorder observes HTML publication phases" {
     };
     for (phases) |phase| {
         try std.testing.expect(
-            recorder.phase_ns[@intFromEnum(phase)] > 0,
+            recorder.phase_ns[@backingInt(phase)] > 0,
         );
     }
     // One page: load/parse read, shared-state read, render read.
-    try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.page_reads)] >= 3);
-    try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.hash_bytes)] > 0);
+    try std.testing.expect(recorder.counters[@backingInt(timings.Counter.page_reads)] >= 3);
+    try std.testing.expect(recorder.counters[@backingInt(timings.Counter.hash_bytes)] > 0);
 }
 
 test "--timings include_reads counts each unique fragment once per build (#760)" {
@@ -824,7 +824,7 @@ test "--timings include_reads counts each unique fragment once per build (#760)"
 
     // Three consumer pages share one fragment: exactly one read (#760), and
     // every rendered page still carries the expanded fragment bytes.
-    try std.testing.expectEqual(@as(u64, 1), recorder.counters[@intFromEnum(timings.Counter.include_reads)]);
+    try std.testing.expectEqual(@as(u64, 1), recorder.counters[@backingInt(timings.Counter.include_reads)]);
 
     var dist_dir = try cwd.openDir(io, dist, .{});
     defer dist_dir.close(io);
@@ -869,10 +869,10 @@ test "--timings zero-page site publishes successfully with honest zero counters 
     // Empty sites stay successful (rendered-search.md), so every counter is
     // legitimately zero: no page was read, fingerprinted, rendered, or audited.
     try std.testing.expectEqual(@as(usize, 0), stats.pages_attempted);
-    inline for (@typeInfo(timings.Counter).@"enum".fields) |field| {
+    inline for (@typeInfo(timings.Counter).@"enum".field_names) |field| {
         try std.testing.expectEqual(
             @as(u64, 0),
-            recorder.counters[@intFromEnum(@field(timings.Counter, field.name))],
+            recorder.counters[@backingInt(@field(timings.Counter, field))],
         );
     }
 

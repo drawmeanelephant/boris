@@ -54,6 +54,17 @@
 //! was signed from.
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const diag = @import("diag.zig");
 const json_out = @import("json_out.zig");
 const nostr = @import("nostr.zig");
@@ -591,7 +602,7 @@ const testing = std.testing;
 /// Fixed aux + fixed created_at make every signed bundle here reproducible.
 const test_secret_key = "b7e151628aed2a6abf7158809cf4f3c762e7160f38b4da56a784d9045190cfef";
 const test_pubkey = "dff1d77f2a671c5f36183726db2341be58feae1da2deced843240f7b502ba659";
-const test_aux = [_]u8{0} ** 32;
+const test_aux = @as([32]u8, @splat(0));
 const test_created_at: i64 = 1705762000;
 const test_published_at: i64 = 1705761000;
 
@@ -859,7 +870,7 @@ test "sign: malformed and empty secret key inputs are refused" {
     defer arena_state.deinit();
     const plan = try planForOne(arena_state.allocator(), "articles/vec", vec_tags, vec_content_json, vec_intention_digest);
 
-    for ([_][]const u8{ "", "not-a-key", "zz" ** 32, test_secret_key[0..62] }) |bad_key| {
+    for ([_][]const u8{ "", "not-a-key", rep("zz", 32), test_secret_key[0..62] }) |bad_key| {
         var result = try run(testing.io, gpa, .{
             .plan = plan,
             .key = bad_key,
@@ -942,7 +953,7 @@ test "sign: a 255-byte d tag is accepted and carried verbatim" {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const long_d = "x" ** 255;
+    const long_d = rep("x", 255);
     var tags_buf: [1024]u8 = undefined;
     const tags_piece = try std.fmt.bufPrint(&tags_buf, "[[\"d\",\"{s}\"],[\"published_at\",\"1705761000\"]]", .{long_d});
     const tags = try arena.dupe(u8, tags_piece);
@@ -985,7 +996,7 @@ test "sign: an intention digest mismatch is refused" {
     const gpa = testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
-    const plan = try planForOne(arena_state.allocator(), "articles/vec", vec_tags, vec_content_json, "00" ** 32);
+    const plan = try planForOne(arena_state.allocator(), "articles/vec", vec_tags, vec_content_json, rep("00", 32));
 
     var result = try run(testing.io, gpa, .{
         .plan = plan,

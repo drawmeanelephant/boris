@@ -343,7 +343,7 @@ pub fn referenceCheck(nodes: []const graph_mod.Node) RefProblems {
     // Cycles along parent edges (ignore nodes with missing/self already broken).
     // Walk from each node; if we revisit a node in the current walk → cycle.
     for (nodes, 0..) |_, start| {
-        var seen: [max_graph_nodes]bool = .{false} ** max_graph_nodes;
+        var seen: [max_graph_nodes]bool = @splat(false);
         var idx: ?usize = start;
         var steps: usize = 0;
         while (idx) |cur| : (steps += 1) {

@@ -447,7 +447,7 @@ pub const ExitCode = enum(u8) {
     io_error = 3,
 
     pub fn int(self: ExitCode) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 

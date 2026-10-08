@@ -643,7 +643,7 @@ fn renderSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const 
     var committed: usize = 0;
     var omitted: usize = 0;
     var na_artifact: usize = 0;
-    var by_kind = [_]usize{0} ** std.meta.fields(artifact_inventory.Kind).len;
+    var by_kind = @as([std.meta.fieldNames(artifact_inventory.Kind).len]usize, @splat(0));
     for (model.inventory.records) |record| {
         artifacts_total += 1;
         switch (record.status) {
@@ -651,7 +651,7 @@ fn renderSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const 
             .omitted_by_plan => omitted += 1,
             .not_applicable => na_artifact += 1,
         }
-        by_kind[@intFromEnum(record.kind)] += 1;
+        by_kind[@backingInt(record.kind)] += 1;
     }
 
     var passed: usize = 0;
@@ -1197,7 +1197,7 @@ fn renderHtmlSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *co
     var committed: usize = 0;
     var omitted: usize = 0;
     var na_artifact: usize = 0;
-    var by_kind = [_]usize{0} ** std.meta.fields(artifact_inventory.Kind).len;
+    var by_kind = @as([std.meta.fieldNames(artifact_inventory.Kind).len]usize, @splat(0));
     for (model.inventory.records) |record| {
         artifacts_total += 1;
         switch (record.status) {
@@ -1205,7 +1205,7 @@ fn renderHtmlSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *co
             .omitted_by_plan => omitted += 1,
             .not_applicable => na_artifact += 1,
         }
-        by_kind[@intFromEnum(record.kind)] += 1;
+        by_kind[@backingInt(record.kind)] += 1;
     }
     var passed: usize = 0;
     var failed: usize = 0;
@@ -1765,11 +1765,11 @@ fn expectJsonStrings(value: std.json.Value, expected: []const []const u8) !void 
 
 /// Runtime-visible wire names of an enum in declaration order, for the
 /// runtime-vs-schema parity test.
-fn enumWireNames(comptime E: type) [std.meta.fields(E).len][]const u8 {
+fn enumWireNames(comptime E: type) [@typeInfo(E).@"enum".field_names.len][]const u8 {
     comptime {
-        const fields = std.meta.fields(E);
+        const fields = @typeInfo(E).@"enum".field_names;
         var names: [fields.len][]const u8 = undefined;
-        for (fields, 0..) |field, index| names[index] = @field(E, field.name).name();
+        for (fields, 0..) |field, index| names[index] = @field(E, field).name();
         return names;
     }
 }

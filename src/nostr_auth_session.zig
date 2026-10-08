@@ -51,11 +51,11 @@ fn spawn(io: std.Io, gpa: std.mem.Allocator, plan: []const u8, bundle: []const u
     else
         try std.process.executablePathAlloc(io, gpa);
     defer gpa.free(executable);
-    const plan_z = try gpa.dupeZ(u8, plan);
+    const plan_z = try gpa.dupeSentinel(u8, plan, 0);
     defer gpa.free(plan_z);
-    const bundle_z = try gpa.dupeZ(u8, bundle);
+    const bundle_z = try gpa.dupeSentinel(u8, bundle, 0);
     defer gpa.free(bundle_z);
-    const report_z = if (report) |r| try gpa.dupeZ(u8, r) else null;
+    const report_z = if (report) |r| try gpa.dupeSentinel(u8, r, 0) else null;
     defer if (report_z) |r| gpa.free(r);
     var argv: [14:null]?[*:0]const u8 = @splat(null);
     argv[0..10].* = .{ executable.ptr, "nostr", "publish", "--plan", plan_z.ptr, "--bundle", bundle_z.ptr, "--auth-pipes", "3,4", "--quiet" };

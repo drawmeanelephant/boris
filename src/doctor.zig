@@ -771,11 +771,11 @@ fn auditReferences(
 
 fn findingLess(_: void, left: Finding, right: Finding) bool {
     const severity_order = std.math.order(
-        @intFromEnum(left.severity),
-        @intFromEnum(right.severity),
+        @backingInt(left.severity),
+        @backingInt(right.severity),
     );
     if (severity_order != .eq) return severity_order == .lt;
-    const domain_order = std.math.order(@intFromEnum(left.domain), @intFromEnum(right.domain));
+    const domain_order = std.math.order(@backingInt(left.domain), @backingInt(right.domain));
     if (domain_order != .eq) return domain_order == .lt;
 
     if (left.subject.target == null and right.subject.target != null) return false;

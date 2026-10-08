@@ -336,12 +336,12 @@ fn verifyStarter(io: Io, gpa: std.mem.Allocator, target_dir: []const u8) !ProbeR
 pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) u8 {
     const message = materialize(io, gpa, target_dir) catch |err| {
         std.debug.print("error: boris init failed: {s}\n", .{@errorName(err)});
-        return @intFromEnum(ExitCode.io_error);
+        return @backingInt(ExitCode.io_error);
     };
     if (message.len > 0) {
         std.debug.print("error: {s}\n", .{message});
         gpa.free(message);
-        return @intFromEnum(ExitCode.usage);
+        return @backingInt(ExitCode.usage);
     }
 
     // Self-verify before claiming success. The starter tree is fixed, so a
@@ -354,7 +354,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) 
             "error: the starter tree failed to compile ({s}); the target directory was removed — this is a compiler/starter drift bug, please report it\n",
             .{@errorName(err)},
         );
-        return @intFromEnum(ExitCode.content_error);
+        return @backingInt(ExitCode.content_error);
     };
 
     if (!quiet) {
@@ -396,7 +396,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) 
             \\
         , .{});
     }
-    return @intFromEnum(ExitCode.success);
+    return @backingInt(ExitCode.success);
 }
 
 test "starter layout marks the search extraction root" {

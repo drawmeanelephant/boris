@@ -162,7 +162,7 @@ fn codesSet(diags: []const diag.Diagnostic, gpa: std.mem.Allocator) ![]diag.Code
     }
     std.mem.sort(diag.Code, list.items, {}, struct {
         fn less(_: void, a: diag.Code, b: diag.Code) bool {
-            return @intFromEnum(a) < @intFromEnum(b);
+            return @backingInt(a) < @backingInt(b);
         }
     }.less);
     return try list.toOwnedSlice(gpa);

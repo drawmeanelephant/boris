@@ -36,7 +36,7 @@ pub const Error = identity.Error || authorization.Error || password.Error || xrp
 /// The Oliver rendering dependency pin recorded in the evidence bindings.
 /// Must match the revision in build.zig.zon (enforced by the zon test below);
 /// the upgrade procedure lives in docs/contracts/oliver-renderer.md.
-pub const oliver_pin = "oliver@80d53b2118005b314d4c551d18a023f293eecc75";
+pub const oliver_pin = "oliver@2a0a1e9";
 
 /// A session acquired for one publish/smoke run: either the DPoP-bound OAuth
 /// session or the Bearer app-password session. Both carry the DID + PDS origin
@@ -265,7 +265,7 @@ fn formatObservedAt(gpa: std.mem.Allocator, seconds: i64) Error![]u8 {
     errdefer out.deinit(gpa);
     try appendYear(&out, gpa, year_day.year);
     try out.append(gpa, '-');
-    try appendTwo(&out, gpa, @intFromEnum(month_day.month));
+    try appendTwo(&out, gpa, @backingInt(month_day.month));
     try out.append(gpa, '-');
     try appendTwo(&out, gpa, @as(u8, @intCast(month_day.day_index)) + 1);
     try out.append(gpa, 'T');

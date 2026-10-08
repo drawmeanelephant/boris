@@ -14,6 +14,17 @@
 //! merged ATProto identity and OAuth foundations (#458, #467, #472).
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const identity = @import("atproto_identity.zig");
 const json_out = @import("json_out.zig");
 const site_url = @import("site_url.zig");
@@ -1040,7 +1051,7 @@ test "rkey derivation is injective and rkey-safe" {
     // reversible output, and the digest form always starts with `~~`. A 200
     // repeated space encodes to 3 bytes each, so the reversible form exceeds
     // the rkey limit and the digest form is used.
-    const long_id = " " ** 200;
+    const long_id = rep(" ", 200);
     const long_rkey = try entityRkey(gpa, long_id);
     defer gpa.free(long_rkey);
     try std.testing.expect(std.mem.startsWith(u8, long_rkey, "~~"));

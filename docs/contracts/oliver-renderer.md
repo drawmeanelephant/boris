@@ -46,9 +46,9 @@ never strips HTML) into the deterministic semantic plain-text projection — see
 |-------|-------|
 | Repository | <https://github.com/drawmeanelephant/oliver> |
 | Branch | `main` |
-| Commit | `80d53b2118005b314d4c551d18a023f293eecc75` |
-| Package hash | `oliver-1.1.0-LOsZkBWrJwAXanVPCdrIH78YlOL63fgQUUSBhIBLXwhm` |
-| Zig | 0.16.0 |
+| Commit | `2a0a1e9` |
+| Package hash | `oliver-1.1.0-LOsZkOeMKAB1o3ynv6PTycxCt3nzpYB6l_hz-J3lVvxF` |
+| Zig | 0.17.0 |
 
 The pin lives in `build.zig.zon` (`.dependencies.oliver.url` + `.hash`). Zig
 verifies the content hash at fetch time, so a checkout is reproducible with no

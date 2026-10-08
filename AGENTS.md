@@ -72,7 +72,7 @@ a staging line is retained, the banner says so.
 Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the
 **default target**, not the whole product. It is not a Node SSG stack.
 
-- Zig **0.16+** is the product core. Markdown is **Oliver**, a pinned Zig
+- Zig **0.17+** is the product core. Markdown is **Oliver**, a pinned Zig
   library consumed natively in-process—not a subprocess or JavaScript pipeline.
 - The content model is **Trunk** / **Satellite** pages with in-page **Aside**
   tokens, not graph nodes. The author frontmatter parent key is **`parent` only**;

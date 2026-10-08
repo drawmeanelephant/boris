@@ -165,7 +165,7 @@ pub const StdTransport = struct {
         // cannot be invalidated or overwritten underneath us.
         var owned_response = try transport.Response.initCopy(
             allocator,
-            @intFromEnum(response.head.status),
+            @backingInt(response.head.status),
             header_storage[0..header_count],
             "",
             request_value.limits,

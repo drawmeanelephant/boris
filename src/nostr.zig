@@ -30,6 +30,17 @@
 //! `nostr_publish.zig`.
 
 const std = @import("std");
+
+fn rep(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const arr = comptime blk: {
+        @setEvalBranchQuota(s.len * n * 4 + 100);
+        var out: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(out[i * s.len ..][0..s.len], s);
+        break :blk out;
+    };
+    return &arr;
+}
+
 const graph = @import("graph.zig");
 const identity = @import("identity.zig");
 const rss_date = @import("rss_date.zig");
@@ -641,7 +652,7 @@ test "nsec oversized valid-checksum payload refuses before writing past secret b
     var encoded: [128]u8 = undefined;
     var output: [32]u8 = undefined;
     for ([_]usize{ 33, 34, 58 }) |length| {
-        const payload = [_]u8{1} ** 58;
+        const payload = @as([58]u8, @splat(1));
         const text = try encodeBech32("nsec", payload[0..length], &encoded);
         try std.testing.expect(!decodeNsec(text, &output));
     }
@@ -820,12 +831,12 @@ fn decodeBech32(input: []const u8, expected_hrp: []const u8, out: []u8) ?usize {
 const testing = std.testing;
 
 test "pubkey: exactly 64 lowercase hex digits" {
-    const good = "a" ** 64;
+    const good = rep("a", 64);
     try validatePubkey(good);
-    try testing.expectError(error.InvalidPubkey, validatePubkey("a" ** 63));
-    try testing.expectError(error.InvalidPubkey, validatePubkey("a" ** 65));
-    try testing.expectError(error.InvalidPubkey, validatePubkey("A" ** 64));
-    try testing.expectError(error.InvalidPubkey, validatePubkey("g" ** 64));
+    try testing.expectError(error.InvalidPubkey, validatePubkey(rep("a", 63)));
+    try testing.expectError(error.InvalidPubkey, validatePubkey(rep("a", 65)));
+    try testing.expectError(error.InvalidPubkey, validatePubkey(rep("A", 64)));
+    try testing.expectError(error.InvalidPubkey, validatePubkey(rep("g", 64)));
     try testing.expectError(error.InvalidPubkey, validatePubkey(""));
 }
 
@@ -958,7 +969,7 @@ test "topics: lowercase, unprefixed, bounded" {
     try testing.expectError(error.InvalidTopic, validateTopic("Recipes"));
     try testing.expectError(error.InvalidTopic, validateTopic("#recipes"));
     try testing.expectError(error.InvalidTopic, validateTopic("a b"));
-    try testing.expectError(error.InvalidTopic, validateTopic("a" ** 129));
+    try testing.expectError(error.InvalidTopic, validateTopic(rep("a", 129)));
 }
 
 test "tags: fixed order with authored topics preserved" {
@@ -1037,7 +1048,7 @@ test "npub: profile input accepts npub and stores hex" {
     try testing.expectEqualStrings(hex, from_npub);
     try testing.expectEqualStrings(hex, from_hex);
     try testing.expectError(error.InvalidPubkey, parseAuthorPubkey(testing.allocator, "npub1not-a-key"));
-    try testing.expectError(error.InvalidPubkey, parseAuthorPubkey(testing.allocator, "A" ** 64));
+    try testing.expectError(error.InvalidPubkey, parseAuthorPubkey(testing.allocator, rep("A", 64)));
 }
 
 test "naddr: TLV order is d, author, kind, then wss relays; ws is omitted" {
@@ -1121,7 +1132,7 @@ test "secret key: malformed inputs are refused" {
     var out: [32]u8 = undefined;
     try testing.expect(!decodeSecretKey("", &out));
     try testing.expect(!decodeSecretKey("not-a-key", &out));
-    try testing.expect(!decodeSecretKey("zz" ** 32, &out));
-    try testing.expect(!decodeSecretKey("a" ** 63, &out));
-    try testing.expect(!decodeSecretKey("a" ** 65, &out));
+    try testing.expect(!decodeSecretKey(rep("zz", 32), &out));
+    try testing.expect(!decodeSecretKey(rep("a", 63), &out));
+    try testing.expect(!decodeSecretKey(rep("a", 65), &out));
 }
