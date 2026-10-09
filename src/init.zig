@@ -1116,7 +1116,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 test "archetype names cover the CLI surface" {
     try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
-        const spec = specFor(@enumFromInt(value));
+        const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
         // is one of the files it writes.
         var has_profile = false;
@@ -1172,7 +1172,7 @@ test "each archetype profile declares the format and theme its spec uses" {
     const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile" };
     const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
-        const spec = specFor(@enumFromInt(value));
+        const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
         for (spec.files) |file| {
             if (std.mem.eql(u8, file.path, "boris.json")) profile = file.data;
@@ -1188,11 +1188,11 @@ test "each archetype profile declares the format and theme its spec uses" {
         // The probe layout lives under the declared theme root.
         try std.testing.expect(std.mem.startsWith(u8, spec.layout_path, expect_theme[i] ++ "/"));
         // The spec's input format matches the profile's declaration.
-        const declared: identity.InputFormat = @enumFromInt(switch (i) {
-            2 => @intFromEnum(identity.InputFormat.cook),
-            4 => @intFromEnum(identity.InputFormat.textile),
-            else => @intFromEnum(identity.InputFormat.markdown),
-        });
+        const declared: identity.InputFormat = @fromBackingInt(@intCast(switch (i) {
+            2 => @backingInt(identity.InputFormat.cook),
+            4 => @backingInt(identity.InputFormat.textile),
+            else => @backingInt(identity.InputFormat.markdown),
+        }));
         try std.testing.expectEqual(declared, spec.input_format);
     }
 }
@@ -1327,7 +1327,7 @@ test "every archetype materializes and compiles through its declared adapter" {
     defer tmp.cleanup();
 
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
-        const archetype: Archetype = @enumFromInt(value);
+        const archetype: Archetype = @fromBackingInt(@intCast(value));
         const spec = specFor(archetype);
         const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, @typeInfo(Archetype).@"enum".field_names[i] });
         defer gpa.free(root);
