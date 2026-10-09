@@ -74,7 +74,7 @@
         if (values[1].includes(term)) score += 2;
         if (values[2].includes(term)) score += 1;
       });
-      if (section.level === 1) score += 1;
+      if (score > 0 && section.level === 1) score += 1;
       if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
       if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
     });
