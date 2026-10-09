@@ -121,8 +121,11 @@ published-HTML fragment check.
 The Pages publication slice adds `EPUBLICATIONLOCATION` for the pre-commit
 semantic URL/location gate. It is emitted when a root-relative project-site
 route omits the declared base path, or when a Boris-owned canonical/public URL
-uses a different origin or base path. This is a publication failure, not a
-warning; it does not add a fourth publication-evidence check.
+uses a different origin or base path. The sitemap preflight emits the same
+code when `--site-url` (or the profile `site.url`) disagrees with the declared
+publication location's base URL; the diagnostic names both URLs so the
+mismatch is never reduced to a generic `EIO`. This is a publication failure,
+not a warning; it does not add a fourth publication-evidence check.
 
 The Cooklang input slice adds `ECOOKLANG` for the `.cook` input family. It is
 emitted when a page tree mixes `.cook` with another page extension or selects

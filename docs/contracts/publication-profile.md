@@ -31,7 +31,9 @@ paths against the owned workspace root, without changing process CWD.
 The profile is UTF-8 JSON with no embedded NUL. The Boris parser rejects
 malformed JSON, comments, trailing data, coercion, duplicate keys, and unknown
 keys at every object level. Duplicate rejection is a Boris parser requirement;
-the companion JSON Schema cannot express it alone.
+the companion JSON Schema cannot express it alone. Structural rejections name
+the offending key or field and its object path (for example
+`unknown key "bogus" in targets[0]`), not a bare error enumeration.
 
 | Bound | Value |
 |---|---:|

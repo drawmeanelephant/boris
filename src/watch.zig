@@ -538,6 +538,16 @@ fn isRecoverableBuildError(err: anyerror) bool {
     return compile.isContentCompileFailure(err);
 }
 
+/// Prose suffix for a non-recoverable failure. Genuine filesystem/system
+/// failures keep the "unrecoverable I/O error" label; usage-class and
+/// already-diagnosed failures (the publication-location/static-dir gates)
+/// already named their real cause, so calling them I/O would mislabel them
+/// (#1035).
+fn unrecoverableLabel(err: anyerror) []const u8 {
+    if (compile.isUsageTargetFailure(err) or err == error.PublicationLocationMismatch) return "failed";
+    return "failed with unrecoverable I/O error";
+}
+
 /// Prose label for a failed watch cycle: `"rebuild"` (HTML publish) or
 /// `"validation rebuild"` (`validate --watch`).
 fn rebuildLabel(action: Action) []const u8 {
@@ -1077,7 +1087,7 @@ pub const WatchCoordinator = struct {
                     std.debug.print("error: {s} failed: {s}. Waiting for correction...\n", .{ rebuildLabel(self.action), @errorName(err) });
                 }
             } else if (!diag.text_suppressed.load(.unordered)) {
-                std.debug.print("error: {s} failed with unrecoverable I/O error: {s}\n", .{ rebuildLabel(self.action), @errorName(err) });
+                std.debug.print("error: {s} {s}: {s}\n", .{ rebuildLabel(self.action), unrecoverableLabel(err), @errorName(err) });
             }
             if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, false);
             if (isRecoverableFailure(err)) return;
@@ -1163,7 +1173,7 @@ pub const WatchCoordinator = struct {
                 if (json) {
                     self.emitBuildFailed("initial", targets, null, outcome, collector_ptr);
                 } else if (!self.options.quiet) {
-                    std.debug.print("error: initial {s} failed with unrecoverable I/O error: {s}\n", .{ initialLabel(self.action), @errorName(err) });
+                    std.debug.print("error: initial {s} {s}: {s}\n", .{ initialLabel(self.action), unrecoverableLabel(err), @errorName(err) });
                 }
                 if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, false);
                 return err;

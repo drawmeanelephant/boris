@@ -22,7 +22,14 @@ pub const ProfileOverrides = publication_profile.ProfileOverrides;
 /// (exit 2) unless it is an allocator failure, which is an I/O/system failure
 /// (exit 3). Central so every profile-reading path uses one mapping.
 pub fn reportPublicationPlanConfigError(err: anyerror) ExitCode {
-    std.debug.print("error: invalid publication profile: {s}\n", .{@errorName(err)});
+    // `lastErrorDetail` names the offending key/field and object path captured
+    // at the first structural rejection (#1038); semantic failures keep the
+    // bare error name.
+    if (publication_profile.lastErrorDetail()) |detail| {
+        std.debug.print("error: invalid publication profile: {s}\n", .{detail});
+    } else {
+        std.debug.print("error: invalid publication profile: {s}\n", .{@errorName(err)});
+    }
     return switch (err) {
         error.OutOfMemory => .io_error,
         else => .usage,

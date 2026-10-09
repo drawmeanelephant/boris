@@ -393,7 +393,21 @@ fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void 
         if (options.site_url) |raw_url| {
             publication_location.validateSiteUrl(gpa, location, raw_url) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
-                else => return error.PublicationLocationMismatch,
+                else => {
+                    // This gate runs before any per-target error printing, so
+                    // emit the mismatch diagnostic here — stderr plus the
+                    // report collector — mirroring the RSS twin path (#1035).
+                    const msg = try std.fmt.allocPrint(gpa, "sitemap publication URL \"{s}\" does not match the declared publication location \"{s}\"", .{ raw_url, location.base_url });
+                    defer gpa.free(msg);
+                    if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: {s}\n", .{msg});
+                    appendHtmlDiagnostic(&options, .{
+                        .severity = .error_,
+                        .code = .EPUBLICATIONLOCATION,
+                        .message = msg,
+                        .remediation = "Set --site-url (or the profile site.url) to the declared publication location base URL",
+                    });
+                    return error.PublicationLocationMismatch;
+                },
             };
         }
     }
@@ -1448,6 +1462,40 @@ pub fn isContentCompileFailure(err: anyerror) bool {
     };
 }
 
+/// Usage-class (exit 2) target/configuration failures. This mirrors the usage
+/// branch of the CLI's `mapHtmlError` so the multi-target wrapper can return
+/// the specific error instead of collapsing it to `LayoutSelectionFailed`
+/// (#1036), and so watch can label the failure without claiming I/O (#1035).
+pub fn isUsageTargetFailure(err: anyerror) bool {
+    return switch (err) {
+        error.NoTargetsSpecified,
+        error.InvalidTargetName,
+        error.DuplicateTargetName,
+        error.EmptyTargetDirectory,
+        error.TargetOutputCollision,
+        error.TargetOutputSymlink,
+        error.WorkspaceEscape,
+        error.MixedThemeRoots,
+        error.AmbiguousGlob,
+        error.DuplicateSelector,
+        error.InvalidLayoutPath,
+        error.LayoutSelectionFailed,
+        error.InvalidSiteUrl,
+        error.InvalidSitemapPath,
+        error.SitemapOutputCollision,
+        error.SitemapSiteUrlRequired,
+        error.SitemapSiteUrlWithoutOutput,
+        error.AmbiguousSitemapTargets,
+        error.StaticDirMissing,
+        error.StaticDirNotDirectory,
+        error.StaticSymlink,
+        error.StaticPathUnsafe,
+        error.StaticPathCollision,
+        => true,
+        else => false,
+    };
+}
+
 /// Orchestrate multiple HTML build targets with complete isolation and sorted sequence.
 /// Enforces validate-all-first, single discovery, then sequential rendering.
 /// Returns a content or I/O sentinel matching the aggregate target failures.
@@ -1501,6 +1549,7 @@ pub fn compileHtmlSiteMulti(
     var any_failed = false;
     var any_io_failed = false;
     var any_usage_failed = false;
+    var first_usage_err: ?anyerror = null;
     // Aggregate page statistics across targets (watch `--watch-json` reports
     // the total written for the initial build; rebuild values are optional).
     var total_stats: CompileStats = .{};
@@ -1526,25 +1575,20 @@ pub fn compileHtmlSiteMulti(
                 if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
                 const msg = try std.fmt.allocPrint(gpa, "target '{s}' compilation failed: {s}", .{ plan.name, @errorName(err) });
                 defer gpa.free(msg);
+                var rem_buf: [1024]u8 = undefined;
+                const locus = targetFailureLocus(err, plan, base_options, &rem_buf);
                 appendHtmlDiagnostic(&base_options, .{
                     .severity = .error_,
-                    .code = layoutCodeFor(err),
+                    .code = locus.code,
                     .message = msg,
-                    .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
-                    .source_path = plan.layout_path,
+                    .remediation = locus.remediation,
+                    .source_path = locus.source_path,
                 });
             }
             any_failed = true;
-            if (err == error.AmbiguousGlob or err == error.MixedThemeRoots or
-                err == error.DuplicateSelector or err == error.LayoutSelectionFailed or
-                err == error.InvalidSiteUrl or err == error.InvalidSitemapPath or
-                err == error.SitemapOutputCollision or err == error.SitemapSiteUrlRequired or
-                err == error.SitemapSiteUrlWithoutOutput or err == error.AmbiguousSitemapTargets or
-                err == error.StaticDirMissing or err == error.StaticDirNotDirectory or
-                err == error.StaticSymlink or err == error.StaticPathUnsafe or
-                err == error.StaticPathCollision)
-            {
+            if (isUsageTargetFailure(err)) {
                 any_usage_failed = true;
+                if (first_usage_err == null) first_usage_err = err;
             } else {
                 any_io_failed = any_io_failed or !isContentCompileFailure(err);
             }
@@ -1561,7 +1605,10 @@ pub fn compileHtmlSiteMulti(
     }
 
     if (any_failed) {
-        if (any_usage_failed) return error.LayoutSelectionFailed;
+        // Usage-class failures keep their specific error name so the CLI and
+        // the --report diagnostic blame the real locus (static dir, sitemap
+        // path, target configuration), not layout selection (#1036).
+        if (any_usage_failed) return first_usage_err orelse error.LayoutSelectionFailed;
         if (any_io_failed) return error.MultiTargetIoFailed;
         return error.MultiTargetCompilationFailed;
     }
@@ -2018,6 +2065,93 @@ pub fn publishStageTree(
 /// Append `d` to the optional HTML-path diagnostic collector (OOM-safe).
 fn appendHtmlDiagnostic(options: *const CompileOptions, d: diag.Diagnostic) void {
     if (options.diagnostics) |sink| sink.append(d);
+}
+
+/// Diagnostic locus for a per-target compile failure (#1036). Usage-class
+/// errors (static dir, sitemap, site URL, target configuration) name the
+/// offending declaration — not the layout that never failed. `rem_buf` backs
+/// any formatted remediation until the caller's collector copies it.
+const TargetFailureLocus = struct {
+    code: diag.Code,
+    remediation: []const u8,
+    source_path: []const u8,
+};
+
+fn targetFailureLocus(
+    err: anyerror,
+    plan: target_mod.TargetPlan,
+    options: CompileOptions,
+    rem_buf: []u8,
+) TargetFailureLocus {
+    const fmt = struct {
+        fn print(buf: []u8, comptime f: []const u8, args: anytype) []const u8 {
+            return std.fmt.bufPrint(buf, f, args) catch "Fix the target configuration and retry the build";
+        }
+    }.print;
+    const static_dir = options.static_dir orelse "";
+    const sitemap_path = options.sitemap_path orelse "";
+    return switch (err) {
+        error.StaticDirMissing => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Create the static directory \"{s}\" or drop --static-dir", .{static_dir}),
+            .source_path = static_dir,
+        },
+        error.StaticDirNotDirectory => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Point --static-dir at a directory; \"{s}\" is not one", .{static_dir}),
+            .source_path = static_dir,
+        },
+        error.StaticSymlink => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Remove the symlink under static directory \"{s}\"; static entries must be regular files", .{static_dir}),
+            .source_path = static_dir,
+        },
+        error.StaticPathUnsafe => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Remove the unsafe path under static directory \"{s}\"", .{static_dir}),
+            .source_path = static_dir,
+        },
+        error.StaticPathCollision => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Rename the colliding entry under static directory \"{s}\" so it does not shadow a page or asset output", .{static_dir}),
+            .source_path = static_dir,
+        },
+        error.SitemapOutputCollision => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Choose a --sitemap-path that does not collide with a page or asset output; \"{s}\" is taken", .{sitemap_path}),
+            .source_path = sitemap_path,
+        },
+        error.InvalidSitemapPath => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Use a target-root-relative sitemap path; \"{s}\" is not allowed", .{sitemap_path}),
+            .source_path = sitemap_path,
+        },
+        error.SitemapSiteUrlRequired => .{
+            .code = .EUSAGE,
+            .remediation = "Pass --site-url with the absolute base URL the sitemap publishes under",
+            .source_path = sitemap_path,
+        },
+        error.SitemapSiteUrlWithoutOutput => .{
+            .code = .EUSAGE,
+            .remediation = "Enable --sitemap (or a target sitemap) when passing --site-url",
+            .source_path = "",
+        },
+        error.AmbiguousSitemapTargets => .{
+            .code = .EUSAGE,
+            .remediation = "Set the sitemap path on one target's profile instead of across multiple targets",
+            .source_path = "",
+        },
+        error.InvalidSiteUrl => .{
+            .code = .EUSAGE,
+            .remediation = "Pass an absolute http(s) --site-url",
+            .source_path = "",
+        },
+        else => .{
+            .code = layoutCodeFor(err),
+            .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+            .source_path = plan.layout_path,
+        },
+    };
 }
 
 /// Stable diagnostic code for layout/theme load failures.
