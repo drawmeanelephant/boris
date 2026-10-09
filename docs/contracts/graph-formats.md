@@ -36,7 +36,7 @@ stay on stderr. Exit classes follow `check` / `impact`:
 
 Every projection, HTML, analysis-report, or watch selector is a conflict
 because it would either execute another path or corrupt the document stream:
-`--report`, `--timings`, `--fail-on-unreferenced`, `--rag`, `--context`,
+`--report`, `--timings`, the `check`-only `--fail-on-*` flags, `--rag`, `--context`,
 `--llms`, `--rss`, `--sitemap`, `--no-rag`, `--target`, `--html`,
 `--html-dir`, `--theme`, `--layout-rule`, `--watch`, `--jobs`,
 `--incremental`, `--scope`, and the Pages/RSS channel flags. `--out` is

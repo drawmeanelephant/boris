@@ -189,7 +189,7 @@ SIGINT/SIGTERM (same policy as HTML watch mode).
 | Surface | Question answered | Additional policy or evidence | Writes |
 |---|---|---|---|
 | `validate` | Does selected HTML source/configuration survive canonical prepublication compilation? | None | None |
-| `check` | What graph/dependency health facts and first-slice unreferenced-page findings exist after a valid frozen graph? | Documentation Intelligence policy | Optional explicit report only |
+| `check` | What graph/dependency health facts and unreferenced/advisory findings exist after a valid frozen graph? | Documentation Intelligence policy | Optional explicit report only |
 | normal `build` | Can Boris preflight, render, stage, commit, and emit the selected publication/projection? | Publication and projection semantics | Selected product artifacts |
 | publication evidence | What can be proven about exact committed target bytes? | Inventory, checks, claims, Touch Atlas, and Proof Pack contracts | Target-local evidence after commit |
 | proposed `doctor` | Does an existing publication snapshot agree with source/profile/rendered-artifact expectations? | Internal kernel in `src/doctor.zig`; no public command | Optional report only, if a command lands |
