@@ -207,6 +207,12 @@ pub const Options = struct {
     report_path: ?[]const u8 = null,
     /// Make ordinary unreferenced-page analysis findings fatal for `check`.
     fail_on_unreferenced: bool = false,
+    /// Advisory-finding policy opt-ins for `check` (#1023); each flag makes
+    /// its finding class fatal. All are informational without a flag.
+    fail_on_unlinked: bool = false,
+    fail_on_flat_graph: bool = false,
+    fail_on_zero_includes: bool = false,
+    fail_on_zero_relations: bool = false,
     mode: Mode = .html,
     /// Explicit whole-tree authoring format (Markdown remains the default).
     input_format: identity.InputFormat = .markdown,
@@ -638,6 +644,10 @@ const ParseState = struct {
     saw_format: bool = false,
     saw_report: bool = false,
     saw_fail_on_unreferenced: bool = false,
+    saw_fail_on_unlinked: bool = false,
+    saw_fail_on_flat_graph: bool = false,
+    saw_fail_on_zero_includes: bool = false,
+    saw_fail_on_zero_relations: bool = false,
     saw_profile: bool = false,
 
     // Analysis commands (`check` / `impact`) and their shared flags.
@@ -645,6 +655,10 @@ const ParseState = struct {
     analysis_format: AnalysisFormat = .human,
     analysis_report: ?[]const u8 = null,
     fail_on_unreferenced: bool = false,
+    fail_on_unlinked: bool = false,
+    fail_on_flat_graph: bool = false,
+    fail_on_zero_includes: bool = false,
+    fail_on_zero_relations: bool = false,
 
     // `init [DIR]` positional.
     init_dir: ?[]const u8 = null,
@@ -778,6 +792,13 @@ const ParseState = struct {
 
     fn wantsRss(st: *const ParseState) bool {
         return st.saw_rss or st.saw_rss_path;
+    }
+
+    /// Any `check`-only finding-policy flag (`--fail-on-*`, #1023).
+    fn sawCheckPolicyFlag(st: *const ParseState) bool {
+        return st.saw_fail_on_unreferenced or st.saw_fail_on_unlinked or
+            st.saw_fail_on_flat_graph or st.saw_fail_on_zero_includes or
+            st.saw_fail_on_zero_relations;
     }
 
     fn sawPagesLocation(st: *const ParseState) bool {
@@ -1368,6 +1389,30 @@ fn parseAnalysisFlags(
     if (std.mem.eql(u8, a, "--fail-on-unreferenced")) {
         try markSaw(&st.saw_fail_on_unreferenced);
         st.fail_on_unreferenced = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--fail-on-unlinked")) {
+        try markSaw(&st.saw_fail_on_unlinked);
+        st.fail_on_unlinked = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--fail-on-flat-graph")) {
+        try markSaw(&st.saw_fail_on_flat_graph);
+        st.fail_on_flat_graph = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--fail-on-zero-includes")) {
+        try markSaw(&st.saw_fail_on_zero_includes);
+        st.fail_on_zero_includes = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--fail-on-zero-relations")) {
+        try markSaw(&st.saw_fail_on_zero_relations);
+        st.fail_on_zero_relations = true;
         return true;
     }
     return false;
@@ -1989,6 +2034,10 @@ fn buildProofVerifyOptions(st: *ParseState) ParseError!Options {
         .{ .token = "--bundles-only", .triggered = st.saw_bundles_only },
         .{ .token = "--complete", .triggered = st.saw_complete },
         .{ .token = "--fail-on-unreferenced", .triggered = st.saw_fail_on_unreferenced },
+        .{ .token = "--fail-on-unlinked", .triggered = st.saw_fail_on_unlinked },
+        .{ .token = "--fail-on-flat-graph", .triggered = st.saw_fail_on_flat_graph },
+        .{ .token = "--fail-on-zero-includes", .triggered = st.saw_fail_on_zero_includes },
+        .{ .token = "--fail-on-zero-relations", .triggered = st.saw_fail_on_zero_relations },
     });
     if (scan.triggered == 1) return failConflict(st, commandWord(st.command), scan.offender);
     if (scan.triggered > 1) return error.ConflictingFlags;
@@ -2078,7 +2127,7 @@ fn buildRecipeScaleOptions(st: *ParseState) ParseError!Options {
 fn buildGraphOptions(st: *ParseState) ParseError!Options {
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_report or st.saw_fail_on_unreferenced or st.saw_watch or st.saw_watch_json or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile or
+        st.saw_report or st.sawCheckPolicyFlag() or st.saw_watch or st.saw_watch_json or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile or
         st.saw_scope or st.saw_split_size or st.saw_bundles_only or st.saw_complete or st.saw_serve or st.serve_port != null)
     {
         return error.ConflictingFlags;
@@ -2252,7 +2301,7 @@ fn validateBuildConflicts(st: *ParseState) ParseError!void {
             if (profile_scan.triggered > 1) return error.ConflictingFlags;
         }
     }
-    if (st.saw_fail_on_unreferenced and st.command != .check) return error.ConflictingFlags;
+    if (st.sawCheckPolicyFlag() and st.command != .check) return error.ConflictingFlags;
 
     if (st.command == .validate) {
         // Validation is the no-publication form of the selected HTML source /
@@ -2593,6 +2642,10 @@ fn buildOptionsForMode(
             o.analysis_report = if (analysis_command) st.analysis_report else null;
             o.report_path = if (analysis_command) null else st.analysis_report;
             o.fail_on_unreferenced = st.fail_on_unreferenced;
+            o.fail_on_unlinked = st.fail_on_unlinked;
+            o.fail_on_flat_graph = st.fail_on_flat_graph;
+            o.fail_on_zero_includes = st.fail_on_zero_includes;
+            o.fail_on_zero_relations = st.fail_on_zero_relations;
             o.sitemap_path = if (st.wantsSitemap()) st.sitemap_path else null;
             o.static_dir = if (st.wantsStatic()) st.static_dir else null;
             o.site_url = st.site_url;
@@ -2786,6 +2839,10 @@ pub const usage_text =
     \\  --out PATH          Graph render output path (single file; default stdout)
     \\  --report PATH        Write the report to PATH (check/impact analysis; build/validate HTML diagnostics)
     \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
+    \\  --fail-on-unlinked    Make check fail when it reports unlinked pages
+    \\  --fail-on-flat-graph  Make check fail on a flat-corpus advisory
+    \\  --fail-on-zero-includes Make check fail when the corpus uses no includes
+    \\  --fail-on-zero-relations Make check fail when the corpus uses no references
     \\  --profile PATH      Selected publication profile for plan/build/watch/validate
     \\  --id PAGE            Recipe page entity id (`recipe-scale`; required)
     \\  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; exclusive with --servings)
@@ -3096,6 +3153,10 @@ const never_blamed_flags = [_][]const u8{
     "--incremental",
     "--watch",
     "--fail-on-unreferenced",
+    "--fail-on-unlinked",
+    "--fail-on-flat-graph",
+    "--fail-on-zero-includes",
+    "--fail-on-zero-relations",
     "--context",
     "--bundles-only",
     "--complete",
@@ -3257,6 +3318,19 @@ test "parse: documentation intelligence commands" {
     try expect(strict.fail_on_unreferenced);
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unreferenced", "--fail-on-unreferenced" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unreferenced", "--out", ".boris" }));
+
+    // Advisory-finding policy flags (#1023): all check-only opt-ins.
+    var advisory = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unlinked", "--fail-on-flat-graph", "--fail-on-zero-includes", "--fail-on-zero-relations" });
+    defer advisory.deinit(std.testing.allocator);
+    try expect(advisory.fail_on_unlinked);
+    try expect(advisory.fail_on_flat_graph);
+    try expect(advisory.fail_on_zero_includes);
+    try expect(advisory.fail_on_zero_relations);
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unlinked", "--fail-on-unlinked" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--fail-on-flat-graph" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--fail-on-zero-includes" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--fail-on-zero-relations" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--fail-on-flat-graph" }));
 
     var impact = try parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--quiet" });
     defer impact.deinit(std.testing.allocator);

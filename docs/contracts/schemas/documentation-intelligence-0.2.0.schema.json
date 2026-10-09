@@ -93,7 +93,7 @@
     "finding": {
       "type": "object",
       "required": ["code", "type", "value", "count", "sourcePath", "line", "column"],
-      "properties": {"code": {"type": "string"}, "type": {"enum": ["page", "source"]}, "value": {"type": "string"}, "count": {"type": "integer", "minimum": 0}, "sourcePath": {"anyOf": [{"type": "null"}, {"type": "string"}]}, "line": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "column": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}},
+      "properties": {"code": {"type": "string"}, "type": {"enum": ["page", "source", "graph"]}, "value": {"type": "string"}, "count": {"type": "integer", "minimum": 0}, "sourcePath": {"anyOf": [{"type": "null"}, {"type": "string"}]}, "line": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "column": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}},
       "additionalProperties": false
     },
     "diagnostic": {

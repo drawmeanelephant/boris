@@ -9,6 +9,9 @@ const std = @import("std");
 pub const EndpointType = enum {
     page,
     source,
+    /// Findings that describe the whole corpus rather than one node carry
+    /// this endpoint type. Edges and impact results never use it.
+    graph,
 };
 
 pub const Endpoint = struct {
@@ -43,7 +46,19 @@ pub const Edge = struct {
 pub const FindingCode = enum {
     unreferenced_page,
     fan_in_hotspot,
+    unlinked_page,
+    flat_graph,
+    zero_includes,
+    zero_relations,
 };
+
+/// `flat_graph` fires only once a corpus is large enough for the missing
+/// structure to be a signal rather than a stub site (#1023).
+pub const flat_graph_min_pages: usize = 2;
+
+/// Corpus-level advisory findings name the whole graph rather than a single
+/// endpoint; the value is a fixed token so the report stays deterministic.
+pub const corpus_endpoint = Endpoint{ .type = .graph, .value = "corpus" };
 
 pub const Finding = struct {
     code: FindingCode,
@@ -136,10 +151,14 @@ pub fn analyze(
         switch (edge.to.type) {
             .page => bumpKind(&report.summary.edge_counts.incoming.pages, edge.kind),
             .source => bumpKind(&report.summary.edge_counts.incoming.sources, edge.kind),
+            // Edges never carry corpus endpoints; the type exists for
+            // corpus-level findings only.
+            .graph => {},
         }
         switch (edge.from.type) {
             .page => bumpKind(&report.summary.edge_counts.outgoing.pages, edge.kind),
             .source => bumpKind(&report.summary.edge_counts.outgoing.sources, edge.kind),
+            .graph => {},
         }
     }
     report.summary.source_endpoints = known_sources.count();
@@ -171,6 +190,63 @@ pub fn analyze(
             try report.findings.append(allocator, .{
                 .code = .unreferenced_page,
                 .endpoint = endpoint,
+            });
+        }
+    }
+
+    // Advisory findings (#1023): facts about a valid-but-flat corpus. A page
+    // is unlinked when no edge touches its node in either direction and no
+    // include composes its source file — a stronger condition than
+    // unreferenced, which only weighs inbound use.
+    for (pages) |page| {
+        const endpoint = Endpoint{ .type = .page, .value = page.id };
+        var linked = false;
+        for (edges) |edge| {
+            if (Endpoint.eql(edge.from, endpoint) or Endpoint.eql(edge.to, endpoint)) {
+                linked = true;
+                break;
+            }
+            const kind_is_include = edge.kind.len == 7 and std.mem.eql(u8, edge.kind, "include");
+            if (kind_is_include and edge.to.type == .source and page.source_path != null and
+                std.mem.eql(u8, edge.to.value, page.source_path.?))
+            {
+                linked = true;
+                break;
+            }
+        }
+        if (!linked) {
+            try report.findings.append(allocator, .{
+                .code = .unlinked_page,
+                .endpoint = endpoint,
+            });
+        }
+    }
+
+    // Corpus-level advisories. Every edge contributes exactly one incoming
+    // count, so the incoming totals measure the closed kind set.
+    const inc = report.summary.edge_counts.incoming;
+    const include_edges = inc.pages.include + inc.sources.include;
+    const reference_edges = inc.pages.reference + inc.sources.reference;
+    const parent_edges = inc.pages.parent + inc.sources.parent;
+    const total_edges = parent_edges + include_edges + reference_edges;
+    if (pages.len > 0) {
+        if (include_edges == 0) {
+            try report.findings.append(allocator, .{
+                .code = .zero_includes,
+                .endpoint = corpus_endpoint,
+            });
+        }
+        if (reference_edges == 0) {
+            try report.findings.append(allocator, .{
+                .code = .zero_relations,
+                .endpoint = corpus_endpoint,
+            });
+        }
+        if (pages.len >= flat_graph_min_pages and total_edges == 0) {
+            try report.findings.append(allocator, .{
+                .code = .flat_graph,
+                .endpoint = corpus_endpoint,
+                .count = pages.len,
             });
         }
     }
@@ -350,4 +426,89 @@ test "analysis reports source fan-in hotspots" {
     try std.testing.expectEqual(@as(usize, 1), report.summary.source_endpoints);
     try std.testing.expectEqual(@as(usize, 1), report.summary.hotspots);
     try std.testing.expectEqual(@as(usize, 2), report.findings.items[0].count);
+}
+
+fn countFindings(report: *const Report, code: FindingCode) usize {
+    var n: usize = 0;
+    for (report.findings.items) |f| {
+        if (f.code == code) n += 1;
+    }
+    return n;
+}
+
+test "advisory findings: flat corpus reports flat_graph, unlinked, and zero-feature nudges" {
+    const pages = [_]Page{
+        .{ .id = "a" },
+        .{ .id = "b" },
+        .{ .id = "c" },
+    };
+    var report = try analyze(std.testing.allocator, &pages, &.{}, .{});
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 3), countFindings(&report, .unlinked_page));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .flat_graph));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .zero_includes));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .zero_relations));
+    for (report.findings.items) |f| {
+        if (f.code == .flat_graph or f.code == .zero_includes or f.code == .zero_relations) {
+            try std.testing.expectEqual(EndpointType.graph, f.endpoint.type);
+            try std.testing.expectEqualStrings("corpus", f.endpoint.value);
+        }
+        if (f.code == .flat_graph) try std.testing.expectEqual(@as(usize, 3), f.count);
+    }
+}
+
+test "advisory findings: single page below the flat_graph minimum still reports zero-feature nudges" {
+    const pages = [_]Page{
+        .{ .id = "solo" },
+    };
+    var report = try analyze(std.testing.allocator, &pages, &.{}, .{});
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 0), countFindings(&report, .flat_graph));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .unlinked_page));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .zero_includes));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .zero_relations));
+}
+
+test "advisory findings: empty corpus reports no advisories" {
+    var report = try analyze(std.testing.allocator, &.{}, &.{}, .{});
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 0), report.findings.items.len);
+}
+
+test "advisory findings: unlinked_page is stronger than unreferenced_page" {
+    // `hub` has only an outgoing reference: unreferenced (no inbound use) but
+    // not unlinked. `stray` touches nothing: both findings fire.
+    const pages = [_]Page{
+        .{ .id = "hub" },
+        .{ .id = "stray" },
+        .{ .id = "target" },
+    };
+    const edges = [_]Edge{
+        .{ .from = .{ .type = .page, .value = "hub" }, .to = .{ .type = .page, .value = "target" }, .kind = "reference" },
+    };
+    var report = try analyze(std.testing.allocator, &pages, &edges, .{});
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .unlinked_page));
+    try std.testing.expectEqual(@as(usize, 2), countFindings(&report, .unreferenced_page));
+    try std.testing.expectEqual(@as(usize, 0), countFindings(&report, .flat_graph));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .zero_includes));
+    try std.testing.expectEqual(@as(usize, 0), countFindings(&report, .zero_relations));
+    for (report.findings.items) |f| {
+        if (f.code == .unlinked_page) try std.testing.expectEqualStrings("stray", f.endpoint.value);
+    }
+}
+
+test "advisory findings: include consumption links a page without a wiki-link" {
+    const pages = [_]Page{
+        .{ .id = "index" },
+        .{ .id = "_includes/f", .source_path = "_includes/f.md" },
+    };
+    const edges = [_]Edge{
+        .{ .from = .{ .type = .page, .value = "index" }, .to = .{ .type = .source, .value = "_includes/f.md" }, .kind = "include" },
+    };
+    var report = try analyze(std.testing.allocator, &pages, &edges, .{});
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 0), countFindings(&report, .unlinked_page));
+    try std.testing.expectEqual(@as(usize, 0), countFindings(&report, .zero_includes));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .zero_relations));
 }

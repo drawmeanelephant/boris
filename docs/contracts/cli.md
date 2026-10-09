@@ -9,7 +9,10 @@ family is an additional explicit network family, not a build mode.
 ```text
 boris build [build options]
 boris validate [HTML source and target options]
-boris check [--input DIR] [--format human|json] [--report PATH] [--fail-on-unreferenced]
+boris check [--input DIR] [--format human|json] [--report PATH]
+            [--fail-on-unreferenced] [--fail-on-unlinked]
+            [--fail-on-flat-graph] [--fail-on-zero-includes]
+            [--fail-on-zero-relations]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 boris watch [build options]
 boris plan --profile PATH [plan overrides]
@@ -288,10 +291,14 @@ boris check --input CONTENT --format json --report REPORT.json
 boris impact ID --input CONTENT --format json --report REPORT.json
 ```
 
-`boris check` reports `unreferenced_page` findings without failing by default.
-CI that treats those findings as fatal may add `--fail-on-unreferenced`; the
-flag is rejected for other commands and does not change the report schema or
-bytes.
+`boris check` reports `unreferenced_page` and advisory findings
+(`unlinked_page`, `flat_graph`, `zero_includes`, `zero_relations` — see
+[documentation-intelligence.md](documentation-intelligence.md) § Advisory
+findings) without failing by default. CI that treats a finding class as fatal
+may add its opt-in flag — `--fail-on-unreferenced`, `--fail-on-unlinked`,
+`--fail-on-flat-graph`, `--fail-on-zero-includes`, or
+`--fail-on-zero-relations`; each flag scopes to its own class, is rejected
+for other commands, and does not change the report schema or bytes.
 
 These reports use the versioned `boris-documentation-intelligence` schema
 defined in [`documentation-intelligence.md`](documentation-intelligence.md).
