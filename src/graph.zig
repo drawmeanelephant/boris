@@ -35,6 +35,12 @@ pub const Node = struct {
     output_path: []const u8 = "",
     title: ?[]const u8 = null,
     parent: ?[]const u8 = null,
+    /// 1-based source line of the authored `parent:` field, when known
+    /// (EPARENT* diagnostics point at the field line, else `1:1`).
+    parent_line: ?u32 = null,
+    /// 1-based source line of the authored `relations:` field, when known
+    /// (ERELATION* diagnostics).
+    relations_line: ?u32 = null,
     parent_index: ?u32 = null,
     status: ?[]const u8 = null,
     /// RSS-only author metadata; deliberately not serialized in the base IR.
@@ -235,7 +241,7 @@ pub fn validateSemanticRelations(
                     .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets its source page", .{relation.kind.name()}),
                     .remediation = try retain.dupe(u8, "Choose a different target page"),
                     .source_path = node.source_path,
-                    .line = 1,
+                    .line = node.relations_line orelse 1,
                     .column = 1,
                     .id = node.id,
                 });
@@ -248,7 +254,7 @@ pub fn validateSemanticRelations(
                     .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets missing page \"{s}\"", .{ relation.kind.name(), relation.target }),
                     .remediation = try retain.dupe(u8, "Create the target page or remove the relation"),
                     .source_path = node.source_path,
-                    .line = 1,
+                    .line = node.relations_line orelse 1,
                     .column = 1,
                     .id = node.id,
                 });
@@ -263,7 +269,7 @@ pub fn validateSemanticRelations(
                         .message = try std.fmt.allocPrint(retain, "duplicate semantic relation {s} -> \"{s}\"", .{ relation.kind.name(), relation.target }),
                         .remediation = try retain.dupe(u8, "Keep each semantic relation tuple only once"),
                         .source_path = node.source_path,
-                        .line = 1,
+                        .line = node.relations_line orelse 1,
                         .column = 1,
                         .id = node.id,
                     });
@@ -310,7 +316,7 @@ pub fn validateTopology(
                     .message = try std.fmt.allocPrint(retain, "parent \"{s}\" refers to this document", .{p}),
                     .remediation = try retain.dupe(u8, "Remove parent or point it at a different document id"),
                     .source_path = n.source_path,
-                    .line = 1,
+                    .line = n.parent_line orelse 1,
                     .column = 1,
                     .id = n.id,
                 });
@@ -328,7 +334,7 @@ pub fn validateTopology(
                     .message = try std.fmt.allocPrint(retain, "parent \"{s}\" does not exist", .{p}),
                     .remediation = try retain.dupe(u8, "Create the parent document or fix the parent id"),
                     .source_path = n.source_path,
-                    .line = 1,
+                    .line = n.parent_line orelse 1,
                     .column = 1,
                     .id = n.id,
                 });
@@ -409,7 +415,7 @@ pub fn validateTopology(
                                 .message = try std.fmt.allocPrint(retain, "parent cycle involving {s}", .{path_owned}),
                                 .remediation = try retain.dupe(u8, "Break the cycle by changing or removing a parent link"),
                                 .source_path = nodes[ni].source_path,
-                                .line = 1,
+                                .line = nodes[ni].parent_line orelse 1,
                                 .column = 1,
                                 .id = nodes[ni].id,
                             });
@@ -678,6 +684,64 @@ test "validateTopology two-node cycle" {
     try expectCodeCount(diags.items, .EPARENTCYCLE, 2); // one per cycle participant
 }
 
+test "validateTopology parent diagnostics point at the field line (#1021)" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    var nodes = [_]Node{
+        .{ .id = "a", .source_path = "a.md", .parent = "missing", .parent_line = 7 },
+        .{ .id = "b", .source_path = "b.md", .parent = "b", .parent_line = 3 },
+        // No authored locus: diagnostics fall back to 1:1.
+        .{ .id = "c", .source_path = "c.md", .parent = "also-missing" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try validateTopology(gpa, retain, &nodes, &diags);
+
+    for (diags.items) |d| {
+        if (d.code == .EPARENTMISSING and std.mem.eql(u8, d.source_path, "a.md")) {
+            try std.testing.expectEqual(@as(?u32, 7), d.line);
+            try std.testing.expectEqual(@as(?u32, 1), d.column);
+        } else if (d.code == .EPARENTSELF) {
+            try std.testing.expectEqualStrings("b.md", d.source_path);
+            try std.testing.expectEqual(@as(?u32, 3), d.line);
+        } else if (d.code == .EPARENTMISSING and std.mem.eql(u8, d.source_path, "c.md")) {
+            try std.testing.expectEqual(@as(?u32, 1), d.line);
+        }
+    }
+}
+
+test "validateTopology cycle diagnostics use each participant's parent line (#1021)" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    var nodes = [_]Node{
+        .{ .id = "a", .source_path = "a.md", .parent = "b", .parent_line = 2 },
+        .{ .id = "b", .source_path = "b.md", .parent = "a", .parent_line = 5 },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try validateTopology(gpa, retain, &nodes, &diags);
+
+    var saw_a = false;
+    var saw_b = false;
+    for (diags.items) |d| {
+        if (d.code != .EPARENTCYCLE) continue;
+        if (std.mem.eql(u8, d.source_path, "a.md")) {
+            saw_a = true;
+            try std.testing.expectEqual(@as(?u32, 2), d.line);
+        } else if (std.mem.eql(u8, d.source_path, "b.md")) {
+            saw_b = true;
+            try std.testing.expectEqual(@as(?u32, 5), d.line);
+        }
+    }
+    try std.testing.expect(saw_a and saw_b);
+}
+
 test "validateTopology longer cycle (3 nodes)" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
@@ -772,6 +836,33 @@ test "validateSemanticRelations preserves diagnostic order and text" {
     try std.testing.expectEqualStrings("semantic relation depends_on targets missing page \"missing\"", diags.items[1].message);
     try std.testing.expectEqual(diag.Code.ERELATIONDUPLICATE, diags.items[2].code);
     try std.testing.expectEqualStrings("duplicate semantic relation supersedes -> \"target\"", diags.items[2].message);
+}
+
+test "validateSemanticRelations points diagnostics at the relations field line (#1021)" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    const source_relations = [_]page_mod.SemanticRelation{
+        .{ .kind = .{ .value = "relates_to" }, .target = "source" },
+        .{ .kind = .{ .value = "depends_on" }, .target = "missing" },
+    };
+    var nodes = [_]Node{
+        .{ .id = "source", .source_path = "source.md", .semantic_relations = &source_relations, .relations_line = 9 },
+        .{ .id = "target", .source_path = "target.md" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    try validateSemanticRelations(gpa, retain, &nodes, &diags);
+    try expectCodeCount(diags.items, .ERELATIONSELF, 1);
+    try expectCodeCount(diags.items, .ERELATIONMISSING, 1);
+    for (diags.items) |d| {
+        try std.testing.expectEqualStrings("source.md", d.source_path);
+        try std.testing.expectEqual(@as(?u32, 9), d.line);
+        try std.testing.expectEqual(@as(?u32, 1), d.column);
+    }
 }
 
 test "validateSemanticRelations handles a relation-dense page set" {
