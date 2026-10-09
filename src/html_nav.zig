@@ -224,6 +224,42 @@ pub fn renderChildrenProfile(
     return try buf.toOwnedSlice(allocator);
 }
 
+/// Direct parent link for `{{parent}}` (#1007): resolved title-or-id label
+/// and page-relative href from the frozen graph. Trunks emit the empty
+/// fragment. A draft parent still emits — `{{breadcrumb}}` already links it,
+/// and #738's no-advertise rule covers `{{nav}}` / `{{children}}` only.
+pub fn renderParent(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    current_index: u32,
+    current_output_path: []const u8,
+) ![]u8 {
+    return renderParentProfile(allocator, nodes, current_index, current_output_path, false);
+}
+
+pub fn renderParentProfile(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    current_index: u32,
+    current_output_path: []const u8,
+    strict: bool,
+) ![]u8 {
+    const parent_index = nodes[current_index].parent_index orelse return "";
+    const parent = nodes[parent_index];
+    const out_path = try outputPathFor(allocator, parent);
+    defer allocator.free(out_path);
+    const href = try identity.relativeHref(allocator, current_output_path, out_path);
+    defer allocator.free(href);
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    try buf.appendSlice(allocator, if (strict) "<div class=\"page-parent\"><a href=\"" else "<nav class=\"page-parent\" aria-label=\"Parent\"><a href=\"");
+    try appendEscaped(&buf, allocator, href);
+    try buf.appendSlice(allocator, "\">");
+    try appendEscaped(&buf, allocator, displayTitle(parent));
+    try buf.appendSlice(allocator, if (strict) "</a></div>" else "</a></nav>");
+    return try buf.toOwnedSlice(allocator);
+}
+
 /// Breadcrumb root → self for `{{breadcrumb}}`.
 pub fn renderBreadcrumb(
     allocator: std.mem.Allocator,
@@ -362,6 +398,50 @@ test "renderChildren is id-sorted, escaped, relative, and empty for satellite" {
 
     const satellite = try renderChildren(gpa, g.nodes, nav, 0, "alpha.html");
     try std.testing.expectEqualStrings("", satellite);
+}
+
+test "renderParent emits direct-parent link only (#1007)" {
+    const gpa = std.testing.allocator;
+    var nodes = [_]graph_mod.Node{
+        .{ .id = "index", .source_path = "index.md", .title = "Home", .parent = null },
+        .{ .id = "log/2026-09", .source_path = "log/2026-09.md", .title = "September & <Notes>", .parent = "index" },
+        .{ .id = "log/2026-09/entry", .source_path = "log/2026-09/entry.md", .title = "Entry", .parent = "log/2026-09" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try graph_mod.validate(gpa, gpa, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
+    const g = try graph_mod.freeze(gpa, &nodes, null);
+    defer gpa.free(g.edges);
+
+    var entry_i: u32 = 0;
+    var trunk_i: u32 = 0;
+    for (g.nodes, 0..) |n, i| {
+        if (std.mem.eql(u8, n.id, "log/2026-09/entry")) entry_i = @intCast(i);
+        if (std.mem.eql(u8, n.id, "index")) trunk_i = @intCast(i);
+    }
+
+    // Satellite links its direct parent (title label, escaped, page-relative
+    // href) — not the whole breadcrumb chain.
+    const html = try renderParent(gpa, g.nodes, entry_i, "log/2026-09/entry.html");
+    defer gpa.free(html);
+    try std.testing.expectEqualStrings(
+        "<nav class=\"page-parent\" aria-label=\"Parent\"><a href=\"../2026-09.html\">September &amp; &lt;Notes&gt;</a></nav>",
+        html,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, html, "Home") == null);
+
+    // Trunk (no parent) emits the empty fragment.
+    const none = try renderParent(gpa, g.nodes, trunk_i, "index.html");
+    try std.testing.expectEqualStrings("", none);
+
+    // Strict profile: div shape, no nav/aria.
+    const strict = try renderParentProfile(gpa, g.nodes, entry_i, "log/2026-09/entry.html", true);
+    defer gpa.free(strict);
+    try std.testing.expectEqualStrings(
+        "<div class=\"page-parent\"><a href=\"../2026-09.html\">September &amp; &lt;Notes&gt;</a></div>",
+        strict,
+    );
 }
 
 test "draft-rooted subtrees are pruned from nav and omitted from children" {
