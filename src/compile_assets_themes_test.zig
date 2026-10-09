@@ -145,10 +145,8 @@ test "issue-1007 hooks: page-status token, tags list, direct-parent link" {
     defer gpa.free(page_html);
     try std.testing.expect(std.mem.indexOf(u8, page_html, "<html data-status=\"draft\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, page_html, "<body class=\"status-draft\">") != null);
-    try std.testing.expect(std.mem.indexOf(u8, page_html,
-        "<ul class=\"page-tags\">\n<li>guides</li>\n<li>onboarding</li>\n</ul>") != null);
-    try std.testing.expect(std.mem.indexOf(u8, page_html,
-        "<nav class=\"page-parent\" aria-label=\"Parent\"><a href=\"../guides.html\">Guides</a></nav>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<ul class=\"page-tags\">\n<li>guides</li>\n<li>onboarding</li>\n</ul>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<nav class=\"page-parent\" aria-label=\"Parent\"><a href=\"../guides.html\">Guides</a></nav>") != null);
     // Frozen metadata bytes are unchanged: raw parent id stays in the <dl>.
     try std.testing.expect(std.mem.indexOf(u8, page_html, "<dl class=\"page-metadata\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, page_html, "<div><dt>Parent</dt><dd>guides</dd></div>") != null);
@@ -211,8 +209,7 @@ test "issue-1007 hooks under html4_strict profile emit div shapes" {
     const page_html = try readFileAlloc(io, cwd, page_path, gpa);
     defer gpa.free(page_html);
     try std.testing.expect(std.mem.indexOf(u8, page_html, "class=\"status-draft\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, page_html,
-        "<div class=\"page-parent\"><a href=\"../guides.html\">Guides</a></div>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<div class=\"page-parent\"><a href=\"../guides.html\">Guides</a></div>") != null);
     try std.testing.expect(std.mem.indexOf(u8, page_html, "<ul class=\"page-tags\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, page_html, "<nav") == null);
 }
