@@ -4627,16 +4627,16 @@ test "targetFailureLocus: every usage-class error maps off the layout fallback" 
     };
     var buf: [1024]u8 = undefined;
     const usage_errors = [_]anyerror{
-        error.NoTargetsSpecified,              error.InvalidTargetName,
-        error.DuplicateTargetName,             error.EmptyTargetDirectory,
-        error.TargetOutputCollision,           error.TargetOutputSymlink,
-        error.WorkspaceEscape,                 error.StaticDirMissing,
-        error.StaticDirNotDirectory,           error.StaticSymlink,
-        error.StaticPathUnsafe,                error.StaticPathCollision,
-        error.InvalidSitemapPath,              error.SitemapOutputCollision,
-        error.SitemapSiteUrlRequired,          error.SitemapSiteUrlWithoutOutput,
-        error.AmbiguousSitemapTargets,         error.InvalidSiteUrl,
-        error.InvalidRssPath,                  error.RssOutputCollision,
+        error.NoTargetsSpecified,      error.InvalidTargetName,
+        error.DuplicateTargetName,     error.EmptyTargetDirectory,
+        error.TargetOutputCollision,   error.TargetOutputSymlink,
+        error.WorkspaceEscape,         error.StaticDirMissing,
+        error.StaticDirNotDirectory,   error.StaticSymlink,
+        error.StaticPathUnsafe,        error.StaticPathCollision,
+        error.InvalidSitemapPath,      error.SitemapOutputCollision,
+        error.SitemapSiteUrlRequired,  error.SitemapSiteUrlWithoutOutput,
+        error.AmbiguousSitemapTargets, error.InvalidSiteUrl,
+        error.InvalidRssPath,          error.RssOutputCollision,
     };
     for (usage_errors) |err| {
         const locus = targetFailureLocus(err, plan, options, &buf);
