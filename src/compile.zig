@@ -169,6 +169,8 @@ pub fn freezeSiteFromPageDb(
             .output_path = p.output_path,
             .title = p.title,
             .parent = p.parent,
+            .parent_line = p.parent_line,
+            .relations_line = p.relations_line,
             .status = if (p.status) |s| s.name() else null,
             .tags = p.tags,
             .body_offset = p.body_offset,
@@ -2028,6 +2030,8 @@ fn reportLinkAuditFindings(sink: ?*diag.Collector, findings: []const link_audit.
             else => "does not resolve to a published output [fix the path, or publish the file it names]",
         };
         const remediation = switch (f.code) {
+            .EROUTEESCAPE => "Point the link at a published output, or drop the reference",
+            .EPUBLICATIONLOCATION => "Use a target-relative URL or include the declared publication base path",
             .EFRAGMENTMISSING => "Update the fragment to a rendered id on the target page, or drop it",
             else => "Fix the path, or publish the file it names",
         };
@@ -2562,6 +2566,7 @@ fn preflightHead(
             .severity = .warning,
             .code = .WHEADOGP,
             .message = "HTML 4.01 Strict omits optional OpenGraph and article property tags; canonical, description, Twitter and RSS links remain available",
+            .remediation = "Use the html or xhtml output profile to emit OpenGraph tags",
             .source_path = options.layout_path,
         };
         appendHtmlDiagnostic(&options, d);

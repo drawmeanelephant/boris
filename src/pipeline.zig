@@ -1033,6 +1033,8 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             .id_explicit = p.id_explicit,
             .title = p.title,
             .parent = p.parent,
+            .parent_line = p.parent_line,
+            .relations_line = p.relations_line,
             .status = statusName(p.status),
             .published_at = p.published_at,
             .summary = p.summary,

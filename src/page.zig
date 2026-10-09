@@ -168,6 +168,13 @@ pub const FrontmatterView = struct {
     tag_count: usize = 0,
     relations: [max_relation_count]SemanticRelation = undefined,
     relation_count: usize = 0,
+    /// 1-based source line of the `parent:` field, when authored. Graph
+    /// diagnostics (EPARENTMISSING/SELF/CYCLE) point at this line rather
+    /// than the top of the file (#1021).
+    parent_line: ?u32 = null,
+    /// 1-based source line of the `relations:` field, when authored
+    /// (ERELATION* diagnostics; the whole list is one line by grammar).
+    relations_line: ?u32 = null,
 
     pub fn tagsSlice(self: *const FrontmatterView) []const []const u8 {
         return self.tags[0..self.tag_count];
@@ -299,6 +306,11 @@ pub const DurablePage = struct {
     kind: ContentKind = .md,
     /// Byte offset of body start in the source file (not a live buffer).
     body_offset: usize = 0,
+    /// 1-based source line of the authored `parent:` field, when present.
+    /// Diagnostic locus only; not serialized.
+    parent_line: ?u32 = null,
+    /// 1-based source line of the authored `relations:` field, when present.
+    relations_line: ?u32 = null,
 
     // Graph fields — provisional until freeze; stable after freeze.
     role: Role = .trunk,
@@ -427,6 +439,8 @@ pub const PageDb = struct {
             .recipe = recipe,
             .kind = discovery.kind,
             .body_offset = body_offset,
+            .parent_line = meta.parent_line,
+            .relations_line = meta.relations_line,
             .role = if (meta.parent != null) .satellite else .trunk,
         });
     }
@@ -565,4 +579,36 @@ test "PageDb.promote records frontmatter id override provenance" {
     try std.testing.expectEqualStrings("notes-child", db.items()[0].entity_id);
     try std.testing.expect(db.items()[1].id_explicit);
     try std.testing.expectEqualStrings("pinned", db.items()[1].entity_id);
+}
+
+test "PageDb.promote carries frontmatter field loci (#1021)" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    var db = PageDb.init(gpa, retain);
+    defer db.deinit();
+
+    const discovery: Page = .{
+        .source_path = "child.md",
+        .entity_id = "child",
+        .output_path = "child.html",
+        .kind = .md,
+    };
+    const meta: FrontmatterView = .{
+        .parent = "home",
+        .parent_line = 4,
+        .relations_line = 7,
+    };
+    try db.promote(discovery, "child", false, meta, 64, .{});
+
+    const p = db.items()[0];
+    try std.testing.expectEqual(@as(?u32, 4), p.parent_line);
+    try std.testing.expectEqual(@as(?u32, 7), p.relations_line);
+
+    const bare: FrontmatterView = .{};
+    try db.promote(discovery, "child2", false, bare, 0, .{});
+    try std.testing.expect(db.items()[1].parent_line == null);
+    try std.testing.expect(db.items()[1].relations_line == null);
 }
