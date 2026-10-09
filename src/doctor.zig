@@ -313,76 +313,6 @@ fn pageId(path: []const u8) []const u8 {
     return path;
 }
 
-fn appendCodepoint(out: *std.ArrayList(u8), a: std.mem.Allocator, cp: u32) !void {
-    if (cp <= 0x7f) return out.append(a, @intCast(cp));
-    if (cp <= 0x7ff) {
-        try out.append(a, @intCast(0xc0 | (cp >> 6)));
-        return out.append(a, @intCast(0x80 | (cp & 0x3f)));
-    }
-    if (cp <= 0xffff) {
-        try out.append(a, @intCast(0xe0 | (cp >> 12)));
-        try out.append(a, @intCast(0x80 | ((cp >> 6) & 0x3f)));
-        return out.append(a, @intCast(0x80 | (cp & 0x3f)));
-    }
-    if (cp <= 0x10ffff) {
-        try out.append(a, @intCast(0xf0 | (cp >> 18)));
-        try out.append(a, @intCast(0x80 | ((cp >> 12) & 0x3f)));
-        try out.append(a, @intCast(0x80 | ((cp >> 6) & 0x3f)));
-        return out.append(a, @intCast(0x80 | (cp & 0x3f)));
-    }
-}
-
-fn appendEntity(
-    out: *std.ArrayList(u8),
-    a: std.mem.Allocator,
-    entity: []const u8,
-) !bool {
-    const pairs = .{
-        .{ "amp", '&' },
-        .{ "lt", '<' },
-        .{ "gt", '>' },
-        .{ "quot", '"' },
-        .{ "apos", '\'' },
-        .{ "nbsp", ' ' },
-    };
-    inline for (pairs) |pair| {
-        if (std.mem.eql(u8, entity, pair[0])) {
-            try out.append(a, pair[1]);
-            return true;
-        }
-    }
-    if (entity.len > 1 and entity[0] == '#') {
-        var base: u8 = 10;
-        var digits = entity[1..];
-        if (digits.len > 1 and (digits[0] == 'x' or digits[0] == 'X')) {
-            base = 16;
-            digits = digits[1..];
-        }
-        const cp = std.fmt.parseInt(u32, digits, base) catch return false;
-        try appendCodepoint(out, a, cp);
-        return true;
-    }
-    return false;
-}
-
-fn decodeEntities(a: std.mem.Allocator, text: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    var i: usize = 0;
-    while (i < text.len) {
-        if (text[i] == '&') {
-            if (std.mem.indexOfScalarPos(u8, text, i + 1, ';')) |semi| {
-                if (try appendEntity(&out, a, text[i + 1 .. semi])) {
-                    i = semi + 1;
-                    continue;
-                }
-            }
-        }
-        try out.append(a, text[i]);
-        i += 1;
-    }
-    return out.toOwnedSlice(a);
-}
-
 const IdOccurrence = struct {
     value: []const u8,
     offset: usize,
@@ -514,7 +444,7 @@ fn scanPage(a: std.mem.Allocator, state: *PageState) !void {
         while (attributes.next()) |attribute| {
             const value = attribute.value orelse continue;
             if (std.ascii.eqlIgnoreCase(attribute.name, "id")) {
-                const decoded = try decodeEntities(a, value);
+                const decoded = try html_scan.decodeEntities(a, value);
                 if (decoded.len != 0) {
                     try state.ids.append(a, .{
                         .value = decoded,
@@ -675,7 +605,7 @@ fn auditReferences(
     if (!state.intended) return;
 
     for (state.references.items) |reference| {
-        const decoded_target = try decodeEntities(builder.allocator, reference.target);
+        const decoded_target = try html_scan.decodeEntities(builder.allocator, reference.target);
         if (route_resolver.isExternalOrEmpty(decoded_target)) continue;
         if (isLiteralMarkdownTarget(decoded_target)) continue;
         route_resolver.validatePercentEscapes(decoded_target) catch {

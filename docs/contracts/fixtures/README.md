@@ -18,6 +18,12 @@ Feature 9 (heading-target wiki links) lives under:
 | `wiki-heading-fragments/` | Success-shape author examples (`[[id#heading]]`) |
 | `wiki-heading-missing/` | Missing fragment must fail HTML with `EREFERENCEMISSING` |
 
+The published-output fragment audit (#1022) lives under:
+
+| Fixture | Role |
+|---------|------|
+| `link-fragments/` | Live, stale, same-document, non-heading, and external `#fragment` references; `EFRAGMENTMISSING` warns without failing build/validate |
+
 Layout selection (`--layout-rule`) lives under:
 
 | Fixture | Role |

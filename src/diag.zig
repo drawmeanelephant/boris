@@ -74,8 +74,9 @@ pub const Code = enum {
     /// A rendered publication URL does not belong to the declared public
     /// origin/base-path, or a project-site root-relative route omits it.
     EPUBLICATIONLOCATION,
-    /// Reserved: published reference resolves but its `#fragment` is not an id
-    /// on the target page. Not yet emitted; see `link_audit.zig`.
+    /// Published local reference resolves, but its `#fragment` matches no
+    /// rendered `id` on the target page. Emitted as a warning by
+    /// `link_audit.zig`; it never changes exit behavior.
     EFRAGMENTMISSING,
     /// A selected Nostr article is not publishable: wrong source dialect,
     /// draft, path-derived entity id, or missing required metadata.

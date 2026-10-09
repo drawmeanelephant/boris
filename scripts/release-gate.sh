@@ -413,6 +413,34 @@ else
   printf '%s\n' "${F9_ERR}" | head -20
 fi
 
+# --- 4c1. Published link fragments (EFRAGMENTMISSING, warning) ------------
+note "4c1. Published link fragments (EFRAGMENTMISSING)"
+FRAG_CONTENT="docs/contracts/fixtures/link-fragments/content"
+FRAG_LAYOUT="test/fixtures/html/layouts/main.html"
+FRAG_OUT="${GATE_DIR}/html-link-fragments"
+rm -rf "${FRAG_OUT}"
+set +e
+FRAG_ERR="$("${BORIS}" --input="${FRAG_CONTENT}" --html-layout="${FRAG_LAYOUT}" --html-dir="${FRAG_OUT}" 2>&1)"
+FRAG_EC=$?
+set -e
+# EFRAGMENTMISSING is advisory: the build still commits and exits 0.
+if [[ "${FRAG_EC}" -ne 0 ]]; then
+  fail "link-fragments: expected exit 0 (warning only), got ${FRAG_EC}"
+  printf '%s\n' "${FRAG_ERR}" | head -20
+elif [[ ! -f "${FRAG_OUT}/index.html" ]]; then
+  fail "link-fragments: index.html missing despite exit 0"
+elif grep -q 'EFRAGMENTMISSING' <<<"${FRAG_ERR}" && grep -q 'old-name' <<<"${FRAG_ERR}"; then
+  pass "link-fragments: stale anchor warned, build committed"
+else
+  fail "link-fragments: EFRAGMENTMISSING warning missing"
+  printf '%s\n' "${FRAG_ERR}" | head -20
+fi
+if grep -q 'guide.html#old-name' "${FRAG_OUT}/index.html"; then
+  pass "link-fragments: stale href published verbatim (no rewriting)"
+else
+  fail "link-fragments: stale href was rewritten or dropped"
+fi
+
 # --- 4c2. Layout selection (--layout-rule) --------------------------------
 note "4c2. Layout selection (--layout-rule)"
 LR_ROOT="docs/contracts/fixtures/layout-rules"

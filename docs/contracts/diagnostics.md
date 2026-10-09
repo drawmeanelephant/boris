@@ -109,6 +109,15 @@ it in memory over the assembled page bytes — see
 `EPUBLICATIONLOCATION` fail both compilation and validation with identical
 diagnostics.
 
+`EFRAGMENTMISSING` is emitted by that same shared audit on both surfaces, but
+at **warning** severity: the route resolves, so a dead anchor is an advisory
+on valid-but-rotting output rather than an unservable one. The warning is
+reported and collected without changing the exit status; promotion to error
+later is a deliberate one-line change. The fragment is compared against every
+rendered element `id` on the target page — headings, Aside/Details anchors,
+footnote ids, and authored `id` attributes all count, matching `doctor`'s
+published-HTML fragment check.
+
 The Pages publication slice adds `EPUBLICATIONLOCATION` for the pre-commit
 semantic URL/location gate. It is emitted when a root-relative project-site
 route omits the declared base path, or when a Boris-owned canonical/public URL
@@ -156,7 +165,7 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `EROUTEMISSING` | error | Published local `href`/`src` resolves to no output this build intends to keep | `link_audit` → HTML commit / validate |
 | `EROUTEESCAPE` | error | Published local `href`/`src` climbs above the output root and can never be served | `link_audit` → HTML commit / validate |
 | `EPUBLICATIONLOCATION` | error | A Boris-owned rendered public URL disagrees with the declared publication origin/base path, or a project-site root-relative route omits that base path | `link_audit` → HTML pre-commit gate / validate |
-| `EFRAGMENTMISSING` | reserved | Published local reference resolves, but its `#fragment` is not an id on the target page. Not yet emitted; see [documentation-links.md](documentation-links.md) | — |
+| `EFRAGMENTMISSING` | warning | Published local reference resolves to a rendered `.html` page, but its `#fragment` matches no rendered element `id` on that page; advisory only — never fails build or validate. See [documentation-links.md](documentation-links.md) | `link_audit` → HTML commit / validate |
 | `ENOSTRELIGIBILITY` | error | An allowlisted Nostr article cannot be published as NIP-23: non-Markdown source, `status: draft`, path-derived entity id, a missing title / summary / publication date, an entity id absent from the page graph, or a tag that is not a lowercase `t` topic | `nostr.ineligibility` → `boris nostr plan` |
 | `ENOSTRMARKDOWN` | error | Publication-safe Markdown carries a defect a relay client would show: raw HTML, a hard-wrapped paragraph, a Boris-only component, or an unresolved relative URL/asset | `render.inspectMarkdown` → `boris nostr plan` |
 | `ENOSTRTIME` | error | Plan: the authored UTC `published_at` does not convert to a Unix second count. Sign: `created_at` precedes `published_at`, or a changed intention needs a strictly newer `created_at` than the prior event (NIP-01 tie-break) | `nostr.publishedAtUnix` / `nostr_sign` → `boris nostr plan` / `boris nostr sign` |

@@ -73,8 +73,9 @@ requires that:
 - the first effective `<base href>` is validated against the declared location
   and becomes the resolution base for later relative, query-only,
   fragment-only, and empty-reference URLs; when those latter references use a
-  base that names another document, the audit checks that document route but
-  does not check whether the fragment name exists. The `<base>` element itself
+  base that names another document, the audit checks that document route and,
+  when the route is a rendered `.html` page, its fragment against that page's
+  rendered ids (`EFRAGMENTMISSING`, warning only). The `<base>` element itself
   is context, not an artifact that must exist in the output manifest;
 - recognized document-location metadata is limited to canonical links,
   `og:url`, `twitter:url`, and `meta name="url"`; `itemprop="url"` is not

@@ -133,8 +133,11 @@ same render helper and layout splice) against the intended output set: every
 page plus published content, theme, and sitemap assets. `EROUTEMISSING`,
 `EROUTEESCAPE`, and `EPUBLICATIONLOCATION` therefore fail validation exactly
 as they fail compilation — without a target or stage directory ever appearing.
-The audit's diagnostics are the shared `build`/`validate` diagnostic form,
-emitted by the same reporter.
+The same in-memory audit also emits `EFRAGMENTMISSING` for a reference whose
+route resolves to a rendered page but whose `#fragment` matches no rendered
+element `id` there; that finding is a warning on both surfaces and never
+changes the exit status. The audit's diagnostics are the shared
+`build`/`validate` diagnostic form, emitted by the same reporter.
 
 This is not a temporary-directory build. Validation returns before the first
 target or sibling stage directory is created.
