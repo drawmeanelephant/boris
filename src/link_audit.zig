@@ -1140,10 +1140,8 @@ test "a fragment that matches a rendered id on the target page is clean" {
 
     // Audit order does not matter: the referrer is checked after the target's
     // ids are harvested. Non-heading ids (an Aside anchor here) count too.
-    try auditDocumentWithOptions(gpa, &fa.intended, "index.html",
-        "<a href=\"guide.html#section-one\">ok</a><a href=\"guide.html#n1\">aside</a>", fa.options(), &fa.findings);
-    try auditDocumentWithOptions(gpa, &fa.intended, "guide.html",
-        "<h2 id=\"section-one\">S</h2><aside id=\"n1\"></aside>", fa.options(), &fa.findings);
+    try auditDocumentWithOptions(gpa, &fa.intended, "index.html", "<a href=\"guide.html#section-one\">ok</a><a href=\"guide.html#n1\">aside</a>", fa.options(), &fa.findings);
+    try auditDocumentWithOptions(gpa, &fa.intended, "guide.html", "<h2 id=\"section-one\">S</h2><aside id=\"n1\"></aside>", fa.options(), &fa.findings);
     try fa.check(gpa);
     try std.testing.expectEqual(@as(usize, 0), fa.findings.items.len);
 }
@@ -1158,8 +1156,7 @@ test "a stale or renamed anchor emits EFRAGMENTMISSING as a warning" {
     // The heading was renamed to `current-name`; `old-name` still resolves a
     // route but lands on no rendered id.
     try auditDocumentWithOptions(gpa, &fa.intended, "guide.html", "<h2 id=\"current-name\">C</h2>", fa.options(), &fa.findings);
-    try auditDocumentWithOptions(gpa, &fa.intended, "index.html",
-        "<a href=\"guide.html#old-name\">stale</a><a href=\"guide.html\">page-only</a>", fa.options(), &fa.findings);
+    try auditDocumentWithOptions(gpa, &fa.intended, "index.html", "<a href=\"guide.html#old-name\">stale</a><a href=\"guide.html\">page-only</a>", fa.options(), &fa.findings);
     try fa.check(gpa);
 
     try std.testing.expectEqual(@as(usize, 1), fa.findings.items.len);
@@ -1180,8 +1177,7 @@ test "same-document and percent-encoded fragments are checked like any resolved 
     try fa.intended.put(gpa, "guide.html", {});
 
     try auditDocumentWithOptions(gpa, &fa.intended, "guide.html", "<h2 id=\"caf&#233;\">x</h2>", fa.options(), &fa.findings);
-    try auditDocumentWithOptions(gpa, &fa.intended, "index.html",
-        "<h1 id=\"top\">T</h1>" ++ // live same-document anchor
+    try auditDocumentWithOptions(gpa, &fa.intended, "index.html", "<h1 id=\"top\">T</h1>" ++ // live same-document anchor
         "<a href=\"#top\">ok</a>" ++ // resolves against own ids
         "<a href=\"#gone\">stale</a>" ++ // missing on this document
         "<a href=\"guide.html#caf%C3%A9\">decoded</a>", // percent form of café
@@ -1203,8 +1199,7 @@ test "fragments are not checked on unrouted or non-page references" {
     // page, so it has no harvested id set and its fragments are not verifiable.
     try fa.intended.put(gpa, "static.html", {});
 
-    try auditDocumentWithOptions(gpa, &fa.intended, "index.html",
-        "<a href=\"gone.html#frag\">missing route</a>" ++ // EROUTEMISSING, not EFRAGMENTMISSING
+    try auditDocumentWithOptions(gpa, &fa.intended, "index.html", "<a href=\"gone.html#frag\">missing route</a>" ++ // EROUTEMISSING, not EFRAGMENTMISSING
         "<a href=\"assets/pic.png#frag\">asset</a>" ++ // fragments are page-only
         "<a href=\"static.html#frag\">passthrough</a>" ++ // no id set to check
         "<a href=\"https://example.com/p.html#frag\">external</a>" ++ // out of scope
