@@ -761,7 +761,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                     .severity = .error_,
                     .code = .EIO,
                     .message = try std.fmt.allocPrint(retain, "content root \"{s}\" not found or not a directory", .{options.content_root}),
-                    .remediation = try retain.dupe(u8, "Create the content directory or pass --input=DIR"),
+                    .remediation = try retain.dupe(u8, "Create the content directory, pass --input=DIR, or run boris init for a starter site"),
                 });
                 result.failure = .io;
                 diag.sortDiagnostics(result.diagnostics.items);
@@ -789,7 +789,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                 .severity = .error_,
                 .code = .EIO,
                 .message = try std.fmt.allocPrint(retain, "content root \"{s}\" not found or not a directory", .{options.content_root}),
-                .remediation = try retain.dupe(u8, "Create the content directory or pass --input=DIR"),
+                .remediation = try retain.dupe(u8, "Create the content directory, pass --input=DIR, or run boris init for a starter site"),
             });
             result.failure = .io;
             diag.sortDiagnostics(result.diagnostics.items);

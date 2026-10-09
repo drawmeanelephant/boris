@@ -134,14 +134,35 @@ by this HTML path. See [the profile contract](publication-profile.md#offline-and
 
 ### `init`: deterministic starter scaffold with self-verification
 
-`boris init [DIR]` (default `.`) writes a fixed starter tree — three content
-pages exercising the graph, a closed-slot theme whose layout ships the
-[rendered-search browser client](rendered-search.md), and the two publication
-profiles — into `DIR`, which must not exist or must be empty. The tree is
-byte-deterministic across runs.
+`boris init [DIR] [--type NAME]` (default `.`) writes a fixed starter tree
+into `DIR`, which must not exist or must be empty. `--type` selects one of
+five archetypes; the flag names are exactly the enum values the CLI reports:
+
+- `docs` (default) — the historical Markdown starter: three content pages
+  exercising the graph, a closed-slot theme whose layout ships the
+  [rendered-search browser client](rendered-search.md), and the two
+  publication profiles.
+- `garden` — a flat-ish digital garden: dense wiki links, semantic
+  relations, `{{include}}` composition from `content/includes/`, and a
+  registered `<Aside>` component, under the shipped `ledger` theme.
+- `cookbook` — a Cooklang recipe box (`.cook` pages exercising ingredients,
+  cookware, timers, and sub-recipe references) under `cards`; its profile
+  declares `"input_format": "cook"`.
+- `blog` — dated posts on a parent chain (`published_at` + `summary`)
+  under `cozy`.
+- `textile` — `.textile` pages through the native adapter under `press`;
+  its profile declares `"input_format": "textile"`.
+
+Each archetype ships its own theme (byte-identical to the `themes/` catalog
+copy) and a `boris.json` publication profile that declares its input format
+and theme, so `boris --profile boris.json` builds the materialized tree
+through the normal profile-driven path — the compiler has no per-archetype
+branches. An unknown `--type` is a usage error (exit `2`) that lists the
+valid names. Every tree is byte-deterministic across runs.
 
 After materializing, `init` compiles the fresh tree through the normal HTML
-pipeline into a probe output directory (`DIR/.boris-init-probe`) and removes
+pipeline — in the input format the archetype's profile declares — into a
+probe output directory (`DIR/.boris-init-probe`) and removes
 it again. Exit `0` therefore means "materialized **and** compiled": the
 success report includes the verified page count. Probe paths are resolved
 relative to the process working directory like every other generated output

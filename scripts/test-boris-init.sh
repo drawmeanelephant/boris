@@ -109,5 +109,64 @@ note "init --quiet prints nothing on success"
 [[ -s "$OUT/quiet.stdout" ]] && fail "init --quiet still printed stdout"
 pass "quiet silence honored"
 
-rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
+# --- --type selects a starter archetype -------------------------------------
+note "init --help names every archetype"
+"$ROOT/zig-out/bin/boris" init --help >"$OUT/init-help.stdout" 2>"$OUT/init-help.stderr" \
+    || fail "init --help exited nonzero"
+for t in docs garden cookbook blog textile; do
+    grep -q "$t" "$OUT/init-help.stderr" || fail "init help does not name archetype $t"
+done
+pass "help names docs, garden, cookbook, blog, textile"
+
+note "unknown --type is a usage error"
+if "$ROOT/zig-out/bin/boris" init --type bogus "$OUT/bogus" >"$OUT/bogus.stdout" 2>"$OUT/bogus.stderr"; then
+    fail "init accepted an unknown archetype"
+fi
+grep -q 'unknown init type' "$OUT/bogus.stderr" || fail "unknown-type diagnostic missing"
+grep -q 'docs, garden, cookbook, blog, textile' "$OUT/bogus.stderr" || fail "unknown-type diagnostic did not list archetypes"
+[[ ! -e "$OUT/bogus" ]] || fail "unknown type still wrote a tree"
+pass "unknown archetype refused with the name list"
+
+note "each archetype materializes and compiles through its declared profile"
+for t in garden cookbook blog textile; do
+    "$ROOT/zig-out/bin/boris" init --type "$t" "$OUT/arch-$t" >"$OUT/arch-$t.stdout" 2>"$OUT/arch-$t.stderr" \
+        || fail "init --type $t exited nonzero: $(head -3 "$OUT/arch-$t.stderr")"
+    [[ -f "$OUT/arch-$t/boris.json" ]] || fail "init --type $t wrote no boris.json"
+    [[ ! -d "$OUT/arch-$t/.boris-init-probe" ]] || fail "init --type $t left its compile probe behind"
+    (cd "$OUT/arch-$t" && "$ROOT/zig-out/bin/boris" --profile boris.json --quiet) \
+        >"$OUT/arch-$t-build.stdout" 2>"$OUT/arch-$t-build.stderr" \
+        || fail "archetype $t does not build through its own profile: $(head -3 "$OUT/arch-$t-build.stderr")"
+    [[ -f "$OUT/arch-$t/dist/index.html" ]] || fail "archetype $t profile build wrote no index.html"
+done
+pass "garden, cookbook, blog, textile all init + profile-build"
+
+note "archetype surfaces are honest"
+grep -q '"input_format": "cook"' "$OUT/arch-cookbook/boris.json" \
+    || fail "cookbook profile does not declare input_format: cook"
+grep -q '"input_format": "textile"' "$OUT/arch-textile/boris.json" \
+    || fail "textile profile does not declare input_format: textile"
+find "$OUT/arch-cookbook/content" -name '*.cook' | grep -q . || fail "cookbook wrote no .cook pages"
+find "$OUT/arch-textile/content" -name '*.textile' | grep -q . || fail "textile wrote no .textile pages"
+grep -q 'recipe-scale' "$OUT/arch-cookbook/content/index.cook" \
+    || fail "cookbook index does not point at boris recipe-scale"
+grep -q '{{include ' "$OUT/arch-garden/content/notes/composition.md" \
+    || fail "garden lost its include demo"
+[[ -d "$OUT/arch-garden/content/includes" ]] || fail "garden wrote no includes/ fragments"
+grep -q '<Aside kind=' "$OUT/arch-garden/content/index.md" \
+    || fail "garden lost its registered-component demo"
+(cd "$OUT/arch-cookbook" && "$ROOT/zig-out/bin/boris" recipe-scale --cooklang --id mains/carbonara --servings 4) \
+    >"$OUT/recipe-scale.json" 2>"$OUT/recipe-scale.stderr" \
+    || fail "recipe-scale failed inside the cookbook starter: $(head -3 "$OUT/recipe-scale.stderr")"
+grep -q '"target": 4' "$OUT/recipe-scale.json" || fail "recipe-scale did not scale to 4 servings"
+pass "formats, includes, components, and recipe-scale all exercise their seams"
+
+note "archetype trees are deterministic too"
+"$ROOT/zig-out/bin/boris" init --type=garden "$OUT/arch-garden-b" >"$OUT/garden-b.stdout" 2>"$OUT/garden-b.stderr" \
+    || fail "second garden init failed"
+diff -r "$OUT/arch-garden" "$OUT/arch-garden-b" -x dist >/dev/null \
+    || fail "two garden inits produced different trees"
+pass "byte-identical garden trees (--type=NAME form accepted)"
+
+rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site" \
+    "$OUT/arch-garden" "$OUT/arch-cookbook" "$OUT/arch-blog" "$OUT/arch-textile" "$OUT/arch-garden-b"
 echo "boris-init: all assertions passed"
