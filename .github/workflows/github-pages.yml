@@ -35,7 +35,7 @@ jobs:
       - name: Install Zig
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       # Markdown rendering is Oliver, a pure-Zig library pinned by content
       # hash in build.zig.zon: no CMake, no host tools. jq is used below for
@@ -250,7 +250,7 @@ jobs:
         if: ${{ inputs.audit_deployment == true }}
         uses: drawmeanelephant/zig-zouave@2d8510d62b517fa786279562cf8b1bdcf0c47b9f
         with:
-          version: 0.16.0
+          version: 0.17.0
 
       - name: Download target-local evidence
         if: ${{ inputs.audit_deployment == true }}
