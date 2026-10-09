@@ -48,11 +48,15 @@ severity, code, message, remediation, sourcePath, line, column, id
 | `severity` | string | yes | `error` \| `warning` \| `info` |
 | `code` | string | yes | Stable category, e.g. `EDUPLICATEID` |
 | `message` | string | yes | Human-readable, single line preferred |
-| `remediation` | string | yes | Author guidance; may be empty string |
+| `remediation` | string | yes | Author-facing fix guidance; empty string when no concrete action exists; never a pointer to another output channel (e.g. "see stderr") |
 | `sourcePath` | string \| null | yes | Content-relative path, or null if N/A |
 | `line` | integer \| null | yes | **1-based** line in source file; null if N/A |
 | `column` | integer \| null | yes | **1-based** column (v0.2: **byte offset within line**); null if N/A |
 | `id` | string \| null | yes | Related entity id when known |
+
+`remediation` is populated whenever a concrete author action exists. Codes
+that legitimately carry none today: `ILAYOUTSELECTED` (an informational
+outcome record — nothing is wrong and there is nothing to fix).
 
 ### Text form (stderr)
 
@@ -79,8 +83,8 @@ Examples (actual codes as emitted):
 ```text
 error: EDUPLICATEID: beta.md:1:1: duplicate id "shared" (also alpha.md)
 error: EFRONTMATTER: bad.md:2:1: unknown key "category"
-error: EPARENTMISSING: orphan.md:1:1: parent "nope" does not exist
-error: EPARENTCYCLE: a.md:1:1: parent cycle involving a -> b -> a
+error: EPARENTMISSING: orphan.md:3:1: parent "nope" does not exist
+error: EPARENTCYCLE: a.md:2:1: parent cycle involving a -> b -> a
 ```
 
 Sorting for JSON arrays: by (`sourcePath` empty last in practice via empty
@@ -264,8 +268,9 @@ category but must keep the `code` string stable.
 | Duplicate id | First line of the later file in `sourcePath` order (report both paths in `message`) |
 | Unclosed frontmatter | Line of opening `---` (1:1) or EOF line |
 | Unknown / bad key | Start of that field line |
-| Missing parent | Page source (line/column from validation; v0.2 often `1:1`) |
-| Cycle | Each involved file (`1:1` in v0.2) with full cycle path in message |
+| Missing/self parent | Page source: the `parent:` field line (column `1`); `1:1` only when no authored locus is known |
+| Cycle | Each involved file at its `parent:` field line (when known) with the full cycle path in `message` |
+| Semantic relation (missing/self/duplicate) | Page source: the `relations:` field line (column `1`) when authored |
 | Encoding | `1:1` of the file |
 | Invalid path/id | The offending path or the `id:` field line |
 

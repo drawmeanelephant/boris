@@ -25,7 +25,10 @@ boris impact guides/reference --input docs/contracts/fixtures/documentation-inte
 
 The corresponding JSON and human-output goldens, including source-endpoint
 impact, are committed beside this README. The `edge-cases/` trees cover empty
-and single-page inputs. The integration test also verifies that analysis does
+and single-page inputs plus `flat/`, a multi-page corpus with no `parent`,
+`include`, or `reference` edges that exercises every advisory finding
+(`flat_graph`, `unlinked_page`, `zero_includes`, `zero_relations`) and each
+`--fail-on-*` opt-in. The integration test also verifies that analysis does
 not create build artifacts or publish a report after invalid input.
 
 The same frozen graph is rendered by `boris graph`, with both outputs pinned

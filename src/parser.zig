@@ -168,6 +168,15 @@ fn fail(category: Category, line: u32, column: u32, message: []const u8) ParseRe
     };
 }
 
+/// Hard-stop diagnostic carrying a concrete author-facing fix (issue #1021
+/// remediation audit). Callers still fall back to a generic remediation when
+/// `remediation` is empty.
+fn failRem(category: Category, line: u32, column: u32, message: []const u8, remediation: []const u8) ParseResult {
+    var r = fail(category, line, column, message);
+    r.diagnostic.?.remediation = remediation;
+    return r;
+}
+
 fn utf8BomAtStart(source: []const u8) bool {
     return source.len >= 3 and source[0] == 0xEF and source[1] == 0xBB and source[2] == 0xBF;
 }
@@ -317,13 +326,13 @@ pub fn parse(source: []const u8) ParseResult {
 
     // --- bounds / encoding gate -------------------------------------------
     if (source.len > max_source_bytes) {
-        return fail(.EFRONTMATTER, 1, 1, "source exceeds maximum accepted size");
+        return failRem(.EFRONTMATTER, 1, 1, "source exceeds maximum accepted size", "Reduce the file below the maximum source size");
     }
     if (utf8BomAtStart(source)) {
-        return fail(.EINVALIDUTF8, 1, 1, "UTF-8 BOM is not allowed");
+        return failRem(.EINVALIDUTF8, 1, 1, "UTF-8 BOM is not allowed", "Remove the byte-order mark and save the file as UTF-8");
     }
     if (source.len > 0 and !std.unicode.utf8ValidateSlice(source)) {
-        return fail(.EINVALIDUTF8, 1, 1, "source is not valid UTF-8");
+        return failRem(.EINVALIDUTF8, 1, 1, "source is not valid UTF-8", "Re-encode the file as UTF-8");
     }
 
     // Well-formed UTF-8 is not the same as reviewable UTF-8. Invisible code
@@ -364,7 +373,7 @@ pub fn parse(source: []const u8) ParseResult {
 
     // Opening fence present. A file that is only `---` (no newline) is unclosed.
     if (!first[2]) {
-        return fail(.EFRONTMATTER, 1, 1, "unclosed frontmatter: missing closing ---");
+        return failRem(.EFRONTMATTER, 1, 1, "unclosed frontmatter: missing closing ---", "Add a closing --- line after the last field");
     }
 
     doc.has_frontmatter = true;
@@ -391,12 +400,12 @@ pub fn parse(source: []const u8) ParseResult {
     }
 
     if (close_line_start == null) {
-        return fail(.EFRONTMATTER, 1, 1, "unclosed frontmatter: missing closing ---");
+        return failRem(.EFRONTMATTER, 1, 1, "unclosed frontmatter: missing closing ---", "Add a closing --- line after the last field");
     }
 
     const fm_block = source[fm_content_start..close_line_start.?];
     if (fm_block.len > max_frontmatter_bytes) {
-        return fail(.EFRONTMATTER, 1, 1, "frontmatter exceeds maximum size");
+        return failRem(.EFRONTMATTER, 1, 1, "frontmatter exceeds maximum size", "Reduce the frontmatter block below the maximum size");
     }
 
     // Body is everything after the closing fence line (including its newline).
@@ -431,21 +440,21 @@ pub fn parse(source: []const u8) ParseResult {
 
         // Nested mapping / indent form.
         if (raw_line[0] == ' ' or raw_line[0] == '\t') {
-            return fail(.EFRONTMATTER, line_no, 1, "indented frontmatter lines are not supported (no nested mappings)");
+            return failRem(.EFRONTMATTER, line_no, 1, "indented frontmatter lines are not supported (no nested mappings)", "Write each field as a top-level key: value line with no leading indent");
         }
 
         // YAML sequence item form.
         if (raw_line.len >= 2 and raw_line[0] == '-' and (raw_line[1] == ' ' or raw_line[1] == '\t')) {
-            return fail(.EFRONTMATTER, line_no, 1, "YAML sequences are not supported in frontmatter");
+            return failRem(.EFRONTMATTER, line_no, 1, "YAML sequences are not supported in frontmatter", "Write list values inline, e.g. tags: [a, b]");
         }
 
         // Anchors / aliases as whole-line forms.
         if (raw_line[0] == '&' or raw_line[0] == '*') {
-            return fail(.EFRONTMATTER, line_no, 1, "YAML anchors and aliases are not supported");
+            return failRem(.EFRONTMATTER, line_no, 1, "YAML anchors and aliases are not supported", "Write a literal value; anchors and aliases are not supported");
         }
 
         const colon = std.mem.indexOfScalar(u8, raw_line, ':') orelse {
-            return fail(.EFRONTMATTER, line_no, 1, "malformed frontmatter line (expected key: value)");
+            return failRem(.EFRONTMATTER, line_no, 1, "malformed frontmatter line (expected key: value)", "Write the line as key: value");
         };
 
         const key = trimAscii(raw_line[0..colon]);
@@ -453,25 +462,25 @@ pub fn parse(source: []const u8) ParseResult {
         const col = keyColumnInLine(raw_line, key);
 
         if (key.len == 0) {
-            return fail(.EFRONTMATTER, line_no, 1, "empty frontmatter key");
+            return failRem(.EFRONTMATTER, line_no, 1, "empty frontmatter key", "Name the field before the colon");
         }
 
         field_count += 1;
         if (field_count > max_frontmatter_fields) {
-            return fail(.EFRONTMATTER, line_no, col, "frontmatter exceeds maximum field count");
+            return failRem(.EFRONTMATTER, line_no, col, "frontmatter exceeds maximum field count", "Reduce the number of frontmatter fields");
         }
 
         // `tags` is the only deliberately supported non-scalar form.
         if (std.mem.eql(u8, key, "tags")) {
             if (saw_tags) {
-                return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"tags\"");
+                return failRem(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"tags\"", "Keep each frontmatter key at most once");
             }
             saw_tags = true;
             const n = parseTagsList(raw_val, &doc.meta.tags) catch |err| {
                 return switch (err) {
-                    error.TooManyTags => fail(.EFRONTMATTER, line_no, col, "tags exceeds maximum tag count"),
-                    error.TagTooLong => fail(.EFRONTMATTER, line_no, col, "tag exceeds maximum length"),
-                    error.BadTags => fail(.EFRONTMATTER, line_no, col, "tags must be a simple list like [a, b] with plain or double-quoted items"),
+                    error.TooManyTags => failRem(.EFRONTMATTER, line_no, col, "tags exceeds maximum tag count", "Reduce the tag list"),
+                    error.TagTooLong => failRem(.EFRONTMATTER, line_no, col, "tag exceeds maximum length", "Shorten the tag"),
+                    error.BadTags => failRem(.EFRONTMATTER, line_no, col, "tags must be a simple list like [a, b] with plain or double-quoted items", "Use the form tags: [a, b]"),
                 };
             };
             doc.meta.tag_count = n;
@@ -482,14 +491,15 @@ pub fn parse(source: []const u8) ParseResult {
         }
 
         if (std.mem.eql(u8, key, "relations")) {
-            if (saw_relations) return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"relations\"");
+            if (saw_relations) return failRem(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"relations\"", "Keep each frontmatter key at most once");
             saw_relations = true;
+            doc.meta.relations_line = line_no;
             doc.meta.relation_count = parseRelationsList(raw_val, &doc.meta.relations) catch |err| return switch (err) {
-                error.TooManyRelations => fail(.EFRONTMATTER, line_no, col, "relations exceeds maximum relation count"),
-                error.DuplicateRelation => fail(.EFRONTMATTER, line_no, col, "relations contains a duplicate tuple"),
-                error.UnknownKind => fail(.EFRONTMATTER, line_no, col, "relations contains an unknown relation kind"),
-                error.InvalidTarget => fail(.EINVALIDPATH, line_no, col, "relation target is not a valid entity id"),
-                error.BadRelations => fail(.EFRONTMATTER, line_no, col, "relations must be a list like [supersedes=guides/old]"),
+                error.TooManyRelations => failRem(.EFRONTMATTER, line_no, col, "relations exceeds maximum relation count", "Reduce the relation list"),
+                error.DuplicateRelation => failRem(.EFRONTMATTER, line_no, col, "relations contains a duplicate tuple", "Keep each kind=target pair only once"),
+                error.UnknownKind => failRem(.EFRONTMATTER, line_no, col, "relations contains an unknown relation kind", "Use a declared relation kind such as supersedes or depends_on"),
+                error.InvalidTarget => failRem(.EINVALIDPATH, line_no, col, "relation target is not a valid entity id", "Use a canonical entity id as the relation target"),
+                error.BadRelations => failRem(.EFRONTMATTER, line_no, col, "relations must be a list like [supersedes=guides/old]", "Use the form relations: [kind=target, ...]"),
             };
             line_no += 1;
             if (!pl[2]) break;
@@ -499,83 +509,84 @@ pub fn parse(source: []const u8) ParseResult {
 
         const value = parseScalarValue(raw_val) catch |err| {
             return switch (err) {
-                error.EmptyValue => fail(.EFRONTMATTER, line_no, col, "frontmatter value must be a non-empty plain or double-quoted string"),
-                error.SingleQuote => fail(.EFRONTMATTER, line_no, col, "single-quoted values are not supported; use plain text or double quotes"),
-                error.BadQuote => fail(.EFRONTMATTER, line_no, col, "malformed double-quoted string (no escapes; no embedded raw quotes)"),
-                error.BlockScalar => fail(.EFRONTMATTER, line_no, col, "YAML block scalars (| and >) are not supported"),
-                error.FlowCollection => fail(.EFRONTMATTER, line_no, col, "YAML flow sequences/mappings ([ ] { }) are not supported on this key"),
-                error.AnchorAlias => fail(.EFRONTMATTER, line_no, col, "YAML anchors and aliases are not supported"),
+                error.EmptyValue => failRem(.EFRONTMATTER, line_no, col, "frontmatter value must be a non-empty plain or double-quoted string", "Give the field a non-empty plain or double-quoted value"),
+                error.SingleQuote => failRem(.EFRONTMATTER, line_no, col, "single-quoted values are not supported; use plain text or double quotes", "Use a plain or double-quoted value"),
+                error.BadQuote => failRem(.EFRONTMATTER, line_no, col, "malformed double-quoted string (no escapes; no embedded raw quotes)", "Close the double quote and remove embedded raw quotes"),
+                error.BlockScalar => failRem(.EFRONTMATTER, line_no, col, "YAML block scalars (| and >) are not supported", "Use a single-line value"),
+                error.FlowCollection => failRem(.EFRONTMATTER, line_no, col, "YAML flow sequences/mappings ([ ] { }) are not supported on this key", "Use a single-line value; only tags and relations accept lists"),
+                error.AnchorAlias => failRem(.EFRONTMATTER, line_no, col, "YAML anchors and aliases are not supported", "Write a literal value; anchors and aliases are not supported"),
             };
         };
 
         if (std.mem.eql(u8, key, "title")) {
             if (saw_title) {
-                return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"title\"");
+                return failRem(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"title\"", "Keep each frontmatter key at most once");
             }
             saw_title = true;
             if (value.len > max_title_bytes) {
-                return fail(.EFRONTMATTER, line_no, col, "title exceeds maximum length");
+                return failRem(.EFRONTMATTER, line_no, col, "title exceeds maximum length", "Shorten the title");
             }
             doc.meta.title = value;
         } else if (std.mem.eql(u8, key, "id")) {
             if (saw_id) {
-                return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"id\"");
+                return failRem(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"id\"", "Keep each frontmatter key at most once");
             }
             saw_id = true;
             if (value.len > max_entity_id_bytes) {
-                return fail(.EFRONTMATTER, line_no, col, "id exceeds maximum length");
+                return failRem(.EFRONTMATTER, line_no, col, "id exceeds maximum length", "Shorten the id");
             }
             if (!identity.validateEntityId(value)) {
-                return fail(.EINVALIDPATH, line_no, col, "id is not a valid canonical entity id");
+                return failRem(.EINVALIDPATH, line_no, col, "id is not a valid canonical entity id", "Use a canonical entity id (relative /-separated segments, no '..' or spaces)");
             }
             doc.meta.id = value;
         } else if (std.mem.eql(u8, key, "parent")) {
             if (saw_parent) {
-                return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"parent\"");
+                return failRem(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"parent\"", "Keep each frontmatter key at most once");
             }
             saw_parent = true;
             if (value.len > max_entity_id_bytes) {
-                return fail(.EFRONTMATTER, line_no, col, "parent exceeds maximum length");
+                return failRem(.EFRONTMATTER, line_no, col, "parent exceeds maximum length", "Shorten the parent id");
             }
             if (!identity.validateEntityId(value)) {
-                return fail(.EFRONTMATTER, line_no, col, "parent is not a valid canonical entity id");
+                return failRem(.EFRONTMATTER, line_no, col, "parent is not a valid canonical entity id", "Use a canonical entity id for parent");
             }
             doc.meta.parent = value;
+            doc.meta.parent_line = line_no;
         } else if (std.mem.eql(u8, key, "status")) {
             if (saw_status) {
-                return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"status\"");
+                return failRem(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"status\"", "Keep each frontmatter key at most once");
             }
             saw_status = true;
             if (Status.parse(value)) |st| {
                 doc.meta.status = st;
             } else {
-                return fail(.EFRONTMATTER, line_no, col, "status must be draft, published, or archived");
+                return failRem(.EFRONTMATTER, line_no, col, "status must be draft, published, or archived", "Use draft, published, or archived");
             }
         } else if (std.mem.eql(u8, key, "published_at")) {
-            if (saw_published_at) return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"published_at\"");
+            if (saw_published_at) return failRem(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"published_at\"", "Keep each frontmatter key at most once");
             saw_published_at = true;
-            _ = rss_date.parse(value) catch return fail(.EFRONTMATTER, line_no, col, "published_at must be exactly YYYY-MM-DDTHH:MM:SSZ with a valid UTC calendar date");
+            _ = rss_date.parse(value) catch return failRem(.EFRONTMATTER, line_no, col, "published_at must be exactly YYYY-MM-DDTHH:MM:SSZ with a valid UTC calendar date", "Use the exact form YYYY-MM-DDTHH:MM:SSZ");
             doc.meta.published_at = value;
         } else if (std.mem.eql(u8, key, "summary")) {
-            if (saw_summary) return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"summary\"");
+            if (saw_summary) return failRem(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"summary\"", "Keep each frontmatter key at most once");
             saw_summary = true;
-            if (value.len > max_summary_bytes) return fail(.EFRONTMATTER, line_no, col, "summary exceeds maximum length");
+            if (value.len > max_summary_bytes) return failRem(.EFRONTMATTER, line_no, col, "summary exceeds maximum length", "Shorten the summary");
             doc.meta.summary = value;
         } else if (page_mod.isServingsKey(key)) {
             if (saw_servings) {
-                return fail(.EFRONTMATTER, line_no, col, "duplicate servings field (servings, serves, and yield are the same key)");
+                return failRem(.EFRONTMATTER, line_no, col, "duplicate servings field (servings, serves, and yield are the same key)", "Keep only one of servings, serves, or yield");
             }
             saw_servings = true;
             if (value.len > page_mod.max_servings_bytes) {
-                return fail(.EFRONTMATTER, line_no, col, "servings exceeds maximum length");
+                return failRem(.EFRONTMATTER, line_no, col, "servings exceeds maximum length", "Shorten the servings value");
             }
             const count = page_mod.parseServingsValue(value) catch {
-                return fail(.EFRONTMATTER, line_no, col, "servings must be a positive integer, optionally followed by a space and units");
+                return failRem(.EFRONTMATTER, line_no, col, "servings must be a positive integer, optionally followed by a space and units", "Use a positive integer, optionally followed by units, like servings: 4");
             };
             doc.meta.servings = .{ .count = count, .authored = value };
         } else {
             // Closed key set — including legacy parentEntry / parent_entry.
-            return fail(.EFRONTMATTER, line_no, col, "unsupported frontmatter key");
+            return failRem(.EFRONTMATTER, line_no, col, "unsupported frontmatter key", "Use only the supported keys: id, title, parent, status, tags, relations, published_at, summary, servings");
         }
 
         line_no += 1;
@@ -584,7 +595,7 @@ pub fn parse(source: []const u8) ParseResult {
     }
 
     if (doc.meta.published_at != null and doc.meta.summary == null) {
-        return fail(.EFRONTMATTER, line_no, 1, "published_at requires a non-empty summary");
+        return failRem(.EFRONTMATTER, line_no, 1, "published_at requires a non-empty summary", "Add a summary field or remove published_at");
     }
 
     return .{ .doc = doc };
@@ -697,6 +708,68 @@ test "parse: bounded semantic relations" {
     try std.testing.expectEqualStrings("supersedes", r.doc.meta.relationsSlice()[0].kind.name());
     try std.testing.expectEqualStrings("guides/cache-v1", r.doc.meta.relationsSlice()[0].target);
     try std.testing.expectEqualStrings("depends_on", r.doc.meta.relationsSlice()[1].kind.name());
+}
+
+test "parse: parent and relations field loci are captured (#1021)" {
+    const src =
+        \\---
+        \\title: Locus
+        \\parent: home
+        \\relations: [supersedes=guides/old]
+        \\---
+        \\body
+        \\
+    ;
+    const r = parse(src);
+    try std.testing.expect(r.isOk());
+    try std.testing.expectEqual(@as(?u32, 3), r.doc.meta.parent_line);
+    try std.testing.expectEqual(@as(?u32, 4), r.doc.meta.relations_line);
+
+    const bare = parse("# no frontmatter\n");
+    try std.testing.expect(bare.isOk());
+    try std.testing.expect(bare.doc.meta.parent_line == null);
+    try std.testing.expect(bare.doc.meta.relations_line == null);
+}
+
+test "parse: frontmatter diagnostics carry concrete remediation (#1021)" {
+    const cases = [_]struct {
+        src: []const u8,
+        category: Category,
+        remediation: []const u8,
+    }{
+        .{
+            .src = "---\ncategory: unknown\n---\n# Bad\n",
+            .category = .EFRONTMATTER,
+            .remediation = "Use only the supported keys: id, title, parent, status, tags, relations, published_at, summary, servings",
+        },
+        .{
+            .src = "---\nparent: !!bad id!!\n---\n",
+            .category = .EFRONTMATTER,
+            .remediation = "Use a canonical entity id for parent",
+        },
+        .{
+            .src = "---\npublished_at: 2026-07-28T14:30:00Z\n---\n",
+            .category = .EFRONTMATTER,
+            .remediation = "Add a summary field or remove published_at",
+        },
+        .{
+            .src = "---\ntitle: A\n",
+            .category = .EFRONTMATTER,
+            .remediation = "Add a closing --- line after the last field",
+        },
+    };
+    for (cases) |c| {
+        const r = parse(c.src);
+        try std.testing.expect(!r.isOk());
+        const d = r.diagnostic.?;
+        try std.testing.expectEqual(c.category, d.category);
+        try std.testing.expectEqualStrings(c.remediation, d.remediation);
+    }
+
+    const bom = parse("\xef\xbb\xbf# hi\n");
+    try std.testing.expect(!bom.isOk());
+    try std.testing.expectEqual(Category.EINVALIDUTF8, bom.diagnostic.?.category);
+    try std.testing.expectEqualStrings("Remove the byte-order mark and save the file as UTF-8", bom.diagnostic.?.remediation);
 }
 
 test "parse: semantic relation malformed, unknown, duplicate, and invalid target" {

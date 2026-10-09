@@ -105,8 +105,12 @@ fn isSearchExcludeMarker(name: []const u8, txt: []const u8) bool {
         hasAttr(txt, "data-boris-noindex") or
         // The frozen metadata fragment cannot carry the search marker on
         // HTML 4.01 Strict layouts, so identify this compiler-owned chrome by
-        // its stable class as well.
-        (std.ascii.eqlIgnoreCase(name, "dl") and hasClass(txt, "page-metadata"));
+        // its stable class as well. Same rule for the `{{tags}}` list (#1007)
+        // and the Strict `{{parent}}` shape (non-Strict emits `<nav>`, which
+        // isAlwaysExcludedName already covers).
+        (std.ascii.eqlIgnoreCase(name, "dl") and hasClass(txt, "page-metadata")) or
+        (std.ascii.eqlIgnoreCase(name, "ul") and hasClass(txt, "page-tags")) or
+        (std.ascii.eqlIgnoreCase(name, "div") and hasClass(txt, "page-parent"));
 }
 
 fn isHidden(txt: []const u8) bool {
@@ -774,6 +778,27 @@ test "compiler metadata is excluded without hiding authored definition lists" {
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expectEqual(@as(usize, 1), d.sections.len);
     try std.testing.expectEqualStrings("Status published", d.sections[0].text);
+}
+
+test "compiler tag list and strict parent chrome are excluded (#1007)" {
+    // `{{tags}}` emits `ul.page-tags` in both profiles; Strict `{{parent}}`
+    // emits `div.page-parent` (non-Strict `nav` is already always-excluded).
+    // Tag chips and parent labels are chrome, not searchable content — same
+    // rule as `dl.page-metadata` so metadata snippets stay out of the index.
+    const html =
+        \\<main data-boris-search-root>
+        \\<ul class="page-tags"><li>guides</li><li>onboarding</li></ul>
+        \\<div class="page-parent"><a href="../guides.html">Guides Label</a></div>
+        \\<h1>Body</h1><p>Searchable prose.</p><ul><li>authored list</li></ul></main>
+    ;
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Searchable prose") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "authored list") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "onboarding") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Guides Label") == null);
 }
 
 test "title fallback and heading fragments decode entities" {

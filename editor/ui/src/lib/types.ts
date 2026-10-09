@@ -152,7 +152,7 @@ export type Problem = {
 
 export type AnalysisFinding = {
   code: string;
-  endpoint_type: 'page' | 'source';
+  endpoint_type: 'page' | 'source' | 'graph';
   value: string;
   count: number;
   source_path: string | null;

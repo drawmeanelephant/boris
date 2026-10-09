@@ -109,9 +109,12 @@ are treated as layout chrome and skipped. Navigation, footer,
 executable/non-visible elements, and regions marked
 `data-boris-search-exclude`, `data-boris-search-ignore`, or `data-boris-noindex`
 are never indexed. Nested markup inside an excluded region does not re-enter
-the index. The compiler-emitted `<dl class="page-metadata">` block is also
-excluded as layout chrome, including on HTML 4.01 Strict layouts that cannot
-use the `data-boris-search-exclude` attribute.
+the index. The compiler-emitted `<dl class="page-metadata">` block and the
+`{{tags}}` `<ul class="page-tags">` list are also excluded as layout chrome,
+including on HTML 4.01 Strict layouts that cannot use the
+`data-boris-search-exclude` attribute; the Strict `{{parent}}` shape
+(`<div class="page-parent">`) is excluded the same way, while the default
+`<nav class="page-parent">` is already navigation chrome.
 
 Rendered entities (`amp`, `lt`, `gt`, `quot`, `apos`, `nbsp`, and numeric
 character references) are decoded before title, heading, fragment, text, or

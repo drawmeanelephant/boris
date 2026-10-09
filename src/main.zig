@@ -2489,13 +2489,30 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
         std.debug.print("{s}", .{rendered});
     }
 
-    // `check` is CI-useful by default: unreferenced pages are findings.
-    // Unreferenced pages are ordinary findings by default; the check-only flag
-    // opts into treating them as a content failure.
-    if (opts.command == .check and opts.fail_on_unreferenced and report.summary.unreferenced_pages > 0) {
+    // `check` is CI-useful by default: findings are informational unless a
+    // check-only `--fail-on-*` flag opts into treating its finding class as a
+    // content failure (#1023). The report bytes never depend on policy.
+    if (opts.command == .check and checkPolicyFailed(opts, report.findings.items)) {
         return .content_error;
     }
     return .success;
+}
+
+/// Map each opted-in `--fail-on-*` flag to its finding class; absent flags
+/// leave every finding informational.
+fn checkPolicyFailed(opts: Options, findings: []const intelligence.Finding) bool {
+    for (findings) |finding| {
+        const fatal = switch (finding.code) {
+            .unreferenced_page => opts.fail_on_unreferenced,
+            .unlinked_page => opts.fail_on_unlinked,
+            .flat_graph => opts.fail_on_flat_graph,
+            .zero_includes => opts.fail_on_zero_includes,
+            .zero_relations => opts.fail_on_zero_relations,
+            .fan_in_hotspot => false,
+        };
+        if (fatal) return true;
+    }
+    return false;
 }
 
 /// Map normalized profile intent onto the existing HTML coordinator. Reject
@@ -2730,7 +2747,10 @@ fn appendEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror, code: Exi
             .severity = .error_,
             .code = if (code == .usage) .EUSAGE else .EIO,
             .message = @errorName(err),
-            .remediation = "See the stderr diagnostic for the full explanation",
+            .remediation = if (code == .usage)
+                "Check the command line (run boris --help for the full option list)"
+            else
+                "Check that the input and output paths exist and are accessible",
         });
     }
 }
@@ -3803,6 +3823,92 @@ test "runPipeline: unreferenced check findings are report-only unless opted in" 
     const strict_bytes = try cwd.readFileAlloc(io, strict_report, gpa, .unlimited);
     defer gpa.free(strict_bytes);
     try std.testing.expectEqualStrings(default_bytes, strict_bytes);
+}
+
+test "runPipeline: advisory check findings are exit 0 unless their flag opts in" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const cwd = Io.Dir.cwd();
+    const flat_input = "docs/contracts/fixtures/documentation-intelligence/edge-cases/flat/content";
+
+    const default_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-flat.json", .{tmp.sub_path});
+    defer gpa.free(default_report);
+    const base = Options{
+        .command = .check,
+        .input_dir = flat_input,
+        .analysis_format = .json,
+        .analysis_report = default_report,
+        .quiet = true,
+    };
+    try std.testing.expectEqual(ExitCode.success, runPipeline(io, gpa, base));
+    const default_bytes = try cwd.readFileAlloc(io, default_report, gpa, .unlimited);
+    defer gpa.free(default_bytes);
+
+    // Each --fail-on-* flag opts only its own class into exit 1; the flat
+    // fixture emits every advisory class, so every flag fails with an
+    // identical report.
+    const policies = [_]struct { name: []const u8, apply: *const fn (*Options) void }{
+        .{ .name = "unreferenced", .apply = struct {
+            fn go(o: *Options) void {
+                o.fail_on_unreferenced = true;
+            }
+        }.go },
+        .{ .name = "unlinked", .apply = struct {
+            fn go(o: *Options) void {
+                o.fail_on_unlinked = true;
+            }
+        }.go },
+        .{ .name = "flat-graph", .apply = struct {
+            fn go(o: *Options) void {
+                o.fail_on_flat_graph = true;
+            }
+        }.go },
+        .{ .name = "zero-includes", .apply = struct {
+            fn go(o: *Options) void {
+                o.fail_on_zero_includes = true;
+            }
+        }.go },
+        .{ .name = "zero-relations", .apply = struct {
+            fn go(o: *Options) void {
+                o.fail_on_zero_relations = true;
+            }
+        }.go },
+    };
+    for (policies) |policy| {
+        const report_path = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-flat-{s}.json", .{ tmp.sub_path, policy.name });
+        defer gpa.free(report_path);
+        var strict = base;
+        strict.analysis_report = report_path;
+        policy.apply(&strict);
+        try std.testing.expectEqual(ExitCode.content_error, runPipeline(io, gpa, strict));
+        const strict_bytes = try cwd.readFileAlloc(io, report_path, gpa, .unlimited);
+        defer gpa.free(strict_bytes);
+        try std.testing.expectEqualStrings(default_bytes, strict_bytes);
+    }
+
+    // The linked fixture emits none of the advisory classes, so opting into
+    // all of them still exits 0 with the golden report.
+    const linked_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-linked.json", .{tmp.sub_path});
+    defer gpa.free(linked_report);
+    const linked = Options{
+        .command = .check,
+        .input_dir = "docs/contracts/fixtures/documentation-intelligence/content",
+        .analysis_format = .json,
+        .analysis_report = linked_report,
+        .quiet = true,
+        .fail_on_unlinked = true,
+        .fail_on_flat_graph = true,
+        .fail_on_zero_includes = true,
+        .fail_on_zero_relations = true,
+    };
+    try std.testing.expectEqual(ExitCode.success, runPipeline(io, gpa, linked));
+    const linked_bytes = try cwd.readFileAlloc(io, linked_report, gpa, .unlimited);
+    defer gpa.free(linked_bytes);
+    const golden = try cwd.readFileAlloc(io, "docs/contracts/fixtures/documentation-intelligence/expected/check.json", gpa, .unlimited);
+    defer gpa.free(golden);
+    try std.testing.expectEqualStrings(golden, linked_bytes);
 }
 
 test "runPipeline: graph renders pin the documentation-intelligence goldens" {
