@@ -2720,7 +2720,7 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*ti
         .timings = recorder,
         .diagnostics = collector_ptr,
     }) catch |err| {
-        const code = mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
+        const code = mapHtmlError(err, opts.input_dir);
         appendEscapedDiagnostic(collector_ptr, err, code);
         writeHtmlReport(io, gpa, opts, collector_ptr, false, out_dir, false);
         return code;
@@ -3208,16 +3208,16 @@ fn runValidateWatch(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     defer watcher.deinit();
 
     addWatchRoots(io, gpa, opts, &watcher) catch |err| {
-        return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
+        return mapWatchHtmlError(opts, err);
     };
 
     var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher(), vcs_revision) catch |err| {
-        return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
+        return mapWatchHtmlError(opts, err);
     };
     defer coord.deinit();
 
     coord.run() catch |err| {
-        return mapHtmlError(err, opts.targets.items, opts.html_layout, opts.input_dir);
+        return mapWatchHtmlError(opts, err);
     };
     return .success;
 }
@@ -3246,18 +3246,18 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         defer watcher.deinit();
 
         addWatchRoots(io, gpa, opts, &watcher) catch |err| {
-            return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
+            return mapWatchHtmlError(opts, err);
         };
 
         var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher(), vcs_revision) catch |err| {
-            return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
+            return mapWatchHtmlError(opts, err);
         };
         defer coord.deinit();
         coord.recorder = recorder;
         coord.nostr_head = nostr_head;
 
         coord.run() catch |err| {
-            return mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
+            return mapWatchHtmlError(opts, err);
         };
 
         return .success;
@@ -3291,7 +3291,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .standard_site_verification = verification,
             .nostr_head = nostr_head,
         }) catch |err| {
-            const code = mapHtmlError(err, opts.targets.items, layout_path, opts.input_dir);
+            const code = mapHtmlError(err, opts.input_dir);
             appendEscapedDiagnostic(collector_ptr, err, code);
             writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir, false);
             return code;
@@ -3335,7 +3335,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .standard_site_verification = verification,
             .nostr_head = nostr_head,
         }) catch |err| {
-            const code = mapHtmlError(err, &.{}, layout_path, opts.input_dir);
+            const code = mapHtmlError(err, opts.input_dir);
             appendEscapedDiagnostic(collector_ptr, err, code);
             writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir, false);
             return code;
@@ -3359,6 +3359,17 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
     return .success;
 }
 
+/// Map a watch-mode failure to an exit code. Under `--watch-json` the
+/// coordinator already streamed the failure as a `build-failed`/`watch-error`
+/// NDJSON event, so diagnostic text stays suppressed through the outer error
+/// mapping: stderr remains exclusively NDJSON (docs/contracts/watch-mode.md).
+fn mapWatchHtmlError(opts: Options, err: anyerror) ExitCode {
+    const prior = diag.text_suppressed.load(.unordered);
+    if (opts.watch_json) diag.text_suppressed.store(true, .unordered);
+    defer diag.text_suppressed.store(prior, .unordered);
+    return mapHtmlError(err, opts.input_dir);
+}
+
 /// Map HTML compile failures to process exit codes.
 /// Target configuration / path isolation → 2; content/layout/component → 1;
 /// missing content root and I/O → 3.
@@ -3369,8 +3380,6 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
 /// emitted a structured diagnostic, not because the caller asked for silence.
 fn mapHtmlError(
     err: anyerror,
-    targets: []const target.TargetSpec,
-    global_layout: []const u8,
     input_root: []const u8,
 ) ExitCode {
     switch (err) {
@@ -3393,19 +3402,19 @@ fn mapHtmlError(
         error.SitemapSiteUrlRequired,
         error.SitemapSiteUrlWithoutOutput,
         error.AmbiguousSitemapTargets,
+        error.InvalidRssPath,
+        error.RssOutputCollision,
         error.StaticDirMissing,
         error.StaticDirNotDirectory,
         error.StaticSymlink,
         error.StaticPathUnsafe,
         error.StaticPathCollision,
-        => {
-            errPrint("error: invalid target configuration: {s}\n", .{@errorName(err)});
-            if (targets.len > 0 and !diag.text_suppressed.load(.unordered)) {
-                std.debug.print("configured targets (canonical order):\n", .{});
-                target.printTargetConfigLines(targets, global_layout);
-            }
-            return .usage;
-        },
+        // The compile layer emits the cause itself — prose when unsuppressed
+        // plus a structured diagnostic for --report/--watch-json — for every
+        // error in this set. Re-printing here doubled the message on ordinary
+        // builds and appended non-JSON prose after build-failed on
+        // --watch-json (#1035).
+        => return .usage,
         // Graph/include/wiki/component failures (and multi-target wrap) already print
         // structured diagnostics on the HTML path; re-printing @errorName only doubles noise.
         error.GraphValidationFailed,
@@ -3664,20 +3673,20 @@ test "standardSiteStatus maps the closed vocabulary" {
 }
 
 test "mapHtmlError: multi-target I/O failure exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, "content"));
 }
 
 test "mapHtmlError: missing content root exits 3 and names the probed path" {
     // #779: the diagnostic must carry the resolved input root so a wrong-cwd
     // invocation reads as an invocation problem, not an opaque I/O class.
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.ContentDirMissing, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.ContentDirMissing, "content"));
 }
 
 test "mapHtmlError: unsafe SVG content failure exits 1 without a generic wrapper" {
     // AssetUnsafeSvg already emitted the structured EASSET diagnostic from the
     // content-asset path; mapHtmlError must classify it as a content error
     // (exit 1) and must not print either generic wrapper line.
-    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, "content"));
 }
 
 fn writeTreeFileMain(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8) !void {
@@ -3746,33 +3755,30 @@ test "runHtml threads --refresh-evidence into the compile options (#728)" {
 }
 
 test "mapHtmlError: link-audit content failure exits 1" {
-    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.LinkAuditFailed, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.LinkAuditFailed, "content"));
 }
 
 test "mapHtmlError: committed publication with stale checks evidence exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationChecksFailed, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationChecksFailed, "content"));
 }
 
 test "mapHtmlError: committed publication with stale claims evidence exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationClaimsFailed, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationClaimsFailed, "content"));
 }
 
 test "mapHtmlError: committed publication with unrefreshed Touch Atlas exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationTouchesFailed, &.{}, default_layout, "content"));
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationProofPackFailed, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationTouchesFailed, "content"));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationProofPackFailed, "content"));
 }
 
 test "mapHtmlError: target configuration failures exit 2" {
-    const specs = [_]target.TargetSpec{
-        .{ .name = "prod", .output_dir = "dist/prod" },
-    };
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputCollision, &specs, default_layout, "content"));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.WorkspaceEscape, &specs, default_layout, "content"));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.DuplicateTargetName, &specs, default_layout, "content"));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.InvalidTargetName, &specs, default_layout, "content"));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputSymlink, &specs, default_layout, "content"));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.EmptyTargetDirectory, &specs, default_layout, "content"));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.NoTargetsSpecified, &.{}, default_layout, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputCollision, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.WorkspaceEscape, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.DuplicateTargetName, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.InvalidTargetName, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputSymlink, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.EmptyTargetDirectory, "content"));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.NoTargetsSpecified, "content"));
 }
 
 test "runPipeline: valid fixture exits 0" {

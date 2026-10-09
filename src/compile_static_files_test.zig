@@ -8,6 +8,7 @@ const Io = std.Io;
 const compile = @import("compile.zig");
 const compileHtmlSite = compile.compileHtmlSite;
 const kit = @import("compile_test_kit.zig");
+const diag = @import("diag.zig");
 const target_mod = @import("target.zig");
 const static_files = @import("static_files.zig");
 const publication_checks = @import("publication_checks.zig");
@@ -111,14 +112,22 @@ test "static passthrough: missing directory fails loudly" {
     }));
 
     const targets = [_]target_mod.TargetSpec{.{ .name = "default", .output_dir = dist }};
-    // The multi-target wrap reports usage-class failures as its generic
-    // LayoutSelectionFailed sentinel; the single-target path above preserves
-    // the exact error.
-    try std.testing.expectError(error.LayoutSelectionFailed, compile.validateHtmlSiteMulti(io, gpa, &targets, .{
+    // The multi-target wrap preserves the usage-class error name so the CLI
+    // and --report diagnostics blame the static directory, not layout
+    // selection (#1036).
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.StaticDirMissing, compile.validateHtmlSiteMulti(io, gpa, &targets, .{
         .content_root = content,
         .quiet = true,
         .static_dir = static_dir,
+        .diagnostics = &collector,
     }));
+    try std.testing.expect(collector.list.items.len >= 1);
+    const d = collector.list.items[collector.list.items.len - 1];
+    try std.testing.expectEqual(diag.Code.EUSAGE, d.code);
+    try std.testing.expectEqualStrings(static_dir, d.source_path);
+    try std.testing.expect(std.mem.indexOf(u8, d.remediation, static_dir) != null);
 }
 
 test "static passthrough: page collision and compiler-owned namespace fail loudly" {

@@ -1,0 +1,3 @@
+### Fixed
+
+- Static-directory, sitemap-path, RSS feed-path, and target-output usage failures (`StaticSymlink`, `StaticDirMissing`, `SitemapOutputCollision`, `RssOutputCollision`, `TargetOutputSymlink`, and siblings) now keep their specific error and report `EUSAGE` diagnostics naming the offending path, instead of collapsing into `LayoutSelectionFailed` with `ELAYOUT` diagnostics and the layout path. RSS feed collisions report their own `InvalidRssPath`/`RssOutputCollision` names and blame `rss.path`, not a sitemap the target may not declare. See [the diagnostics contract](/docs/contracts/diagnostics.md) (Fixes #1036).

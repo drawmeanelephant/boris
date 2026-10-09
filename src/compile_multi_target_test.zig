@@ -473,6 +473,119 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
     }
 }
 
+/// Assert exactly one error diagnostic whose source path names the offending
+/// target output and whose remediation is targeted (not the generic "check
+/// the command line" fallback) — the pre-plan declaration checks must carry
+/// the same locus the per-target wrapper reports (#1036).
+fn expectTargetLocus(collector: *const diag.Collector, output_dir: []const u8, name: []const u8) !void {
+    var errors: usize = 0;
+    for (collector.list.items) |d| {
+        if (!d.isError()) continue;
+        errors += 1;
+        try std.testing.expectEqual(diag.Code.EUSAGE, d.code);
+        try std.testing.expectEqualStrings(output_dir, d.source_path);
+        try std.testing.expect(std.mem.indexOf(u8, d.remediation, output_dir) != null);
+        try std.testing.expect(std.mem.indexOf(u8, d.message, name) != null);
+    }
+    try std.testing.expectEqual(@as(usize, 1), errors);
+}
+
+test "compileHtmlSiteMulti - declaration failures carry the target locus (#1036)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-target-locus", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "L{{content}}");
+    try writeTreeFile(io, work, "content/index.md", "# Index\n");
+
+    const cwd_abs = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_abs);
+    const work_abs = try std.fs.path.resolve(gpa, &.{ cwd_abs, work });
+    defer gpa.free(work_abs);
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work_abs});
+    defer gpa.free(content_path);
+    // Layout paths are workspace-relative by grammar; opened under work_abs.
+    const layout_path = "layouts/main.html";
+
+    // The prose lines are tested end-to-end by the watch-json contract script;
+    // keep this unit test silent.
+    const suppressed = diag.text_suppressed.load(.unordered);
+    diag.text_suppressed.store(true, .unordered);
+    defer diag.text_suppressed.store(suppressed, .unordered);
+
+    // 1. Output nested inside the content root → collision locus.
+    {
+        const colliding = try std.fmt.allocPrint(gpa, "{s}/content/dist", .{work_abs});
+        defer gpa.free(colliding);
+        const targets = [_]target_mod.TargetSpec{
+            .{ .name = "alpha", .output_dir = colliding },
+        };
+        var collector = diag.Collector.init(gpa, io);
+        defer collector.deinit();
+        const res = compileHtmlSiteMulti(io, gpa, &targets, .{
+            .workspace_root = work_abs,
+            .content_root = content_path,
+            .layout_path = layout_path,
+            .diagnostics = &collector,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TargetOutputCollision, res);
+        try expectTargetLocus(&collector, colliding, "alpha");
+    }
+
+    // 2. Output escaping the workspace → escape locus.
+    {
+        const escaped = try std.fmt.allocPrint(gpa, "{s}-escaped", .{work_abs});
+        defer gpa.free(escaped);
+        const targets = [_]target_mod.TargetSpec{
+            .{ .name = "alpha", .output_dir = escaped },
+        };
+        var collector = diag.Collector.init(gpa, io);
+        defer collector.deinit();
+        const res = compileHtmlSiteMulti(io, gpa, &targets, .{
+            .workspace_root = work_abs,
+            .content_root = content_path,
+            .layout_path = layout_path,
+            .diagnostics = &collector,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.WorkspaceEscape, res);
+        try expectTargetLocus(&collector, escaped, "alpha");
+    }
+
+    // 3. Output path occupied by a symlink → symlink locus.
+    {
+        const real_dir = try std.fmt.allocPrint(gpa, "{s}/real_target", .{work_abs});
+        defer gpa.free(real_dir);
+        try cwd.createDirPath(io, real_dir);
+        const link_dir = try std.fmt.allocPrint(gpa, "{s}/link_target", .{work_abs});
+        defer gpa.free(link_dir);
+        cwd.symLink(io, real_dir, link_dir, .{}) catch |sym_err| {
+            if (sym_err == error.AccessDenied or sym_err == error.PermissionDenied) return;
+            return sym_err;
+        };
+        const targets = [_]target_mod.TargetSpec{
+            .{ .name = "alpha", .output_dir = link_dir },
+        };
+        var collector = diag.Collector.init(gpa, io);
+        defer collector.deinit();
+        const res = compileHtmlSiteMulti(io, gpa, &targets, .{
+            .workspace_root = work_abs,
+            .content_root = content_path,
+            .layout_path = layout_path,
+            .diagnostics = &collector,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TargetOutputSymlink, res);
+        try expectTargetLocus(&collector, link_dir, "alpha");
+    }
+}
+
 test "F9.1 multi-target themes isolate assets" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

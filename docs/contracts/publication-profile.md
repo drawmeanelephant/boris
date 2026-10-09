@@ -31,7 +31,17 @@ paths against the owned workspace root, without changing process CWD.
 The profile is UTF-8 JSON with no embedded NUL. The Boris parser rejects
 malformed JSON, comments, trailing data, coercion, duplicate keys, and unknown
 keys at every object level. Duplicate rejection is a Boris parser requirement;
-the companion JSON Schema cannot express it alone.
+the companion JSON Schema cannot express it alone. Structural rejections name
+the offending key or field and its object path — including paths inside
+`targets[].head` — for example `unknown key "bogus" in
+targets[0].head.pages[0].values` or `missing required field "id" in
+targets[0].head.pages[0]`, not a bare error enumeration. A value of the
+wrong JSON type names the field inside the object that holds it — `wrong type
+for field "defaults" in targets[0].head`, never a fabricated
+`targets[0].head.defaults` path for a non-object value. Semantic rejections
+that have no JSON shape fault to blame (an invalid `base_url`, duplicate head
+page ids, an empty target name after validation) still report only the error
+enumeration.
 
 | Bound | Value |
 |---|---:|

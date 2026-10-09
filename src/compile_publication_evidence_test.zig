@@ -377,6 +377,8 @@ test "Pages publication location mismatches fail before target replacement" {
     try std.testing.expectEqualStrings("previous target", sentinel_after_link_failure);
     try std.testing.expectError(error.FileNotFound, readTargetPayload(io, gpa, dist, "index.html"));
 
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
     try std.testing.expectError(error.PublicationLocationMismatch, compileHtmlSite(io, gpa, .{
         .content_root = content,
         .dist_dir = dist,
@@ -385,7 +387,17 @@ test "Pages publication location mismatches fail before target replacement" {
         .sitemap_path = "sitemap.xml",
         .site_url = "https://owner.github.io",
         .publication_location = &location,
+        .diagnostics = &collector,
     }));
+    // The gate emits its own structured diagnostic — stderr plus the report
+    // collector — so the CLI never falls back to the generic EIO escape
+    // diagnostic for this usage-class failure (#1035).
+    try std.testing.expect(collector.list.items.len >= 1);
+    const mismatch_diagnostic = collector.list.items[collector.list.items.len - 1];
+    try std.testing.expectEqual(diag.Severity.error_, mismatch_diagnostic.severity);
+    try std.testing.expectEqual(diag.Code.EPUBLICATIONLOCATION, mismatch_diagnostic.code);
+    try std.testing.expect(std.mem.indexOf(u8, mismatch_diagnostic.message, "\"https://owner.github.io\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mismatch_diagnostic.message, "\"https://owner.github.io/boris\"") != null);
     const sentinel_after_sitemap_failure = try readTargetPayload(io, gpa, dist, "sentinel.txt");
     defer gpa.free(sentinel_after_sitemap_failure);
     try std.testing.expectEqualStrings("previous target", sentinel_after_sitemap_failure);

@@ -90,6 +90,210 @@ pub const Error = error{
     HeadBaseMismatch,
 } || std.mem.Allocator.Error;
 
+// ---------------------------------------------------------------------------
+// Error-locus side channel (#1038). The strict parser stops at the first
+// structural failure; these buffers record the JSON object path under
+// validation (`targets[0].sitemap`), the field whose value is being checked,
+// and the offending key/field so the CLI can print `unknown key "bogus" in
+// targets[0]` instead of a bare enum name. `parseBytes` resets the channel on
+// entry, a successful parse leaves it empty, and a rejected profile is
+// terminal for the run — the CLI and every profile-reading command parse at
+// most one profile before exiting on the failure.
+var locus_path_buf: [512]u8 = undefined;
+var locus_path_len: usize = 0;
+var locus_detail_buf: [512]u8 = undefined;
+var locus_detail_len: usize = 0;
+var locus_field_buf: [128]u8 = undefined;
+var locus_field_len: usize = 0;
+
+/// The offending locus captured at the first structural failure, e.g.
+/// `unknown key "bogus" in targets[0]`. Null when the failure carries no
+/// better locus than its error name (semantic rejections, OOM).
+pub fn lastErrorDetail() ?[]const u8 {
+    if (locus_detail_len == 0) return null;
+    return locus_detail_buf[0..locus_detail_len];
+}
+
+fn locusReset() void {
+    locus_path_len = 0;
+    locus_detail_len = 0;
+    locus_field_len = 0;
+}
+
+fn locusMark() usize {
+    return locus_path_len;
+}
+
+/// Pop the path back to `mark` after a sibling node parsed cleanly. A `try`
+/// that fails skips the restore, so the deepest locus survives the failure.
+fn locusRestore(mark: usize) void {
+    locus_path_len = mark;
+}
+
+fn locusPushField(name: []const u8) void {
+    const needs_dot = locus_path_len != 0;
+    if (locus_path_len + @intFromBool(needs_dot) + name.len > locus_path_buf.len) return;
+    if (needs_dot) {
+        locus_path_buf[locus_path_len] = '.';
+        locus_path_len += 1;
+    }
+    @memcpy(locus_path_buf[locus_path_len..][0..name.len], name);
+    locus_path_len += name.len;
+}
+
+fn locusPushIndex(index: usize) void {
+    const s = std.fmt.bufPrint(locus_path_buf[locus_path_len..], "[{d}]", .{index}) catch return;
+    locus_path_len += s.len;
+    // An array element is not the parent field; the type helpers fall back to
+    // the bare `wrong type` phrasing, and the `[i]` suffix names the element.
+    locus_field_len = 0;
+}
+
+/// Record the first failure's locus detail; the parser stops immediately, so
+/// the earliest write is the accurate one. Appends `in <path>` (or
+/// `in the profile root`).
+fn locusDetail(comptime fmt: []const u8, args: anytype) void {
+    if (locus_detail_len != 0) return;
+    var writer = std.Io.Writer.fixed(&locus_detail_buf);
+    writer.print(fmt, args) catch {};
+    const path = if (locus_path_len == 0) "the profile root" else locus_path_buf[0..locus_path_len];
+    writer.print(" in {s}", .{path}) catch {};
+    locus_detail_len = writer.buffered().len;
+}
+
+fn locusSetField(name: []const u8) void {
+    const n = @min(name.len, locus_field_buf.len);
+    @memcpy(locus_field_buf[0..n], name[0..n]);
+    locus_field_len = n;
+}
+
+/// Copy a path assembled outside the parse descent (the duplicate-key token
+/// rescan) into the locus path buffer so `locusDetail` renders `in <path>`.
+fn locusSetPath(path: []const u8) void {
+    const n = @min(path.len, locus_path_buf.len);
+    @memcpy(locus_path_buf[0..n], path[0..n]);
+    locus_path_len = n;
+}
+
+fn locusWrongType() void {
+    if (locus_field_len == 0) {
+        locusDetail("wrong type", .{});
+    } else {
+        locusDetail("wrong type for field \"{s}\"", .{locus_field_buf[0..locus_field_len]});
+    }
+}
+
+fn locusMissingField(name: []const u8) Error {
+    locusDetail("missing required field \"{s}\"", .{name});
+    return error.MissingField;
+}
+
+/// Record an out-of-grammar string for a closed enum field (the profile's own
+/// `html_profile`, or the `head` declaration's enum fields via
+/// `diagnoseJsonShape`).
+fn locusInvalidEnum(value: []const u8) void {
+    if (locus_field_len != 0) {
+        locusDetail("invalid value \"{s}\" for field \"{s}\"", .{ value, locus_field_buf[0..locus_field_len] });
+    } else {
+        locusDetail("invalid value \"{s}\"", .{value});
+    }
+}
+
+/// Whether descending into a field of type `T` adds a path segment for this
+/// JSON value — object for structs, array for non-u8 slices. A value carrying
+/// the wrong JSON type for its declared container stays on the parent path
+/// and speaks through locus_field, so `head.defaults = []` reads `in
+/// targets[0].head`, not `targets[0].head.defaults` (#1038).
+fn matchesContainerShape(comptime T: type, value: std.json.Value) bool {
+    return switch (@typeInfo(T)) {
+        .@"struct" => value == .object,
+        .optional => |info| matchesContainerShape(info.child, value),
+        .pointer => |info| info.size == .slice and info.child != u8 and value == .array,
+        else => false,
+    };
+}
+
+/// Diagnostic re-walk for a rejected `head` declaration (#1038): checks the
+/// already-parsed JSON value against `T`'s declared shape and records the
+/// first structural mismatch (unknown key, missing required field, wrong JSON
+/// type, unknown enum value) in the same locus vocabulary the strict parser
+/// uses. Runs only after `head_metadata.parse` fails, so a walk that finds no
+/// mismatch records nothing — the rejection was semantic (bad URL, duplicate
+/// page id, …) and keeps the bare error name.
+fn diagnoseJsonShape(comptime T: type, value: std.json.Value) void {
+    switch (@typeInfo(T)) {
+        .optional => |info| switch (value) {
+            // `head` forbids null outright (rejectNulls), so a null in an
+            // optional field is still the wrong type for this grammar.
+            .null => locusWrongType(),
+            else => diagnoseJsonShape(info.child, value),
+        },
+        .bool => {
+            _ = boolean(value) catch return;
+        },
+        .int => {
+            _ = integer(value) catch return;
+        },
+        .pointer => |info| {
+            if (info.size != .slice) return;
+            if (info.child == u8) {
+                _ = string(value) catch return;
+                return;
+            }
+            const items = array(value) catch return;
+            for (items, 0..) |item, i| {
+                const mark = locusEnterIndex(i);
+                diagnoseJsonShape(info.child, item);
+                if (locus_detail_len != 0) return;
+                locusRestore(mark);
+            }
+        },
+        .@"enum" => {
+            const s = string(value) catch return;
+            if (std.meta.stringToEnum(T, s) == null) locusInvalidEnum(s);
+        },
+        .@"struct" => |info| {
+            const obj = object(value) catch return;
+            var it = obj.iterator();
+            keys: while (it.next()) |entry| {
+                inline for (info.field_names) |name| {
+                    if (std.mem.eql(u8, entry.key_ptr.*, name)) continue :keys;
+                }
+                locusDetail("unknown key \"{s}\"", .{entry.key_ptr.*});
+                return;
+            }
+            inline for (info.field_names, info.field_types, info.field_attrs) |name, field_type, attrs| {
+                if (field(obj, name)) |child| {
+                    const mark = locusMark();
+                    if (matchesContainerShape(field_type, child)) locusPushField(name);
+                    diagnoseJsonShape(field_type, child);
+                    if (locus_detail_len != 0) return;
+                    locusRestore(mark);
+                } else if (attrs.defaultValue(field_type) == null) {
+                    locusDetail("missing required field \"{s}\"", .{name});
+                    return;
+                }
+            }
+        },
+        else => {},
+    }
+}
+
+/// Begin descending into the object field `name`: push the segment and return
+/// the mark the caller restores after the child parse succeeds. A `try` that
+/// fails skips the restore, keeping the deepest locus for `locusDetail`.
+fn locusEnter(comptime name: []const u8) usize {
+    const mark = locusMark();
+    locusPushField(name);
+    return mark;
+}
+
+fn locusEnterIndex(index: usize) usize {
+    const mark = locusMark();
+    locusPushIndex(index);
+    return mark;
+}
+
 pub const InputFormat = enum { markdown, textile, cook };
 
 pub const ProfileWorkspace = struct {
@@ -284,6 +488,7 @@ pub fn parseBytes(allocator: std.mem.Allocator, workspace: ProfileWorkspace, byt
         var rejected_workspace = workspace;
         rejected_workspace.deinit(allocator);
     }
+    locusReset();
     if (bytes.len > max_profile_bytes) return error.ProfileTooLarge;
     if (!std.unicode.utf8ValidateSlice(bytes)) return error.InvalidUtf8;
     if (std.mem.indexOfScalar(u8, bytes, 0) != null) return error.EmbeddedNul;
@@ -294,7 +499,10 @@ pub fn parseBytes(allocator: std.mem.Allocator, workspace: ProfileWorkspace, byt
         .max_value_len = max_string_bytes,
         .allocate = .alloc_always,
     }) catch |err| return switch (err) {
-        error.DuplicateField => error.DuplicateKey,
+        error.DuplicateField => {
+            reportFirstDuplicateKey(allocator, bytes);
+            return error.DuplicateKey;
+        },
         error.ValueTooLong => error.StringTooLong,
         else => error.InvalidJson,
     };
@@ -340,19 +548,28 @@ fn checkDepth(bytes: []const u8) Error!void {
 fn object(value: std.json.Value) Error!std.json.ObjectMap {
     return switch (value) {
         .object => |v| v,
-        else => error.WrongType,
+        else => {
+            locusWrongType();
+            return error.WrongType;
+        },
     };
 }
 fn array(value: std.json.Value) Error![]std.json.Value {
     return switch (value) {
         .array => |v| v.items,
-        else => error.WrongType,
+        else => {
+            locusWrongType();
+            return error.WrongType;
+        },
     };
 }
 fn string(value: std.json.Value) Error![]const u8 {
     const v = switch (value) {
         .string => |s| s,
-        else => return error.WrongType,
+        else => {
+            locusWrongType();
+            return error.WrongType;
+        },
     };
     if (v.len > max_string_bytes) return error.StringTooLong;
     if (std.mem.indexOfScalar(u8, v, 0) != null) return error.EmbeddedNul;
@@ -361,20 +578,28 @@ fn string(value: std.json.Value) Error![]const u8 {
 fn boolean(value: std.json.Value) Error!bool {
     return switch (value) {
         .bool => |v| v,
-        else => error.WrongType,
+        else => {
+            locusWrongType();
+            return error.WrongType;
+        },
     };
 }
 fn integer(value: std.json.Value) Error!usize {
     return switch (value) {
         .integer => |v| if (v >= 0) @intCast(v) else error.InvalidLimit,
-        else => error.WrongType,
+        else => {
+            locusWrongType();
+            return error.WrongType;
+        },
     };
 }
 fn field(obj: std.json.ObjectMap, name: []const u8) ?std.json.Value {
+    // The most recent lookup names the value a type helper is about to check.
+    locusSetField(name);
     return obj.get(name);
 }
 fn required(obj: std.json.ObjectMap, name: []const u8) Error!std.json.Value {
-    return field(obj, name) orelse error.MissingField;
+    return field(obj, name) orelse locusMissingField(name);
 }
 fn only(obj: std.json.ObjectMap, names: []const []const u8) Error!void {
     var it = obj.iterator();
@@ -386,11 +611,101 @@ fn only(obj: std.json.ObjectMap, names: []const []const u8) Error!void {
                 break;
             }
         }
-        if (!known) return error.UnknownKey;
+        if (!known) {
+            locusDetail("unknown key \"{s}\"", .{entry.key_ptr.*});
+            return error.UnknownKey;
+        }
     }
 }
 fn dup(allocator: std.mem.Allocator, value: []const u8) Error![]u8 {
     return allocator.dupe(u8, value);
+}
+
+/// Best-effort locus for the fail-closed `duplicate_field_behavior` rejection.
+/// std.json raises `DuplicateField` only after the duplicate *value* parses,
+/// so the scanner cursor no longer names the key; a second token pass tracks
+/// object frames until the first repeated key and records
+/// `duplicate key "x" in <path>` for `lastErrorDetail`. Runs only on the
+/// terminal rejection path, so allocations live on a local arena.
+/// `nextAllocMax` returns complete tokens: `.string`/`.allocated_string` carry
+/// the decoded key or value even when the source spelling contains escapes
+/// (`"na\u006de"`), which also makes the duplicate check compare the same
+/// decoded bytes the rejecting parse compared.
+fn reportFirstDuplicateKey(allocator: std.mem.Allocator, bytes: []const u8) void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const Frame = struct {
+        object: bool,
+        expect_key: bool = true,
+        index: usize = 0,
+        path_mark: usize,
+        last_key: []const u8 = "",
+        seen: std.StringHashMapUnmanaged(void) = .{},
+    };
+    var stack: std.ArrayList(Frame) = .empty;
+    var path: std.ArrayList(u8) = .empty;
+    var scanner = std.json.Scanner.initCompleteInput(a, bytes);
+    defer scanner.deinit();
+
+    while (true) {
+        const token = scanner.nextAllocMax(a, .alloc_if_needed, max_string_bytes) catch return;
+        switch (token) {
+            .end_of_document => return,
+            .object_begin, .array_begin => {
+                const mark = path.items.len;
+                if (stack.items.len > 0) {
+                    const t = &stack.items[stack.items.len - 1];
+                    if (t.object) {
+                        if (t.expect_key) return;
+                        if (path.items.len > 0) path.append(a, '.') catch return;
+                        path.appendSlice(a, t.last_key) catch return;
+                    } else {
+                        var index_buf: [24]u8 = undefined;
+                        const s = std.fmt.bufPrint(&index_buf, "[{d}]", .{t.index}) catch return;
+                        path.appendSlice(a, s) catch return;
+                    }
+                }
+                stack.append(a, .{
+                    .object = token == .object_begin,
+                    .path_mark = mark,
+                }) catch return;
+            },
+            .object_end, .array_end => {
+                const frame = stack.pop() orelse return;
+                path.shrinkRetainingCapacity(frame.path_mark);
+                if (stack.items.len > 0) {
+                    const t = &stack.items[stack.items.len - 1];
+                    if (t.object) t.expect_key = true else t.index += 1;
+                }
+            },
+            .string, .allocated_string => |s| {
+                if (stack.items.len == 0) return;
+                const t = &stack.items[stack.items.len - 1];
+                if (t.object and t.expect_key) {
+                    if (t.seen.contains(s)) {
+                        locusSetPath(path.items);
+                        locusDetail("duplicate key \"{s}\"", .{s});
+                        return;
+                    }
+                    t.seen.put(a, s, {}) catch return;
+                    t.last_key = s;
+                    t.expect_key = false;
+                } else if (t.object) {
+                    t.expect_key = true;
+                } else {
+                    t.index += 1;
+                }
+            },
+            else => {
+                if (stack.items.len > 0) {
+                    const t = &stack.items[stack.items.len - 1];
+                    if (t.object) t.expect_key = true else t.index += 1;
+                }
+            },
+        }
+    }
 }
 
 fn parsePlan(allocator: std.mem.Allocator, value: std.json.Value) Error!PublicationPlan {
@@ -401,11 +716,31 @@ fn parsePlan(allocator: std.mem.Allocator, value: std.json.Value) Error!Publicat
     var plan = PublicationPlan{ .input = try dup(allocator, if (field(root, "input")) |v| try checkedPath(v) else "content") };
     errdefer plan.deinit(allocator);
     if (field(root, "input_format")) |v| plan.input_format = try parseInputFormat(v);
-    if (field(root, "site")) |v| plan.site = try parseSite(allocator, v);
-    if (field(root, "publication")) |v| plan.publication = try parsePublication(allocator, v);
-    if (field(root, "targets")) |v| plan.targets = try parseTargets(allocator, v);
-    if (field(root, "editions")) |v| try parseEditions(allocator, &plan, v);
-    if (field(root, "nostr")) |v| plan.nostr = try parseNostr(allocator, v);
+    if (field(root, "site")) |v| {
+        const mark = locusEnter("site");
+        plan.site = try parseSite(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(root, "publication")) |v| {
+        const mark = locusEnter("publication");
+        plan.publication = try parsePublication(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(root, "targets")) |v| {
+        const mark = locusEnter("targets");
+        plan.targets = try parseTargets(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(root, "editions")) |v| {
+        const mark = locusEnter("editions");
+        try parseEditions(allocator, &plan, v);
+        locusRestore(mark);
+    }
+    if (field(root, "nostr")) |v| {
+        const mark = locusEnter("nostr");
+        plan.nostr = try parseNostr(allocator, v);
+        locusRestore(mark);
+    }
     return plan;
 }
 
@@ -429,15 +764,19 @@ fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPl
     // and validated, so malformed configuration fails closed either way.
     if (field(obj, "pubkey")) |v| {
         out.pubkey = nostr.parseAuthorPubkey(allocator, try string(v)) catch return error.InvalidNostr;
-    } else if (out.enabled) return error.MissingField;
+    } else if (out.enabled) return locusMissingField("pubkey");
 
     if (field(obj, "articles")) |v| {
+        const mark = locusEnter("articles");
         out.articles = try parseNostrArticles(allocator, v);
-    } else if (out.enabled) return error.MissingField;
+        locusRestore(mark);
+    } else if (out.enabled) return locusMissingField("articles");
 
     if (field(obj, "relays")) |v| {
+        const mark = locusEnter("relays");
         out.relays = try parseNostrRelays(allocator, v);
-    } else if (out.enabled) return error.MissingField;
+        locusRestore(mark);
+    } else if (out.enabled) return locusMissingField("relays");
 
     if (field(obj, "timeout_ms")) |v| {
         const n = try integer(v);
@@ -450,12 +789,16 @@ fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPl
         out.retries = n;
     }
     if (field(obj, "auth")) |v| {
+        const mark = locusEnter("auth");
         if (!out.enabled) return error.InvalidNostr;
         const auth = try object(v);
         try only(auth, &.{ "mode", "relays" });
         if (!std.mem.eql(u8, try string(try required(auth, "mode")), "nip42")) return error.InvalidNostr;
+        const relays_mark = locusEnter("relays");
         out.auth_relays = try parseNostrRelays(allocator, try required(auth, "relays"));
+        locusRestore(relays_mark);
         nostr_auth.validateDeclaration(allocator, .{ .mode = "nip42", .relays = out.auth_relays }, out.relays) catch return error.InvalidNostr;
+        locusRestore(mark);
     }
     return out;
 }
@@ -474,11 +817,13 @@ fn parseNostrArticles(allocator: std.mem.Allocator, value: std.json.Value) Error
         for (out[0..initialized]) |v| allocator.free(v);
         allocator.free(out);
     }
-    for (values) |v| {
+    for (values, 0..) |v, i| {
+        const mark = locusEnterIndex(i);
         const id = try string(v);
         if (!identity.validateEntityId(id)) return error.InvalidNostr;
         out[initialized] = try dup(allocator, id);
         initialized += 1;
+        locusRestore(mark);
     }
     std.mem.sort([]u8, out, {}, struct {
         fn less(_: void, a: []u8, b: []u8) bool {
@@ -502,12 +847,14 @@ fn parseNostrRelays(allocator: std.mem.Allocator, value: std.json.Value) Error![
         for (out[0..initialized]) |v| allocator.free(v);
         allocator.free(out);
     }
-    for (values) |v| {
+    for (values, 0..) |v, i| {
+        const mark = locusEnterIndex(i);
         out[initialized] = nostr.normalizeRelayUrl(allocator, try string(v)) catch |err| {
             if (err == error.OutOfMemory) return error.OutOfMemory;
             return error.InvalidNostr;
         };
         initialized += 1;
+        locusRestore(mark);
     }
     nostr.sortRelays(out) catch return error.InvalidNostr;
     return out;
@@ -582,8 +929,16 @@ fn parsePublication(allocator: std.mem.Allocator, value: std.json.Value) Error!P
         if (field(obj, "name")) |v| config.name = try boundedTextMax(allocator, v, max_standard_site_name_bytes);
         if (field(obj, "description")) |v| config.description = try boundedTextMax(allocator, v, max_standard_site_description_bytes);
         if (field(obj, "show_in_discover")) |v| config.show_in_discover = try boolean(v);
-        if (field(obj, "include")) |v| config.include = try parseFilters(allocator, v);
-        if (field(obj, "exclude")) |v| config.exclude = try parseFilters(allocator, v);
+        if (field(obj, "include")) |v| {
+            const mark = locusEnter("include");
+            config.include = try parseFilters(allocator, v);
+            locusRestore(mark);
+        }
+        if (field(obj, "exclude")) |v| {
+            const mark = locusEnter("exclude");
+            config.exclude = try parseFilters(allocator, v);
+            locusRestore(mark);
+        }
         if (field(obj, "prune")) |v| config.prune = try boolean(v);
         return .{ .standard_site = config };
     }
@@ -599,7 +954,8 @@ fn parseFilters(allocator: std.mem.Allocator, value: std.json.Value) Error![][]c
         for (filters[0..initialized]) |entry| allocator.free(entry);
         allocator.free(filters);
     }
-    for (values) |entry| {
+    for (values, 0..) |entry, i| {
+        const mark = locusEnterIndex(i);
         const text = try string(entry);
         if (text.len == 0) return error.InvalidPublication;
         // Closed filter grammar (docs/contracts/standard-site.md): an exact
@@ -611,6 +967,7 @@ fn parseFilters(allocator: std.mem.Allocator, value: std.json.Value) Error![][]c
         }
         filters[initialized] = try dup(allocator, text);
         initialized += 1;
+        locusRestore(mark);
     }
     return filters;
 }
@@ -633,9 +990,11 @@ fn parseTargets(allocator: std.mem.Allocator, value: std.json.Value) Error![]Htm
         for (targets[0..initialized]) |*v| v.deinit(allocator);
         allocator.free(targets);
     }
-    for (values) |v| {
+    for (values, 0..) |v, i| {
+        const mark = locusEnterIndex(i);
         targets[initialized] = try parseTarget(allocator, v);
         initialized += 1;
+        locusRestore(mark);
     }
     std.mem.sort(HtmlTargetPlan, targets, {}, struct {
         fn less(_: void, a: HtmlTargetPlan, b: HtmlTargetPlan) bool {
@@ -649,7 +1008,12 @@ fn parseTarget(allocator: std.mem.Allocator, value: std.json.Value) Error!HtmlTa
     try only(obj, &.{ "name", "output", "public", "theme", "layout", "layout_rules", "sitemap", "rss", "llms", "static", "head", "html_profile" });
     const name = try string(try required(obj, "name"));
     if (name.len > max_target_name_bytes or !target.isValidTargetName(name)) return error.InvalidTarget;
-    var out = HtmlTargetPlan{ .name = try dup(allocator, name), .output = try dup(allocator, try checkedPath(try required(obj, "output"))) };
+    var out: HtmlTargetPlan = blk: {
+        const name_owned = try dup(allocator, name);
+        errdefer allocator.free(name_owned);
+        const output_owned = try dup(allocator, try checkedPath(try required(obj, "output")));
+        break :blk .{ .name = name_owned, .output = output_owned };
+    };
     errdefer out.deinit(allocator);
     if (field(obj, "public")) |v| out.public = try boolean(v);
     if (field(obj, "theme")) |v| {
@@ -659,17 +1023,52 @@ fn parseTarget(allocator: std.mem.Allocator, value: std.json.Value) Error!HtmlTa
     }
     if (field(obj, "layout")) |v| out.layout = try dup(allocator, try checkedPath(v));
     if (out.theme != null and out.layout != null) return error.InvalidLayout;
-    if (field(obj, "layout_rules")) |v| out.layout_rules = try parseRules(allocator, v);
-    if (field(obj, "sitemap")) |v| out.sitemap = try parseSitemap(allocator, v);
-    if (field(obj, "rss")) |v| out.rss = try parseRss(allocator, v);
-    if (field(obj, "llms")) |v| out.llms = try parseLlms(allocator, v);
-    if (field(obj, "static")) |v| out.static = try parseStatic(allocator, v);
-    if (field(obj, "head")) |v| out.head = head_metadata.parse(allocator, v) catch |err| {
-        if (err == error.OutOfMemory) return error.OutOfMemory;
-        return error.InvalidHead;
-    };
+    if (field(obj, "layout_rules")) |v| {
+        const mark = locusEnter("layout_rules");
+        out.layout_rules = try parseRules(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(obj, "sitemap")) |v| {
+        const mark = locusEnter("sitemap");
+        out.sitemap = try parseSitemap(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(obj, "rss")) |v| {
+        const mark = locusEnter("rss");
+        out.rss = try parseRss(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(obj, "llms")) |v| {
+        const mark = locusEnter("llms");
+        out.llms = try parseLlms(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(obj, "static")) |v| {
+        const mark = locusEnter("static");
+        out.static = try parseStatic(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(obj, "head")) |v| {
+        const mark = locusMark();
+        out.head = head_metadata.parse(allocator, v) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            // head_metadata.parse flattens std.json's structural rejections
+            // into InvalidHead; re-walk the value against the declaration
+            // shape so the failure still names the offending key/field and
+            // its object path. An object value descends under `head`; a
+            // scalar keeps the parent path and reports the field itself.
+            if (v == .object) locusPushField("head");
+            diagnoseJsonShape(head_metadata.Declaration, v);
+            return error.InvalidHead;
+        };
+        locusRestore(mark);
+    }
     if (field(obj, "html_profile")) |v| {
-        out.html_profile = std.meta.stringToEnum(render.OutputProfile, try string(v)) orelse return error.InvalidHead;
+        const text = try string(v);
+        out.html_profile = std.meta.stringToEnum(render.OutputProfile, text) orelse {
+            locusInvalidEnum(text);
+            return error.InvalidHead;
+        };
     }
     return out;
 }
@@ -685,13 +1084,15 @@ fn parseRules(allocator: std.mem.Allocator, value: std.json.Value) Error![]layou
         }
         allocator.free(rules);
     }
-    for (values) |value_| {
+    for (values, 0..) |value_, i| {
+        const mark = locusEnterIndex(i);
         const obj = try object(value_);
         try only(obj, &.{ "selector", "layout" });
         const selector = try string(try required(obj, "selector"));
         const parsed = layout_select.parseSelector(selector) catch return error.InvalidLayout;
         rules[initialized] = .{ .kind = parsed.kind, .value = try dup(allocator, parsed.value), .layout_path = try dup(allocator, try checkedPath(try required(obj, "layout"))) };
         initialized += 1;
+        locusRestore(mark);
     }
     layout_select.rejectDuplicateSelectors(rules) catch return error.InvalidLayout;
     layout_select.sortRulesCanonical(rules);
@@ -729,9 +1130,21 @@ fn parseStatic(allocator: std.mem.Allocator, value: std.json.Value) Error!Static
 fn parseEditions(allocator: std.mem.Allocator, plan: *PublicationPlan, value: std.json.Value) Error!void {
     const obj = try object(value);
     try only(obj, &.{ "ir", "rag", "context" });
-    if (field(obj, "ir")) |v| plan.ir = try parseIr(allocator, v);
-    if (field(obj, "rag")) |v| plan.rag = try parseRag(allocator, v);
-    if (field(obj, "context")) |v| plan.context = try parseContext(allocator, v);
+    if (field(obj, "ir")) |v| {
+        const mark = locusEnter("ir");
+        plan.ir = try parseIr(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(obj, "rag")) |v| {
+        const mark = locusEnter("rag");
+        plan.rag = try parseRag(allocator, v);
+        locusRestore(mark);
+    }
+    if (field(obj, "context")) |v| {
+        const mark = locusEnter("context");
+        plan.context = try parseContext(allocator, v);
+        locusRestore(mark);
+    }
 }
 fn parseIr(allocator: std.mem.Allocator, value: std.json.Value) Error!IrPlan {
     const obj = try object(value);
@@ -919,6 +1332,135 @@ test "strict parser rejects duplicate unknown malformed and bounded input" {
         .{ .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"x\",\"output\":\"dist\",\"layout\":\"layouts/main.html\",\"layuot\":\"nope\"}]}", .err = error.UnknownKey },
     };
     for (cases) |case| try std.testing.expectError(case.err, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, case.text, .{}));
+}
+
+test "structural rejections record the offending key and object path (#1038)" {
+    const cases = [_]struct { text: []const u8, err: anyerror, detail: []const u8 }{
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"bogus\":true}",
+            .err = error.UnknownKey,
+            .detail = "unknown key \"bogus\" in the profile root",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"x\",\"output\":\"d\",\"bogus\":1}]}",
+            .err = error.UnknownKey,
+            .detail = "unknown key \"bogus\" in targets[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"site\":{\"url\":123}}",
+            .err = error.WrongType,
+            .detail = "wrong type for field \"url\" in site",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"x\",\"output\":\"d\",\"sitemap\":{\"bogus\":1}}]}",
+            .err = error.UnknownKey,
+            .detail = "unknown key \"bogus\" in targets[0].sitemap",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"format\":\"boris-publication-profile\"}",
+            .err = error.DuplicateKey,
+            .detail = "duplicate key \"format\" in the profile root",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"name\":\"b\",\"output\":\"d\"}]}",
+            .err = error.DuplicateKey,
+            .detail = "duplicate key \"name\" in targets[0]",
+        },
+        // The rescan decodes escapes before comparing keys: `na\u006de` is a
+        // second `name`, and an escaped *value* does not corrupt key tracking.
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"na\\u006de\":\"b\",\"output\":\"d\"}]}",
+            .err = error.DuplicateKey,
+            .detail = "duplicate key \"name\" in targets[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"layout\":\"x\",\"head\":{\"defaults\":{\"title\":\"caf\\u00e9\"}},\"layout\":\"y\"}]}",
+            .err = error.DuplicateKey,
+            .detail = "duplicate key \"layout\" in targets[0]",
+        },
+        // `head` rejections inside its nested object keep the key/field and
+        // the full object path instead of a bare InvalidHead.
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"id\":\"a\",\"values\":{\"bogus\":1}}]}}]}",
+            .err = error.InvalidHead,
+            .detail = "unknown key \"bogus\" in targets[0].head.pages[0].values",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"values\":{\"title\":\"x\"}}]}}]}",
+            .err = error.InvalidHead,
+            .detail = "missing required field \"id\" in targets[0].head.pages[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":{\"image\":{\"source\":\"theme\",\"path\":\"a.png\"}}}}]}",
+            .err = error.InvalidHead,
+            .detail = "missing required field \"alt\" in targets[0].head.defaults.image",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":{\"type\":\"product\"}}}]}",
+            .err = error.InvalidHead,
+            .detail = "invalid value \"product\" for field \"type\" in targets[0].head.defaults",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"enabled\":\"yes\"}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"enabled\" in targets[0].head",
+        },
+        // Wrong-type container values stay on the parent object path: the
+        // field is named in the message, not duplicated as a path segment.
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":[]}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"defaults\" in targets[0].head",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":{}}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"pages\" in targets[0].head",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"id\":\"a\",\"values\":[]}]}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"values\" in targets[0].head.pages[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"id\":\"a\",\"values\":{\"image\":[]}}]}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"image\" in targets[0].head.pages[0].values",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":5}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"head\" in targets[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"html_profile\":\"bogus\"}]}",
+            .err = error.InvalidHead,
+            .detail = "invalid value \"bogus\" for field \"html_profile\" in targets[0]",
+        },
+        .{
+            .text = "{\"schema_version\":1}",
+            .err = error.MissingField,
+            .detail = "missing required field \"format\" in the profile root",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"x\"}]}",
+            .err = error.MissingField,
+            .detail = "missing required field \"output\" in targets[0]",
+        },
+    };
+    for (cases) |case| {
+        try std.testing.expectError(case.err, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, case.text, .{}));
+        try std.testing.expectEqualStrings(case.detail, lastErrorDetail().?);
+    }
+    // Semantic rejections inside `head` (a bad base URL, duplicate page ids,
+    // out-of-range values) keep the bare error name: there is no JSON locus
+    // to report.
+    try std.testing.expectError(error.InvalidHead, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"enabled\":true,\"base_url\":\"/local\"}}]}", .{}));
+    try std.testing.expect(lastErrorDetail() == null);
+    // A clean parse leaves no stale locus for the next report.
+    var request = try parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"editions\":{\"ir\":{\"output\":\".boris\"}}}", .{});
+    defer request.deinit(std.testing.allocator);
+    try std.testing.expect(lastErrorDetail() == null);
 }
 
 test "JSON byte, string, and nesting bounds fail before plan construction" {
