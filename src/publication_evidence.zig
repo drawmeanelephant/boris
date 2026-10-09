@@ -19,8 +19,8 @@ pub fn EvidenceInput(comptime E: type) type {
         pass1: Io.File.Reader = undefined,
         digest: std.crypto.hash.sha2.Sha256 = std.crypto.hash.sha2.Sha256.init(.{}),
         count: usize = 0,
-        pass2_buffer: [64 * 1024]u8 = undefined,
-        pass2: Io.File.Reader = undefined,
+        bytes: std.ArrayList(u8) = .empty,
+        pass2: Io.Reader = undefined,
 
         const Self = @This();
 
@@ -33,7 +33,9 @@ pub fn EvidenceInput(comptime E: type) type {
             self.pass1 = self.file.reader(io, &self.pass1_buffer);
         }
 
-        pub fn hashPass(self: *Self, fail_error: E) E!void {
+        /// The only read pass over the handle: every byte is counted, hashed
+        /// for the binding, and collected so `parseReader` can replay it.
+        pub fn hashPass(self: *Self, gpa: std.mem.Allocator, fail_error: E) E!void {
             var chunk: [64 * 1024]u8 = undefined;
             while (true) {
                 const n = self.pass1.interface.readSliceShort(&chunk) catch
@@ -41,13 +43,17 @@ pub fn EvidenceInput(comptime E: type) type {
                 if (n == 0) break;
                 self.digest.update(chunk[0..n]);
                 self.count = std.math.add(usize, self.count, n) catch return fail_error;
+                self.bytes.appendSlice(gpa, chunk[0..n]) catch return error.OutOfMemory;
             }
         }
 
-        pub fn rewindForParse(self: *Self, io: Io, fail_error: E) E!void {
-            io.vtable.fileSeekTo(io.userdata, self.file, 0) catch
-                return fail_error;
-            self.pass2 = self.file.reader(io, &self.pass2_buffer);
+        /// A reader over exactly the bytes `hashPass` collected. Replaying
+        /// the payload from memory keeps the parse pass off the file handle:
+        /// no-follow handles are asynchronous on Windows, where a second
+        /// streaming read after rewinding the handle does not complete.
+        pub fn parseReader(self: *Self) *Io.Reader {
+            self.pass2 = Io.Reader.fixed(self.bytes.items);
+            return &self.pass2;
         }
 
         pub fn close(self: *Self, io: Io) void {

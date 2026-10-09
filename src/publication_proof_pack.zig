@@ -112,9 +112,9 @@ const Edge = publication_touches.Edge;
 const EdgeKind = publication_touches.EdgeKind;
 
 /// One no-follow open per evidence input, mirroring the touches layer: the
-/// exact same opened regular-file handle is read twice (hash pass, then a
-/// rewound parse pass), so a path replaced after the open can never mix
-/// evidence versions.
+/// opened regular-file handle is read exactly once (the hash pass also
+/// collects the payload), and the parse pass replays those bytes from
+/// memory, so a path replaced after the open can never mix evidence versions.
 const EvidenceInput = evidence_mod.EvidenceInput(Error);
 
 fn bindingEqual(a: FileBinding, b: FileBinding) bool {
@@ -458,29 +458,25 @@ pub fn writeAfterTouches(
     defer touches_input.close(io);
     if (options.after_open) |hook| hook(options.after_open_context);
 
-    try artifacts_input.hashPass(error.InvalidArtifactsReport);
-    try artifacts_input.rewindForParse(io, error.InvalidArtifactsReport);
-    var inventory = artifact_inventory.parseStream(arena_gpa, &artifacts_input.pass2.interface, target) catch |err| switch (err) {
+    try artifacts_input.hashPass(arena_gpa, error.InvalidArtifactsReport);
+    var inventory = artifact_inventory.parseStream(arena_gpa, artifacts_input.parseReader(), target) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.InvalidArtifactsReport,
     };
     const artifacts_binding = artifacts_input.finish();
 
-    try checks_input.hashPass(error.InvalidChecksReport);
-    try checks_input.rewindForParse(io, error.InvalidChecksReport);
-    const parsed_checks = try publication_touches.parseChecksStream(arena_gpa, &checks_input.pass2.interface, target);
+    try checks_input.hashPass(arena_gpa, error.InvalidChecksReport);
+    const parsed_checks = try publication_touches.parseChecksStream(arena_gpa, checks_input.parseReader(), target);
     const checks_binding = checks_input.finish();
 
-    try claims_input.hashPass(error.InvalidClaimsReport);
-    try claims_input.rewindForParse(io, error.InvalidClaimsReport);
-    const parsed_claims = try publication_touches.parseClaimsStream(arena_gpa, &claims_input.pass2.interface, target);
+    try claims_input.hashPass(arena_gpa, error.InvalidClaimsReport);
+    const parsed_claims = try publication_touches.parseClaimsStream(arena_gpa, claims_input.parseReader(), target);
     const claims_binding = claims_input.finish();
 
-    try touches_input.hashPass(error.InvalidTouchesReport);
-    try touches_input.rewindForParse(io, error.InvalidTouchesReport);
+    try touches_input.hashPass(arena_gpa, error.InvalidTouchesReport);
     const parsed_touches = try publication_touches.parseTouchesStream(
         arena_gpa,
-        &touches_input.pass2.interface,
+        touches_input.parseReader(),
         target,
         &inventory,
         &parsed_checks,
