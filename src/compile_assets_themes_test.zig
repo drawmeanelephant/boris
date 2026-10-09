@@ -121,6 +121,102 @@ test "F9.1 theme-site fixture: slots, page-relative asset URLs, footer" {
     try std.testing.expectEqualStrings(theme_css, copied);
 }
 
+test "issue-1007 hooks: page-status token, tags list, direct-parent link" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-1007-hooks", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-hooks/content",
+        .dist_dir = dist,
+        .layout_path = "docs/contracts/fixtures/theme-hooks/layouts/main.html",
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), stats.pages_written);
+
+    // Satellite: all three hooks populated alongside the frozen <dl>.
+    const page_path = try std.fmt.allocPrint(gpa, "{s}/guides/getting-started.html", .{dist});
+    defer gpa.free(page_path);
+    const page_html = try readFileAlloc(io, cwd, page_path, gpa);
+    defer gpa.free(page_html);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<html data-status=\"draft\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<body class=\"status-draft\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html,
+        "<ul class=\"page-tags\">\n<li>guides</li>\n<li>onboarding</li>\n</ul>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html,
+        "<nav class=\"page-parent\" aria-label=\"Parent\"><a href=\"../guides.html\">Guides</a></nav>") != null);
+    // Frozen metadata bytes are unchanged: raw parent id stays in the <dl>.
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<dl class=\"page-metadata\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<div><dt>Parent</dt><dd>guides</dd></div>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<div><dt>Status</dt><dd>draft</dd></div>") != null);
+
+    // Trunk with status but no tags/parent: status token emits, chrome stays out.
+    const guides_path = try std.fmt.allocPrint(gpa, "{s}/guides.html", .{dist});
+    defer gpa.free(guides_path);
+    const guides_html = try readFileAlloc(io, cwd, guides_path, gpa);
+    defer gpa.free(guides_html);
+    try std.testing.expect(std.mem.indexOf(u8, guides_html, "data-status=\"published\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, guides_html, "page-tags") == null);
+    try std.testing.expect(std.mem.indexOf(u8, guides_html, "page-parent") == null);
+
+    // No status/tags/parent at all: empty token output, no empty elements,
+    // and no metadata <dl> either (unchanged absent-marker behavior).
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_path);
+    const index_html = try readFileAlloc(io, cwd, index_path, gpa);
+    defer gpa.free(index_html);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "data-status=\"\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "class=\"status-\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "page-tags") == null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "page-parent") == null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "page-metadata") == null);
+}
+
+test "issue-1007 hooks under html4_strict profile emit div shapes" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-1007-strict", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    // Strict layouts cannot use data-* attributes or <nav>; the status token
+    // still works inside a `class` attribute, and `{{parent}}` emits the div
+    // shape. `{{tags}}` is the same <ul> in both profiles.
+    try writeTreeFile(io, work, "theme/layouts/main.html",
+        \\<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+        \\<html><head><title>{{title}}</title></head><body class="status-{{page-status}}">{{parent}}{{tags}}<div>{{content}}</div></body></html>
+    );
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-hooks/content",
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .output_profile = .html4_strict,
+        .quiet = true,
+    });
+
+    const page_path = try std.fmt.allocPrint(gpa, "{s}/guides/getting-started.html", .{dist});
+    defer gpa.free(page_path);
+    const page_html = try readFileAlloc(io, cwd, page_path, gpa);
+    defer gpa.free(page_html);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "class=\"status-draft\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html,
+        "<div class=\"page-parent\"><a href=\"../guides.html\">Guides</a></div>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<ul class=\"page-tags\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_html, "<nav") == null);
+}
+
 test "F9.1 asset collision with page output fails loudly" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

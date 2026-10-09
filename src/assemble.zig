@@ -4,8 +4,9 @@
 //! a reusable closed plan of ordered static / slot / asset-url segments.
 //! Required marker: `{{content}}`. Optional slots: `{{nav}}`, `{{breadcrumb}}`,
 //! `{{title}}`, `{{toc}}`, `{{children}}`, `{{metadata}}`, `{{relations}}`,
-//! `{{backlinks}}`, `{{footer}}`. Optional helper:
-//! `{{asset-url <theme-relative path>}}` (validated path grammar only).
+//! `{{backlinks}}`, `{{footer}}`, `{{tags}}`, `{{parent}}`. Optional helpers:
+//! `{{asset-url <theme-relative path>}}` (validated path grammar only) and
+//! `{{page-status}}` (repeatable, argument-free, attribute-safe token).
 //! Final HTML is streamed with sequential writes — no full-page mega-string.
 //!
 //! ## I/O invariants
@@ -59,8 +60,17 @@ pub const footer_marker = "{{footer}}";
 /// Standard.site verification link tags). Layouts opt in explicitly; absence
 /// must never silently claim document verification.
 pub const head_marker = "{{head}}";
+/// Per-tag list slot fed from closed `tags` frontmatter (#1007).
+pub const tags_marker = "{{tags}}";
+/// Direct-parent title/link slot resolved from the frozen graph (#1007).
+pub const parent_marker = "{{parent}}";
 /// Prefix of the argument-bearing helper (path follows a single space).
 pub const asset_url_prefix = "{{asset-url ";
+/// Repeatable attribute-safe token emitting the page's `status` name
+/// (`draft` / `published` / `archived`) or the empty string. The closed
+/// lowercase-ASCII vocabulary makes the value safe inside quoted attribute
+/// values and text without escaping (#1007).
+pub const page_status_marker = "{{page-status}}";
 
 /// Max static + slot + asset-url pieces in one closed layout plan.
 pub const max_segments: usize = 32;
@@ -93,6 +103,9 @@ pub const Slot = enum {
     toc,
     children,
     metadata,
+    tags,
+    parent,
+    page_status,
     relations,
     backlinks,
     footer,
@@ -116,6 +129,12 @@ pub const SlotValues = struct {
     toc: []const u8 = "",
     children: []const u8 = "",
     metadata: []const u8 = "",
+    /// `{{tags}}` fragment (`<ul class="page-tags">` or empty).
+    tags: []const u8 = "",
+    /// `{{parent}}` fragment (resolved direct-parent link or empty).
+    parent: []const u8 = "",
+    /// `{{page-status}}` value: closed status name token or empty string.
+    page_status: []const u8 = "",
     relations: []const u8 = "",
     backlinks: []const u8 = "",
     footer: []const u8 = "",
@@ -134,6 +153,9 @@ pub const SlotValues = struct {
             .toc => self.toc,
             .children => self.children,
             .metadata => self.metadata,
+            .tags => self.tags,
+            .parent => self.parent,
+            .page_status => self.page_status,
             .relations => self.relations,
             .backlinks => self.backlinks,
             .footer => self.footer,
@@ -208,6 +230,9 @@ pub const Layout = struct {
     has_toc: bool = false,
     has_children: bool = false,
     has_metadata: bool = false,
+    has_tags: bool = false,
+    has_parent: bool = false,
+    has_page_status: bool = false,
     has_relations: bool = false,
     has_backlinks: bool = false,
     has_footer: bool = false,
@@ -237,6 +262,8 @@ pub const Layout = struct {
         var seen_toc = false;
         var seen_children = false;
         var seen_metadata = false;
+        var seen_tags = false;
+        var seen_parent = false;
         var seen_relations = false;
         var seen_backlinks = false;
         var seen_footer = false;
@@ -303,6 +330,20 @@ pub const Layout = struct {
                 seen_metadata = true;
                 layout.has_metadata = true;
                 try layout.appendSlot(.metadata);
+            } else if (std.mem.eql(u8, token, tags_marker)) {
+                if (seen_tags) return error.DuplicateLayoutMarker;
+                seen_tags = true;
+                layout.has_tags = true;
+                try layout.appendSlot(.tags);
+            } else if (std.mem.eql(u8, token, parent_marker)) {
+                if (seen_parent) return error.DuplicateLayoutMarker;
+                seen_parent = true;
+                layout.has_parent = true;
+                try layout.appendSlot(.parent);
+            } else if (std.mem.eql(u8, token, page_status_marker)) {
+                // Repeatable attribute-safe token: no once-per-layout check.
+                layout.has_page_status = true;
+                try layout.appendSlot(.page_status);
             } else if (std.mem.eql(u8, token, relations_marker)) {
                 if (seen_relations) return error.DuplicateLayoutMarker;
                 seen_relations = true;
@@ -341,7 +382,8 @@ pub const Layout = struct {
 
         // Content-only convenience prefix/suffix for legacy three-write tests.
         if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title and !layout.has_toc and !layout.has_children and
-            !layout.has_metadata and !layout.has_relations and !layout.has_backlinks and !layout.has_footer and !layout.has_head and !layout.has_asset_url)
+            !layout.has_metadata and !layout.has_tags and !layout.has_parent and !layout.has_page_status and
+            !layout.has_relations and !layout.has_backlinks and !layout.has_footer and !layout.has_head and !layout.has_asset_url)
         {
             if (layout.segment_count == 3 and
                 layout.segments[0] == .static and
@@ -902,6 +944,39 @@ test "layout metadata footer and asset-url plan" {
 
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{metadata}}{{metadata}}{{content}}"));
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{footer}}{{footer}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{tags}}{{tags}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{parent}}{{parent}}{{content}}"));
+}
+
+test "layout issue-1007 metadata hooks parse (#1007)" {
+    const raw =
+        \\<body data-status="{{page-status}}"><main>{{metadata}}{{tags}}{{parent}}{{content}}</main></body>
+    ;
+    const layout = try Layout.split(raw);
+    try std.testing.expect(layout.has_metadata);
+    try std.testing.expect(layout.has_tags);
+    try std.testing.expect(layout.has_parent);
+    try std.testing.expect(layout.has_page_status);
+
+    // `{{page-status}}` is the repeatable attribute-safe token: multiple
+    // occurrences are allowed and each costs one segment (bounded by
+    // max_segments, like every construct).
+    const repeated = try Layout.split("<html data-status=\"{{page-status}}\"><body class=\"status-{{page-status}}\">{{content}}</body>");
+    try std.testing.expect(repeated.has_page_status);
+
+    // It sits naturally mid-attribute: static bytes + slot + static bytes.
+    const seg = repeated.segmentsSlice();
+    var status_count: usize = 0;
+    for (seg) |s| {
+        if (s == .slot and s.slot == .page_status) status_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), status_count);
+
+    // Lookalike tokens are still unknown markers.
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{page-status=x}}{{content}}"));
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{status}}{{content}}"));
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{tag}}{{content}}"));
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{parents}}{{content}}"));
     try std.testing.expectError(error.InvalidAssetUrl, Layout.split("{{asset-url ../escape.css}}{{content}}"));
     try std.testing.expectError(error.InvalidAssetUrl, Layout.split("{{asset-url /abs.css}}{{content}}"));
     try std.testing.expectError(error.InvalidAssetUrl, Layout.split("{{asset-url css/docs.css}}{{content}}"));
