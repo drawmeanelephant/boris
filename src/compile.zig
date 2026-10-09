@@ -1983,9 +1983,6 @@ pub fn publishStageTree(
 /// same typed helpers as publication. Rendered bytes are deliberately
 /// discarded; search, output link audit, inventories, checks, claims, Touch
 /// Atlas, and Proof Pack remain publication phases.
-/// Report link-audit findings on stderr and fail the pipeline. Shared by the
-/// publish path (staged/live overlay audit) and the validation path (in-memory
-/// audit) so the two diagnostics cannot drift.
 /// Append `d` to the optional HTML-path diagnostic collector (OOM-safe).
 fn appendHtmlDiagnostic(options: *const CompileOptions, d: diag.Diagnostic) void {
     if (options.diagnostics) |sink| sink.append(d);
@@ -2015,15 +2012,29 @@ pub fn layoutCodeFor(err: anyerror) diag.Code {
     };
 }
 
-fn reportLinkAuditFindings(sink: ?*diag.Collector, findings: []const link_audit.Finding) error{LinkAuditFailed} {
+/// Report link-audit findings on stderr and through the collector, then fail
+/// the pipeline when any finding is error-severity. Warning findings
+/// (`EFRAGMENTMISSING`) are reported and collected without changing the
+/// outcome. Shared by the publish path (staged/live overlay audit) and the
+/// validation path (in-memory audit) so the two diagnostics cannot drift.
+fn reportLinkAuditFindings(sink: ?*diag.Collector, findings: []const link_audit.Finding) error{LinkAuditFailed}!void {
+    var saw_error = false;
     for (findings) |f| {
+        const severity = link_audit.severityFor(f.code);
         const detail = switch (f.code) {
             .EROUTEESCAPE => "climbs above the output root and can never be served [point it at a published output, or drop the reference]",
             .EPUBLICATIONLOCATION => "does not match the declared publication origin/base path [use a target-relative URL or include the Pages base path]",
+            .EFRAGMENTMISSING => "resolves to a published page, but its #fragment matches no rendered id there [update the fragment, or point the reference at an anchor the page emits]",
             else => "does not resolve to a published output [fix the path, or publish the file it names]",
         };
+        const remediation = switch (f.code) {
+            .EFRAGMENTMISSING => "Update the fragment to a rendered id on the target page, or drop it",
+            else => "Fix the path, or publish the file it names",
+        };
+        if (severity == .error_) saw_error = true;
         if (!diag.text_suppressed.load(.unordered)) {
-            std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
+            std.debug.print("{s}: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
+                severity.textName(),
                 f.code.name(),
                 f.source,
                 f.line,
@@ -2033,15 +2044,15 @@ fn reportLinkAuditFindings(sink: ?*diag.Collector, findings: []const link_audit.
             });
         }
         if (sink) |s| s.append(.{
-            .severity = .error_,
+            .severity = severity,
             .code = f.code,
             .message = detail,
-            .remediation = "Fix the path, or publish the file it names",
+            .remediation = remediation,
             .source_path = f.source,
             .line = f.line,
         });
     }
-    return error.LinkAuditFailed;
+    if (saw_error) return error.LinkAuditFailed;
 }
 
 fn validatePrepublicationTarget(
@@ -2103,9 +2114,18 @@ fn validatePrepublicationTarget(
 
     var findings: std.ArrayList(link_audit.Finding) = .empty;
     defer link_audit.freeFindings(gpa, &findings);
+    // Fragment checking shares the per-page audit: each page's rendered ids
+    // feed `id_index`, and fragment-bearing references are discharged by
+    // `checkPendingFragments` after every page has been audited.
+    var id_index: link_audit.IdIndex = .{};
+    defer link_audit.freeIdIndex(gpa, &id_index);
+    var pending_fragments: std.ArrayList(link_audit.PendingFragment) = .empty;
+    defer link_audit.freePendingFragments(gpa, &pending_fragments);
     var link_audit_opts = link_audit.Options{
         .publication_location = options.publication_location,
         .allow_markdown_literals = options.allow_markdown_literals,
+        .id_index = &id_index,
+        .fragments = &pending_fragments,
     };
     if (options.timings) |t| {
         link_audit_opts.resolution_counter = t.counterPtr(.link_resolutions);
@@ -2169,7 +2189,10 @@ fn validatePrepublicationTarget(
         if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
     }
     if (options.timings) |t| t.stop(.render);
-    if (findings.items.len != 0) return reportLinkAuditFindings(options.diagnostics, findings.items);
+    if (options.timings) |t| t.start(.link_audit);
+    try link_audit.checkPendingFragments(gpa, pending_fragments.items, &id_index, &findings);
+    if (options.timings) |t| t.stop(.link_audit);
+    try reportLinkAuditFindings(options.diagnostics, findings.items);
 
     // Sitemap configuration is source/target validity, but sitemap publication
     // is not. Render its deterministic bytes in memory to exercise the exact
@@ -3600,7 +3623,7 @@ fn auditOutputLinks(
     if (options.timings) |t| t.start(.link_audit);
     try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, link_audit_opts, &findings);
     if (options.timings) |t| t.stop(.link_audit);
-    if (findings.items.len != 0) return reportLinkAuditFindings(options.diagnostics, findings.items);
+    try reportLinkAuditFindings(options.diagnostics, findings.items);
 }
 
 fn writeInventoryOverlay(

@@ -262,6 +262,82 @@ pub fn attributeMatches(raw: []const u8, wanted: []const u8, mode: enum { exact,
     return !mismatch and matched == wanted.len;
 }
 
+fn appendCodepoint(out: *std.ArrayList(u8), a: std.mem.Allocator, cp: u32) !void {
+    if (cp <= 0x7f) return out.append(a, @intCast(cp));
+    if (cp <= 0x7ff) {
+        try out.append(a, @intCast(0xc0 | (cp >> 6)));
+        return out.append(a, @intCast(0x80 | (cp & 0x3f)));
+    }
+    if (cp <= 0xffff) {
+        try out.append(a, @intCast(0xe0 | (cp >> 12)));
+        try out.append(a, @intCast(0x80 | ((cp >> 6) & 0x3f)));
+        return out.append(a, @intCast(0x80 | (cp & 0x3f)));
+    }
+    if (cp <= 0x10ffff) {
+        try out.append(a, @intCast(0xf0 | (cp >> 18)));
+        try out.append(a, @intCast(0x80 | ((cp >> 12) & 0x3f)));
+        try out.append(a, @intCast(0x80 | ((cp >> 6) & 0x3f)));
+        return out.append(a, @intCast(0x80 | (cp & 0x3f)));
+    }
+}
+
+fn appendEntity(
+    out: *std.ArrayList(u8),
+    a: std.mem.Allocator,
+    entity: []const u8,
+) !bool {
+    const pairs = .{
+        .{ "amp", '&' },
+        .{ "lt", '<' },
+        .{ "gt", '>' },
+        .{ "quot", '"' },
+        .{ "apos", '\'' },
+        .{ "nbsp", ' ' },
+    };
+    inline for (pairs) |pair| {
+        if (std.mem.eql(u8, entity, pair[0])) {
+            try out.append(a, pair[1]);
+            return true;
+        }
+    }
+    if (entity.len > 1 and entity[0] == '#') {
+        var base: u8 = 10;
+        var digits = entity[1..];
+        if (digits.len > 1 and (digits[0] == 'x' or digits[0] == 'X')) {
+            base = 16;
+            digits = digits[1..];
+        }
+        const cp = std.fmt.parseInt(u32, digits, base) catch return false;
+        try appendCodepoint(out, a, cp);
+        return true;
+    }
+    return false;
+}
+
+/// Decode the named and numeric character references a browser applies when
+/// reading an attribute value. Unknown or unterminated references stay
+/// literal, matching how a browser keeps them. Attribute values reaching the
+/// link audit or Doctor are compared in this decoded form so `id="a&amp;b"`
+/// and `href="#a&b"` describe the same anchor.
+pub fn decodeEntities(a: std.mem.Allocator, text: []const u8) ![]u8 {
+    if (std.mem.indexOfScalar(u8, text, '&') == null) return a.dupe(u8, text);
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < text.len) {
+        if (text[i] == '&') {
+            if (std.mem.indexOfScalarPos(u8, text, i + 1, ';')) |semi| {
+                if (try appendEntity(&out, a, text[i + 1 .. semi])) {
+                    i = semi + 1;
+                    continue;
+                }
+            }
+        }
+        try out.append(a, text[i]);
+        i += 1;
+    }
+    return out.toOwnedSlice(a);
+}
+
 /// Elements whose text content is not markup. A reference written inside one of
 /// these is documentation or script data, never a published link.
 pub fn isRawTextElement(name: []const u8) bool {

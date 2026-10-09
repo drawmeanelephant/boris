@@ -46,7 +46,12 @@ One leading `/` resolves from the content root. The resolved source path must
 match an existing graph node's `source_path` exactly. A matching node's
 `entity_id` is converted with `identity.htmlOutputPath`, then
 `identity.relativeHref` produces the page-relative public href. Query strings
-and fragments are copied verbatim.
+and fragments are copied verbatim — verbatim means the rewriter does not know
+whether the fragment names a real anchor. The published-output link audit
+checks the rendered result instead: a local reference whose route resolves to
+a published page but whose `#fragment` matches no rendered element `id` on
+that page is reported as `EFRAGMENTMISSING` (warning only, never rewritten or
+repaired; see [diagnostics.md](diagnostics.md)).
 
 Boris's current output contract is `{entity_id}.html`; there is no directory
 `index.html` → directory-URL mapping in this slice.

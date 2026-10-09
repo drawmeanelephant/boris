@@ -40,13 +40,85 @@ pub const Finding = struct {
     attribute: []const u8,
 };
 
-/// Fragment (`#anchor`) checking is deliberately NOT implemented here. Doing it
-/// correctly requires parsing real `id` attributes rather than string-matching
-/// them, URL-decoding the fragment, and handling same-document references — and
-/// a fragment check that fails open on an unreadable target is worse than none,
-/// because it reports success it did not establish. Route checking stands alone
-/// until that is built. `EFRAGMENTMISSING` is reserved in the diagnostics
-/// contract for it.
+/// Output-relative path → set of rendered element `id` values on that page,
+/// harvested while the page's tags are walked for references. A fragment is
+/// live iff it byte-matches a decoded `id` attribute anywhere in the target
+/// document — headings are the common case, but Aside/Details anchors,
+/// footnote ids, and authored HTML ids are equally valid targets, so the
+/// harvest is not restricted to h1–h6. (`doctor`'s fragment check uses the
+/// same all-ids rule; the two surfaces cannot disagree about the same link.)
+pub const IdIndex = std.StringHashMapUnmanaged(std.StringHashMapUnmanaged(void));
+
+/// A resolved local reference whose `#fragment` still needs a target-page id
+/// check. Recorded by `auditOne` when `Options.fragments` is set; discharged
+/// by `checkPendingFragments` once every page has contributed its ids.
+pub const PendingFragment = struct {
+    /// Output-relative path of the page that carries the reference.
+    source: []const u8,
+    /// Raw attribute value, exactly as published.
+    target: []const u8,
+    /// Resolved output-relative route of the target page.
+    resolved: []const u8,
+    /// Fragment after HTML-entity and percent decoding — the comparison form
+    /// a browser uses against element ids.
+    fragment: []const u8,
+    line: u32,
+    /// Attribute the reference was found in, e.g. `href`.
+    attribute: []const u8,
+};
+
+pub fn freePendingFragments(gpa: std.mem.Allocator, pending: *std.ArrayList(PendingFragment)) void {
+    for (pending.items) |p| {
+        gpa.free(p.source);
+        gpa.free(p.target);
+        gpa.free(p.resolved);
+        gpa.free(p.fragment);
+    }
+    pending.deinit(gpa);
+}
+
+pub fn freeIdIndex(gpa: std.mem.Allocator, index: *IdIndex) void {
+    var it = index.iterator();
+    while (it.next()) |entry| {
+        var ids = entry.value_ptr.*;
+        var id_it = ids.keyIterator();
+        while (id_it.next()) |key| gpa.free(key.*);
+        ids.deinit(gpa);
+        gpa.free(entry.key_ptr.*);
+    }
+    index.deinit(gpa);
+}
+
+/// Emit each pending fragment whose decoded form matches no rendered `id` on
+/// its resolved target page as an `EFRAGMENTMISSING` finding (warning — see
+/// `severityFor`). A resolved `.html` route without a harvested id set is a
+/// passthrough asset rather than an audited page; it is skipped because a
+/// fragment check that fails open on an unreadable target is worse than none.
+pub fn checkPendingFragments(
+    gpa: std.mem.Allocator,
+    pending: []const PendingFragment,
+    id_index: *const IdIndex,
+    findings: *std.ArrayList(Finding),
+) !void {
+    for (pending) |p| {
+        const ids = id_index.getPtr(p.resolved) orelse continue;
+        if (ids.contains(p.fragment)) continue;
+        try appendFinding(gpa, findings, .EFRAGMENTMISSING, p.source, p.target, p.line, p.attribute);
+    }
+}
+
+/// Diagnostic severity per audit code. `EFRAGMENTMISSING` is advisory: the
+/// route resolves, so a dead anchor is valid-but-rotting output rather than an
+/// unservable one. Keeping it a warning avoids cutting off workflows on a
+/// check whose false-positive surface is still being mapped; promotion to
+/// `error` is a deliberate one-line change here plus the contract row.
+pub fn severityFor(code: diag.Code) diag.Severity {
+    return switch (code) {
+        .EFRAGMENTMISSING => .warning,
+        else => .error_,
+    };
+}
+
 pub const Options = struct {
     /// When present, root-relative and same-origin absolute URLs are checked
     /// against the declared publication origin/base path before route audit.
@@ -74,6 +146,15 @@ pub const Options = struct {
     /// recognizes (`doclink.zig`), so it cannot be widened by accident into a
     /// general "ignore missing links" switch.
     allow_markdown_literals: bool = false,
+    /// When set, every audited document's rendered element `id` values are
+    /// collected here, keyed by its output-relative path, so fragment
+    /// references can be verified after the whole page set has been seen.
+    id_index: ?*IdIndex = null,
+    /// When set, each local reference that resolves to a published `.html`
+    /// route and carries a non-empty `#fragment` is queued here for the
+    /// post-audit `checkPendingFragments` pass. Bare `#fragment` references
+    /// record their own document as the target.
+    fragments: ?*std.ArrayList(PendingFragment) = null,
 };
 
 /// Attributes whose value is a single URL. `srcset` is deliberately excluded:
@@ -277,6 +358,54 @@ fn hasMarkdownExtension(path: []const u8) bool {
     return std.mem.endsWith(u8, path, ".md") or std.mem.endsWith(u8, path, ".mdx");
 }
 
+/// Browser comparison form for a rendered fragment: HTML entities first (the
+/// attribute layer), then one percent-decode (the URL layer). A malformed
+/// percent escape stays literal — also what a browser would compare against
+/// element ids.
+fn decodeFragmentForMatch(gpa: std.mem.Allocator, raw: []const u8) ![]u8 {
+    const unescaped = try html_scan.decodeEntities(gpa, raw);
+    defer gpa.free(unescaped);
+    return route_resolver.decodeFragment(gpa, unescaped) catch |err| switch (err) {
+        error.MalformedPercentEscape => try gpa.dupe(u8, unescaped),
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+}
+
+/// Queue a resolved reference for the post-audit fragment check. Only
+/// non-empty fragments on published `.html` routes are checked; the line
+/// number is resolved here, while the scanning cursor still covers the tag.
+fn recordPendingFragment(
+    gpa: std.mem.Allocator,
+    opts: Options,
+    source_path: []const u8,
+    target: []const u8,
+    resolved: []const u8,
+    raw_fragment: []const u8,
+    offset: usize,
+    lines: *LineCounter,
+    attribute: []const u8,
+) !void {
+    const pending = opts.fragments orelse return;
+    if (raw_fragment.len == 0 or !std.mem.endsWith(u8, resolved, ".html")) return;
+
+    const owned_source = try gpa.dupe(u8, source_path);
+    errdefer gpa.free(owned_source);
+    const owned_target = try gpa.dupe(u8, target);
+    errdefer gpa.free(owned_target);
+    const owned_resolved = try gpa.dupe(u8, resolved);
+    errdefer gpa.free(owned_resolved);
+    const owned_fragment = try decodeFragmentForMatch(gpa, raw_fragment);
+    errdefer gpa.free(owned_fragment);
+    try pending.append(gpa, .{
+        .source = owned_source,
+        .target = owned_target,
+        .resolved = owned_resolved,
+        .fragment = owned_fragment,
+        .line = lines.at(offset),
+        .attribute = attribute,
+    });
+}
+
 fn auditOne(
     gpa: std.mem.Allocator,
     intended: *const std.StringHashMapUnmanaged(void),
@@ -298,7 +427,13 @@ fn auditOne(
     /// per-reference setup.
     fast_scratch: []u8,
 ) !void {
-    if (isSameDocumentTarget(target) and !has_effective_base) return;
+    if (isSameDocumentTarget(target) and !has_effective_base) {
+        // A bare `#fragment` still names an anchor on this document; queue it
+        // for the post-audit check instead of resolving a route for it.
+        const raw = if (target.len > 1) target[1..] else "";
+        try recordPendingFragment(gpa, opts, source_path, target, source_path, raw, offset, lines, attribute);
+        return;
+    }
 
     var route_target: []const u8 = target;
     var owned_route: ?[]u8 = null;
@@ -339,6 +474,10 @@ fn auditOne(
             if (!(opts.allow_markdown_literals and hasMarkdownExtension(resolved))) {
                 try appendFinding(gpa, findings, .EROUTEMISSING, source_path, target, lines.at(offset), attribute);
             }
+            return;
+        }
+        if (route_resolver.fragment(route_target)) |raw| {
+            try recordPendingFragment(gpa, opts, source_path, target, resolved, raw, offset, lines, attribute);
         }
         return;
     }
@@ -348,9 +487,14 @@ fn auditOne(
         .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, lines.at(offset), attribute),
         .path => |resolved| {
             defer gpa.free(resolved);
-            if (intended.contains(resolved)) return;
-            if (opts.allow_markdown_literals and hasMarkdownExtension(resolved)) return;
-            try appendFinding(gpa, findings, .EROUTEMISSING, source_path, target, lines.at(offset), attribute);
+            if (!intended.contains(resolved)) {
+                if (opts.allow_markdown_literals and hasMarkdownExtension(resolved)) return;
+                try appendFinding(gpa, findings, .EROUTEMISSING, source_path, target, lines.at(offset), attribute);
+                return;
+            }
+            if (route_resolver.fragment(route_target)) |raw| {
+                try recordPendingFragment(gpa, opts, source_path, target, resolved, raw, offset, lines, attribute);
+            }
         },
     }
 }
@@ -370,6 +514,17 @@ pub fn auditDocumentWithOptions(
     var base_source_path: ?[]u8 = null;
     defer if (base_source_path) |path| gpa.free(path);
     var lines: LineCounter = .{ .html = html };
+    // When the caller runs the fragment check, this document's rendered ids
+    // are collected under its output path while the tag walk is already here.
+    var page_ids: ?*std.StringHashMapUnmanaged(void) = null;
+    if (opts.id_index) |index| {
+        const gop = try index.getOrPut(gpa, source_path);
+        if (!gop.found_existing) {
+            gop.key_ptr.* = try gpa.dupe(u8, source_path);
+            gop.value_ptr.* = .{};
+        }
+        page_ids = gop.value_ptr;
+    }
     // One resolution scratch per document, not per reference: a 4 KiB buffer
     // re-declared inside `auditOne` is stack-poisoned (memset) on every call,
     // which dominated large audits.
@@ -439,6 +594,15 @@ pub fn auditDocumentWithOptions(
             } else if (is_meta and std.ascii.eqlIgnoreCase(attribute.name, "content")) {
                 if (meta_content == null) meta_content = value;
             }
+            // A tag may carry both `href` and `id` (a named anchor), so the id
+            // harvest is a separate test rather than another else-if branch.
+            if (page_ids != null and value.len > 0 and
+                std.ascii.eqlIgnoreCase(attribute.name, "id"))
+            {
+                const decoded = try html_scan.decodeEntities(gpa, value);
+                const gop = try page_ids.?.getOrPut(gpa, decoded);
+                if (gop.found_existing) gpa.free(decoded);
+            }
         }
         if (href) |target| {
             try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "href", opts, findings, i, &lines, &fast_path_buffer);
@@ -502,6 +666,17 @@ pub fn audit(
     for (page_paths) |p| try intended.put(gpa, p, {});
     for (asset_paths) |p| try intended.put(gpa, p, {});
 
+    // Fragment checking shares this pass: every audited page contributes its
+    // rendered ids, and fragment-bearing references are checked once the whole
+    // live set has been walked.
+    var id_index: IdIndex = .{};
+    defer freeIdIndex(gpa, &id_index);
+    var pending_fragments: std.ArrayList(PendingFragment) = .empty;
+    defer freePendingFragments(gpa, &pending_fragments);
+    var audit_opts = opts;
+    audit_opts.id_index = &id_index;
+    audit_opts.fragments = &pending_fragments;
+
     for (page_paths) |path| {
         if (!std.mem.endsWith(u8, path, ".html")) continue;
         const html = readOverlay(io, staged_dir, live_dir, path, gpa) catch |err| switch (err) {
@@ -515,8 +690,10 @@ pub fn audit(
             else => return err,
         };
         defer gpa.free(html);
-        try auditDocumentWithOptions(gpa, &intended, path, html, opts, findings);
+        try auditDocumentWithOptions(gpa, &intended, path, html, audit_opts, findings);
     }
+
+    try checkPendingFragments(gpa, pending_fragments.items, &id_index, findings);
 }
 
 test "any scheme-bearing, protocol-relative, or fragment-only target is skipped" {
@@ -930,4 +1107,112 @@ test "common audit routes use caller scratch without allocation" {
         &findings,
     );
     try std.testing.expectEqual(@as(usize, 0), findings.items.len);
+}
+
+const FragmentAudit = struct {
+    intended: std.StringHashMapUnmanaged(void) = .{},
+    id_index: IdIndex = .{},
+    pending: std.ArrayList(PendingFragment) = .empty,
+    findings: std.ArrayList(Finding) = .empty,
+
+    fn deinit(self: *FragmentAudit, gpa: std.mem.Allocator) void {
+        self.intended.deinit(gpa);
+        freeIdIndex(gpa, &self.id_index);
+        freePendingFragments(gpa, &self.pending);
+        freeFindings(gpa, &self.findings);
+    }
+
+    fn options(self: *FragmentAudit) Options {
+        return .{ .id_index = &self.id_index, .fragments = &self.pending };
+    }
+
+    fn check(self: *FragmentAudit, gpa: std.mem.Allocator) !void {
+        try checkPendingFragments(gpa, self.pending.items, &self.id_index, &self.findings);
+    }
+};
+
+test "a fragment that matches a rendered id on the target page is clean" {
+    const gpa = std.testing.allocator;
+    var fa: FragmentAudit = .{};
+    defer fa.deinit(gpa);
+    try fa.intended.put(gpa, "index.html", {});
+    try fa.intended.put(gpa, "guide.html", {});
+
+    // Audit order does not matter: the referrer is checked after the target's
+    // ids are harvested. Non-heading ids (an Aside anchor here) count too.
+    try auditDocumentWithOptions(gpa, &fa.intended, "index.html",
+        "<a href=\"guide.html#section-one\">ok</a><a href=\"guide.html#n1\">aside</a>", fa.options(), &fa.findings);
+    try auditDocumentWithOptions(gpa, &fa.intended, "guide.html",
+        "<h2 id=\"section-one\">S</h2><aside id=\"n1\"></aside>", fa.options(), &fa.findings);
+    try fa.check(gpa);
+    try std.testing.expectEqual(@as(usize, 0), fa.findings.items.len);
+}
+
+test "a stale or renamed anchor emits EFRAGMENTMISSING as a warning" {
+    const gpa = std.testing.allocator;
+    var fa: FragmentAudit = .{};
+    defer fa.deinit(gpa);
+    try fa.intended.put(gpa, "index.html", {});
+    try fa.intended.put(gpa, "guide.html", {});
+
+    // The heading was renamed to `current-name`; `old-name` still resolves a
+    // route but lands on no rendered id.
+    try auditDocumentWithOptions(gpa, &fa.intended, "guide.html", "<h2 id=\"current-name\">C</h2>", fa.options(), &fa.findings);
+    try auditDocumentWithOptions(gpa, &fa.intended, "index.html",
+        "<a href=\"guide.html#old-name\">stale</a><a href=\"guide.html\">page-only</a>", fa.options(), &fa.findings);
+    try fa.check(gpa);
+
+    try std.testing.expectEqual(@as(usize, 1), fa.findings.items.len);
+    const finding = fa.findings.items[0];
+    try std.testing.expectEqual(diag.Code.EFRAGMENTMISSING, finding.code);
+    try std.testing.expectEqual(diag.Severity.warning, severityFor(finding.code));
+    try std.testing.expectEqualStrings("index.html", finding.source);
+    try std.testing.expectEqualStrings("guide.html#old-name", finding.target);
+    try std.testing.expectEqualStrings("href", finding.attribute);
+    try std.testing.expectEqual(@as(u32, 1), finding.line);
+}
+
+test "same-document and percent-encoded fragments are checked like any resolved route" {
+    const gpa = std.testing.allocator;
+    var fa: FragmentAudit = .{};
+    defer fa.deinit(gpa);
+    try fa.intended.put(gpa, "index.html", {});
+    try fa.intended.put(gpa, "guide.html", {});
+
+    try auditDocumentWithOptions(gpa, &fa.intended, "guide.html", "<h2 id=\"caf&#233;\">x</h2>", fa.options(), &fa.findings);
+    try auditDocumentWithOptions(gpa, &fa.intended, "index.html",
+        "<h1 id=\"top\">T</h1>" ++ // live same-document anchor
+        "<a href=\"#top\">ok</a>" ++ // resolves against own ids
+        "<a href=\"#gone\">stale</a>" ++ // missing on this document
+        "<a href=\"guide.html#caf%C3%A9\">decoded</a>", // percent form of café
+        fa.options(), &fa.findings);
+    try fa.check(gpa);
+
+    try std.testing.expectEqual(@as(usize, 1), fa.findings.items.len);
+    try std.testing.expectEqual(diag.Code.EFRAGMENTMISSING, fa.findings.items[0].code);
+    try std.testing.expectEqualStrings("#gone", fa.findings.items[0].target);
+}
+
+test "fragments are not checked on unrouted or non-page references" {
+    const gpa = std.testing.allocator;
+    var fa: FragmentAudit = .{};
+    defer fa.deinit(gpa);
+    try fa.intended.put(gpa, "index.html", {});
+    try fa.intended.put(gpa, "assets/pic.png", {});
+    // A passthrough `.html` file is a valid route but is never audited as a
+    // page, so it has no harvested id set and its fragments are not verifiable.
+    try fa.intended.put(gpa, "static.html", {});
+
+    try auditDocumentWithOptions(gpa, &fa.intended, "index.html",
+        "<a href=\"gone.html#frag\">missing route</a>" ++ // EROUTEMISSING, not EFRAGMENTMISSING
+        "<a href=\"assets/pic.png#frag\">asset</a>" ++ // fragments are page-only
+        "<a href=\"static.html#frag\">passthrough</a>" ++ // no id set to check
+        "<a href=\"https://example.com/p.html#frag\">external</a>" ++ // out of scope
+        "<a href=\"index.html#\">empty</a>", // bare `#` names no anchor
+        fa.options(), &fa.findings);
+    try fa.check(gpa);
+
+    try std.testing.expectEqual(@as(usize, 1), fa.findings.items.len);
+    try std.testing.expectEqual(diag.Code.EROUTEMISSING, fa.findings.items[0].code);
+    try std.testing.expectEqualStrings("gone.html#frag", fa.findings.items[0].target);
 }

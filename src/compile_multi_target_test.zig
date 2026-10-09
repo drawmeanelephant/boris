@@ -268,6 +268,105 @@ test "validateHtmlSiteMulti runs the output link audit in memory" {
     try std.testing.expectError(error.FileNotFound, cwd.access(io, stage, .{}));
 }
 
+test "a stale published fragment warns but fails neither build nor validate" {
+    // Issue #1022: EFRAGMENTMISSING is advisory. A reference whose route
+    // resolves but whose `#fragment` names no rendered id on the target page
+    // is reported and collected as a warning; `build` still publishes and
+    // `validate` still passes. The rendered-id harvest covers every element
+    // id — headings, authored anchors, component ids — so a link to a
+    // non-heading anchor must stay clean (the same rule `doctor` applies).
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-fragment-audit-test", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\status: published
+        \\---
+        \\# Home
+        \\
+        \\[heading](./guide.md#section-one)
+        \\[element](./guide.md#custom-anchor)
+        \\[renamed](./guide.md#old-name)
+        \\[external](https://example.com/guide#gone)
+        \\[self](#home)
+        \\[self-missing](#no-such-anchor)
+        \\
+    );
+    try writeTreeFile(io, work, "content/guide.md",
+        \\---
+        \\title: Guide
+        \\status: published
+        \\---
+        \\# Guide
+        \\
+        \\## Section One
+        \\
+        \\<div id="custom-anchor">x</div>
+        \\
+    );
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const index_out = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_out);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content_path,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .diagnostics = &collector,
+        .quiet = true,
+    });
+    // Warnings did not cut the build: both pages published.
+    try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+    try cwd.access(io, index_out, .{});
+
+    // Exactly the two dead anchors warned — the renamed cross-page fragment
+    // and the missing same-document one. The live heading, the authored
+    // element id, the external URL, and the present same-document fragment
+    // all stayed clean.
+    var missing: usize = 0;
+    for (collector.list.items) |d| {
+        try std.testing.expect(!d.isError());
+        try std.testing.expectEqualStrings("index.html", d.source_path);
+        if (d.code == .EFRAGMENTMISSING) missing += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), missing);
+
+    // `validate` runs the same audit in memory: same two warnings, no error.
+    const targets = [_]target_mod.TargetSpec{
+        .{ .name = "default", .output_dir = dist },
+    };
+    try validateHtmlSiteMulti(io, gpa, &targets, .{
+        .content_root = content_path,
+        .layout_path = layout_path,
+        .diagnostics = &collector,
+        .quiet = true,
+    });
+    missing = 0;
+    var errors: usize = 0;
+    for (collector.list.items) |d| {
+        if (d.code == .EFRAGMENTMISSING) missing += 1;
+        if (d.isError()) errors += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 4), missing);
+    try std.testing.expectEqual(@as(usize, 0), errors);
+}
+
 test "compileHtmlSiteMulti - success, validation, and isolation" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
