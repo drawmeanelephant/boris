@@ -155,6 +155,8 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
    | `{{toc}}` | In-page outline from **this page’s** body headings (h1–h3 with `id`) |
    | `{{children}}` | Direct frozen children of the current page (or empty) |
    | `{{metadata}}` | Status / tags fragment; unset fields omitted |
+   | `{{tags}}` | Per-tag `<ul class="page-tags">` list from closed frontmatter (or empty) |
+   | `{{parent}}` | Resolved direct-parent link from the frozen graph (or empty on Trunks) |
    | `{{relations}}` | Outgoing validated semantic relations (or empty) |
    | `{{backlinks}}` | Incoming relations derived from the validated set (or empty) |
    | `{{footer}}` | Theme `footer.html` contents, or empty when the theme has none |
@@ -164,7 +166,11 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
    than once (up to 16 occurrences per layout; total layout segments ≤ 32;
    beyond either bound the layout fails to load with
    `LayoutTooManyAssetUrls` / `LayoutTooManySegments`) and is not subject
-   to the at-most-once slot rule.
+   to the at-most-once slot rule. The `{{page-status}}` token is likewise
+   **repeatable** (each occurrence is one segment; no separate bound) and
+   emits the closed `status` name — `draft`, `published`, or `archived` —
+   or the empty string, attribute-safe by construction
+   (`templating-and-themes.md` §3.3).
 
 4. Missing `{{content}}` → hard error **before** content compilation.
 5. Duplicate of any slot marker → hard error **before** content compilation.
@@ -173,7 +179,8 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
    (`assemble.Layout`), all views into the long-lived layout buffer.
 8. Final assembly streams sequential writes only: static segments and per-page
    slot fragments (content, and any of nav/breadcrumb/title/toc/children/
-   metadata/relations/backlinks/footer present in the layout), plus one URL
+   metadata/tags/parent/relations/backlinks/footer present in the layout), one
+   status token per `{{page-status}}` occurrence, plus one URL
    per `asset-url` occurrence. **No** full-page mega-string concatenation in
    the product assembly path.
 
@@ -185,8 +192,8 @@ Before any page render, the HTML path:
 2. Runs the same `graph.validate` rules as IR/RAG (`EPARENT*`, duplicates, cycles).
 3. On any error diagnostic: **do not** publish HTML pages; exit **1** (content).
 4. On success: freeze the graph, `buildNav`, and use the frozen snapshot for
-   `{{nav}}` / `{{breadcrumb}}` / `{{children}}` (and fingerprint material when
-   graph chrome is present).
+   `{{nav}}` / `{{breadcrumb}}` / `{{children}}` / `{{parent}}` (and
+   fingerprint material when graph chrome is present).
 
 ### Status gating on the default HTML target (#738)
 
@@ -199,6 +206,7 @@ default HTML target a `status: draft` page is **emitted but not advertised**:
 | `{{nav}}` | **Pruned**, including the whole subtree below a drafted page (no re-rooting; publish the trunk to re-advertise its section). An all-draft forest still emits the empty `<nav>` wrapper shape. |
 | `{{children}}` | Direct draft children are **omitted**; an all-draft child list emits the empty fragment. |
 | `{{breadcrumb}}` | Unchanged — per-page context, not advertising; a drafted ancestor stays a crumb. |
+| `{{parent}}` | Unchanged — same rule as `{{breadcrumb}}`; a drafted direct parent still emits its link. |
 | Search index / sitemap / RSS | Excluded (same rule as before this section existed). The publication-checks report applies the same eligibility rule: an emitted draft is not a `rendered-search` check subject, so its absence from the index cannot fail that check (#752; inventory records the fact as `"advertised": false`). |
 | `{{metadata}}` on the drafted page itself | Unchanged (own-page context). |
 | `archived` | Treated exactly like published on the HTML target, consistent with Standard.site and Nostr eligibility. |
@@ -286,12 +294,49 @@ children omitted; see [status gating](#status-gating-on-the-default-html-target-
   filtering, pagination, queries, or runtime behavior. `{{nav}}` semantics are
   unchanged.
 
+### Direct-parent HTML (normative shape, #1007)
+
+When `{{parent}}` is present, Boris emits a link to the current frozen node's
+**direct** parent only — not the whole breadcrumb chain:
+
+```html
+<nav class="page-parent" aria-label="Parent"><a href="REL">TITLE</a></nav>
+```
+
+- `REL` uses the same page-relative output-path behavior as `{{nav}}`; it is
+  never a leading-`/` site-absolute path.
+- `TITLE` is the parent title when set, otherwise its entity id. Link text and
+  `href` are HTML-escaped.
+- A Trunk page (no parent) emits the empty fragment — no wrapper.
+- Under `html4_strict` the same fragment renders as
+  `<div class="page-parent"><a href="REL">TITLE</a></div>` (no `nav`/`aria`).
+- The raw parent id still appears in `{{metadata}}`; this slot is additive.
+  The `nav` / `div` element is compiler chrome for rendered search
+  ([rendered-search.md](rendered-search.md)).
+
+### Per-tag list HTML (normative shape, #1007)
+
+When `{{tags}}` is present, Boris emits one list item per closed `tags`
+frontmatter entry, in declared order:
+
+```html
+<ul class="page-tags">
+<li>TAG</li>
+</ul>
+```
+
+- `TAG` text is HTML-escaped; the shape is identical under `html4_strict`.
+- A page with no tags emits the empty fragment — no empty `<ul>` is produced.
+- The list is fed from frontmatter, never parsed out of the `{{metadata}}`
+  `<dl>`; it is compiler chrome for rendered search
+  ([rendered-search.md](rendered-search.md)).
+
 ### Incremental fingerprints and graph chrome
 
-When the layout contains `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, or
-`{{children}}`, each such page fingerprint includes a **site nav material**
-digest derived from the frozen ordered list of `(id, title, parent, role,
-status)` for
+When the layout contains `{{nav}}`, `{{breadcrumb}}`, `{{title}}`,
+`{{children}}`, or `{{parent}}`, each such page fingerprint includes a
+**site nav material** digest derived from the frozen ordered list of
+`(id, title, parent, role, status)` for
 every page: the raw material is hashed once per build, and each page
 fingerprint folds in that fixed-size SHA-256 digest rather than rehashing the
 per-page-count material. This conservative shared material keeps title, output-path, parent,

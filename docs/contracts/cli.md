@@ -9,7 +9,10 @@ family is an additional explicit network family, not a build mode.
 ```text
 boris build [build options]
 boris validate [HTML source and target options]
-boris check [--input DIR] [--format human|json] [--report PATH] [--fail-on-unreferenced]
+boris check [--input DIR] [--format human|json] [--report PATH]
+            [--fail-on-unreferenced] [--fail-on-unlinked]
+            [--fail-on-flat-graph] [--fail-on-zero-includes]
+            [--fail-on-zero-relations]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 boris watch [build options]
 boris plan --profile PATH [plan overrides]
@@ -134,14 +137,35 @@ by this HTML path. See [the profile contract](publication-profile.md#offline-and
 
 ### `init`: deterministic starter scaffold with self-verification
 
-`boris init [DIR]` (default `.`) writes a fixed starter tree — three content
-pages exercising the graph, a closed-slot theme whose layout ships the
-[rendered-search browser client](rendered-search.md), and the two publication
-profiles — into `DIR`, which must not exist or must be empty. The tree is
-byte-deterministic across runs.
+`boris init [DIR] [--type NAME]` (default `.`) writes a fixed starter tree
+into `DIR`, which must not exist or must be empty. `--type` selects one of
+five archetypes; the flag names are exactly the enum values the CLI reports:
+
+- `docs` (default) — the historical Markdown starter: three content pages
+  exercising the graph, a closed-slot theme whose layout ships the
+  [rendered-search browser client](rendered-search.md), and the two
+  publication profiles.
+- `garden` — a flat-ish digital garden: dense wiki links, semantic
+  relations, `{{include}}` composition from `content/includes/`, and a
+  registered `<Aside>` component, under the shipped `ledger` theme.
+- `cookbook` — a Cooklang recipe box (`.cook` pages exercising ingredients,
+  cookware, timers, and sub-recipe references) under `cards`; its profile
+  declares `"input_format": "cook"`.
+- `blog` — dated posts on a parent chain (`published_at` + `summary`)
+  under `cozy`.
+- `textile` — `.textile` pages through the native adapter under `press`;
+  its profile declares `"input_format": "textile"`.
+
+Each archetype ships its own theme (byte-identical to the `themes/` catalog
+copy) and a `boris.json` publication profile that declares its input format
+and theme, so `boris --profile boris.json` builds the materialized tree
+through the normal profile-driven path — the compiler has no per-archetype
+branches. An unknown `--type` is a usage error (exit `2`) that lists the
+valid names. Every tree is byte-deterministic across runs.
 
 After materializing, `init` compiles the fresh tree through the normal HTML
-pipeline into a probe output directory (`DIR/.boris-init-probe`) and removes
+pipeline — in the input format the archetype's profile declares — into a
+probe output directory (`DIR/.boris-init-probe`) and removes
 it again. Exit `0` therefore means "materialized **and** compiled": the
 success report includes the verified page count. Probe paths are resolved
 relative to the process working directory like every other generated output
@@ -288,10 +312,14 @@ boris check --input CONTENT --format json --report REPORT.json
 boris impact ID --input CONTENT --format json --report REPORT.json
 ```
 
-`boris check` reports `unreferenced_page` findings without failing by default.
-CI that treats those findings as fatal may add `--fail-on-unreferenced`; the
-flag is rejected for other commands and does not change the report schema or
-bytes.
+`boris check` reports `unreferenced_page` and advisory findings
+(`unlinked_page`, `flat_graph`, `zero_includes`, `zero_relations` — see
+[documentation-intelligence.md](documentation-intelligence.md) § Advisory
+findings) without failing by default. CI that treats a finding class as fatal
+may add its opt-in flag — `--fail-on-unreferenced`, `--fail-on-unlinked`,
+`--fail-on-flat-graph`, `--fail-on-zero-includes`, or
+`--fail-on-zero-relations`; each flag scopes to its own class, is rejected
+for other commands, and does not change the report schema or bytes.
 
 These reports use the versioned `boris-documentation-intelligence` schema
 defined in [`documentation-intelligence.md`](documentation-intelligence.md).

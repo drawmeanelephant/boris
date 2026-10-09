@@ -61,7 +61,7 @@ pub const Diagnostic = struct {
     id: ?[]const u8,
 };
 
-pub const EndpointType = enum { page, source };
+pub const EndpointType = enum { page, source, graph };
 
 pub const AnalysisFinding = struct {
     code: []const u8,

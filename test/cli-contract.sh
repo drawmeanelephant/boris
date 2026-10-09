@@ -59,6 +59,30 @@ cmp "${TMP}/check.json" "${TMP}/check-repeat.json"
 grep -q '"sourceLocations"' "${TMP}/check.json"
 grep -q '"diagnostics": \[\]' "${TMP}/check.json"
 
+# Advisory findings (#1023): a valid-but-flat corpus reports flat_graph,
+# unlinked_page, zero_includes, and zero_relations — all informational by
+# default; each --fail-on-* flag opts its class into exit 1 without changing
+# report bytes.
+FLAT="docs/contracts/fixtures/documentation-intelligence/edge-cases/flat/content"
+SINGLE="docs/contracts/fixtures/documentation-intelligence/edge-cases/single/content"
+expect_exit 0 "${BORIS}" check --input="${FLAT}" --format=json --report="${TMP}/check-flat.json" --quiet
+grep -q '"code":"flat_graph"' "${TMP}/check-flat.json"
+grep -q '"code":"unlinked_page"' "${TMP}/check-flat.json"
+grep -q '"code":"zero_includes"' "${TMP}/check-flat.json"
+grep -q '"code":"zero_relations"' "${TMP}/check-flat.json"
+grep -q '"type":"graph","value":"corpus"' "${TMP}/check-flat.json"
+for flag in --fail-on-unreferenced --fail-on-unlinked --fail-on-flat-graph --fail-on-zero-includes --fail-on-zero-relations; do
+  expect_exit 1 "${BORIS}" check --input="${FLAT}" --format=json --report="${TMP}/check-flat-strict.json" "${flag}" --quiet
+  cmp "${TMP}/check-flat.json" "${TMP}/check-flat-strict.json"
+done
+# Flags are scoped to their own class: the linked fixture trips none of the
+# advisory flags, and a single page stays below the flat_graph minimum.
+expect_exit 0 "${BORIS}" check --input="${FIXTURE}" --format=json --report="${TMP}/check-advisory-strict.json" \
+  --fail-on-unlinked --fail-on-flat-graph --fail-on-zero-includes --fail-on-zero-relations --quiet
+cmp "${EXPECTED}/check.json" "${TMP}/check-advisory-strict.json"
+expect_exit 0 "${BORIS}" check --input="${SINGLE}" --format=json --report="${TMP}/check-single-flat.json" --fail-on-flat-graph --quiet
+expect_exit 1 "${BORIS}" check --input="${SINGLE}" --format=json --report="${TMP}/check-single-unlinked.json" --fail-on-unlinked --quiet
+
 # Content, usage, and I/O failures stay distinct and do not create an analysis
 # report when no valid frozen graph exists.
 expect_exit 1 "${BORIS}" check --input="${INVALID}" --format=json --report="${TMP}/invalid.json" --quiet

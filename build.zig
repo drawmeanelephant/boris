@@ -480,6 +480,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // Starter archetype themes for `boris init --type`: the shipped themes
+    // under themes/ are embedded byte-for-byte so a materialized starter is
+    // identical to the catalog copy. `@embedFile` cannot cross the src/
+    // package boundary, so the embed table roots at themes/ itself.
+    const init_archetype_themes_mod = b.createModule(.{
+        .root_source_file = b.path("themes/init_archetype_themes.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    root_mod.addImport("init_archetype_themes", init_archetype_themes_mod);
     root_mod.addOptions("build_info", build_info);
     root_mod.addImport("secp256k1", secp.c_module);
     root_mod.linkLibrary(secp.library);
@@ -976,6 +986,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         });
         nostr_process_fixture_mod.addOptions("build_info", build_info);
+        nostr_process_fixture_mod.addImport("init_archetype_themes", init_archetype_themes_mod);
         nostr_process_fixture_mod.addImport("secp256k1", secp.c_module);
         nostr_process_fixture_mod.linkLibrary(secp.library);
         linkOliver(nostr_process_fixture_mod, oliver_mod);

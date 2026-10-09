@@ -503,7 +503,7 @@ pub fn compileHtmlToSink(
         gpa,
         &db,
         options.quiet,
-        layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0,
+        layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_parent or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0,
         options.timings,
         options.diagnostics,
     );
@@ -589,6 +589,24 @@ fn renderMetadata(allocator: std.mem.Allocator, page: *const DurablePage, strict
         try buf.appendSlice(allocator, if (strict) "</dd>\n" else "</dd></div>\n");
     }
     try buf.appendSlice(allocator, "</dl>\n");
+    return try buf.toOwnedSlice(allocator);
+}
+
+/// `{{tags}}` per-tag list fed from closed `tags` frontmatter (escaped), so
+/// themes can style chips without splitting the frozen `<dl>` text (#1007).
+/// Empty string when the page has no tags; search treats `ul.page-tags` as
+/// compiler chrome (rendered-search contract).
+fn renderTags(allocator: std.mem.Allocator, page: *const DurablePage) ![]const u8 {
+    if (page.tags.len == 0) return "";
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    try buf.appendSlice(allocator, "<ul class=\"page-tags\">\n");
+    for (page.tags) |tag| {
+        try buf.appendSlice(allocator, "<li>");
+        try html_nav.appendEscaped(&buf, allocator, tag);
+        try buf.appendSlice(allocator, "</li>\n");
+    }
+    try buf.appendSlice(allocator, "</ul>\n");
     return try buf.toOwnedSlice(allocator);
 }
 
@@ -953,6 +971,15 @@ fn renderPageSlots(
     if (layout.has_metadata) {
         slots.metadata = try renderMetadata(arena, page, strict);
     }
+    if (layout.has_tags) {
+        slots.tags = try renderTags(arena, page);
+    }
+    if (layout.has_page_status) {
+        // Closed status names are lowercase ASCII: safe verbatim inside a
+        // quoted attribute value (`<body data-status="{{page-status}}">`)
+        // and in text. Unset status emits the empty string.
+        slots.page_status = if (page.status) |st| st.name() else "";
+    }
     if (layout.has_footer) {
         slots.footer = if (render_opts.theme) |t| t.footer() else "";
     }
@@ -980,13 +1007,16 @@ fn renderPageSlots(
         if (layout.has_children) {
             slots.children = try html_nav.renderChildrenProfile(arena, s.nodes, s.nav, gi, page.output_path, strict);
         }
+        if (layout.has_parent) {
+            slots.parent = try html_nav.renderParentProfile(arena, s.nodes, gi, page.output_path, strict);
+        }
         if (layout.has_relations) {
             slots.relations = try html_relations.renderRelationsProfile(arena, s.nodes, gi, page.output_path, strict);
         }
         if (layout.has_backlinks) {
             slots.backlinks = try html_relations.renderBacklinksProfile(arena, s.nodes, gi, page.output_path, strict);
         }
-    } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks) {
+    } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_parent or layout.has_relations or layout.has_backlinks) {
         // Layout requests graph chrome but no frozen site — treat as internal error.
         return error.GraphValidationFailed;
     }
@@ -1172,7 +1202,7 @@ pub fn compileHtmlSite(
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
+    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_parent or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
     defer site.deinit();
 
     return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
@@ -1803,7 +1833,7 @@ pub fn compilePages(
     // Content-only layouts can compile without graph chrome; still freeze so
     // invalid parents fail loud on the HTML path.
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_parent or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
     defer site.deinit();
     return compilePagesWithSite(io, gpa, db, layout, options, &site);
 }
@@ -1833,7 +1863,7 @@ pub fn compilePagesWithShared(
     layout_bytes: []const u8,
 ) !CompileStats {
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_parent or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
     defer site.deinit();
     return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, &site);
 }
@@ -3026,10 +3056,11 @@ fn fingerprintPage(
     for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
     const page_layout = page_layouts[page_idx];
-    // Graph chrome (nav, breadcrumb, title, children) depends on the frozen site.
-    // `children` uses the same complete graph digest conservatively: it keeps
-    // add/remove/rename/title changes correct across incremental runs.
-    const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
+    // Graph chrome (nav, breadcrumb, title, children, parent) depends on the
+    // frozen site. `children`/`parent` use the same complete graph digest
+    // conservatively: it keeps add/remove/rename/title changes correct across
+    // incremental runs (a parent title edit must dirty `{{parent}}` pages).
+    const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children or page_layout.has_parent;
     const nav_material: []const u8 = if (needs_site_material) site.site_nav_digest else "";
     var relation_material: []u8 = &.{};
     if (page_layout.has_relations or page_layout.has_backlinks) {
