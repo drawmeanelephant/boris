@@ -169,6 +169,12 @@ revision, or filesystem traversal order.
 
 The engine retains only canonical inventory metadata, the checks report
 vocabulary, and the report under construction; payloads are never retained.
+Each committed input report is read exactly once: its bytes are counted,
+hashed, and transiently buffered — bounded at 64 MiB per report — so the
+parser replays the exact hashed bytes from memory rather than re-reading the
+handle. The buffer dies with the derivation arena, and a committed report
+larger than the bound is rejected as that report's own malformed-input
+error, never an allocation failure.
 
 The report establishes only what the three named checks observed within the
 declared target-local scope, with the six listed limitations attached. It does

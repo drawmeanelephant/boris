@@ -780,12 +780,11 @@ pub fn parseChecksStream(
     };
 }
 
-/// One no-follow open per evidence input. The exact same opened regular-file
-/// handle is read twice: a first streaming pass counts and hashes every byte,
-/// then the handle is rewound and the exact same byte stream is handed to the
-/// streaming JSON parser. A path replaced after the open can never mix
-/// evidence versions, and the bytes counted and hashed are exactly the bytes
-/// parsed.
+/// One no-follow open per evidence input, read exactly once: the streaming
+/// pass counts and hashes every byte while collecting the payload, which the
+/// streaming JSON parser then replays from memory. A path replaced after the
+/// open can never mix evidence versions, and the bytes counted and hashed are
+/// exactly the bytes parsed.
 const EvidenceInput = evidence_mod.EvidenceInput(Error);
 
 const Derivation = struct {
@@ -1040,9 +1039,8 @@ pub fn writeAfterChecks(
     var artifacts_input: EvidenceInput = .{};
     try artifacts_input.open(io, root, artifact_inventory.output_path, error.InvalidArtifactsReport);
     defer artifacts_input.close(io);
-    try artifacts_input.hashPass(error.InvalidArtifactsReport);
-    try artifacts_input.rewindForParse(io, error.InvalidArtifactsReport);
-    var inventory = artifact_inventory.parseStream(report_gpa, &artifacts_input.pass2.interface, target) catch |err| switch (err) {
+    try artifacts_input.hashPass(report_gpa, error.InvalidArtifactsReport);
+    var inventory = artifact_inventory.parseStream(report_gpa, artifacts_input.parseReader(), target) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.InvalidArtifactsReport,
     };
@@ -1053,9 +1051,8 @@ pub fn writeAfterChecks(
     try checks_input.open(io, root, publication_checks.output_path, error.InvalidChecksReport);
     defer checks_input.close(io);
     if (options.after_open) |hook| hook(options.after_open_context);
-    try checks_input.hashPass(error.InvalidChecksReport);
-    try checks_input.rewindForParse(io, error.InvalidChecksReport);
-    const parsed_checks = try parseChecksStream(report_gpa, &checks_input.pass2.interface, target);
+    try checks_input.hashPass(report_gpa, error.InvalidChecksReport);
+    const parsed_checks = try parseChecksStream(report_gpa, checks_input.parseReader(), target);
     const checks_binding = checks_input.finish();
 
     if (parsed_checks.artifact_binding.bytes != artifact_binding.bytes or
