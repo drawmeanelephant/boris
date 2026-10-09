@@ -200,6 +200,10 @@ pub const Options = struct {
     impact_id: ?[]const u8 = null,
     /// Target directory for `boris init [DIR]` (default: ".").
     init_dir: ?[]const u8 = null,
+    /// Starter archetype name for `boris init --type NAME` (default: the
+    /// `docs` starter). The name set is owned by `init.zig`; the CLI only
+    /// carries the author's spelling through.
+    init_type: ?[]const u8 = null,
     analysis_format: AnalysisFormat = .human,
     analysis_report: ?[]const u8 = null,
     /// HTML-path diagnostics report path (`--report` on build/validate).
@@ -466,6 +470,7 @@ fn parseOptionsAccumulate(gpa: std.mem.Allocator, args: []const []const u8, st: 
         if (try parseGlobalFlags(st, a)) continue;
         if (try parseProfileAndPlanFlags(st, a, args, &i)) continue;
         if (try parseNostrFlags(st, a, args, &i)) continue;
+        if (try parseInitFlags(st, a, args, &i)) continue;
         if (try parseRecipeScaleFlags(st, a, args, &i)) continue;
         if (try parseGraphFlags(st, a, args, &i)) continue;
         if (try parseProofVerifyFlags(gpa, st, a, args, &i)) continue;
@@ -660,8 +665,10 @@ const ParseState = struct {
     fail_on_zero_includes: bool = false,
     fail_on_zero_relations: bool = false,
 
-    // `init [DIR]` positional.
+    // `init [DIR]` positional and its `--type NAME` archetype selector.
     init_dir: ?[]const u8 = null,
+    init_type: ?[]const u8 = null,
+    saw_init_type: bool = false,
 
     // `plan` / profile selection.
     profile_path: ?[]const u8 = null,
@@ -1255,6 +1262,24 @@ fn parseProofVerifyFlags(
         try markSaw(&st.saw_block_code);
         const val = try takeValue(args, i, a, "--block-code");
         try st.block_codes.append(gpa, val);
+        return true;
+    }
+    return false;
+}
+
+/// `init` family flag: `--type NAME` selects the starter archetype
+/// (`init.zig` owns the name set). Beside any other command it is a usage
+/// error, matching the recipe-scale family flags' stance.
+fn parseInitFlags(
+    st: *ParseState,
+    a: []const u8,
+    args: []const []const u8,
+    i: *usize,
+) ParseError!bool {
+    if (std.mem.eql(u8, a, "--type") or std.mem.startsWith(u8, a, "--type=")) {
+        if (st.command != .init) return error.ConflictingFlags;
+        try markSaw(&st.saw_init_type);
+        st.init_type = try takeValue(args, i, a, "--type");
         return true;
     }
     return false;
@@ -2076,6 +2101,7 @@ fn buildInitOptions(st: *ParseState) ParseError!Options {
         .timings = false,
         .command = .init,
         .init_dir = st.init_dir,
+        .init_type = st.init_type,
         .mode = .html,
         .input_format = identity.InputFormat.markdown,
         .input_dir = "content",
@@ -2743,7 +2769,7 @@ pub const usage_text =
     \\  nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
     \\  nostr sign          Sign a plan artifact into a signed-event bundle (offline; key via stdin)
     \\  nostr publish       Send a signed-event bundle to the plan's relays; writes the report
-    \\  init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
+    \\  init [DIR]          Write a starter site into DIR (default: .); --type picks docs, garden, cookbook, blog, or textile
     \\  (no command)        Same as build
     \\  standard-site publish options:
     \\  --profile PATH      Standard.site publication profile (required)
@@ -2983,14 +3009,24 @@ pub fn printInitUsage() void {
     std.debug.print(
         \\Boris init — materialize a deterministic starter site and verify it compiles
         \\
-        \\Usage: boris init [DIR] [--quiet]
+        \\Usage: boris init [DIR] [--type NAME] [--quiet]
         \\
-        \\Writes a fixed starter tree into DIR (default `.`): three content pages
-        \\exercising the graph (trunk, satellites, wiki links, a semantic relation),
-        \\a closed-slot theme whose layout ships the rendered-search browser client,
-        \\and the two publication profiles (boris.json, standard-site.json).
+        \\Writes a fixed starter tree into DIR (default `.`) selected by
+        \\`--type` (default `docs`):
+        \\
+        \\  docs      Markdown documentation site (the historical starter)
+        \\  garden    flat-ish digital garden: dense wiki links, semantic
+        \\            relations, {{include}} composition, an <Aside> component
+        \\  cookbook  Cooklang .cook recipe box; profile declares input_format: cook
+        \\  blog      dated posts on a parent chain (published_at + summary)
+        \\  textile   Textile pages through the native adapter;
+        \\            profile declares input_format: textile
+        \\
+        \\Each archetype writes its own theme and a boris.json publication
+        \\profile, so `boris --profile boris.json` builds it out of the box.
         \\DIR must be empty or not exist; the tree is byte-deterministic.
         \\
+        \\  --type NAME      Starter archetype (docs, garden, cookbook, blog, textile)
         \\  --quiet          Suppress the success report; errors always print
         \\
         \\After writing, init compiles the fresh tree through the normal HTML
@@ -3597,6 +3633,26 @@ test "parse: init takes an optional target directory" {
     try expectEqual(Command.init, flag_first.command);
     try expectEqualStrings("site", flag_first.init_dir.?);
     try expect(flag_first.quiet);
+
+    // `--type NAME` selects the starter archetype; the value is carried
+    // verbatim (init.zig owns the name set and reports unknown names).
+    var typed = try parseOptions(std.testing.allocator, &.{ "boris", "init", "--type", "garden" });
+    defer typed.deinit(std.testing.allocator);
+    try expectEqual(Command.init, typed.command);
+    try expect(typed.init_dir == null);
+    try expectEqualStrings("garden", typed.init_type.?);
+
+    var typed_eq = try parseOptions(std.testing.allocator, &.{ "boris", "init", "site", "--type=textile" });
+    defer typed_eq.deinit(std.testing.allocator);
+    try expectEqualStrings("site", typed_eq.init_dir.?);
+    try expectEqualStrings("textile", typed_eq.init_type.?);
+
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "init", "--type", "blog", "--type", "docs" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "init", "--type" }));
+    try expectError(error.EmptyValue, parseOptions(std.testing.allocator, &.{ "boris", "init", "--type=" }));
+    // `--type` is an init flag; beside any other command it is a usage error.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--type", "garden" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--type", "docs" }));
 
     // init performs no compiler phase: mode/output/analysis flags are usage
     // errors, and the target directory is positional, so --input is not an

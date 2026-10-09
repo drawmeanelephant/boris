@@ -546,7 +546,7 @@ pub fn runGraph(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timin
 
 pub fn runInit(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     const target_dir = opts.init_dir orelse ".";
-    return @fromBackingInt(@intCast(init_mod.run(io, gpa, target_dir, opts.quiet)));
+    return @fromBackingInt(@intCast(init_mod.run(io, gpa, target_dir, opts.init_type, opts.quiet)));
 }
 
 pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
