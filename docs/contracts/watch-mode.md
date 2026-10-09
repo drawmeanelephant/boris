@@ -128,8 +128,10 @@ line-by-line and key off the `event` field. Exit codes are unchanged by
 - The stream is **exclusively NDJSON** while `--watch-json` is active. Compile
   progress prose (`wrote dist/…`) and prose diagnostics are suppressed for the
   duration of each build; the diagnostics are carried inside `build-failed`
-  instead. `--quiet` is therefore implied by `--watch-json` for the compile
-  path, but the event stream itself is always emitted regardless of `--quiet`.
+  instead. A failure that ends the session exits after its `build-failed`
+  record — no prose follows the event. `--quiet` is therefore implied by
+  `--watch-json` for the compile path, but the event stream itself is always
+  emitted regardless of `--quiet`.
 - Key order is stable and written explicitly, so a consumer may pin the exact
   byte shape. Numeric fields are emitted without quotes; `null` marks an absent
   optional scalar.

@@ -236,6 +236,10 @@ pub const ValidateTargetsOptions = struct {
     content_root: []const u8 = "content",
     /// Global default layout path (`--html-layout`). Used when a target has no override.
     layout_path: []const u8 = "layouts/main.html",
+    /// Optional out: on failure, receives the index into `targets` of the
+    /// declaration being checked, so the caller can blame the offending
+    /// target. Untouched for failures that name no single target.
+    failure_index: ?*usize = null,
 };
 
 /// Reject mixing managed theme roots or managed+legacy layouts within one target.
@@ -280,6 +284,7 @@ pub fn validateTargets(
 
     // 1. Validate target name grammar and duplicate names
     for (targets, 0..) |target, i| {
+        errdefer { if (options.failure_index) |idx| idx.* = i; }
         if (!isValidTargetName(target.name)) {
             return error.InvalidTargetName;
         }
@@ -310,7 +315,8 @@ pub fn validateTargets(
     }
 
     // 2. Resolve absolute paths, normalize separators, check workspace membership
-    for (targets) |target| {
+    for (targets, 0..) |target, i| {
+        errdefer { if (options.failure_index) |idx| idx.* = i; }
         if (target.output_dir.len == 0) {
             return error.EmptyTargetDirectory;
         }
@@ -362,7 +368,8 @@ pub fn validateTargets(
         protected_layouts.deinit(gpa);
     }
 
-    for (plans.items) |plan| {
+    for (plans.items, 0..) |plan, i| {
+        errdefer { if (options.failure_index) |idx| idx.* = i; }
         const declared = try layout_select.collectDeclaredLayouts(gpa, plan.layout_path, plan.layout_rules);
         defer gpa.free(declared);
         for (declared) |lp| {
@@ -383,6 +390,7 @@ pub fn validateTargets(
 
     // 4. Overlap, parent/child nesting, protected roots, symlink detection
     for (plans.items, 0..) |plan, i| {
+        errdefer { if (options.failure_index) |idx| idx.* = i; }
         const path_a = plan.resolved_output_dir;
 
         if (pathsNestOrEqual(path_a, content_abs, case_insensitive)) {

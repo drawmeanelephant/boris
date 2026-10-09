@@ -199,14 +199,16 @@ fn locusInvalidEnum(value: []const u8) void {
     }
 }
 
-/// Whether descending into a field of type `T` adds a path segment. Structs
-/// and arrays of non-u8 elements are containers; strings, scalars, and enums
-/// are leaves that stay on the parent path and speak through locus_field.
-fn containerShape(comptime T: type) bool {
+/// Whether descending into a field of type `T` adds a path segment for this
+/// JSON value — object for structs, array for non-u8 slices. A value carrying
+/// the wrong JSON type for its declared container stays on the parent path
+/// and speaks through locus_field, so `head.defaults = []` reads `in
+/// targets[0].head`, not `targets[0].head.defaults` (#1038).
+fn matchesContainerShape(comptime T: type, value: std.json.Value) bool {
     return switch (@typeInfo(T)) {
-        .@"struct" => true,
-        .optional => |info| containerShape(info.child),
-        .pointer => |info| info.size == .slice and info.child != u8,
+        .@"struct" => value == .object,
+        .optional => |info| matchesContainerShape(info.child, value),
+        .pointer => |info| info.size == .slice and info.child != u8 and value == .array,
         else => false,
     };
 }
@@ -263,7 +265,7 @@ fn diagnoseJsonShape(comptime T: type, value: std.json.Value) void {
             inline for (info.field_names, info.field_types, info.field_attrs) |name, field_type, attrs| {
                 if (field(obj, name)) |child| {
                     const mark = locusMark();
-                    if (child != .null and containerShape(field_type)) locusPushField(name);
+                    if (matchesContainerShape(field_type, child)) locusPushField(name);
                     diagnoseJsonShape(field_type, child);
                     if (locus_detail_len != 0) return;
                     locusRestore(mark);
@@ -1402,6 +1404,28 @@ test "structural rejections record the offending key and object path (#1038)" {
             .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"enabled\":\"yes\"}}]}",
             .err = error.InvalidHead,
             .detail = "wrong type for field \"enabled\" in targets[0].head",
+        },
+        // Wrong-type container values stay on the parent object path: the
+        // field is named in the message, not duplicated as a path segment.
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":[]}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"defaults\" in targets[0].head",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":{}}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"pages\" in targets[0].head",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"id\":\"a\",\"values\":[]}]}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"values\" in targets[0].head.pages[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"id\":\"a\",\"values\":{\"image\":[]}}]}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"image\" in targets[0].head.pages[0].values",
         },
         .{
             .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":5}]}",

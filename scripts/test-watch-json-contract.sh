@@ -358,4 +358,54 @@ else
 fi
 pass "report daemon terminated on SIGTERM"
 
+# ---------------------------------------------------------------------------
+# Phase 4: a target-declaration failure on the initial cycle must still be a
+# pure NDJSON stream — hello + build-started + build-failed, exactly one
+# structured diagnostic naming the offending output, then exit 2. No prose
+# may follow the event (#1035/#1036).
+# ---------------------------------------------------------------------------
+note "phase 4: declaration failure stays NDJSON and exits 2"
+FERR="$OUT/fail-stderr.log"
+FOUT="$OUT/fail-stdout.log"
+FRC=0
+"$BORIS" watch --watch-json \
+    --input "$OUT/content" \
+    --theme "$OUT/theme" \
+    --target "alpha=$OUT/content/dist" \
+    >"$FOUT" 2>"$FERR" || FRC=$?
+[[ "$FRC" == "2" ]] || fail "declaration failure exited $FRC (expected 2)"
+expect_line "{\"event\":\"hello\",\"watch_events_schema\":1,\"compiler\":\"$COMPILER_ID\"}" "$FERR"
+expect_line '{"event":"build-started","phase":"initial","mode":"html","targets":["alpha"]}' "$FERR"
+expect_shape '^\{"event":"build-failed","phase":"initial","mode":"html","targets":\["alpha"\],"errors":1,"diagnostics":\[\{"severity":"error","code":"EUSAGE"' "$FERR"
+grep -qF '"sourcePath":".zig-cache/watch-json-contract/content/dist"' "$FERR" \
+    || fail "declaration diagnostic does not name the offending output: $(cat "$FERR")"
+grep -q '"recoverable":false' "$FERR" || fail "declaration failure must be unrecoverable"
+[[ "$(grep -c '^{' "$FERR")" == "3" ]] || fail "expected exactly 3 NDJSON lines: $(cat "$FERR")"
+[[ "$(grep -c '"severity":"error"' "$FERR")" == "1" ]] || fail "expected exactly one error diagnostic: $(cat "$FERR")"
+if grep -vE '^\{"event":"' "$FERR" | grep -q .; then
+    fail "prose leaked into the failed-startup NDJSON stream: $(grep -vE '^\{"event":"' "$FERR" | head -1)"
+fi
+[[ ! -s "$FOUT" ]] || fail "failed-startup stdout is not empty: $(head -1 "$FOUT")"
+pass "declaration failure: pure NDJSON, one EUSAGE diagnostic, exit 2"
+
+note "phase 4b: validate daemon declaration failure stays NDJSON and exits 2"
+# validate rejects --target; a missing --static-dir exercises the same
+# usage-failure path inside runCompile.
+VERR2="$OUT/validate-fail-stderr.log"
+VOUT2="$OUT/validate-fail-stdout.log"
+VRC=0
+"$BORIS" validate --watch --watch-json \
+    --input "$OUT/content" \
+    --theme "$OUT/theme" \
+    --static-dir "$OUT/no-such-dir" \
+    >"$VOUT2" 2>"$VERR2" || VRC=$?
+[[ "$VRC" == "2" ]] || fail "validate declaration failure exited $VRC (expected 2)"
+expect_line '{"event":"build-started","phase":"initial","mode":"validate","targets":["default"]}' "$VERR2"
+expect_shape '^\{"event":"build-failed","phase":"initial","mode":"validate","targets":\["default"\],"errors":1,"diagnostics":\[\{"severity":"error","code":"EUSAGE"' "$VERR2"
+if grep -vE '^\{"event":"' "$VERR2" | grep -q .; then
+    fail "prose leaked into the validate failure NDJSON stream: $(grep -vE '^\{"event":"' "$VERR2" | head -1)"
+fi
+[[ ! -s "$VOUT2" ]] || fail "validate failure stdout is not empty: $(head -1 "$VOUT2")"
+pass "validate declaration failure: pure NDJSON, exit 2"
+
 echo "watch-json-contract: all assertions passed"

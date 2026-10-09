@@ -1166,12 +1166,16 @@ pub fn compileHtmlSite(
 ) !CompileStats {
     const cwd = Io.Dir.cwd();
 
-    try validateSitemapConfig(gpa, options);
+    validateSitemapConfig(gpa, options) catch |err| {
+        if (isUsageTargetFailure(err)) reportTargetConfigFailure(&options, &.{}, 0, err);
+        return err;
+    };
 
     // 0. Lexical layout-path grammar before any open (no .. / absolute escapes).
     layout_select.validateLayoutPath(options.layout_path) catch |err| {
         const msg = try std.fmt.allocPrint(gpa, "invalid layout path {s}: {s}", .{ options.layout_path, @errorName(err) });
         defer gpa.free(msg);
+        if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: {s}\n", .{msg});
         appendHtmlDiagnostic(&options, .{
             .severity = .error_,
             .code = .ELAYOUTPATH,
@@ -1182,7 +1186,19 @@ pub fn compileHtmlSite(
         return err;
     };
     for (options.layout_rules) |rule| {
-        try layout_select.validateLayoutPath(rule.layout_path);
+        layout_select.validateLayoutPath(rule.layout_path) catch |err| {
+            const msg = try std.fmt.allocPrint(gpa, "invalid layout path {s}: {s}", .{ rule.layout_path, @errorName(err) });
+            defer gpa.free(msg);
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: {s}\n", .{msg});
+            appendHtmlDiagnostic(&options, .{
+                .severity = .error_,
+                .code = .ELAYOUTPATH,
+                .message = msg,
+                .remediation = diag.Code.remediationForLayout(.ELAYOUTPATH),
+                .source_path = rule.layout_path,
+            });
+            return err;
+        };
     }
 
     // 1. Layout first — hard fail before any content walk on bad marker.
@@ -1219,7 +1235,14 @@ pub fn compileHtmlSite(
     var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_parent or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
     defer site.deinit();
 
-    return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
+    return compilePagesWithSite(io, gpa, &db, layout, options, &site) catch |err| {
+        // Usage-class failures no deeper phase diagnosed (static dir, sitemap /
+        // feed collisions, site-url gates) get the same locus + remediation the
+        // multi-target path emits; the CLI mapper only classifies the exit.
+        if (isUsageTargetFailure(err) and !alreadyReportedTargetFailure(err))
+            reportTargetConfigFailure(&options, &.{}, 0, err);
+        return err;
+    };
 }
 
 /// Shared, layout-independent fingerprint inputs built once for multi-target runs.
@@ -1500,6 +1523,68 @@ pub fn isUsageTargetFailure(err: anyerror) bool {
     };
 }
 
+/// True when the deeper compile phase already printed the prose line and
+/// appended the structured diagnostic for this failure (graph/include/wiki/
+/// component faults, per-page layout selection, head metadata). Aggregate
+/// wrappers and the CLI mapper must not report it a second time (#1036).
+fn alreadyReportedTargetFailure(err: anyerror) bool {
+    return err == error.IncludeFailed or err == error.ReferenceFailed or
+        err == error.Html4StrictFailed or err == error.ComponentFailed or
+        err == error.GraphValidationFailed or err == error.AmbiguousGlob or
+        err == error.DuplicateSelector or err == error.MixedThemeRoots or
+        err == error.LayoutSelectionFailed or head_metadata.isFailure(err);
+}
+
+/// Emit the prose line and structured diagnostic for a target-configuration
+/// failure raised before per-target compilation begins — the target
+/// declaration checks (collision, workspace escape, symlink), the sitemap /
+/// site-url gate, and the ambiguous-sitemap-targets guard — plus the
+/// single-target path's undiagnosed usage failures. `spec_index <
+/// targets.len` names the offending declaration; otherwise the failure is
+/// global. The CLI mapper classifies the exit code only — the cause is
+/// emitted here, once (#1035/#1036).
+fn reportTargetConfigFailure(
+    options: *const CompileOptions,
+    targets: []const target_mod.TargetSpec,
+    spec_index: usize,
+    err: anyerror,
+) void {
+    const plan: ?target_mod.TargetPlan = if (spec_index < targets.len) blk: {
+        const spec = targets[spec_index];
+        break :blk .{
+            .name = spec.name,
+            .output_dir = spec.output_dir,
+            .resolved_output_dir = "",
+            .layout_path = target_mod.effectiveLayout(spec, options.layout_path),
+            .layout_rules = spec.layout_rules,
+            .html_profile = spec.html_profile,
+            .head = spec.head,
+            .feed = spec.feed,
+        };
+    } else null;
+    var rem_buf: [1024]u8 = undefined;
+    const locus = targetFailureLocus(err, plan, options.*, &rem_buf);
+    var msg_buf: [512]u8 = undefined;
+    const msg = if (plan) |p|
+        std.fmt.bufPrint(&msg_buf, "invalid configuration for target '{s}': {s}", .{ p.name, @errorName(err) }) catch @errorName(err)
+    else
+        std.fmt.bufPrint(&msg_buf, "invalid target configuration: {s}", .{@errorName(err)}) catch @errorName(err);
+    if (!diag.text_suppressed.load(.unordered)) {
+        std.debug.print("error: {s}\n", .{msg});
+        if (targets.len > 0) {
+            std.debug.print("configured targets (canonical order):\n", .{});
+            target_mod.printTargetConfigLines(targets, options.layout_path);
+        }
+    }
+    appendHtmlDiagnostic(options, .{
+        .severity = .error_,
+        .code = locus.code,
+        .message = msg,
+        .remediation = locus.remediation,
+        .source_path = locus.source_path,
+    });
+}
+
 /// Orchestrate multiple HTML build targets with complete isolation and sorted sequence.
 /// Enforces validate-all-first, single discovery, then sequential rendering.
 /// Returns a content or I/O sentinel matching the aggregate target failures.
@@ -1512,14 +1597,28 @@ pub fn compileHtmlSiteMulti(
     targets: []const target_mod.TargetSpec,
     base_options: CompileOptions,
 ) !CompileStats {
-    if (base_options.sitemap_path != null and targets.len > 1) return error.AmbiguousSitemapTargets;
-    try validateSitemapConfig(gpa, base_options);
+    if (base_options.sitemap_path != null and targets.len > 1) {
+        reportTargetConfigFailure(&base_options, targets, targets.len, error.AmbiguousSitemapTargets);
+        return error.AmbiguousSitemapTargets;
+    }
+    validateSitemapConfig(gpa, base_options) catch |err| {
+        if (isUsageTargetFailure(err)) reportTargetConfigFailure(&base_options, targets, targets.len, err);
+        return err;
+    };
 
-    const plans = try target_mod.validateTargets(io, gpa, targets, .{
+    // Declaration failures return before any per-target compile begins, so
+    // emit the same locus diagnostic the per-target wrapper produces — the
+    // CLI mapper classifies the exit and never re-prints the cause (#1036).
+    var failed_spec: usize = targets.len;
+    const plans = target_mod.validateTargets(io, gpa, targets, .{
         .workspace_root = base_options.workspace_root,
         .content_root = base_options.content_root,
         .layout_path = base_options.layout_path,
-    });
+        .failure_index = &failed_spec,
+    }) catch |err| {
+        if (isUsageTargetFailure(err)) reportTargetConfigFailure(&base_options, targets, failed_spec, err);
+        return err;
+    };
     defer {
         for (plans) |plan| gpa.free(plan.resolved_output_dir);
         gpa.free(plans);
@@ -1571,11 +1670,7 @@ pub fn compileHtmlSiteMulti(
                 total_stats.last_reset_capacity = st.last_reset_capacity;
             }
         } else |err| {
-            if (err != error.IncludeFailed and err != error.ReferenceFailed and err != error.Html4StrictFailed and
-                err != error.ComponentFailed and err != error.GraphValidationFailed and err != error.AmbiguousGlob and
-                err != error.MixedThemeRoots and err != error.LayoutSelectionFailed and
-                !head_metadata.isFailure(err))
-            {
+            if (!alreadyReportedTargetFailure(err)) {
                 if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
                 const msg = try std.fmt.allocPrint(gpa, "target '{s}' compilation failed: {s}", .{ plan.name, @errorName(err) });
                 defer gpa.free(msg);
@@ -2083,7 +2178,7 @@ const TargetFailureLocus = struct {
 
 fn targetFailureLocus(
     err: anyerror,
-    plan: target_mod.TargetPlan,
+    plan: ?target_mod.TargetPlan,
     options: CompileOptions,
     rem_buf: []u8,
 ) TargetFailureLocus {
@@ -2092,11 +2187,24 @@ fn targetFailureLocus(
             return std.fmt.bufPrint(buf, f, args) catch "Fix the target configuration and retry the build";
         }
     }.print;
+    // Declaration-phase failures have no plan yet (and the raw single-target
+    // path never builds one); fall back to the shared options so the locus
+    // still names the effective layout/feed (#1036).
+    const p: target_mod.TargetPlan = plan orelse .{
+        .name = options.target_name,
+        .output_dir = options.dist_dir,
+        .resolved_output_dir = "",
+        .layout_path = options.layout_path,
+        .layout_rules = options.layout_rules,
+        .html_profile = options.output_profile,
+        .head = options.head,
+        .feed = options.feed,
+    };
     const static_dir = options.static_dir orelse "";
     const sitemap_path = options.sitemap_path orelse "";
     // The RSS feed path is declared per target (`rss.path`), not on the shared
     // options, so its locus comes from the failing target plan (#1036).
-    const rss_path = if (plan.feed) |feed| feed.path else "";
+    const rss_path = if (p.feed) |feed| feed.path else "";
     return switch (err) {
         error.RssOutputCollision => .{
             .code = .EUSAGE,
@@ -2120,28 +2228,28 @@ fn targetFailureLocus(
         },
         error.DuplicateTargetName => .{
             .code = .EUSAGE,
-            .remediation = fmt(rem_buf, "Give each target a unique name; \"{s}\" is declared more than once", .{plan.name}),
+            .remediation = fmt(rem_buf, "Give each target a unique name; \"{s}\" is declared more than once", .{p.name}),
             .source_path = "",
         },
         error.EmptyTargetDirectory => .{
             .code = .EUSAGE,
-            .remediation = fmt(rem_buf, "Give target '{s}' a non-empty output directory", .{plan.name}),
+            .remediation = fmt(rem_buf, "Give target '{s}' a non-empty output directory", .{p.name}),
             .source_path = "",
         },
         error.TargetOutputCollision => .{
             .code = .EUSAGE,
-            .remediation = fmt(rem_buf, "Move target '{s}' output \"{s}\" so it does not nest with the content root, a layout path, or another target output", .{ plan.name, plan.output_dir }),
-            .source_path = plan.output_dir,
+            .remediation = fmt(rem_buf, "Move target '{s}' output \"{s}\" so it does not nest with the content root, a layout path, or another target output", .{ p.name, p.output_dir }),
+            .source_path = p.output_dir,
         },
         error.TargetOutputSymlink => .{
             .code = .EUSAGE,
-            .remediation = fmt(rem_buf, "Remove the symlink at \"{s}\" or choose a different output directory for target '{s}'", .{ plan.output_dir, plan.name }),
-            .source_path = plan.output_dir,
+            .remediation = fmt(rem_buf, "Remove the symlink at \"{s}\" or choose a different output directory for target '{s}'", .{ p.output_dir, p.name }),
+            .source_path = p.output_dir,
         },
         error.WorkspaceEscape => .{
             .code = .EUSAGE,
-            .remediation = fmt(rem_buf, "Move target '{s}' output \"{s}\" inside the workspace root", .{ plan.name, plan.output_dir }),
-            .source_path = plan.output_dir,
+            .remediation = fmt(rem_buf, "Move target '{s}' output \"{s}\" inside the workspace root", .{ p.name, p.output_dir }),
+            .source_path = p.output_dir,
         },
         error.StaticDirMissing => .{
             .code = .EUSAGE,
@@ -2201,7 +2309,7 @@ fn targetFailureLocus(
         else => .{
             .code = layoutCodeFor(err),
             .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
-            .source_path = plan.layout_path,
+            .source_path = p.layout_path,
         },
     };
 }
@@ -2471,7 +2579,19 @@ fn preparePageLayouts(
     for (options.layout_rules) |rule| {
         try layout_select.validateLayoutPath(rule.layout_path);
     }
-    try target_mod.rejectMixedThemeRoots(options.layout_path, options.layout_rules);
+    target_mod.rejectMixedThemeRoots(options.layout_path, options.layout_rules) catch |err| {
+        if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' mixed theme roots in layout rules: {s}\n", .{ options.target_name, @errorName(err) });
+        const msg = try std.fmt.allocPrint(gpa, "target '{s}' mixed theme roots in layout rules: {s}", .{ options.target_name, @errorName(err) });
+        defer gpa.free(msg);
+        appendHtmlDiagnostic(&options, .{
+            .severity = .error_,
+            .code = .ELAYOUTRULE,
+            .message = msg,
+            .remediation = diag.Code.remediationForLayout(.ELAYOUTRULE),
+            .source_path = options.layout_path,
+        });
+        return err;
+    };
     const declared = try layout_select.collectDeclaredLayouts(gpa, options.layout_path, options.layout_rules);
     defer gpa.free(declared);
 
