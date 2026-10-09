@@ -1,3 +1,3 @@
 ### Fixed
 
-- Malformed publication profiles now name the offending key or field and its object path (for example `unknown key "bogus" in targets[0]`, `duplicate key "format"`, `missing required field "output"`) instead of printing a bare error enumeration. See [the publication-profile contract](/docs/contracts/publication-profile.md) (Fixes #1038).
+- Malformed publication profiles now name the offending key or field and its object path — including paths inside `targets[].head` — for example `unknown key "bogus" in targets[0].head.pages[0].values`, `duplicate key "format"`, or `missing required field "id" in targets[0].head.pages[0]`, instead of printing a bare error enumeration. Duplicate keys are compared after JSON escape decoding, so `"name"` and `"na\u006de"` collide. Semantic rejections with no JSON-shape fault still report the bare error name. See [the publication-profile contract](/docs/contracts/publication-profile.md) (Fixes #1038).

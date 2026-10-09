@@ -150,6 +150,45 @@ test "social head: disabled configuration retains bytes and conflicts fail befor
     try std.testing.expectEqualStrings(baseline, try kit.readTargetPayload(io, a, out, "index.html"));
 }
 
+test "social head: rss.path collision blames the feed declaration, not a sitemap (#1036)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    const out = try std.fmt.allocPrint(a, "{s}/dist", .{root});
+    const lp = try std.fmt.allocPrint(a, "{s}/layouts/main.html", .{root});
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try kit.writeTreeFile(io, root, "content/index.md", article);
+    try kit.writeTreeFile(io, root, "layouts/main.html", layout);
+    var cfg: head.Declaration = .{ .enabled = true, .base_url = "https://example.test" };
+    // rss.path "index.html" collides with the index page output; no sitemap
+    // is declared. The diagnostic must name the feed path, not "" or the
+    // layout (PR #1041 review).
+    const specs = [_]target.TargetSpec{.{
+        .name = "default",
+        .output_dir = out,
+        .layout_path = lp,
+        .head = &cfg,
+        .feed = .{ .path = "index.html", .title = "Updates", .description = "News" },
+    }};
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.RssOutputCollision, compile.validateHtmlSiteMulti(io, gpa, &specs, .{
+        .content_root = content,
+        .diagnostics = &collector,
+    }));
+    try std.testing.expect(collector.list.items.len >= 1);
+    const d = collector.list.items[collector.list.items.len - 1];
+    try std.testing.expectEqual(diag.Code.EUSAGE, d.code);
+    try std.testing.expectEqualStrings("index.html", d.source_path);
+    try std.testing.expect(std.mem.indexOf(u8, d.remediation, "index.html") != null);
+    try std.testing.expect(std.mem.indexOf(u8, d.remediation, "rss") != null);
+    // No head-metadata diagnostic: the failure is not a layout or head fault.
+    for (collector.list.items) |item| try std.testing.expect(item.code != .EHEAD);
+}
+
 test "social head: target bases, theme inventories and profiles cannot be borrowed" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

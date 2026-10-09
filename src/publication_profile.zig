@@ -188,6 +188,95 @@ fn locusMissingField(name: []const u8) Error {
     return error.MissingField;
 }
 
+/// Record an out-of-grammar string for a closed enum field (the profile's own
+/// `html_profile`, or the `head` declaration's enum fields via
+/// `diagnoseJsonShape`).
+fn locusInvalidEnum(value: []const u8) void {
+    if (locus_field_len != 0) {
+        locusDetail("invalid value \"{s}\" for field \"{s}\"", .{ value, locus_field_buf[0..locus_field_len] });
+    } else {
+        locusDetail("invalid value \"{s}\"", .{value});
+    }
+}
+
+/// Whether descending into a field of type `T` adds a path segment. Structs
+/// and arrays of non-u8 elements are containers; strings, scalars, and enums
+/// are leaves that stay on the parent path and speak through locus_field.
+fn containerShape(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .@"struct" => true,
+        .optional => |info| containerShape(info.child),
+        .pointer => |info| info.size == .slice and info.child != u8,
+        else => false,
+    };
+}
+
+/// Diagnostic re-walk for a rejected `head` declaration (#1038): checks the
+/// already-parsed JSON value against `T`'s declared shape and records the
+/// first structural mismatch (unknown key, missing required field, wrong JSON
+/// type, unknown enum value) in the same locus vocabulary the strict parser
+/// uses. Runs only after `head_metadata.parse` fails, so a walk that finds no
+/// mismatch records nothing — the rejection was semantic (bad URL, duplicate
+/// page id, …) and keeps the bare error name.
+fn diagnoseJsonShape(comptime T: type, value: std.json.Value) void {
+    switch (@typeInfo(T)) {
+        .optional => |info| switch (value) {
+            // `head` forbids null outright (rejectNulls), so a null in an
+            // optional field is still the wrong type for this grammar.
+            .null => locusWrongType(),
+            else => diagnoseJsonShape(info.child, value),
+        },
+        .bool => {
+            _ = boolean(value) catch return;
+        },
+        .int => {
+            _ = integer(value) catch return;
+        },
+        .pointer => |info| {
+            if (info.size != .slice) return;
+            if (info.child == u8) {
+                _ = string(value) catch return;
+                return;
+            }
+            const items = array(value) catch return;
+            for (items, 0..) |item, i| {
+                const mark = locusEnterIndex(i);
+                diagnoseJsonShape(info.child, item);
+                if (locus_detail_len != 0) return;
+                locusRestore(mark);
+            }
+        },
+        .@"enum" => {
+            const s = string(value) catch return;
+            if (std.meta.stringToEnum(T, s) == null) locusInvalidEnum(s);
+        },
+        .@"struct" => |info| {
+            const obj = object(value) catch return;
+            var it = obj.iterator();
+            keys: while (it.next()) |entry| {
+                inline for (info.field_names) |name| {
+                    if (std.mem.eql(u8, entry.key_ptr.*, name)) continue :keys;
+                }
+                locusDetail("unknown key \"{s}\"", .{entry.key_ptr.*});
+                return;
+            }
+            inline for (info.field_names, info.field_types, info.field_attrs) |name, field_type, attrs| {
+                if (field(obj, name)) |child| {
+                    const mark = locusMark();
+                    if (child != .null and containerShape(field_type)) locusPushField(name);
+                    diagnoseJsonShape(field_type, child);
+                    if (locus_detail_len != 0) return;
+                    locusRestore(mark);
+                } else if (attrs.defaultValue(field_type) == null) {
+                    locusDetail("missing required field \"{s}\"", .{name});
+                    return;
+                }
+            }
+        },
+        else => {},
+    }
+}
+
 /// Begin descending into the object field `name`: push the segment and return
 /// the mark the caller restores after the child parse succeeds. A `try` that
 /// fails skips the restore, keeping the deepest locus for `locusDetail`.
@@ -536,6 +625,10 @@ fn dup(allocator: std.mem.Allocator, value: []const u8) Error![]u8 {
 /// object frames until the first repeated key and records
 /// `duplicate key "x" in <path>` for `lastErrorDetail`. Runs only on the
 /// terminal rejection path, so allocations live on a local arena.
+/// `nextAllocMax` returns complete tokens: `.string`/`.allocated_string` carry
+/// the decoded key or value even when the source spelling contains escapes
+/// (`"na\u006de"`), which also makes the duplicate check compare the same
+/// decoded bytes the rejecting parse compared.
 fn reportFirstDuplicateKey(allocator: std.mem.Allocator, bytes: []const u8) void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -555,7 +648,7 @@ fn reportFirstDuplicateKey(allocator: std.mem.Allocator, bytes: []const u8) void
     defer scanner.deinit();
 
     while (true) {
-        const token = scanner.next() catch return;
+        const token = scanner.nextAllocMax(a, .alloc_if_needed, max_string_bytes) catch return;
         switch (token) {
             .end_of_document => return,
             .object_begin, .array_begin => {
@@ -953,12 +1046,27 @@ fn parseTarget(allocator: std.mem.Allocator, value: std.json.Value) Error!HtmlTa
         out.static = try parseStatic(allocator, v);
         locusRestore(mark);
     }
-    if (field(obj, "head")) |v| out.head = head_metadata.parse(allocator, v) catch |err| {
-        if (err == error.OutOfMemory) return error.OutOfMemory;
-        return error.InvalidHead;
-    };
+    if (field(obj, "head")) |v| {
+        const mark = locusMark();
+        out.head = head_metadata.parse(allocator, v) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            // head_metadata.parse flattens std.json's structural rejections
+            // into InvalidHead; re-walk the value against the declaration
+            // shape so the failure still names the offending key/field and
+            // its object path. An object value descends under `head`; a
+            // scalar keeps the parent path and reports the field itself.
+            if (v == .object) locusPushField("head");
+            diagnoseJsonShape(head_metadata.Declaration, v);
+            return error.InvalidHead;
+        };
+        locusRestore(mark);
+    }
     if (field(obj, "html_profile")) |v| {
-        out.html_profile = std.meta.stringToEnum(render.OutputProfile, try string(v)) orelse return error.InvalidHead;
+        const text = try string(v);
+        out.html_profile = std.meta.stringToEnum(render.OutputProfile, text) orelse {
+            locusInvalidEnum(text);
+            return error.InvalidHead;
+        };
     }
     return out;
 }
@@ -1256,6 +1364,55 @@ test "structural rejections record the offending key and object path (#1038)" {
             .err = error.DuplicateKey,
             .detail = "duplicate key \"name\" in targets[0]",
         },
+        // The rescan decodes escapes before comparing keys: `na\u006de` is a
+        // second `name`, and an escaped *value* does not corrupt key tracking.
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"na\\u006de\":\"b\",\"output\":\"d\"}]}",
+            .err = error.DuplicateKey,
+            .detail = "duplicate key \"name\" in targets[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"layout\":\"x\",\"head\":{\"defaults\":{\"title\":\"caf\\u00e9\"}},\"layout\":\"y\"}]}",
+            .err = error.DuplicateKey,
+            .detail = "duplicate key \"layout\" in targets[0]",
+        },
+        // `head` rejections inside its nested object keep the key/field and
+        // the full object path instead of a bare InvalidHead.
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"id\":\"a\",\"values\":{\"bogus\":1}}]}}]}",
+            .err = error.InvalidHead,
+            .detail = "unknown key \"bogus\" in targets[0].head.pages[0].values",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"values\":{\"title\":\"x\"}}]}}]}",
+            .err = error.InvalidHead,
+            .detail = "missing required field \"id\" in targets[0].head.pages[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":{\"image\":{\"source\":\"theme\",\"path\":\"a.png\"}}}}]}",
+            .err = error.InvalidHead,
+            .detail = "missing required field \"alt\" in targets[0].head.defaults.image",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":{\"type\":\"product\"}}}]}",
+            .err = error.InvalidHead,
+            .detail = "invalid value \"product\" for field \"type\" in targets[0].head.defaults",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"enabled\":\"yes\"}}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"enabled\" in targets[0].head",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":5}]}",
+            .err = error.InvalidHead,
+            .detail = "wrong type for field \"head\" in targets[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"html_profile\":\"bogus\"}]}",
+            .err = error.InvalidHead,
+            .detail = "invalid value \"bogus\" for field \"html_profile\" in targets[0]",
+        },
         .{
             .text = "{\"schema_version\":1}",
             .err = error.MissingField,
@@ -1271,6 +1428,11 @@ test "structural rejections record the offending key and object path (#1038)" {
         try std.testing.expectError(case.err, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, case.text, .{}));
         try std.testing.expectEqualStrings(case.detail, lastErrorDetail().?);
     }
+    // Semantic rejections inside `head` (a bad base URL, duplicate page ids,
+    // out-of-range values) keep the bare error name: there is no JSON locus
+    // to report.
+    try std.testing.expectError(error.InvalidHead, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"enabled\":true,\"base_url\":\"/local\"}}]}", .{}));
+    try std.testing.expect(lastErrorDetail() == null);
     // A clean parse leaves no stale locus for the next report.
     var request = try parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"editions\":{\"ir\":{\"output\":\".boris\"}}}", .{});
     defer request.deinit(std.testing.allocator);

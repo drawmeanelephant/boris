@@ -3393,6 +3393,8 @@ fn mapHtmlError(
         error.SitemapSiteUrlRequired,
         error.SitemapSiteUrlWithoutOutput,
         error.AmbiguousSitemapTargets,
+        error.InvalidRssPath,
+        error.RssOutputCollision,
         error.StaticDirMissing,
         error.StaticDirNotDirectory,
         error.StaticSymlink,

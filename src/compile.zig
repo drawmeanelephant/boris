@@ -1457,6 +1457,8 @@ pub fn isContentCompileFailure(err: anyerror) bool {
         error.SitemapSiteUrlRequired,
         error.SitemapSiteUrlWithoutOutput,
         error.AmbiguousSitemapTargets,
+        error.InvalidRssPath,
+        error.RssOutputCollision,
         => false,
         else => false,
     };
@@ -1486,6 +1488,8 @@ pub fn isUsageTargetFailure(err: anyerror) bool {
         error.SitemapSiteUrlRequired,
         error.SitemapSiteUrlWithoutOutput,
         error.AmbiguousSitemapTargets,
+        error.InvalidRssPath,
+        error.RssOutputCollision,
         error.StaticDirMissing,
         error.StaticDirNotDirectory,
         error.StaticSymlink,
@@ -2090,7 +2094,55 @@ fn targetFailureLocus(
     }.print;
     const static_dir = options.static_dir orelse "";
     const sitemap_path = options.sitemap_path orelse "";
+    // The RSS feed path is declared per target (`rss.path`), not on the shared
+    // options, so its locus comes from the failing target plan (#1036).
+    const rss_path = if (plan.feed) |feed| feed.path else "";
     return switch (err) {
+        error.RssOutputCollision => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Choose an rss.path that does not collide with a page or asset output; \"{s}\" is taken", .{rss_path}),
+            .source_path = rss_path,
+        },
+        error.InvalidRssPath => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Use a target-root-relative rss.path; \"{s}\" is not allowed", .{rss_path}),
+            .source_path = rss_path,
+        },
+        error.NoTargetsSpecified => .{
+            .code = .EUSAGE,
+            .remediation = "Declare at least one HTML target (--target or a profile targets[] entry)",
+            .source_path = "",
+        },
+        error.InvalidTargetName => .{
+            .code = .EUSAGE,
+            .remediation = "Use letters, digits, '-', '_' and '.' for target names; \".\" and \"..\" are not allowed",
+            .source_path = "",
+        },
+        error.DuplicateTargetName => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Give each target a unique name; \"{s}\" is declared more than once", .{plan.name}),
+            .source_path = "",
+        },
+        error.EmptyTargetDirectory => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Give target '{s}' a non-empty output directory", .{plan.name}),
+            .source_path = "",
+        },
+        error.TargetOutputCollision => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Move target '{s}' output \"{s}\" so it does not nest with the content root, a layout path, or another target output", .{ plan.name, plan.output_dir }),
+            .source_path = plan.output_dir,
+        },
+        error.TargetOutputSymlink => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Remove the symlink at \"{s}\" or choose a different output directory for target '{s}'", .{ plan.output_dir, plan.name }),
+            .source_path = plan.output_dir,
+        },
+        error.WorkspaceEscape => .{
+            .code = .EUSAGE,
+            .remediation = fmt(rem_buf, "Move target '{s}' output \"{s}\" inside the workspace root", .{ plan.name, plan.output_dir }),
+            .source_path = plan.output_dir,
+        },
         error.StaticDirMissing => .{
             .code = .EUSAGE,
             .remediation = fmt(rem_buf, "Create the static directory \"{s}\" or drop --static-dir", .{static_dir}),
@@ -2745,7 +2797,14 @@ fn preflightHead(
         _ = try head_metadata.resolve(cfg, p);
     }
     if (options.feed) |feed| {
-        try sitemap.validateOutputPath(feed.path);
+        // The feed path is authored as `rss.path`; remap the shared output-path
+        // validator's sitemap error names so downstream diagnostics blame the
+        // RSS declaration, not a sitemap the target may not declare (#1036).
+        sitemap.validateOutputPath(feed.path) catch |err| return switch (err) {
+            error.InvalidSitemapPath => error.InvalidRssPath,
+            error.SitemapOutputCollision => error.RssOutputCollision,
+            else => err,
+        };
         if (std.mem.startsWith(u8, feed.path, "_boris/")) return error.InvalidHead;
         var paths: std.ArrayList([]const u8) = .empty;
         defer paths.deinit(gpa);
@@ -2755,7 +2814,11 @@ fn preflightHead(
         for (static) |a| try paths.append(gpa, a.rel_path);
         try paths.append(gpa, search_index.output_path);
         if (options.sitemap_path) |path| try paths.append(gpa, path);
-        try sitemap.rejectOutputCollisions(feed.path, paths.items);
+        sitemap.rejectOutputCollisions(feed.path, paths.items) catch |err| return switch (err) {
+            error.InvalidSitemapPath => error.InvalidRssPath,
+            error.SitemapOutputCollision => error.RssOutputCollision,
+            else => err,
+        };
         const bytes = try renderTargetFeed(gpa, db, options);
         gpa.free(bytes);
     }
@@ -4160,8 +4223,11 @@ fn compilePagesInner(
     const static_entries = try discoverStaticFiles(io, gpa, cwd, db, options, &theme_bundle, &content_assets);
     defer static_files.freeInventory(gpa, static_entries);
     preflightHead(io, cwd, gpa, db, &layouts, options, &theme_bundle, &content_assets, static_entries) catch |err| {
-        // Layout failures already name their selected page/layout.
-        if (err != error.HeadLayoutInvalid and err != error.HeadOwnedTagConflict)
+        // Layout failures already name their selected page/layout; usage-class
+        // feed-path failures are reported by the caller's target-failure locus
+        // with the offending rss.path, not as a head-metadata fault (#1036).
+        if (err != error.HeadLayoutInvalid and err != error.HeadOwnedTagConflict and
+            err != error.InvalidRssPath and err != error.RssOutputCollision)
             reportHeadFailure(gpa, options, options.layout_path, null, err);
         return err;
     };
@@ -4426,6 +4492,48 @@ pub fn observeWhiteboardLifecycle(
 // Test region moved verbatim to compile_test_kit.zig and the
 // compile_*_test.zig siblings (pure move; see PR for the move audit).
 // This file remains the test root, so the siblings run under `test-compile`.
+
+test "targetFailureLocus: every usage-class error maps off the layout fallback" {
+    const plan: target_mod.TargetPlan = .{
+        .name = "a",
+        .output_dir = "dist-a",
+        .resolved_output_dir = "dist-a",
+        .layout_path = "layouts/main.html",
+        .feed = .{ .path = "rss.xml", .title = "Feed", .description = "Updates" },
+    };
+    const options: CompileOptions = .{
+        .static_dir = "static",
+        .sitemap_path = "sitemap.xml",
+    };
+    var buf: [1024]u8 = undefined;
+    const usage_errors = [_]anyerror{
+        error.NoTargetsSpecified,              error.InvalidTargetName,
+        error.DuplicateTargetName,             error.EmptyTargetDirectory,
+        error.TargetOutputCollision,           error.TargetOutputSymlink,
+        error.WorkspaceEscape,                 error.StaticDirMissing,
+        error.StaticDirNotDirectory,           error.StaticSymlink,
+        error.StaticPathUnsafe,                error.StaticPathCollision,
+        error.InvalidSitemapPath,              error.SitemapOutputCollision,
+        error.SitemapSiteUrlRequired,          error.SitemapSiteUrlWithoutOutput,
+        error.AmbiguousSitemapTargets,         error.InvalidSiteUrl,
+        error.InvalidRssPath,                  error.RssOutputCollision,
+    };
+    for (usage_errors) |err| {
+        const locus = targetFailureLocus(err, plan, options, &buf);
+        try std.testing.expectEqual(diag.Code.EUSAGE, locus.code);
+        try std.testing.expect(locus.remediation.len > 0);
+    }
+    // RSS and sitemap collisions share the sitemap projection's validation but
+    // must report their own declaration locus (#1036).
+    const rss_locus = targetFailureLocus(error.RssOutputCollision, plan, options, &buf);
+    try std.testing.expectEqualStrings("rss.xml", rss_locus.source_path);
+    const sm = targetFailureLocus(error.SitemapOutputCollision, plan, options, &buf);
+    try std.testing.expectEqualStrings("sitemap.xml", sm.source_path);
+    // The symlink arm blames the target output, not the layout.
+    const sym = targetFailureLocus(error.TargetOutputSymlink, plan, options, &buf);
+    try std.testing.expectEqualStrings("dist-a", sym.source_path);
+}
+
 test {
     _ = @import("html4_strict.zig");
     _ = @import("compile_test_kit.zig");

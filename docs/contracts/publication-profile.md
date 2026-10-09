@@ -32,8 +32,13 @@ The profile is UTF-8 JSON with no embedded NUL. The Boris parser rejects
 malformed JSON, comments, trailing data, coercion, duplicate keys, and unknown
 keys at every object level. Duplicate rejection is a Boris parser requirement;
 the companion JSON Schema cannot express it alone. Structural rejections name
-the offending key or field and its object path (for example
-`unknown key "bogus" in targets[0]`), not a bare error enumeration.
+the offending key or field and its object path — including paths inside
+`targets[].head` — for example `unknown key "bogus" in
+targets[0].head.pages[0].values` or `missing required field "id" in
+targets[0].head.pages[0]`, not a bare error enumeration. Semantic rejections
+that have no JSON shape fault to blame (an invalid `base_url`, duplicate head
+page ids, an empty target name after validation) still report only the error
+enumeration.
 
 | Bound | Value |
 |---|---:|
