@@ -2,7 +2,9 @@
 
 **Status:** F9.1 + F9.2 + layout selection implemented (closed layout plan,
 metadata/footer/asset-url, target-owned assets, layout UTF-8 at split,
-orphan asset scrub, `--layout-rule` selection). The default Boris theme ships
+orphan asset scrub, `--layout-rule` selection). The additive metadata hooks
+of #1007 (`{{page-status}}`, `{{tags}}`, `{{parent}}`) are landed; the frozen
+`{{metadata}}` `<dl>` shape is unchanged. The default Boris theme ships
 an external copied stylesheet; DaisyUI and IR layout/asset edges remain open
 per §12.
 
@@ -80,17 +82,21 @@ Templates are UTF-8 HTML files. Boris scans the complete file before compiling
 content. Static bytes are streamed unchanged; slot values are generated per
 page.
 
-The vocabulary has two construct kinds with different multiplicity rules:
+The vocabulary has three construct kinds with different multiplicity rules:
 
-- **Slots** — the eleven closed markers in §3.1. Each slot marker may occur at
-  most **once** per layout; a duplicate is a hard layout error.
+- **Slots** — the thirteen closed markers in §3.1. Each slot marker may occur
+  at most **once** per layout; a duplicate is a hard layout error.
 - **`asset-url` helper** (§3.2) — argument-bearing and **repeatable**, with
   bounded multiplicity: up to **16** occurrences per layout, and the total
-  layout segment count (static text + slots + asset-urls) is capped at
-  **32**; beyond either bound is a hard layout error
+  layout segment count (static text + slots + asset-urls + page-status
+  tokens) is capped at **32**; beyond either bound is a hard layout error
   (`LayoutTooManyAssetUrls` / `LayoutTooManySegments`). Each occurrence
   emits one page-relative URL; the referenced file is copied once per
   distinct path.
+- **`page-status` token** (§3.3) — argument-free and **repeatable**, bounded
+  only by the total segment cap. Each occurrence emits one attribute-safe
+  value; it exists so a layout can carry page status into element attributes
+  (e.g. `<body data-status="{{page-status}}">`) without JavaScript.
 
 ### 3.1 Slots
 
@@ -103,6 +109,8 @@ The vocabulary has two construct kinds with different multiplicity rules:
 | `{{toc}}` | no | Page-local h1–h3 outline from Oliver-emitted heading ids; generated HTML as in `html-output.md`. |
 | `{{children}}` | no | Deterministic direct-child list from the frozen graph; title-or-id labels and links are escaped, and childless pages emit empty. No recursive graph semantics or query language is introduced. |
 | `{{metadata}}` | no | Boris-generated page metadata fragment. Only current closed frontmatter fields are represented; text and attribute values are escaped. |
+| `{{tags}}` | no | Per-tag `<ul class="page-tags"><li>…</li></ul>` list fed from the closed `tags` frontmatter — never parsed back out of the `{{metadata}}` `<dl>`. Tag text is escaped; a page with no tags emits the empty fragment. The emitted list is compiler chrome and is excluded from rendered search like `dl.page-metadata` ([rendered-search.md](rendered-search.md)). |
+| `{{parent}}` | no | Direct parent only, resolved from the frozen graph: `<nav class="page-parent" aria-label="Parent"><a href="…">title-or-id</a></nav>` (a `<div class="page-parent">` under `html4_strict`), with escaped label and page-relative href. Empty for Trunks; a draft parent still emits, matching `{{breadcrumb}}`. The raw parent id remains in `{{metadata}}`; this slot is additive alongside it. |
 | `{{relations}}` | no | Current page's outgoing validated semantic relations with canonical links and stable kind attributes/classes; empty when none. |
 | `{{backlinks}}` | no | Incoming relations derived from the validated semantic relation set with canonical links and stable kind attributes/classes; empty when none. |
 | `{{footer}}` | no | Contents of the theme's optional `footer.html`, or the empty string. This is theme-owned trusted static HTML, not page-authored executable content. |
@@ -117,9 +125,13 @@ load** (`Layout.split` / `loadLayout`), not later during page writes.
 controls its surrounding HTML. A slot present in the layout but with no data
 for a page emits the empty fragment with no wrapper of its own: `{{children}}` on
 a childless page, `{{footer}}` when the theme has no `footer.html`,
+`{{tags}}` when the page has no tags, `{{parent}}` on a Trunk page,
 `{{relations}}` / `{{backlinks}}` when the page has none. `{{asset-url}}` is
 never empty: each occurrence resolves to a real theme-owned file (missing
-file → `AssetNotFound`) or the layout fails to load.
+file → `AssetNotFound`) or the layout fails to load. `{{page-status}}` emits
+the empty string when the page has no `status`, so
+`<body data-status="{{page-status}}">` becomes `data-status=""`; the layout
+owns the attribute, the token owns only the value.
 
 `metadata` is intentionally boring and deterministic. A future implementation
 may emit a stable fragment such as:
@@ -163,6 +175,27 @@ asset-path grammar and fail closed.
 not read a URL, invoke a process, inspect the network, or evaluate an
 expression. Direct hand-written `href`/`src` values remain static bytes and
 are not rewritten by Boris.
+
+### 3.3 Page-status token (#1007)
+
+```text
+{{page-status}}
+```
+
+emits the page's `status` name — one of the closed lowercase-ASCII tokens
+`draft`, `published`, `archived` — or the empty string when `status` is
+unset. The value is attribute-safe **by construction**: the closed vocabulary
+contains no markup-significant bytes, so the token needs no attribute-context
+escaping pass and never reuses a generated HTML fragment.
+
+The token is repeatable (one theme may want `data-status` on `<html>` *and* a
+`status-*` class elsewhere) and may appear anywhere static bytes may — inside
+a quoted attribute value, mid-value (`class="status-{{page-status}}"`), or as
+bare text. Each occurrence is one layout segment and counts toward the
+**32**-segment cap; there is no separate occurrence bound and no argument
+grammar (`{{page-status=x}}` is an unknown marker). Layout-level attribute
+rules still apply: under `html4_strict` a layout cannot write `data-status`
+at all and would use `class` instead.
 
 ## 4. Layout selection
 
@@ -502,6 +535,7 @@ Node, a bundler, or network access.
 | 9 | Orphan theme-asset scrub | **F9.2** — post-publish under managed theme roots only |
 | 10 | Footer UTF-8 boundary | **Accepted** — `footer.html` validated at theme load (`FooterInvalidUtf8`); same encoding contract as layout, even though footer is not marker-scanned |
 | 11 | Bounded site navigation | **Accepted** — `{{nav depth=N}}` (N ≥ 1) caps rendered levels; grammar extension over layout-rule or CSS-only alternatives (#744(3)) |
+| 12 | Additive metadata hooks (#1007) | **Accepted** — repeatable attribute-safe `{{page-status}}` token, once-only `{{tags}}` (`ul.page-tags`) and `{{parent}}` (direct-parent `nav`/`div` link) slots; frozen `{{metadata}}` shape and absent-marker output unchanged |
 
 ### Known limitations (not silent failures)
 
@@ -530,6 +564,17 @@ Node, a bundler, or network access.
 - Expanded fixture/unit coverage: `--theme` path identity, asset-url depths,
   footer/metadata, multi-target isolation, full vs incremental byte-identical
   HTML/assets, traversal/collision/missing/symlink failure paths.
+
+### Additive metadata hooks (landed, #1007)
+
+- `{{page-status}}` repeatable attribute-safe token (§3.3), `{{tags}}` and
+  `{{parent}}` once-only slots (§3.1) in the closed `Layout.split` parser.
+- `{{parent}}` resolves title/link from the frozen graph (site-nav digest in
+  the page fingerprint so a parent title edit dirties dependent pages).
+- `ul.page-tags` and the Strict `div.page-parent` join `dl.page-metadata` as
+  compiler chrome excluded from rendered search.
+- Fixture `docs/contracts/fixtures/theme-hooks/`; existing `{{metadata}}`
+  bytes and absent-marker output preserved byte-for-byte.
 
 ### Layout selection (landed)
 
