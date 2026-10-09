@@ -2730,7 +2730,10 @@ fn appendEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror, code: Exi
             .severity = .error_,
             .code = if (code == .usage) .EUSAGE else .EIO,
             .message = @errorName(err),
-            .remediation = "See the stderr diagnostic for the full explanation",
+            .remediation = if (code == .usage)
+                "Check the command line (run boris --help for the full option list)"
+            else
+                "Check that the input and output paths exist and are accessible",
         });
     }
 }

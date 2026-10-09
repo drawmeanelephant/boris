@@ -1,2 +1,2 @@
-error: EFRONTMATTER: bad.md:3:1: unsupported frontmatter key [Fix the frontmatter or encoding for this file]
+error: EFRONTMATTER: bad.md:3:1: unsupported frontmatter key [Use only the supported keys: id, title, parent, status, tags, relations, published_at, summary, servings]
 error: content or layout failure: ParseFailed
