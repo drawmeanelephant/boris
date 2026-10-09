@@ -309,7 +309,8 @@ test "compileBundle invalid parent has equivalent diagnostic and no graph IR" {
             found = true;
             try testing.expectEqual(diag.Severity.error_, d.severity);
             try testing.expectEqualStrings("orphan.md", d.source_path);
-            try testing.expectEqual(@as(?u32, 1), d.line);
+            // `parent: missing` is the third source line (#1021).
+            try testing.expectEqual(@as(?u32, 3), d.line);
             try testing.expect(d.column != null);
             try testing.expect(d.remediation.len > 0);
         }

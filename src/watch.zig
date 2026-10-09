@@ -569,7 +569,7 @@ fn appendValidateEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror) v
             .severity = .error_,
             .code = .EIO,
             .message = @errorName(err),
-            .remediation = "See the stderr diagnostic for the full explanation",
+            .remediation = "Check that the input and output paths exist and are accessible",
         });
     }
 }
