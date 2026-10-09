@@ -22,6 +22,14 @@ pub fn EvidenceInput(comptime E: type) type {
         bytes: std.ArrayList(u8) = .empty,
         pass2: Io.Reader = undefined,
 
+        /// Committed evidence reports are metadata-scale JSON inventories,
+        /// never payload-sized; a larger file is a malformed report, not a
+        /// bigger allocation. This bounds the bytes `hashPass` collects so
+        /// the single-pass read stays fail-closed: an oversized input is
+        /// rejected with the caller's report error instead of an unbounded
+        /// buffer. Matches `publication_evidence_state.max_state_bytes`.
+        pub const max_bytes: usize = 64 * 1024 * 1024;
+
         const Self = @This();
 
         pub fn open(self: *Self, io: Io, root: Io.Dir, path: []const u8, missing_error: E) E!void {
@@ -43,6 +51,7 @@ pub fn EvidenceInput(comptime E: type) type {
                 if (n == 0) break;
                 self.digest.update(chunk[0..n]);
                 self.count = std.math.add(usize, self.count, n) catch return fail_error;
+                if (self.count > max_bytes) return fail_error;
                 self.bytes.appendSlice(gpa, chunk[0..n]) catch return error.OutOfMemory;
             }
         }
@@ -66,4 +75,47 @@ pub fn EvidenceInput(comptime E: type) type {
             return .{ .bytes = self.count, .sha256 = cache.hexDigest(digest) };
         }
     };
+}
+
+test "hashPass collects up to max_bytes and rejects one byte past it" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const Input = EvidenceInput(error{ OutOfMemory, InvalidArtifactsReport });
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Exactly at the bound the report is counted, hashed, collected, and
+    // replayable: the cap is inclusive, not a stricter limit in disguise.
+    {
+        var file = try tmp.dir.createFile(io, "at-bound.json", .{});
+        try file.setLength(io, Input.max_bytes);
+        file.close(io);
+
+        var input: Input = .{};
+        try input.open(io, tmp.dir, "at-bound.json", error.InvalidArtifactsReport);
+        defer input.close(io);
+        try input.hashPass(gpa, error.InvalidArtifactsReport);
+        defer input.bytes.deinit(gpa);
+        try std.testing.expectEqual(Input.max_bytes, input.count);
+        try std.testing.expectEqual(Input.max_bytes, input.bytes.items.len);
+        try std.testing.expectEqual(Input.max_bytes, input.parseReader().bufferedLen());
+    }
+
+    // One byte over the bound fails closed with the caller's report error —
+    // never OutOfMemory — and the buffer never exceeds the cap.
+    {
+        var file = try tmp.dir.createFile(io, "oversized.json", .{});
+        try file.setLength(io, Input.max_bytes + 1);
+        file.close(io);
+
+        var input: Input = .{};
+        try input.open(io, tmp.dir, "oversized.json", error.InvalidArtifactsReport);
+        defer input.close(io);
+        try std.testing.expectError(
+            error.InvalidArtifactsReport,
+            input.hashPass(gpa, error.InvalidArtifactsReport),
+        );
+        try std.testing.expect(input.bytes.items.len <= Input.max_bytes);
+        input.bytes.deinit(gpa);
+    }
 }

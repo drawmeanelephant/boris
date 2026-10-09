@@ -3000,6 +3000,37 @@ test "stale and malformed evidence is rejected without replacing the prior pair"
     try std.testing.expectEqualSlices(u8, prior.json, json2);
 }
 
+test "oversized evidence report is rejected as malformed and the prior pair is preserved" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var prior = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer prior.deinit(gpa);
+
+    var dir = try publication_touches.openSubdir(io, tmp.dir, "target");
+    defer dir.close(io);
+
+    // The single read pass buffers each committed report so the parser can
+    // replay it; a report past `EvidenceInput.max_bytes` fails closed with
+    // the report's own error — not OutOfMemory — like any other malformed
+    // report, and the committed pair stays byte-identical.
+    var oversized = try dir.createFile(io, artifact_inventory.output_path, .{});
+    try oversized.setLength(io, EvidenceInput.max_bytes + 1);
+    oversized.close(io);
+    try std.testing.expectError(
+        error.InvalidArtifactsReport,
+        writeAfterTouches(io, gpa, dir, "default", .{}),
+    );
+    const json = try readFileAlloc(io, dir, gpa, output_path);
+    defer gpa.free(json);
+    const html = try readFileAlloc(io, dir, gpa, index_output_path);
+    defer gpa.free(html);
+    try std.testing.expectEqualSlices(u8, prior.json, json);
+    try std.testing.expectEqualSlices(u8, prior.html, html);
+}
+
 // ---------------------------------------------------------------------------
 // Permanent semantic-rejection negative controls at the Proof Pack layer.
 // The touches-layer suite pins the shared parsers and graph validator; these
