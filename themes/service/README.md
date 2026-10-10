@@ -27,10 +27,14 @@ CSS is original. Not GOV.UK Frontend. See
 | `{{tags}}` | Intentionally absent. Public-service pages are found by task and section, not by tag; the metadata line still lists tags. |
 | `{{parent}}` | Intentionally absent. `main` and `section` render `{{breadcrumb}}`, which already links the parent; `home` serves the `index` trunk. |
 
-## Known limitation
+## Known limitation: browser-tab title
 
 Every layout spends its one `{{title}}` slot on the visible `<h1>`, so the
-document `<title>` is the static word "Service" on every page. The slot
-vocabulary allows each slot once per layout; moving `{{title}}` into
-`<title>` would leave the page without its heading. This needs a design
-decision (see `ACCESSIBILITY.md`).
+document `<title>` is the static word "Service" on every page. A slot may
+appear at most once per layout
+([`templating-and-themes.md`](../../docs/contracts/templating-and-themes.md)
+§3), and moving `{{title}}` into `<title>` would leave the page without its
+heading. This needs a design decision (see `ACCESSIBILITY.md`). Search is
+not affected: the layout `<h1>` carries `data-boris-search-title="layout"`,
+so `_boris/search/search-index.json` titles each page by its own title even
+when the content has no heading.

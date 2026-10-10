@@ -6,7 +6,11 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 - **Skip link.** Every layout opens with "Skip to main content" targeting
   `#main-content`.
 - **Landmarks.** A body-level `header`, one `main`, a labelled "On this
-  page" `aside` (or the home rail), and a body-level `footer`.
+  page" `aside` (or the home rail), and a body-level `footer`. The service
+  navigation and breadcrumb wrappers are plain `div`s; their former
+  `aria-label`s sat on role-less elements and were never announced. The
+  compiler's `nav aria-label="Site"` and `nav aria-label="Breadcrumb"`
+  inside them are the navigation landmarks.
 - **Focus.** Two-tone focus in the public-service style. Links get a yellow
   `#ffdd00` fill with black text (14.55:1) and a black underline bar;
   other controls get a 0.2rem black outline inside a yellow halo. One of the
@@ -20,7 +24,15 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
   background under light dark-mode text. Status tags are 7.77:1 (draft),
   6.16:1 (published), and 8.57:1 (archived).
 - **Not colour alone.** Status tags keep their word; relation kinds are
-  captions in words; callouts keep a text title.
+  captions in words; callouts keep a text title, and danger also gets a
+  double-width edge. Callout edges: tip `#00703c` (6.21:1 on white), note
+  and info `#1d70b8` (5.17:1), warning `#b35900` (4.83:1), danger `#d4351c`
+  (4.86:1); dark mode `#4cc38a` (6.76:1), `#5694ca` (4.63:1), `#ffa05c`
+  (7.44:1), `#ff7e66` (6.01:1) on `#262727`. Before #1049 warning and danger
+  shared one red, and the light green and red stayed in dark mode.
+- **Current page.** The service navigation marks the compiler's
+  `aria-current="page"` link with a white 0.25rem bar under it and drops
+  its underline (a shape change, not a colour change).
 - **Motion.** `prefers-reduced-motion: reduce` disables smooth scrolling and
   clamps transitions and animations.
 - **Print.** `@media print` resets the palette to black on white even for
@@ -31,7 +43,10 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 - **Search hygiene.** `data-boris-search-root` on `main`. Captions, the
   children section, contents rails, relations, and the layout `<h1>` (which
   has no id, so its stored fragment could not resolve) carry
-  `data-boris-search-exclude`.
+  `data-boris-search-exclude`. The layout `<h1>` also carries
+  `data-boris-search-title="layout"`, so a page with no authored heading is
+  indexed under its own title (verified; before #1049 it indexed as
+  "Service").
 - **Known limitation.** The document `<title>` is the static word "Service"
   on every page because the layouts use their single `{{title}}` slot for
   the visible `<h1>` (WCAG 2.4.2 Page Titled is not met). Recorded for a

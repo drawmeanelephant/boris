@@ -10,6 +10,7 @@
   --govuk-yellow: #ffdd00;
   --govuk-green: #00703c;
   --govuk-red: #d4351c;
+  --govuk-orange: #b35900;
   font-family: Arial, Helvetica, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -26,12 +27,18 @@ a:hover { color: var(--govuk-dark-blue); }
 .govuk-header .govuk-caption { color: #d8e8f8; }
 .govuk-header__logotype { margin: 0; font-size: clamp(1.5rem, 3vw, 2.25rem); font-weight: 700; letter-spacing: -0.04em; }
 .govuk-service-nav ul { display: flex; flex-wrap: wrap; justify-content: end; gap: 0.35rem 1.1rem; margin: 0; padding: 0; list-style: none; }
-.govuk-service-nav a { color: #fff; font-weight: 700; }
+.govuk-service-nav li { display: flex; flex-wrap: wrap; gap: 0.35rem 1.1rem; }
+.govuk-service-nav a { display: inline-block; padding-block: 0.2rem; color: #fff; font-weight: 700; }
+.govuk-service-nav a:hover { color: #fff; text-decoration-thickness: 0.2em; }
+.govuk-service-nav a[aria-current="page"] { text-decoration: none; box-shadow: inset 0 -0.25rem #fff; }
 .govuk-main-wrapper { padding-block: clamp(2rem, 6vw, 4.5rem); }
 .govuk-grid-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(13rem, 1fr); gap: clamp(2rem, 6vw, 5rem); }
 .govuk-grid-column-two-thirds, .govuk-grid-column-one-third { min-width: 0; }
 .govuk-breadcrumbs { margin-bottom: 1.8rem; color: var(--govuk-muted); font-size: 0.9rem; }
-.govuk-heading-xl { max-width: 16ch; margin: 0.2rem 0 1rem; font-size: clamp(2.3rem, 6vw, 4.5rem); line-height: 1.05; letter-spacing: -0.055em; }
+.govuk-breadcrumbs ol { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; margin: 0; padding: 0; list-style: none; }
+.govuk-breadcrumbs li + li::before { content: ""; display: inline-block; width: 0.4rem; height: 0.4rem; margin-inline-end: 0.7rem; border: solid currentColor; border-width: 1px 1px 0 0; transform: translateY(-0.1rem) rotate(45deg); }
+.govuk-breadcrumbs a { color: var(--govuk-ink); }
+.govuk-heading-xl { max-width: 20ch; margin: 0.2rem 0 1rem; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.04; letter-spacing: -0.02em; }
 .govuk-heading-m { margin-top: 0; font-size: 1.45rem; line-height: 1.15; }
 .page-metadata { display: flex; flex-wrap: wrap; gap: 0.45rem 1.2rem; margin: 0 0 1.5rem; color: var(--govuk-muted); font-size: 0.88rem; }
 .page-metadata div { display: flex; gap: 0.3rem; }
@@ -42,17 +49,28 @@ a:hover { color: var(--govuk-dark-blue); }
 .prose h3 { margin-top: 2em; font-size: 1.35rem; }
 .prose img { max-width: 100%; height: auto; border: 1px solid var(--govuk-line); }
 .prose pre { overflow-x: auto; padding: 1rem; background: #263238; color: #fff; }
-.prose table { width: 100%; border-collapse: collapse; }
-.prose th, .prose td { padding: 0.75rem 0.5rem; border-bottom: 1px solid var(--govuk-line); text-align: left; vertical-align: top; }
+.prose table { width: 100%; margin-block: 1.5rem; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.prose th, .prose td { padding: 0.65rem 1.25rem 0.65rem 0; border-bottom: 1px solid var(--govuk-line); text-align: left; vertical-align: top; }
+.prose th:last-child, .prose td:last-child { padding-right: 0; }
+.prose th { font-weight: 700; }
+.prose [align="center"] { text-align: center; }
+.prose [align="right"] { text-align: right; }
 .govuk-contents-list { margin-top: 2.2rem; padding-top: 1rem; border-top: 0.25rem solid var(--govuk-blue); }
-.govuk-contents-list ul { margin: 0.6rem 0 0; padding-left: 1.2rem; }
+.govuk-contents-list ul { margin: 0.6rem 0 0; padding-left: 0; list-style: none; }
+.govuk-contents-list a { font-size: 1.15rem; font-weight: 700; }
 .govuk-contents-list li { margin-block: 0.45rem; }
 .govuk-contents-rail { align-self: start; position: sticky; top: 1rem; }
 .govuk-home-grid { margin-top: 3rem; }
 .govuk-panel { padding: clamp(1.4rem, 4vw, 3rem); background: #d8e8f8; border-left: 0.6rem solid var(--govuk-blue); }
 .admonition, .details { margin-block: 1.5rem; padding: 1rem; border: 1px solid var(--govuk-line); border-left: 0.35rem solid var(--govuk-blue); background: var(--govuk-surface); }
-.admonition--warning, .admonition--danger { border-left-color: var(--govuk-red); }
+.admonition--warning { border-left-color: var(--govuk-orange); }
+.admonition--danger { border-left-color: var(--govuk-red); border-left-width: 0.6rem; }
 .admonition--tip { border-left-color: var(--govuk-green); }
+.admonition__body > :last-child, .details__body > :last-child { margin-bottom: 0; }
+.details { padding: 0; border-left-width: 1px; }
+.details > summary { padding: 0.75rem 1rem; color: var(--govuk-blue); text-decoration: underline; text-underline-offset: 0.13em; }
+.details > summary:hover { color: var(--govuk-dark-blue); text-decoration-thickness: 0.2em; }
+.details__body { margin: 0 1rem 1rem; padding-left: 1rem; border-left: 0.3rem solid var(--govuk-line); }
 details summary { cursor: pointer; font-weight: 700; }
 .govuk-footer { margin-top: 2rem; border-top: 0.6rem solid var(--govuk-yellow); background: var(--govuk-dark-blue); color: #fff; }
 .govuk-footer__inner { width: min(calc(100% - 2rem), 66rem); margin-inline: auto; padding-block: 2rem; }
@@ -61,22 +79,29 @@ details summary { cursor: pointer; font-weight: 700; }
 :focus-visible { outline: 0.2rem solid #0b0c0c; outline-offset: 0; box-shadow: 0 0 0 0.45rem var(--govuk-yellow); }
 a:focus-visible { outline: 3px solid transparent; background: var(--govuk-yellow); color: #0b0c0c; box-shadow: 0 -2px var(--govuk-yellow), 0 4px #0b0c0c; text-decoration: none; }
 .govuk-skip-link:focus-visible { box-shadow: 0 0 0 0.2rem #0b0c0c; }
-@media (prefers-color-scheme: dark) { :root { --govuk-ink: #f0f0ef; --govuk-muted: #c8c8c7; --govuk-bg: #1b1c1c; --govuk-surface: #262727; --govuk-line: #777; --govuk-blue: #5694ca; } a:hover { color: #8fb8e0; } .govuk-panel { background: #12395c; } }
+@media (prefers-color-scheme: dark) { :root { --govuk-ink: #f0f0ef; --govuk-muted: #c8c8c7; --govuk-bg: #1b1c1c; --govuk-surface: #262727; --govuk-line: #777; --govuk-blue: #5694ca; --govuk-green: #4cc38a; --govuk-red: #ff7e66; --govuk-orange: #ffa05c; } .details > summary:hover, .govuk-breadcrumbs a:hover { color: #8fb8e0; } a:hover { color: #8fb8e0; } .govuk-panel { background: #12395c; } }
 @media (max-width: 48rem) { .govuk-header__inner { display: grid; align-items: start; } .govuk-service-nav ul { justify-content: start; } .govuk-grid-row { grid-template-columns: 1fr; } .govuk-contents-rail { position: static; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }
 
 /* First-class constructs */
-.govuk-service-nav .is-current > a, .site-nav .is-current > a { text-decoration-thickness: 0.18em; }
-.site-nav ul ul { margin: 0.2rem 0 0.3rem 0.7rem; padding-left: 0.7rem; border-inline-start: 4px solid var(--govuk-yellow); }
-.page-toc ul, .page-children ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
-.page-toc__l2 { padding-inline-start: 0.7rem; }
-.page-toc__l3 { padding-inline-start: 1.3rem; }
+.page-toc ul, .page-children ul { margin: 0.4rem 0 0; padding-left: 0; list-style: none; }
+.page-toc li::before { content: "— "; color: var(--govuk-muted); }
+.page-toc li { padding-left: 1.4em; text-indent: -1.4em; }
+.page-toc .page-toc__l3 { padding-inline-start: 2.4em; }
 .prose :not(pre) > code { padding: 0.08em 0.28em; background: #fff; border: 1px solid var(--govuk-line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .prose pre code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
 .prose hr { border: 0; border-top: 1px solid var(--govuk-line); margin: 2rem 0; }
 .prose dl { margin: 1.2rem 0; }
 .prose dt { margin-top: 0.7rem; font-weight: 700; }
 .prose dd { margin: 0.2rem 0 0 1.1rem; }
+.prose h4 { margin: 1.8em 0 0.4em; font-size: 1.1rem; }
+.prose figure { margin: 2rem 0; }
+.prose figure p { margin: 0; }
+.prose figcaption { margin-top: 0.5rem; color: var(--govuk-muted); font-size: 0.95rem; }
+.prose sup { line-height: 0; }
+.footnote-ref a, .footnote-backref { text-decoration: none; }
+.prose ul, .prose ol { padding-left: 1.25rem; }
+.prose li { margin-block: 0.3rem; }
 .prose del { color: var(--govuk-muted); }
 .prose blockquote { margin-inline: 0; padding: 0.3rem 1rem; border-inline-start: 0.35rem solid var(--govuk-blue); }
 .footnotes { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--govuk-line); color: var(--govuk-muted); font-size: 0.88rem; }
@@ -93,6 +118,7 @@ a:focus-visible { outline: 3px solid transparent; background: var(--govuk-yellow
 .semantic-backlinks li::before { order: 1; }
 [data-relation-kind]::before { content: attr(data-relation-kind); }
 [data-relation-kind="relates_to"]::before { content: "Relates to"; }
+[data-relation-kind="cites"]::before { content: "Cites"; }
 [data-relation-kind="depends_on"]::before { content: "Depends on"; }
 [data-relation-kind="implements"]::before { content: "Implements"; }
 [data-relation-kind="supersedes"]::before { content: "Supersedes"; }
