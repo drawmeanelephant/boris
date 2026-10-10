@@ -108,7 +108,46 @@ if "$ROOT/zig-out/bin/boris" init "$OUT/occupied" >"$OUT/refuse.stdout" 2>"$OUT/
 fi
 grep -q "refusing to overwrite" "$OUT/refuse.stderr" || fail "refusal message missing"
 [[ -f "$OUT/occupied/keep.txt" ]] || fail "init modified the occupied directory"
+[[ "$(ls -A "$OUT/occupied")" == "keep.txt" ]] || fail "init left its claim file in the occupied directory"
 pass "refusal enforced"
+
+# --- concurrency: racing inits cannot both write the same target ----------
+# Issue #1099: without the .boris-init.lock claim, two inits could both pass
+# the emptiness check and a failure would delete the shared tree.
+note "two concurrent inits on one target: exactly one wins"
+"$ROOT/zig-out/bin/boris" init "$OUT/raced" >"$OUT/race-a.stdout" 2>"$OUT/race-a.stderr" &
+race_a=$!
+"$ROOT/zig-out/bin/boris" init "$OUT/raced" >"$OUT/race-b.stdout" 2>"$OUT/race-b.stderr" &
+race_b=$!
+rc_a=0; wait "$race_a" || rc_a=$?
+rc_b=0; wait "$race_b" || rc_b=$?
+if ! { [[ $rc_a -eq 0 && $rc_b -ne 0 ]] || [[ $rc_a -ne 0 && $rc_b -eq 0 ]]; }; then
+    fail "raced inits: expected exactly one success (a=$rc_a b=$rc_b)"
+fi
+# The target is either a complete starter or gone — never half-written, and
+# never carrying a leftover claim or probe tree.
+if [[ -d "$OUT/raced" ]]; then
+    for f in boris.json content/index.md themes/boris/layouts/main.html; do
+        [[ -f "$OUT/raced/$f" ]] || fail "raced target exists but is not a complete starter ($f missing)"
+    done
+    [[ ! -e "$OUT/raced/.boris-init.lock" ]] || fail "raced target kept the claim file"
+    [[ ! -d "$OUT/raced/.boris-init-probe" ]] || fail "raced target kept the probe tree"
+fi
+# Whichever run lost refused cleanly instead of writing into a claimed tree.
+if [[ $rc_a -ne 0 ]]; then loser_err="$OUT/race-a.stderr"; else loser_err="$OUT/race-b.stderr"; fi
+grep -qE "refusing to overwrite|boris-init\.lock" "$loser_err" \
+    || fail "raced loser did not refuse cleanly: $(head -3 "$loser_err")"
+pass "raced inits: one winner, target whole or untouched"
+
+note "init refuses a target claimed by another init"
+mkdir -p "$OUT/claimed"
+: > "$OUT/claimed/.boris-init.lock"
+if "$ROOT/zig-out/bin/boris" init "$OUT/claimed" >"$OUT/claimed.stdout" 2>"$OUT/claimed.stderr"; then
+    fail "init accepted a claimed directory"
+fi
+grep -q "boris-init\.lock" "$OUT/claimed.stderr" || fail "claim refusal did not name the claim file"
+[[ "$(ls -A "$OUT/claimed")" == ".boris-init.lock" ]] || fail "init modified the claimed directory"
+pass "claimed target refused and untouched"
 
 # --- nested targets: parents are created, not assumed ---------------------
 note "init creates missing parent directories for a nested target"
@@ -396,6 +435,6 @@ done
 grep -q '<figcaption><strong>Dawn.</strong>' "$G/dist/photos/coast.html" || fail "photo-gallery figure caption did not render"
 pass "photo-gallery: home grid; 5 images at depths 0 and 1 resolve page-relative and publish byte-identical"
 
-rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
+rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site" "$OUT/raced" "$OUT/claimed"
 for t in "${ARCHETYPES[@]}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done
 echo "boris-init: all assertions passed"
