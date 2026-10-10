@@ -83,3 +83,10 @@ pub const showcase_css = @embedFile("showcase/assets/css/showcase.css");
 pub const showcase_mark_svg = @embedFile("showcase/assets/img/mark.svg");
 pub const showcase_readme = @embedFile("showcase/README.md");
 pub const showcase_accessibility = @embedFile("showcase/ACCESSIBILITY.md");
+
+pub const archive_layout_main = @embedFile("archive/layouts/main.html");
+pub const archive_layout_archive = @embedFile("archive/layouts/archive.html");
+pub const archive_footer = @embedFile("archive/footer.html");
+pub const archive_css = @embedFile("archive/assets/archive.css");
+pub const archive_readme = @embedFile("archive/README.md");
+pub const archive_accessibility = @embedFile("archive/ACCESSIBILITY.md");

@@ -38,6 +38,11 @@
 //! - `portfolio` — a studio front (`index`, an `about` satellite, three
 //!   dated `projects/` satellites) under `showcase`; `layout_rules` send
 //!   `id:index` to `home.html` and every other page uses `main.html`.
+//! - `archive` — a long-lived archive under `archive`: four tagged
+//!   entries joined by `relates_to` / `supersedes` relations (so entries
+//!   render `{{relations}}` and `{{backlinks}}`), one `status: archived`
+//!   record, and a hand-kept `topics` index by tag; `layout_rules` send
+//!   `id:index` to `archive.html`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -68,7 +73,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -1527,6 +1532,158 @@ const portfolio_profile =
     \\
 ;
 
+// --- archive ----------------------------------------------------------------
+
+const archive_index_md =
+    \\---
+    \\title: Harbor Street Archive
+    \\---
+    \\
+    \\A long-lived archive of small records from one street by the harbor:
+    \\timetables, photographs, and notices, filed so a later reader can follow
+    \\what replaced what.
+    \\
+    \\## How the taxonomy works
+    \\
+    \\- `tags:` file an entry under one or more subjects. Boris generates no
+    \\  tag pages, so [[topics]] is a hand-kept index by tag.
+    \\- `relations:` record typed edges between entries: `relates_to` for "see
+    \\  also" and `supersedes` when a newer record replaces an older one.
+    \\- `{{backlinks}}` is derived evidence: each entry lists the entries
+    \\  whose relations point at it, so an old record shows what replaced it.
+    \\- `status: archived` marks a record that is kept but no longer current.
+    \\
+    \\Every entry is a satellite of this page; the layout's `{{children}}`
+    \\slot lists them.
+    \\
+;
+
+const archive_topics_md =
+    \\---
+    \\title: Topics
+    \\parent: index
+    \\tags: [index]
+    \\---
+    \\
+    \\# Topics
+    \\
+    \\An index by tag, kept by hand. Boris validates every link here, but it
+    \\never generates this page: when you tag a new entry, add it below.
+    \\
+    \\## harbor
+    \\
+    \\- [[entries/2020-harbor-lights]]
+    \\- [[entries/2023-pier-closing]]
+    \\
+    \\## transit
+    \\
+    \\- [[entries/2019-ferry-timetable]]
+    \\- [[entries/2021-ferry-timetable]]
+    \\- [[entries/2023-pier-closing]]
+    \\
+    \\## paper
+    \\
+    \\- [[entries/2019-ferry-timetable]]
+    \\- [[entries/2021-ferry-timetable]]
+    \\
+    \\## photographs
+    \\
+    \\- [[entries/2020-harbor-lights]]
+    \\
+;
+
+const archive_ferry_2019_md =
+    \\---
+    \\title: Ferry timetable, 2019
+    \\parent: index
+    \\status: archived
+    \\tags: [transit, paper]
+    \\---
+    \\
+    \\# Ferry timetable, 2019
+    \\
+    \\**Filed March 2019 · folded card, two sides**
+    \\
+    \\Hourly sailings from seven until seven, with a late boat on Fridays.
+    \\Kept as a record: it is `status: archived`, and its backlinks name the
+    \\timetable that replaced it.
+    \\
+;
+
+const archive_harbor_lights_md =
+    \\---
+    \\title: Harbor lights
+    \\parent: index
+    \\tags: [harbor, photographs]
+    \\relations: [relates_to=entries/2019-ferry-timetable]
+    \\---
+    \\
+    \\# Harbor lights
+    \\
+    \\**Filed November 2020 · six prints**
+    \\
+    \\The last ferry crossing at dusk, photographed from the pier steps. The
+    \\sailing times on the back come from the 2019 timetable.
+    \\
+;
+
+const archive_ferry_2021_md =
+    \\---
+    \\title: Ferry timetable, 2021
+    \\parent: index
+    \\tags: [transit, paper]
+    \\relations: [supersedes=entries/2019-ferry-timetable]
+    \\---
+    \\
+    \\# Ferry timetable, 2021
+    \\
+    \\**Filed April 2021 · single sheet**
+    \\
+    \\Sailings every ninety minutes; the Friday late boat is gone. This sheet
+    \\`supersedes` the 2019 card, which keeps its place in the archive.
+    \\
+;
+
+const archive_pier_closing_md =
+    \\---
+    \\title: Pier closing notice
+    \\parent: index
+    \\tags: [harbor, transit]
+    \\relations: [relates_to=entries/2020-harbor-lights, relates_to=entries/2021-ferry-timetable]
+    \\---
+    \\
+    \\# Pier closing notice
+    \\
+    \\**Filed June 2023 · notice, one page**
+    \\
+    \\The old pier closes for repair; ferries move to the east landing. The
+    \\notice relates to the 2021 timetable it amends and to the photographs of
+    \\the pier as it was.
+    \\
+;
+
+const archive_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Harbor Street Archive" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/archive",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/archive/layouts/archive.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -1729,6 +1886,22 @@ const portfolio_files = [_]FileToWrite{
     .{ .path = "themes/showcase/README.md", .data = archetype_themes.showcase_readme },
     .{ .path = "themes/showcase/ACCESSIBILITY.md", .data = archetype_themes.showcase_accessibility },
     .{ .path = "boris.json", .data = portfolio_profile },
+};
+
+const archive_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = archive_index_md },
+    .{ .path = "content/topics.md", .data = archive_topics_md },
+    .{ .path = "content/entries/2019-ferry-timetable.md", .data = archive_ferry_2019_md },
+    .{ .path = "content/entries/2020-harbor-lights.md", .data = archive_harbor_lights_md },
+    .{ .path = "content/entries/2021-ferry-timetable.md", .data = archive_ferry_2021_md },
+    .{ .path = "content/entries/2023-pier-closing.md", .data = archive_pier_closing_md },
+    .{ .path = "themes/archive/layouts/main.html", .data = archetype_themes.archive_layout_main },
+    .{ .path = "themes/archive/layouts/archive.html", .data = archetype_themes.archive_layout_archive },
+    .{ .path = "themes/archive/footer.html", .data = archetype_themes.archive_footer },
+    .{ .path = "themes/archive/assets/archive.css", .data = archetype_themes.archive_css },
+    .{ .path = "themes/archive/README.md", .data = archetype_themes.archive_readme },
+    .{ .path = "themes/archive/ACCESSIBILITY.md", .data = archetype_themes.archive_accessibility },
+    .{ .path = "boris.json", .data = archive_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -2007,6 +2180,30 @@ const portfolio_spec = ArchetypeSpec{
     ,
 };
 
+const archive_spec = ArchetypeSpec{
+    .layout_path = "themes/archive/layouts/main.html",
+    .files = &archive_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the archive index (archive layout)
+    \\  content/topics.md                 hand-kept index by tag (Boris generates no tag pages)
+    \\  content/entries/                  four tagged entries joined by relates_to / supersedes
+    \\  themes/archive/                   shipped "archive" theme — ordered field-notes index
+    \\  boris.json                        profile (theme: archive, layout_rules id:index → archive)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json                  build the archive (entries show relations and backlinks)
+    \\  boris graph                                 render the relation web as Mermaid
+    \\  boris impact entries/2019-ferry-timetable   what depends on the oldest record
+    \\  boris check                                 graph-health report
+    \\  boris watch --profile boris.json            rebuild on change
+    ,
+    .conventions =
+    \\  tags: files an entry under subjects; keep topics.md in step by hand
+    \\  relations: [relates_to=ID, supersedes=ID] are typed, validated edges; backlinks derive from them
+    \\  status: archived keeps a record rendered and published but marks it no longer current
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -2021,6 +2218,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .@"resume" => &resume_spec,
         .newsletter => &newsletter_spec,
         .portfolio => &portfolio_spec,
+        .archive => &archive_spec,
     };
 }
 
@@ -2217,7 +2415,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -2272,8 +2470,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -2486,6 +2684,37 @@ test "portfolio projects are dated satellites of index and one carries a relatio
     try std.testing.expectEqual(@as(usize, 3), projects);
     try std.testing.expectEqual(@as(usize, 1), related);
     try std.testing.expect(std.mem.indexOf(u8, portfolio_profile, "\"selector\": \"id:index\", \"layout\": \"themes/showcase/layouts/home.html\"") != null);
+}
+
+test "archive entries share tags and relations give every entry backlinks or relations" {
+    var entries: usize = 0;
+    var supersedes: usize = 0;
+    var archived: usize = 0;
+    for (archive_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/entries/")) continue;
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\ntags: [") != null);
+        if (std.mem.indexOf(u8, f.data, "supersedes=") != null) supersedes += 1;
+        if (std.mem.indexOf(u8, f.data, "\nstatus: archived\n") != null) archived += 1;
+        // Every entry is a relation source or target, so {{relations}} or
+        // {{backlinks}} has real content on every entry page.
+        const stem = f.path["content/".len .. f.path.len - ".md".len];
+        var targeted = false;
+        for (archive_spec.files) |g| {
+            if (!std.mem.startsWith(u8, g.path, "content/entries/")) continue;
+            var buf: [96]u8 = undefined;
+            if (std.mem.indexOf(u8, g.data, try std.fmt.bufPrint(&buf, "={s}", .{stem})) != null) targeted = true;
+        }
+        try std.testing.expect(targeted or std.mem.indexOf(u8, f.data, "\nrelations: [") != null);
+        entries += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 4), entries);
+    try std.testing.expectEqual(@as(usize, 1), supersedes);
+    try std.testing.expectEqual(@as(usize, 1), archived);
+    try std.testing.expect(std.mem.indexOf(u8, archive_profile, "\"selector\": \"id:index\", \"layout\": \"themes/archive/layouts/archive.html\"") != null);
+    for ([_][]const u8{ archetype_themes.archive_layout_main, archetype_themes.archive_layout_archive }) |layout| {
+        try std.testing.expect(std.mem.indexOf(u8, layout, "{{relations}}{{backlinks}}") != null);
+    }
 }
 
 test "garden demonstrates include composition, components, and dense links" {

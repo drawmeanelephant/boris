@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -289,6 +289,31 @@ for page in about projects/harbor-signage projects/field-almanac projects/specim
     grep -q "href=\"${page}.html\"" "$P/index.html" || fail "portfolio index does not link $page"
 done
 pass "portfolio: home layout on index; about and three projects on main, all linked"
+
+note "archive: entries render their relations and the backlinks derived from them"
+A="$OUT/arch-archive/dist"
+grep -q 'data-layout="archive"' "$A/index.html" || fail "archive index does not use the archive layout"
+grep -q 'href="entries/2019-ferry-timetable.html"' "$A/index.html" || fail "archive index {{children}} does not list the entries"
+for page in topics entries/2019-ferry-timetable entries/2020-harbor-lights entries/2021-ferry-timetable entries/2023-pier-closing; do
+    grep -q 'data-layout="entry"' "$A/$page.html" || fail "archive $page is not on the archive main layout"
+done
+rel() { sed -n "/<section class=\"semantic-$1\"/,/<\/section>/p" "$A/entries/$2.html"; }
+rel relations 2021-ferry-timetable | grep -q 'data-relation-kind="supersedes".*href="2019-ferry-timetable.html"' \
+    || fail "archive supersedes relation did not render on the 2021 timetable"
+rel relations 2023-pier-closing | grep -q 'href="2020-harbor-lights.html"' \
+    || fail "archive relates_to relation did not render on the pier notice"
+rel backlinks 2019-ferry-timetable | grep -q 'data-relation-kind="supersedes".*href="2021-ferry-timetable.html"' \
+    || fail "archive 2019 timetable has no supersedes backlink"
+rel backlinks 2019-ferry-timetable | grep -q 'data-relation-kind="relates_to".*href="2020-harbor-lights.html"' \
+    || fail "archive 2019 timetable has no relates_to backlink"
+rel backlinks 2021-ferry-timetable | grep -q 'href="2023-pier-closing.html"' \
+    || fail "archive 2021 timetable has no backlink from the pier notice"
+grep -q '<body data-status="archived">' "$A/entries/2019-ferry-timetable.html" \
+    || fail "archive status: archived did not reach the page"
+for e in 2020-harbor-lights 2023-pier-closing 2019-ferry-timetable 2021-ferry-timetable; do
+    grep -q "href=\"entries/$e.html\"" "$A/topics.html" || fail "archive topics index does not link $e"
+done
+pass "archive: archive layout on index; relations + backlinks on entries; status archived; topics index by tag"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done

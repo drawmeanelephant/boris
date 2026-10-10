@@ -195,6 +195,13 @@ catalog themes that fit each one.
   `summary` (one `relates_to` edge). Its profile's `layout_rules` send
   `id:index` to `themes/showcase/layouts/home.html`; every other page
   uses `main.html`.
+- `archive` — a long-lived archive under `archive`: trunk `index`, four
+  tagged `entries/` satellites joined by `relates_to` and `supersedes`
+  relations (one entry is `status: archived`), and a hand-kept `topics`
+  index by tag (Boris generates no tag pages). Entries render
+  `{{relations}}` and the `{{backlinks}}` derived from them. Its profile's
+  `layout_rules` send `id:index` to `themes/archive/layouts/archive.html`;
+  every other page uses `main.html`.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

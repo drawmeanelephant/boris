@@ -3034,6 +3034,8 @@ pub fn printInitUsage() void {
         \\            profile enables head and declares rss (feed.xml) + sitemap
         \\  portfolio studio front plus dated project satellites; layout_rules
         \\            send index to showcase's home.html
+        \\  archive   tagged entries joined by relates_to/supersedes relations,
+        \\            rendered with relations and backlinks; a hand-kept topics index
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.
