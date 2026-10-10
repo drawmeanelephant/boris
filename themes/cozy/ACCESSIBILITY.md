@@ -4,7 +4,6 @@
   element (`tabindex="-1"`).
 - The layout uses explicit header, main, article, nav, aside, section, and
   footer landmarks.
-- The avatar is a labeled initial, not a remote image or decorative asset.
 - Links keep visible underlines. `:focus-visible` adds a 2px dashed slate
   outline with a 3px offset and a pale tint; the outline measures 3.65:1 on
   the paper background and 4.08:1 on the focus tint (`#5a7b8c`), above the

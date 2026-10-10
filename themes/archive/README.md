@@ -37,3 +37,14 @@ the page title even though the heading itself is excluded.
 
 The index section and the "More entries" panel hide when the page has no
 children, and a sidebar module hides when its slot is empty.
+
+## Known limitation: browser-tab title
+
+`archive.html` spends its one `{{title}}` slot on the masthead `<h1>`, so
+the index's document `<title>` is the static word "Archive". A slot may
+appear at most once per layout
+([`templating-and-themes.md`](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/templating-and-themes.md)
+§3). `main.html` has no visible title heading, so its `<title>` carries the
+page title. The masthead copy around the `<h1>` is neutral ("Archive",
+"Index") because the theme ships inside the `archive` starter; edit the
+layout to name your own archive.
