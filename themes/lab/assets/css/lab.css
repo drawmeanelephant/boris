@@ -5,7 +5,7 @@
   --panel-2: #0d1319;
   --ink: #c9d4de;
   --bright: #eef4fa;
-  --muted: #6b7a89;
+  --muted: #7a8896;
   --accent: #5eead4;
   --accent2: #f0abfc;
   --rule: #1e2833;
@@ -52,7 +52,7 @@ body {
   font: .85rem/1.4 var(--mono); padding: .45rem .8rem;
 }
 .search-form input::placeholder { color: var(--muted); }
-.search-form input:focus { border-color: var(--accent); outline: none; }
+.search-form input:focus { border-color: var(--accent); }
 .search-panel {
   position: absolute; z-index: 30; top: calc(100% + .4rem); right: 0;
   width: min(30rem, 90vw); max-height: 60vh; overflow: auto;
@@ -166,6 +166,8 @@ mark { background: var(--mark); color: var(--bright); }
 .graph-panel ul { list-style: none; padding-left: 0; margin: 0; font-family: var(--mono); font-size: .82rem; }
 .graph-panel li { margin: .18rem 0; }
 .graph-panel [data-relation-kind] a::before { content: "⟶ "; color: var(--muted); }
+.graph-panel .semantic-backlinks [data-relation-kind] a::before { content: "⟵ "; }
+.graph-panel [data-relation-kind]::after { content: " " attr(data-relation-kind); color: var(--muted); font-size: .72rem; }
 .graph-panel a { color: var(--accent); text-decoration: none; }
 .graph-panel a:hover { text-decoration: underline; }
 
@@ -174,6 +176,10 @@ mark { background: var(--mark); color: var(--bright); }
 /* ---------- footer ---------- */
 .site-footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: .82rem; font-family: var(--mono); }
 .site-footer:empty { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
 
 /* ---------- print ---------- */
 @media print {
