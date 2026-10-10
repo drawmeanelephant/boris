@@ -65,7 +65,7 @@ details summary { cursor: pointer; font-weight: 800; }
 .site-footer__inner { width: min(calc(100% - 2rem), var(--pico-width)); margin-inline: auto; padding-block: 2rem; color: var(--pico-muted); font-size: 0.9rem; }
 .site-footer__inner p { margin: 0.2rem 0; }
 .muted { color: var(--pico-muted); }
-:focus-visible { outline: 0.2rem solid var(--pico-focus); outline-offset: 0.2rem; }
+:focus-visible { outline: 0.2rem solid var(--pico-focus); outline-offset: 0.2rem; box-shadow: 0 0 0 0.2rem var(--pico-ink); }
 @media (prefers-color-scheme: dark) {
   :root { --pico-bg: #111914; --pico-surface: #19231c; --pico-ink: #edf6ee; --pico-muted: #a9b9aa; --pico-line: #344638; --pico-accent-soft: #173b2d; --pico-shadow: 0 1rem 3rem rgb(0 0 0 / 0.22); }
   .site-header--home { background: linear-gradient(135deg, #173b2d, var(--pico-surface) 62%); }
@@ -76,7 +76,7 @@ details summary { cursor: pointer; font-weight: 800; }
   .hero-card { padding: 1.25rem; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-@media print { .site-header, .site-footer, .toc-rail, .home-rail, .skip-link { display: none; } .page-grid, .home-grid { display: block; padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } }
+@media print { .site-header, .site-footer, .toc-rail, .home-rail, .skip-link { display: none; } .page-grid, .home-grid { display: block; padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } pre { white-space: pre-wrap; } }
 
 /* First-class constructs */
 .site-nav .is-current > a { font-weight: 800; }
@@ -96,3 +96,10 @@ details summary { cursor: pointer; font-weight: 800; }
 .details__body > :first-child { margin-top: 0.7rem; }
 .semantic-relations, .semantic-backlinks { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--pico-line); }
 .semantic-relations ul, .semantic-backlinks ul { padding-left: 1.1rem; }
+.semantic-relations::before, .semantic-backlinks::before { display: block; color: var(--pico-muted); font-size: 0.74rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+.semantic-relations::before { content: "Related"; }
+.semantic-backlinks::before { content: "Referenced by"; }
+.semantic-relations ul, .semantic-backlinks ul { margin: 0.5rem 0 0; }
+.semantic-relations li::before, .semantic-backlinks li::after { content: attr(data-relation-kind); color: var(--pico-muted); font-size: 0.8rem; }
+.semantic-relations li::before { margin-inline-end: 0.45rem; }
+.semantic-backlinks li::after { margin-inline-start: 0.45rem; }

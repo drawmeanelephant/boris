@@ -67,11 +67,11 @@ details summary { cursor: pointer; font-weight: 850; }
 .op-footer__inner { width: min(calc(100% - 2rem), 76rem); margin-inline: auto; padding-block: var(--op-size-7); color: var(--op-muted); font-size: 0.88rem; }
 .op-footer__inner p { margin: var(--op-size-2) 0; }
 .op-muted { color: var(--op-muted); }
-:focus-visible { outline: 0.2rem solid var(--op-focus); outline-offset: 0.2rem; }
+:focus-visible { outline: 0.2rem solid var(--op-focus); outline-offset: 0.2rem; box-shadow: 0 0 0 0.2rem var(--op-ink); }
 @media (prefers-color-scheme: dark) { :root { --op-ink: #f6f3ea; --op-muted: #b7b2a6; --op-bg: #19181d; --op-surface: #25232b; --op-line: #494550; --op-soft: #352c48; --op-shadow: 0 1rem 3rem rgb(0 0 0 / 0.25); } .op-header--home { background: radial-gradient(circle at 80% 10%, #352c48, var(--op-surface) 42%); } }
 @media (max-width: 48rem) { .op-header__inner { display: grid; align-items: start; } .op-nav ul { justify-content: start; } .op-grid, .op-home { grid-template-columns: 1fr; } .op-sidebar { position: static; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-@media print { .op-header, .op-footer, .op-sidebar, .op-home__rail, .skip-link { display: none; } .op-grid, .op-home { display: block; padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } }
+@media print { .op-header, .op-footer, .op-sidebar, .op-home__rail, .skip-link { display: none; } .op-grid, .op-home { display: block; padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } pre { white-space: pre-wrap; } }
 
 /* First-class constructs */
 .op-nav .is-current > a, .site-nav .is-current > a { font-weight: 900; }
@@ -91,3 +91,10 @@ details summary { cursor: pointer; font-weight: 850; }
 .admonition__title { margin: 0 0 0.3rem; font-size: 0.74rem; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
 .details__body > :first-child { margin-top: 0.7rem; }
 .semantic-relations, .semantic-backlinks { margin-top: var(--op-size-6); padding-top: var(--op-size-4); border-top: 1px solid var(--op-line); }
+.semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 var(--op-size-2); color: var(--op-muted); font-size: 0.73rem; font-weight: 850; letter-spacing: 0.1em; text-transform: uppercase; }
+.semantic-relations::before { content: "Related"; }
+.semantic-backlinks::before { content: "Linked from"; }
+.semantic-relations ul, .semantic-backlinks ul { display: flex; flex-direction: column; gap: var(--op-size-2); margin: 0; padding: 0; list-style: none; }
+.semantic-relations li::before, .semantic-backlinks li::after { content: attr(data-relation-kind); display: inline-block; padding: 0 var(--op-size-2); border-radius: 999px; background: var(--op-soft); color: var(--op-ink); font-size: 0.72rem; font-weight: 800; }
+.semantic-relations li::before { margin-inline-end: var(--op-size-2); }
+.semantic-backlinks li::after { margin-inline-start: var(--op-size-2); }

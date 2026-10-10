@@ -4,6 +4,7 @@ HTML-first documentation. Inspired by Pico's class-light approach; the
 CSS is original.
 
 - Layouts: `home.html` (`id:index`), `section.html` (`role:trunk`), `main.html`
+- Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
 - Shared specimen: [`examples/studies-site/`](../../examples/studies-site/)
 
 ```bash
@@ -15,3 +16,18 @@ CSS is original.
   --html-dir test-output/semantic \
   --quiet
 ```
+
+## Slot coverage
+
+All three layouts carry `{{relations}}` and `{{backlinks}}`, labelled
+"Related" and "Referenced by" in small uppercase eyebrows, with the relation kind in muted text. Both emit nothing on a page without semantic
+relations.
+
+Intentionally absent:
+
+- `{{tags}}` — `{{metadata}}` already prints Tags in the hero card. A second
+  per-tag list would repeat it.
+- `{{parent}}` — `{{breadcrumb}}` already links the parent on `main` and
+  `section`; the home page is a Trunk and has no parent.
+- `{{page-status}}` — Status is already text in `{{metadata}}`. This
+  documentation shell does not add a draft badge.

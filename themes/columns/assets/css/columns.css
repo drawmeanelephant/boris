@@ -65,11 +65,11 @@ details summary { cursor: pointer; font-weight: 800; }
 .footer-inner { width: min(calc(100% - 2rem), 72rem); margin-inline: auto; padding-block: 2rem; color: var(--bulma-muted); font-size: 0.9rem; }
 .footer-inner p { margin: 0.2rem 0; }
 .has-text-grey { color: var(--bulma-muted); }
-:focus-visible { outline: 0.2rem solid var(--bulma-focus); outline-offset: 0.2rem; }
+:focus-visible { outline: 0.2rem solid var(--bulma-focus); outline-offset: 0.2rem; box-shadow: 0 0 0 0.2rem var(--bulma-ink); }
 @media (prefers-color-scheme: dark) { :root { --bulma-ink: #f0f4f7; --bulma-muted: #a8b3be; --bulma-bg: #12181e; --bulma-surface: #1b242c; --bulma-line: #34424e; --bulma-primary-dark: #5fe2bd; } .is-light { color: #baf6e3; } }
 @media (max-width: 48rem) { .navbar-inner { display: grid; align-items: start; } .navbar-menu ul { justify-content: start; } .columns { grid-template-columns: 1fr; } .sidebar { position: static; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
-@media print { .navbar, .footer, .sidebar, .skip-link { display: none; } .section { padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } }
+@media print { .navbar, .footer, .sidebar, .skip-link { display: none; } .section { padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } pre { white-space: pre-wrap; } }
 
 /* First-class constructs */
 .navbar-menu .is-current > a, .site-nav .is-current > a { font-weight: 800; }
@@ -89,3 +89,10 @@ details summary { cursor: pointer; font-weight: 800; }
 .admonition__title { margin: 0 0 0.3rem; font-size: 0.74rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .details__body > :first-child { margin-top: 0.7rem; }
 .semantic-relations, .semantic-backlinks { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--bulma-line); }
+.semantic-relations::before, .semantic-backlinks::before { display: block; margin-bottom: 0.5rem; color: var(--bulma-muted); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.semantic-relations::before { content: "Related"; }
+.semantic-backlinks::before { content: "Linked from"; }
+.semantic-relations ul, .semantic-backlinks ul { display: flex; flex-direction: column; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
+.semantic-relations li::before, .semantic-backlinks li::after { content: attr(data-relation-kind); display: inline-block; padding: 0.05rem 0.55rem; border-radius: 999px; background: var(--bulma-bg); color: var(--bulma-ink); font-size: 0.72rem; font-weight: 800; }
+.semantic-relations li::before { margin-inline-end: 0.5rem; }
+.semantic-backlinks li::after { margin-inline-start: 0.5rem; }
