@@ -20,23 +20,24 @@ behavior are normative in
 | Scenario | `--type` | Teaches | Starter theme | Alternates (verified) | Gap note |
 |---|---|---|---|---|---|
 | docs | `docs` | trunk/satellite graph, wiki links, search client | `boris` (embedded starter copy) | `reference`, `engineering` (home), `semantic` | Starter-theme decision pending ([#1063](https://github.com/drawmeanelephant/boris/issues/1063)); this matrix does not decide it. |
-| garden | `garden` | dense wiki links, relations, `{{include}}`, `<Aside>` | `ledger` | `field-notes`, `archive` | `field-notes` and `archive` do not render `{{relations}}` / `{{backlinks}}`. |
+| garden | `garden` | dense wiki links, relations, `{{include}}`, `<Aside>` | `ledger` | `field-notes`, `archive` | — |
 | cookbook | `cookbook` | Cooklang `.cook` pages, `servings` | `cards` | `reading`, `cozy` | Thin second option: no other card-shaped recipe theme. Both alternates build but are generic reading shells. |
 | blog | `blog` | `published_at` posts on a parent chain | `cozy` | `journal`, `showcase` | — |
 | textile | `textile` | `input_format: textile` | `press` | `reading` | — |
 | portfolio | `portfolio` ([#1053](https://github.com/drawmeanelephant/boris/issues/1053)) | `layout_rules` named layouts, `{{children}}` | `showcase` (home) | `minimal` | `showcase/layouts/home.html` has no `{{children}}` slot, so the home page does not list the work automatically yet. |
 | landing | `landing` ([#1054](https://github.com/drawmeanelephant/boris/issues/1054)) | single-Trunk graph, `{{include}}` sections, `layout_rules` | `service` (home) | `civic` (home), `corporate` | No marketing-hero theme exists. `service`'s public-information home is the honest fit. |
-| wiki | `wiki` ([#1055](https://github.com/drawmeanelephant/boris/issues/1055)) | deep parent chains, `{{toc}}`, `{{breadcrumb}}` | `reference` (home + section) | `engineering` (home), `semantic` (home) | `reference` has no `{{relations}}` / `{{backlinks}}`, so the starter's typed edge validates but does not render. |
+| wiki | `wiki` ([#1055](https://github.com/drawmeanelephant/boris/issues/1055)) | deep parent chains, `{{toc}}`, `{{breadcrumb}}` | `reference` (home + section) | `engineering` (home), `semantic` (home) | — |
 | changelog | `changelog` ([#1056](https://github.com/drawmeanelephant/boris/issues/1056)) | `published_at` entries, `status: draft` | `journal` | `compact`, `press` | — |
 | link-in-bio | `link-in-bio` ([#1057](https://github.com/drawmeanelephant/boris/issues/1057)) | a one-page site | `minimal` | `cards` | — |
 | resume | `resume` ([#1058](https://github.com/drawmeanelephant/boris/issues/1058)) | `{{metadata}}` / tags, print stylesheet | `corporate` | `compact`, `minimal` | Print yields a clean single column, with leftovers. See [Theme gaps](#theme-gaps) and [#1048](https://github.com/drawmeanelephant/boris/issues/1048). |
-| archive | later ([#1059](https://github.com/drawmeanelephant/boris/issues/1059)) | `tags` + `relations` taxonomy, `{{backlinks}}` | `archive` | `ledger`, `field-notes` | Slot adoption on `archive` (`{{relations}}`, `{{backlinks}}`) is pending in [#1047](https://github.com/drawmeanelephant/boris/issues/1047). |
+| archive | `archive` ([#1059](https://github.com/drawmeanelephant/boris/issues/1059)) | `tags` + `relations` taxonomy, `{{backlinks}}`, `status: archived` | `archive` (archive) | `ledger`, `field-notes` | `archive` hardcodes its masthead copy. See [Theme gaps](#theme-gaps). |
 | newsletter | `newsletter` ([#1060](https://github.com/drawmeanelephant/boris/issues/1060)) | `published_at` issues, profile `rss` / `sitemap` | `press` (home, archive, blog) | `journal`, `cozy` | — (resolved: press layouts carry `{{head}}`, so the starter's profile ships `rss` on an enabled `head`) |
-| photo-gallery | later ([#1061](https://github.com/drawmeanelephant/boris/issues/1061)) | `{stem}.assets/` content-local images | `gallery` (new) | `showcase` (partial), `cards` | No image-first theme yet. The `gallery` theme is [#1052](https://github.com/drawmeanelephant/boris/issues/1052) and in progress. |
-| dashboard | later ([#1062](https://github.com/drawmeanelephant/boris/issues/1062)) | `status:` field, dense tables / relations | `engineering` | `ledger`, `corporate` | The `{{page-status}}` slot adoption on `engineering` is pending in [#1047](https://github.com/drawmeanelephant/boris/issues/1047). |
+| photo-gallery | `photo-gallery` ([#1061](https://github.com/drawmeanelephant/boris/issues/1061)) | `{stem}.assets/` content-local images, `<figure>` captions | `gallery` (home) | `showcase` (partial), `cards` (partial) | Both alternates publish every image but do not style `gallery-grid`, so figures stack in one column. |
+| dashboard | `dashboard` ([#1062](https://github.com/drawmeanelephant/boris/issues/1062)) | `status:` as visible page state, dense tables, relations | `engineering` (home) | `ledger`, `corporate` (partial) | `corporate` shows status only as plain `{{metadata}}` text; it has no `{{page-status}}` hook. |
 
 "(home)" means the pairing was also built with
 `--layout-rule default id:index themes/NAME/layouts/home.html`.
+"(archive)" is the same rule pointing at `layouts/archive.html`.
 
 ## How the pairings were verified
 
@@ -59,32 +60,46 @@ check as failed. Those themes do not mark the search extraction root that
 the docs starter's search client expects, so search works only under the
 starter theme.
 
+The wave-2 rows (`archive`, `dashboard`, `photo-gallery`, and the
+`newsletter` feed) were re-verified on 2026-10-10 on the wave-1
+integration line at `ed2e3cd2`. Each starter's own content was built with
+each named alternate theme. All eight builds exited 0 and wrote every page
+and a stylesheet; both `photo-gallery` alternates also published all five
+images. Each starter is also covered by `zig build test-boris-init`
+through its own profile.
+
 Re-verify a row after a theme changes by rebuilding the scenario tree with
 the named theme. A starter archetype is also re-verified by `zig build
 test-boris-init`.
 
 ## Theme slot coverage
 
-The teaching slots per theme on `main` at `3710547d` (layouts that carry
-the slot; `-` means none):
+The teaching slots per starter theme on the wave-1 integration line at
+`ed2e3cd2`, after the slot-adoption passes
+([#1047](https://github.com/drawmeanelephant/boris/issues/1047),
+[#1048](https://github.com/drawmeanelephant/boris/issues/1048)) and the new
+`gallery` theme ([#1052](https://github.com/drawmeanelephant/boris/issues/1052)).
+Each cell lists the layouts that carry the slot; `-` means none:
 
-| Theme | `{{children}}` | `{{toc}}` | `{{breadcrumb}}` | `{{relations}}` | `{{backlinks}}` | `{{head}}` |
-|---|---|---|---|---|---|---|
-| `archive` | archive, main | archive, main | archive, main | - | - | - |
-| `cards` | main | main | main | - | - | main |
-| `corporate` | main | main | main | main | main | main |
-| `cozy` | main | main | main | - | - | main |
-| `journal` | main | main | main | - | - | main |
-| `ledger` | main | main | main | main | main | main |
-| `minimal` | main | main | main | main | main | main |
-| `press` | all five | all five | archive, blog, main, section | - | - | - |
-| `reference` | section | main | main, section | - | - | - |
-| `service` | home, main, section | home, main, section | main, section | home, main, section | home, main, section | home, main, section |
-| `showcase` | blog, main, section | all four | blog, main, section | - | - | - |
+| Theme | `{{children}}` | `{{toc}}` | `{{breadcrumb}}` | `{{relations}}` | `{{backlinks}}` | `{{head}}` | `{{page-status}}` |
+|---|---|---|---|---|---|---|---|
+| `archive` | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main |
+| `cards` | main | main | main | main | main | main | - |
+| `corporate` | main | main | main | main | main | main | - |
+| `cozy` | main | main | main | main | main | main | main |
+| `engineering` | home, main, section | home, main, section | main, section | home, main, section | home, main, section | home, main, section | home, main, section |
+| `gallery` | home, main | - | main | home, main | home, main | home, main | home, main |
+| `journal` | main | main | main | main | main | main | main |
+| `ledger` | main | main | main | main | main | main | main |
+| `minimal` | main | main | main | main | main | main | - |
+| `press` | all five | all five | archive, blog, main, section | all five | all five | all five | all five |
+| `reference` | section | main | main, section | home, main, section | home, main, section | home, main, section | - |
+| `service` | home, main, section | home, main, section | main, section | home, main, section | home, main, section | home, main, section | home, main, section |
+| `showcase` | blog, main, section | all four | blog, main, section | all four | all four | all four | all four |
 
 ## Theme gaps
 
-Gaps that keep a wave-1 starter's teaching point from fully rendering.
+Gaps that keep a starter's teaching point from fully rendering.
 Each starter still compiles and says what it does. These belong to the
 theme slot work ([#1047](https://github.com/drawmeanelephant/boris/issues/1047)
 and [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), not to
@@ -112,6 +127,21 @@ and [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), not to
   Links have no underline or URL in print, so a printed wiki link is
   indistinguishable from prose. These belong to the corporate print pass
   ([#1048](https://github.com/drawmeanelephant/boris/issues/1048)).
-- **`reference`, `showcase`, and `press` have no `{{relations}}` /
-  `{{backlinks}}`.** The `wiki`, `portfolio`, and `newsletter` starters'
-  typed edges validate but do not render.
+- ~~**`reference`, `showcase`, and `press` have no `{{relations}}` /
+  `{{backlinks}}`.**~~ Resolved: all three now carry both slots, and the
+  `wiki`, `portfolio`, and `newsletter` starters' typed edges render on
+  both ends.
+- **`archive` hardcodes its masthead copy.** `archive.html` prints a fixed
+  `<title>` ("Field Notes Archive"), a fixed eyebrow ("Personal index ·
+  2018—2024"), and a fixed lede ("Small records, held in order."), and
+  `main.html` repeats the eyebrow. The `archive` starter's own title shows
+  only in the `<h1>`, so a fresh starter carries another site's dates.
+- **`engineering` hardcodes its chrome.** Every layout's `<title>` is the
+  static word "Engineering" (a known limitation in the theme README), and
+  `home.html` labels the index "Theme study". The `dashboard` board shows
+  that label above its own title.
+- **Theme READMEs link to `../../examples/…`.** Every starter copies its
+  theme README byte for byte. That README links to the repository's
+  sample site, and the link is dead in a fresh starter tree. The sibling
+  links (`ACCESSIBILITY.md`, `MIGRATION.md`) resolve, because every starter
+  now writes its theme's full file set.
