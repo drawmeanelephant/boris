@@ -155,3 +155,9 @@ pub fn loadProfileRequestFromOptions(
     const overrides = profileOverridesFromOptions(opts);
     return loadProfileRequest(gpa, io, profile_path, overrides, out);
 }
+
+test "reportPublicationPlanConfigError keeps OutOfMemory in the system-error class (#1042)" {
+    try std.testing.expectEqual(ExitCode.io_error, reportPublicationPlanConfigError(error.OutOfMemory));
+    try std.testing.expectEqual(ExitCode.usage, reportPublicationPlanConfigError(error.InvalidJson));
+    try std.testing.expectEqual(ExitCode.usage, reportPublicationPlanConfigError(error.InvalidHead));
+}

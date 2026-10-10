@@ -104,9 +104,15 @@ pub fn parseLocation(
     raw_origin: []const u8,
     raw_base_path: []const u8,
 ) Error!Location {
-    const base_url = site_url.normalized(allocator, raw_base_url) catch return error.InvalidLocation;
+    const base_url = site_url.normalized(allocator, raw_base_url) catch |err| {
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        return error.InvalidLocation;
+    };
     errdefer allocator.free(base_url);
-    const origin = site_url.normalized(allocator, raw_origin) catch return error.InvalidLocation;
+    const origin = site_url.normalized(allocator, raw_origin) catch |err| {
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        return error.InvalidLocation;
+    };
     errdefer allocator.free(origin);
     const base_origin_len = originLength(base_url) orelse return error.InvalidLocation;
     if (originLength(origin) != origin.len) return error.InvalidLocation;
@@ -1410,4 +1416,24 @@ test "location invariant rejects contradictions" {
     defer location.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("https://example.com/repo", location.base_url);
     try std.testing.expectEqualStrings("/repo", location.base_path);
+}
+
+test "location normalization propagates OutOfMemory instead of InvalidLocation (#1043)" {
+    // Normalization failure classes differ: a malformed URL is a usage error
+    // (exit 2) but an allocation failure is a system error (exit 3), so the
+    // sweep requires every induced failure to surface as OutOfMemory while the
+    // testing allocator checks each run for leaks.
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        // resize_fail_index = 0 forces every grow/remap onto the counted alloc
+        // path so fail_index maps stably to allocation sites.
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index, .resize_fail_index = 0 });
+        const allocator = failing.allocator();
+        var location = parseLocation(allocator, "https://example.com/repo", "https://example.com", "/repo") catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            continue;
+        };
+        location.deinit(allocator);
+        break;
+    }
 }
