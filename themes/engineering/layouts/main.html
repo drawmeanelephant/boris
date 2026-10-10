@@ -12,13 +12,13 @@
     <header class="primer-header">
       <div class="primer-container primer-header__inner">
         <div><p class="primer-kicker">Engineering documentation</p><p class="primer-brand">Engineering</p></div>
-        <div class="primer-nav" aria-label="Site navigation">{{nav}}</div>
+        <div class="primer-nav">{{nav}}</div>
       </div>
     </header>
     <main id="main-content" class="primer-container primer-grid" data-boris-search-root>
       <article class="Box primer-article">
-        <div class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</div>
-        <header><h1 class="primer-title" data-boris-search-exclude>{{title}}</h1>{{metadata}}</header>
+        <div class="breadcrumb">{{breadcrumb}}</div>
+        <header><h1 class="primer-title" data-boris-search-exclude data-boris-search-title="layout">{{title}}</h1>{{metadata}}</header>
         <div class="markdown-body">{{content}}</div>
         <section class="Box Box--nested" aria-labelledby="children-heading" data-boris-search-exclude><h2 id="children-heading" class="h2">In this section</h2>{{children}}</section>
         <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>

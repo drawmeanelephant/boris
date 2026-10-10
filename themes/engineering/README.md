@@ -26,9 +26,14 @@ the CSS is original. Not Primer. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 | `{{tags}}` | Intentionally absent. The metadata line lists tags next to the status label; a separate label row would repeat them. |
 | `{{parent}}` | Intentionally absent. Every layout except `home` renders `{{breadcrumb}}` at the top of the article, which already links the parent. |
 
-## Known limitation
+## Known limitation: browser-tab title
 
 Every layout spends its one `{{title}}` slot on the visible `<h1>`, so the
-document `<title>` is the static word "Engineering" on every page. Moving
-`{{title}}` into `<title>` would leave the page without its heading; this
-needs a design decision (see `ACCESSIBILITY.md`).
+document `<title>` is the static word "Engineering" on every page. A slot
+may appear at most once per layout
+([`templating-and-themes.md`](../../docs/contracts/templating-and-themes.md)
+§3), and moving `{{title}}` into `<title>` would leave the page without its
+heading; this needs a design decision (see `ACCESSIBILITY.md`). Search is
+not affected: the layout `<h1>` carries `data-boris-search-title="layout"`,
+so `_boris/search/search-index.json` titles each page by its own title even
+when the content has no heading.
