@@ -3014,7 +3014,8 @@ pub fn printInitUsage() void {
         \\Writes a fixed starter tree into DIR (default `.`) selected by
         \\`--type` (default `docs`):
         \\
-        \\  docs      Markdown documentation site (the historical starter)
+        \\  docs      Markdown documentation site under the catalog boris theme:
+        \\            relations, backlinks, and a wired search box
         \\  garden    flat-ish digital garden: dense wiki links, semantic
         \\            relations, {{{{include}}}} composition, an <Aside> component
         \\  cookbook  Cooklang .cook recipe box; profile declares input_format: cook

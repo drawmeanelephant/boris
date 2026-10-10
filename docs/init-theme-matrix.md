@@ -19,7 +19,7 @@ behavior are normative in
 
 | Scenario | `--type` | Teaches | Starter theme | Alternates (verified) | Gap note |
 |---|---|---|---|---|---|
-| docs | `docs` | trunk/satellite graph, wiki links, search client | `boris` (embedded starter copy) | `reference`, `engineering` (home), `semantic` | Starter-theme decision pending ([#1063](https://github.com/drawmeanelephant/boris/issues/1063)); this matrix does not decide it. |
+| docs | `docs` | trunk/satellite graph, wiki links, a relation, search client | `boris` | `reference`, `engineering` (home), `semantic` | — (resolved by [#1063](https://github.com/drawmeanelephant/boris/issues/1063): the starter embeds the catalog `boris` theme, so its relation renders on both ends. `boris` hardcodes its brand line. See [Theme gaps](#theme-gaps).) |
 | garden | `garden` | dense wiki links, relations, `{{include}}`, `<Aside>` | `ledger` | `field-notes`, `archive` | — |
 | cookbook | `cookbook` | Cooklang `.cook` pages, `servings`, `{{children}}` recipe deck | `cards` (home) | `reading`, `cozy` | Thin second option: no other card-shaped recipe theme. Both alternates build but are generic reading shells. |
 | blog | `blog` | `published_at` posts on a parent chain | `cozy` | `journal`, `showcase` | — |
@@ -57,19 +57,26 @@ scenario used the tree that `boris init --type NAME` writes. The build
 command was
 `boris --input content --html-dir dist --theme themes/NAME`, plus
 `--cooklang` or `--textile` for those scenarios and the layout rules
-where marked. The `docs` starter theme is the embedded copy the starter
-writes.
+where marked.
 
 All 43 builds exited 0. Each wrote a stylesheet and every page, and all
 three `photo-gallery` themes published the five images. Every starter is
 also covered by `zig build test-boris-init` through its own profile.
 
+The `docs` row was verified again for
+[#1063](https://github.com/drawmeanelephant/boris/issues/1063), on the
+wave-5 docs-starter branch. The starter now writes the catalog `boris`
+theme. Its three pages built under `boris`, `reference`, `engineering`
+(also with the home rule), and `semantic`. Each build rendered the
+`relates_to` edge twice: as `{{relations}}` on `guides/publishing` and as
+`{{backlinks}}` on `guides/getting-started`.
+
 The `docs` alternates were also built through the docs starter's
 publication profile with the theme swapped in. `reference`, `engineering`,
 and `semantic` all pass the `rendered-search` check now, because each
-marks its search extraction root. Only the starter's `boris` theme ships
-the browser search client, so the alternates publish a correct search
-index with no search box on the page.
+marks its search extraction root. Only the `boris` theme ships the
+browser search client, so the alternates publish a correct search index
+with no search box on the page.
 
 Re-verify a row after a theme changes by rebuilding the scenario tree with
 the named theme. A starter archetype is also re-verified by `zig build
@@ -90,6 +97,7 @@ Each cell lists the layouts that carry the slot; `-` means none:
 | Theme | `{{children}}` | `{{toc}}` | `{{breadcrumb}}` | `{{relations}}` | `{{backlinks}}` | `{{head}}` | `{{page-status}}` |
 |---|---|---|---|---|---|---|---|
 | `archive` | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main |
+| `boris` | main | main | main | main | main | main | - |
 | `cards` | home, main | home, main | home, main | home, main | home, main | home, main | - |
 | `corporate` | main | main | main | main | main | main | - |
 | `cozy` | main | main | main | main | main | main | main |
@@ -139,6 +147,12 @@ and [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), not to
   2018—2024"), and a fixed lede ("Small records, held in order."), and
   `main.html` repeats the eyebrow. The `archive` starter's own title shows
   only in the `<h1>`, so a fresh starter carries another site's dates.
+- **`boris` hardcodes its brand line.** `main.html` prints the `<title>`
+  suffix "· Boris", the sidebar name "Boris", and a compiler tagline.
+  `footer.html` repeats the product name. The `docs` starter's
+  `site.title` ("My Boris Site") does not reach that chrome. The private
+  starter theme that #1063 retired hardcoded "My Boris Site" there
+  instead. The starter's conventions report says to edit the copy.
 - **`engineering` hardcodes its chrome.** Every layout's `<title>` is the
   static word "Engineering" (a known limitation in the theme README), and
   `home.html` labels the index "Theme study". The `dashboard` board shows

@@ -38,7 +38,10 @@ for f in \
     content/guides/getting-started.md \
     content/guides/publishing.md \
     themes/boris/layouts/main.html \
+    themes/boris/footer.html \
     themes/boris/assets/css/boris.css \
+    themes/boris/README.md \
+    themes/boris/ACCESSIBILITY.md \
     boris.json \
     standard-site.json; do
     [[ -f "$OUT/site/$f" ]] || fail "init did not write $f"
@@ -65,6 +68,15 @@ cd "$OUT/site"
     >"$OUT/build.stdout" 2>"$OUT/build.stderr" || fail "starter build failed: $(head -3 "$OUT/build.stderr")"
 [[ -f "$OUT/site/dist/index.html" ]] || fail "build wrote no index.html"
 [[ -f "$OUT/site/dist/guides/getting-started.html" ]] || fail "build wrote no guides/getting-started.html"
+# The starter's one relation is visible on both ends (#1063): the theme
+# renders {{relations}} on the source and {{backlinks}} on the target.
+docs_rel() { sed -n "/<section class=\"semantic-$1\"/,/<\/section>/p" "$OUT/site/dist/guides/$2.html"; }
+docs_rel relations publishing | grep -q 'data-relation-kind="relates_to".*href="getting-started.html"' \
+    || fail "docs relates_to relation did not render on guides/publishing"
+docs_rel backlinks getting-started | grep -q 'data-relation-kind="relates_to".*href="publishing.html"' \
+    || fail "docs relates_to backlink did not render on guides/getting-started"
+grep -q '<nav class="page-children"' "$OUT/site/dist/index.html" || fail "docs index has no {{children}} list"
+grep -q 'data-boris-search-ui' "$OUT/site/dist/index.html" || fail "docs index has no search UI"
 rm -rf "$OUT/site/dist"
 "$ROOT/zig-out/bin/boris" --input content --target public=dist --theme themes/boris --profile standard-site.json --quiet \
     >"$OUT/emit.stdout" 2>"$OUT/emit.stderr" || fail "profile HTML emit failed: $(head -5 "$OUT/emit.stderr")"
@@ -136,7 +148,7 @@ grep -qF "expected one of: $ARCHETYPE_LIST)" "$OUT/bogus.stderr" \
 pass "unknown archetype refused with the name list"
 
 note "each archetype materializes, compiles, is deterministic, and refuses non-empty targets"
-for t in "${ARCHETYPES[@]:1}"; do
+for t in "${ARCHETYPES[@]}"; do
     "$ROOT/zig-out/bin/boris" init --type "$t" "$OUT/arch-$t" >"$OUT/arch-$t.stdout" 2>"$OUT/arch-$t.stderr" \
         || fail "init --type $t exited nonzero: $(head -3 "$OUT/arch-$t.stderr")"
     grep -q '^verified: starter compiled [1-9][0-9]* page(s)$' "$OUT/arch-$t.stderr" \
@@ -163,7 +175,12 @@ for t in "${ARCHETYPES[@]:1}"; do
             || fail "archetype $t theme $name differs from themes/$name: $(head -3 "$OUT/arch-$t-theme-$name.diff")"
     done
 done
-pass "${ARCHETYPE_LIST#docs, }: init + byte-identical rerun + refusal + profile-build + full theme file set"
+pass "$ARCHETYPE_LIST: init + byte-identical rerun + refusal + profile-build + full theme file set"
+diff -r "$OUT/site/themes" "$OUT/arch-docs/themes" >/dev/null || fail "default init and --type docs wrote different themes"
+for f in content/index.md content/guides/getting-started.md content/guides/publishing.md boris.json standard-site.json; do
+    cmp -s "$OUT/site/$f" "$OUT/arch-docs/$f" || fail "default init and --type docs differ at $f"
+done
+pass "the default init is --type docs"
 
 note "archetype surfaces are honest"
 grep -q '"input_format": "cook"' "$OUT/arch-cookbook/boris.json" \
@@ -380,5 +397,5 @@ grep -q '<figcaption><strong>Dawn.</strong>' "$G/dist/photos/coast.html" || fail
 pass "photo-gallery: home grid; 5 images at depths 0 and 1 resolve page-relative and publish byte-identical"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
-for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done
+for t in "${ARCHETYPES[@]}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done
 echo "boris-init: all assertions passed"

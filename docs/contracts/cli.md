@@ -143,10 +143,17 @@ archetype; the flag names are exactly the enum values the CLI reports. The
 [init theme coverage matrix](../init-theme-matrix.md) names the alternate
 catalog themes that fit each one.
 
-- `docs` (default) — the historical Markdown starter: three content pages
-  exercising the graph, a closed-slot theme whose layout ships the
-  [rendered-search browser client](rendered-search.md), and the two
-  publication profiles.
+- `docs` (default) — a Markdown documentation starter under the catalog
+  `boris` theme: three content pages exercising the graph (trunk `index`,
+  two `guides/` satellites, wiki links, and one `relates_to` edge), and
+  the two publication profiles. The theme's `main.html` ships the
+  [rendered-search browser client](rendered-search.md) and renders
+  `{{metadata}}`, `{{children}}`, `{{relations}}`, and `{{backlinks}}`, so
+  the relation is visible on both of its pages. Before
+  [#1063](https://github.com/drawmeanelephant/boris/issues/1063) `docs`
+  wrote a private two-file starter theme that lacked those four slots; it
+  now writes the catalog theme's full file set, so its bytes differ from
+  earlier releases.
 - `garden` — a flat-ish digital garden: dense wiki links, semantic
   relations, `{{include}}` composition from `content/includes/`, and a
   registered `<Aside>` component, under the shipped `ledger` theme.
