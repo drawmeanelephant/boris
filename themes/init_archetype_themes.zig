@@ -16,6 +16,7 @@ pub const ledger_readme = @embedFile("ledger/README.md");
 pub const ledger_accessibility = @embedFile("ledger/ACCESSIBILITY.md");
 
 pub const cards_layout_main = @embedFile("cards/layouts/main.html");
+pub const cards_layout_home = @embedFile("cards/layouts/home.html");
 pub const cards_footer = @embedFile("cards/footer.html");
 pub const cards_css = @embedFile("cards/assets/css/cards.css");
 pub const cards_readme = @embedFile("cards/README.md");
@@ -63,6 +64,7 @@ pub const minimal_readme = @embedFile("minimal/README.md");
 pub const minimal_accessibility = @embedFile("minimal/ACCESSIBILITY.md");
 
 pub const journal_layout_main = @embedFile("journal/layouts/main.html");
+pub const journal_layout_archive = @embedFile("journal/layouts/archive.html");
 pub const journal_footer = @embedFile("journal/footer.html");
 pub const journal_css = @embedFile("journal/assets/journal.css");
 pub const journal_readme = @embedFile("journal/README.md");
