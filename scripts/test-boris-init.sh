@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -233,6 +233,14 @@ grep -q 'unreleased' "$C/feed/rss.xml" && fail "changelog draft entry leaked int
 grep -q 'changes/2026-09-28-v0-2-0.html' "$C/dist-sitemap/sitemap.xml" || fail "changelog sitemap is missing a release"
 grep -q 'unreleased' "$C/dist-sitemap/sitemap.xml" && fail "changelog draft entry leaked into the sitemap"
 pass "changelog: draft emitted at its route; absent from search index, RSS, and sitemap"
+
+note "resume: the CV page carries its tags through {{metadata}} and ships a print stylesheet"
+R="$OUT/arch-resume"
+grep -q '<dd>production-editing, typesetting, publishing-systems</dd>' "$R/dist/index.html" \
+    || fail "resume {{metadata}} did not render the CV tags"
+[[ -f "$R/dist/now.html" ]] || fail "resume now satellite did not render"
+grep -q '@media print' "$R/dist/assets/corporate.css" || fail "resume theme ships no print stylesheet"
+pass "resume: tags in metadata, now satellite, print stylesheet published"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done

@@ -28,6 +28,8 @@
 //! - `changelog` — release notes (`index` → `changes` hub → dated entries
 //!   with `published_at` + `summary`) under `journal`; one entry is
 //!   `status: draft`, the unreleased section that renders unadvertised.
+//! - `resume`  — a single-page CV with `tags` for `{{metadata}}` and one
+//!   "now" satellite under `corporate`, whose print stylesheet is the PDF.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -58,7 +60,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume" };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -1163,6 +1165,88 @@ const changelog_profile =
     \\
 ;
 
+// --- resume -----------------------------------------------------------------
+
+const resume_index_md =
+    \\---
+    \\title: Ada Brennan
+    \\tags: [production-editing, typesetting, publishing-systems]
+    \\published_at: 2026-10-01T09:00:00Z
+    \\summary: Production editor and publishing-systems engineer.
+    \\---
+    \\
+    \\# Ada Brennan
+    \\
+    \\Production editor and publishing-systems engineer. This page is the
+    \\whole CV: print it, and the theme's print stylesheet turns the site into
+    \\the PDF.
+    \\
+    \\## Summary
+    \\
+    \\Ten years taking manuscripts to print and to the web from one source.
+    \\Comfortable in the copy room and in the build pipeline.
+    \\
+    \\## Experience
+    \\
+    \\### Lead production editor — Harrow & Finch, 2021–present
+    \\
+    \\- Moved a 40-title backlist to a single-source Markdown workflow.
+    \\- Cut proof turnaround from nine days to four.
+    \\
+    \\### Production editor — Lantern Quarterly, 2016–2021
+    \\
+    \\- Ran the quarterly print schedule and the web edition.
+    \\- Wrote the house style guide still in use today.
+    \\
+    \\## Projects
+    \\
+    \\- **Open specimen book** — a typeface specimen built from plain text.
+    \\- **Proof tracker** — a small tool for routing page proofs.
+    \\
+    \\## Skills
+    \\
+    \\Copy-editing, typesetting, accessibility review, static publishing.
+    \\
+    \\## Contact
+    \\
+    \\- Email: ada@example.com
+    \\- What I am working on right now: [[now]].
+    \\
+;
+
+const resume_now_md =
+    \\---
+    \\title: Now
+    \\parent: index
+    \\tags: [now]
+    \\published_at: 2026-10-05T09:00:00Z
+    \\summary: What I am working on this season.
+    \\---
+    \\
+    \\# Now
+    \\
+    \\- Typesetting a poetry collection for spring.
+    \\- Reading about variable fonts in long-form print.
+    \\- Open to contract production work from November.
+    \\
+    \\Back to the [[index]] CV.
+    \\
+;
+
+const resume_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Ada Brennan" },
+    \\  "targets": [
+    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/corporate" }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -1312,6 +1396,16 @@ const changelog_files = [_]FileToWrite{
     .{ .path = "themes/journal/README.md", .data = archetype_themes.journal_readme },
     .{ .path = "themes/journal/ACCESSIBILITY.md", .data = archetype_themes.journal_accessibility },
     .{ .path = "boris.json", .data = changelog_profile },
+};
+
+const resume_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = resume_index_md },
+    .{ .path = "content/now.md", .data = resume_now_md },
+    .{ .path = "themes/corporate/layouts/main.html", .data = archetype_themes.corporate_layout_main },
+    .{ .path = "themes/corporate/footer.html", .data = archetype_themes.corporate_footer },
+    .{ .path = "themes/corporate/assets/corporate.css", .data = archetype_themes.corporate_css },
+    .{ .path = "themes/corporate/README.md", .data = archetype_themes.corporate_readme },
+    .{ .path = "boris.json", .data = resume_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -1523,6 +1617,27 @@ const changelog_spec = ArchetypeSpec{
     ,
 };
 
+const resume_spec = ArchetypeSpec{
+    .layout_path = "themes/corporate/layouts/main.html",
+    .files = &resume_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the whole CV
+    \\  content/now.md                    one "what I'm doing now" satellite
+    \\  themes/corporate/                 shipped "corporate" theme — dense product-docs chrome
+    \\  boris.json                        profile (input_format: markdown, theme: corporate)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the CV, then print dist/index.html to PDF
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  {{metadata}} renders the page's status and tags; edit tags: to change the CV keywords
+    \\  summary: and published_at: feed RSS and enabled head metadata, not the page body
+    \\  the theme's @media print hides the header, navigation, and contents rail for paper
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -1534,6 +1649,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .wiki => &wiki_spec,
         .@"link-in-bio" => &link_in_bio_spec,
         .changelog => &changelog_spec,
+        .@"resume" => &resume_spec,
     };
 }
 
@@ -1730,7 +1846,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -1785,8 +1901,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -1916,6 +2032,15 @@ test "changelog entries are dated and exactly one is a draft" {
     try std.testing.expectEqual(@as(usize, 3), entries);
     try std.testing.expectEqual(@as(usize, 1), drafts);
     try std.testing.expect(std.mem.indexOf(u8, changelog_unreleased_md, "\nstatus: draft\n") != null);
+}
+
+test "resume is one CV page with metadata-bearing frontmatter and a print stylesheet" {
+    for ([_][]const u8{ "\ntags: [", "\npublished_at: 2026-", "\nsummary: " }) |key| {
+        try std.testing.expect(std.mem.indexOf(u8, resume_index_md, key) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, resume_now_md, "\nparent: index\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.corporate_layout_main, "{{metadata}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.corporate_css, "@media print") != null);
 }
 
 test "garden demonstrates include composition, components, and dense links" {

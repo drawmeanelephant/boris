@@ -29,7 +29,7 @@ behavior are normative in
 | wiki | `wiki` ([#1055](https://github.com/drawmeanelephant/boris/issues/1055)) | deep parent chains, `{{toc}}`, `{{breadcrumb}}` | `reference` (home + section) | `engineering` (home), `semantic` (home) | `reference` has no `{{relations}}` / `{{backlinks}}`, so the starter's typed edge validates but does not render. |
 | changelog | `changelog` ([#1056](https://github.com/drawmeanelephant/boris/issues/1056)) | `published_at` entries, `status: draft` | `journal` | `compact`, `press` | — |
 | link-in-bio | `link-in-bio` ([#1057](https://github.com/drawmeanelephant/boris/issues/1057)) | a one-page site | `minimal` | `cards` | — |
-| resume | `resume` ([#1058](https://github.com/drawmeanelephant/boris/issues/1058)) | `{{metadata}}` / tags, print stylesheet | `corporate` | `compact`, `minimal` | Print pass under review ([#1048](https://github.com/drawmeanelephant/boris/issues/1048)). |
+| resume | `resume` ([#1058](https://github.com/drawmeanelephant/boris/issues/1058)) | `{{metadata}}` / tags, print stylesheet | `corporate` | `compact`, `minimal` | Print yields a clean single column, with leftovers. See [Theme gaps](#theme-gaps) and [#1048](https://github.com/drawmeanelephant/boris/issues/1048). |
 | archive | later ([#1059](https://github.com/drawmeanelephant/boris/issues/1059)) | `tags` + `relations` taxonomy, `{{backlinks}}` | `archive` | `ledger`, `field-notes` | Slot adoption on `archive` (`{{relations}}`, `{{backlinks}}`) is pending in [#1047](https://github.com/drawmeanelephant/boris/issues/1047). |
 | newsletter | `newsletter` ([#1060](https://github.com/drawmeanelephant/boris/issues/1060)) | `published_at` issues, profile `rss` / `sitemap` | `press` (home, archive, blog) | `journal`, `cozy` | `press` layouts have no `{{head}}`, so a profile `rss` declaration fails with `EHEAD`. See [Theme gaps](#theme-gaps). |
 | photo-gallery | later ([#1061](https://github.com/drawmeanelephant/boris/issues/1061)) | `{stem}.assets/` content-local images | `gallery` (new) | `showcase` (partial), `cards` | No image-first theme yet. The `gallery` theme is [#1052](https://github.com/drawmeanelephant/boris/issues/1052) and in progress. |
@@ -98,6 +98,19 @@ and [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), not to
 - **`showcase/layouts/home.html` has no `{{children}}`.** The `portfolio`
   index lists its projects with hand-written wiki links until the slot
   lands.
+- **`corporate` print leaves page furniture in the CV.** The `resume`
+  starter was printed to PDF with headless Chrome (`--print-to-pdf`, two
+  Letter pages). Its `@media print` hides the header, sidebar, contents
+  rail, and search, and drops the flex layout, so the CV body prints as one
+  clean column. The following still print:
+  - the breadcrumb, as a numbered list ("1. Ada Brennan");
+  - the `{{children}}` list (a bare "• Now");
+  - the theme footer ("Corporate · themes/corporate");
+  - the light surface background.
+
+  Links have no underline or URL in print, so a printed wiki link is
+  indistinguishable from prose. These belong to the corporate print pass
+  ([#1048](https://github.com/drawmeanelephant/boris/issues/1048)).
 - **`reference`, `showcase`, and `press` have no `{{relations}}` /
   `{{backlinks}}`.** The `wiki`, `portfolio`, and `newsletter` starters'
   typed edges validate but do not render.

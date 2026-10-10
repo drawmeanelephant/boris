@@ -63,3 +63,8 @@ pub const journal_footer = @embedFile("journal/footer.html");
 pub const journal_css = @embedFile("journal/assets/journal.css");
 pub const journal_readme = @embedFile("journal/README.md");
 pub const journal_accessibility = @embedFile("journal/ACCESSIBILITY.md");
+
+pub const corporate_layout_main = @embedFile("corporate/layouts/main.html");
+pub const corporate_footer = @embedFile("corporate/footer.html");
+pub const corporate_css = @embedFile("corporate/assets/corporate.css");
+pub const corporate_readme = @embedFile("corporate/README.md");

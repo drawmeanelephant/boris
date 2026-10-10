@@ -24,3 +24,7 @@
   stays out of search, RSS, and sitemap output
   ([#1056](https://github.com/drawmeanelephant/boris/issues/1056),
   [status gating](/docs/contracts/html-output.md)).
+- `boris init --type resume` writes a single-page CV under `corporate`:
+  tags rendered by `{{metadata}}`, one "now" satellite, and the theme's
+  print stylesheet as the PDF path
+  ([#1058](https://github.com/drawmeanelephant/boris/issues/1058)).

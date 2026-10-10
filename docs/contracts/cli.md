@@ -176,6 +176,10 @@ catalog themes that fit each one.
   `status: draft` (the unreleased section): it renders at its route but is
   excluded from the search index, RSS, and sitemap per
   [status gating](html-output.md).
+- `resume` — a single-page CV (trunk `index` with `tags`, `published_at`,
+  and `summary`) plus one "now" satellite, under `corporate`. `{{metadata}}`
+  renders the page's status and tags; the theme's `@media print` rules
+  are the PDF path.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format
