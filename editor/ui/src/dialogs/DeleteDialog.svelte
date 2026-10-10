@@ -19,7 +19,7 @@
 <dialog bind:this={dialog} onkeydown={onKeydown} onclose={onClose} aria-labelledby="delete-heading">
   <h2 id="delete-heading">Delete file</h2>
   <p>Delete {buffer.activePath || 'selected file'}? This changes the project immediately and cannot be undone in Boris Editor.</p>
-  <div class="dialog-actions">
+  <div class="dialog-actions toolbar">
     <button type="button" aria-keyshortcuts="Escape" onclick={onCancel}>Cancel<kbd aria-hidden="true">Esc</kbd></button>
     <button type="button" class="danger" aria-keyshortcuts="Enter" onclick={onDelete}>Delete {buffer.activePath || 'file'}<kbd aria-hidden="true">Enter</kbd></button>
   </div>

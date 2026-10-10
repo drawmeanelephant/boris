@@ -63,15 +63,15 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
 </script>
 
 {#if node?.recipe}
-  <section class="recipe-pane" aria-labelledby="recipe-heading">
+  <section class="subpane recipe-pane" aria-labelledby="recipe-heading">
     <div class="pane-heading">
       <div>
         <h3 id="recipe-heading">Recipe</h3>
         <p>Read-only Boris <code>recipe</code> facet. Source remains the <code>.cook</code> file. Scale recipe asks the compiler; it does not write quantities back.</p>
       </div>
-      <button type="button" onclick={printRecipe}>Print this recipe</button>
+      <button type="button" class="ghost" onclick={printRecipe}>Print this recipe</button>
     </div>
-    <div class="recipe-scale">
+    <div class="recipe-scale toolbar">
       <label>
         Scale factor
         <input type="text" name="scale-factor" value={problems.scaleFactor} oninput={(e) => (problems.scaleFactor = (e.currentTarget as HTMLInputElement).value)} autocomplete="off" />
@@ -90,7 +90,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
             <td>{ingredient.preparation || '—'}</td>
             <td>
               {#if ingredient.recipeRef && nodeForIdLocal(ingredient.recipeRef)}
-                <button type="button" onclick={() => onOpenNode(nodeForIdLocal(ingredient.recipeRef!))}>
+                <button type="button" class="compact" onclick={() => onOpenNode(nodeForIdLocal(ingredient.recipeRef!))}>
                   Go to recipe {ingredient.recipeRef}
                 </button>
               {:else if ingredient.recipeRef}

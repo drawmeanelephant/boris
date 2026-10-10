@@ -162,11 +162,11 @@
 
 <figure class="graph-map" data-testid="graph-map">
   <div class="graph-map-controls" role="group" aria-label="Graph map zoom">
-    <button type="button" onclick={zoomOut} disabled={manualScale === null && scale <= fitScale + 1e-6} aria-label="Zoom out">−</button>
+    <button type="button" class="compact" onclick={zoomOut} disabled={manualScale === null && scale <= fitScale + 1e-6} aria-label="Zoom out">−</button>
     <span class="graph-map-zoom" data-testid="graph-map-zoom" aria-live="polite">{zoomPercent}%</span>
-    <button type="button" onclick={zoomIn} disabled={scale >= MAX_ZOOM} aria-label="Zoom in">+</button>
-    <button type="button" onclick={fit} disabled={manualScale === null} aria-label="Fit map to width">Fit</button>
-    <button type="button" onclick={actualSize} disabled={Math.abs(scale - 1) < 1e-6} aria-label="Actual size (100%)">Actual size</button>
+    <button type="button" class="compact" onclick={zoomIn} disabled={scale >= MAX_ZOOM} aria-label="Zoom in">+</button>
+    <button type="button" class="compact" onclick={fit} disabled={manualScale === null} aria-label="Fit map to width">Fit</button>
+    <button type="button" class="compact" onclick={actualSize} disabled={Math.abs(scale - 1) < 1e-6} aria-label="Actual size (100%)">Actual size</button>
   </div>
   <!-- Focusable scroll container: a focused scrollable region pans with the
        arrow keys, which is the keyboard counterpart to the zoom buttons. -->

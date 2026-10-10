@@ -39,9 +39,9 @@
       }}
     />
     {#if dialogs.createError}
-      <p id="create-error" class="warning-text" role="alert">{dialogs.createError}</p>
+      <p id="create-error" class="notice" data-tone="danger" role="alert">{dialogs.createError}</p>
     {/if}
-    <div class="dialog-actions">
+    <div class="dialog-actions toolbar">
       <button type="button" aria-keyshortcuts="Escape" onclick={onCancel}>Cancel<kbd aria-hidden="true">Esc</kbd></button>
       <button type="submit" class="primary" disabled={!submitReady} aria-keyshortcuts="Enter">Create file<kbd aria-hidden="true">Enter</kbd></button>
     </div>

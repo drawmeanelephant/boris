@@ -285,6 +285,7 @@ export type PreviewState = {
   message: string;
   preview_url: string;
   watch_active?: boolean;
+  stale_reason?: 'earlier_build' | 'failed_rebuild' | null;
 };
 
 export type GraphEndpoint = { type: 'page' | 'source'; value: string };

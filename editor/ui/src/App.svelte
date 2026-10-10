@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { prefersReducedMotion } from 'svelte/motion';
+  import { motionMs } from './lib/motion';
   import { token, launchOpenPath, api, elapsedLabel, hostErrorLabel, authorPathIssue, isLaunchOpenSafe, defaultLaunchPath } from './lib/api';
   import type {
     Health,
@@ -59,6 +59,8 @@
   import ProjectPane from './components/ProjectPane.svelte';
   import SourcePane from './components/SourcePane.svelte';
   import ProblemsPane from './components/ProblemsPane.svelte';
+  import GraphPane from './components/GraphPane.svelte';
+  import PublicationPane from './components/PublicationPane.svelte';
   import PreviewPane from './components/PreviewPane.svelte';
   import WatchPane from './components/WatchPane.svelte';
   import ConflictDialog from './dialogs/ConflictDialog.svelte';
@@ -99,9 +101,19 @@
     }
   });
 
+  // Without a host none of these payloads will ever arrive, so the panes stop
+  // promising they are loading. The sentences match the per-request failure
+  // copy in connect() below.
+  function markPayloadsUnavailable() {
+    authoring.status = 'Boris authoring vocabulary is unavailable.';
+    graph.status = 'Boris graph is unavailable.';
+    publication.status = 'Publication profiles are unavailable.';
+  }
+
   async function connect() {
     if (!token) {
       markTokenMissing();
+      markPayloadsUnavailable();
       return;
     }
     const started = Date.now();
@@ -160,6 +172,7 @@
     } catch {
       noteHostUnavailable();
       markConnectFailed();
+      markPayloadsUnavailable();
     }
   }
 
@@ -195,6 +208,7 @@
       await requestResolution({ action: 'command', mode });
       return;
     }
+    problems.runError = false;
     if (mode === 'impact' && !problems.impactId.trim()) {
       problems.status = 'Enter an entity or source endpoint before running impact.';
       return;
@@ -234,6 +248,7 @@
     problems.running = false;
     problems.runningMode = '';
     if (!result.response.ok) {
+      problems.runError = true;
       problems.status = `Could not run ${commandLabel(mode)}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
       return;
     }
@@ -941,23 +956,26 @@
     onNavigate={navigateToProblem}
     onOpenFile={openFile}
     onOpenGraphNode={openGraphNode}
-    onImpact={runImpactOnCurrent}
     onScale={() => runCommand('recipe_scale')}
     onReset={resetScale}
-    onRunPlan={() => runCommand('plan')}
-    onVerifyProof={() => runCommand('proof_verify')}
-    onExportGraph={() => runCommand('graph_export')}
     onEnterFocus={enterFocusMode}
   />
 
   {#if density.mode === 'review'}
-    <div class="workspace-rail" transition:fade={{ duration: prefersReducedMotion.current ? 0 : 120 }}>
+    <div class="workspace-rail" transition:fade={{ duration: motionMs('fast') }}>
       <ProblemsPane
         onRunCommand={runCommand}
         onNavigate={navigateToProblem}
       />
       <PreviewPane onRebuild={() => rebuildPreview('manual')} />
       <WatchPane />
+      <GraphPane
+        onOpenPath={openFile}
+        onOpenNode={openGraphNode}
+        onImpact={runImpactOnCurrent}
+        onExport={() => runCommand('graph_export')}
+      />
+      <PublicationPane onRunPlan={() => runCommand('plan')} onVerifyProof={() => runCommand('proof_verify')} />
     </div>
   {/if}
 </main>

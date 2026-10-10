@@ -16,6 +16,6 @@
   } = $props();
 </script>
 
-<div class="action-group action-group-{tone}" role="group" aria-label={label}>
+<div class="action-group toolbar action-group-{tone}" role="group" aria-label={label}>
   {@render children()}
 </div>

@@ -58,7 +58,7 @@
     <p>{buffer.activePath} no longer exists on disk. Your unsaved version is still in the editor.</p>
     <label for="deleted-version">Your unsaved version</label>
     <textarea id="deleted-version" bind:this={deletedVersion} readonly value={buffer.content}></textarea>
-    <div class="dialog-actions">
+    <div class="dialog-actions toolbar">
       <button type="button" aria-keyshortcuts="Escape" onclick={onKeepEditing}>Keep editing<kbd aria-hidden="true">Esc</kbd></button>
       <button type="button" aria-keyshortcuts="Alt+D" onclick={onDiscardDeleted}>Discard changes<kbd aria-hidden="true">Alt+D</kbd></button>
       <!-- svelte-ignore a11y_autofocus -->
@@ -76,7 +76,7 @@
         <textarea id="disk-version" bind:this={diskVersion} readonly value={buffer.conflict.content}></textarea>
       </div>
     </div>
-    <div class="dialog-actions">
+    <div class="dialog-actions toolbar">
       <button type="button" aria-keyshortcuts="Escape" onclick={onKeepEditing}>Keep editing<kbd aria-hidden="true">Esc</kbd></button>
       <button type="button" aria-keyshortcuts="Alt+L" onclick={onLoadDisk}>Load disk version<kbd aria-hidden="true">Alt+L</kbd></button>
       <!-- svelte-ignore a11y_autofocus -->

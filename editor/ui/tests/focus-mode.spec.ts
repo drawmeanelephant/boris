@@ -575,3 +575,147 @@ test('writing aids persist across reloads', async ({ page }) => {
   await expect(reopened.getByRole('radio', { name: 'Typewriter scrolling on' })).toBeChecked();
   await expect(reopened.getByRole('radio', { name: 'Paragraph dimming on' })).toBeChecked();
 });
+
+// #1066: Typography and Writing aids open as overlays under their summaries.
+// 1440px keeps the chrome on one row; at 1024px it wraps and both summaries
+// sit at the right edge, which is where an inline panel used to push the
+// actions onto new rows and an anchored one would overflow the viewport.
+for (const width of [1440, 1024]) {
+  test(`chrome panels open without reflowing the chrome or resizing the surface at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await installApi(page, { layout: 'split' });
+    const editor = await openFileAndEnterFocus(page);
+    const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+    const chrome = focus.locator('.focus-chrome');
+    const surface = focus.locator('.focus-surface');
+    const before = { chrome: await chrome.boundingBox(), surface: await surface.boundingBox(), editor: await editor.boundingBox() };
+
+    for (const selector of ['details.focus-type:not(.focus-aids)', 'details.focus-aids']) {
+      const details = focus.locator(selector);
+      await details.locator('summary').click();
+      const panel = details.locator('.focus-type-grid');
+      await expect(panel).toBeVisible();
+      expect(await chrome.boundingBox(), `${selector} open: chrome box`).toEqual(before.chrome);
+      expect(await surface.boundingBox(), `${selector} open: surface box`).toEqual(before.surface);
+      expect(await editor.boundingBox(), `${selector} open: writing surface box`).toEqual(before.editor);
+      // The panel hangs below its summary and stays inside the chrome's width.
+      const box = (await panel.boundingBox())!;
+      const summaryBox = (await details.locator('summary').boundingBox())!;
+      expect(box.y).toBeGreaterThan(summaryBox.y + summaryBox.height);
+      expect(box.x).toBeGreaterThanOrEqual(before.chrome!.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(before.chrome!.x + before.chrome!.width);
+      await page.keyboard.press('Escape');
+      await expect(panel).toBeHidden();
+    }
+  });
+}
+
+test('an open chrome panel paints above the writing surface on its own layer', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await installApi(page);
+  const editor = await openFileAndEnterFocus(page);
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  await focus.locator('details.focus-type:not(.focus-aids) summary').click();
+  const panel = focus.locator('details.focus-type:not(.focus-aids) .focus-type-grid');
+  await expect(panel).toBeVisible();
+
+  const layer = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--layer-focus-popover').trim());
+  expect(layer).not.toBe('');
+  await expect(panel).toHaveCSS('z-index', layer);
+
+  // Where the panel overlaps the textarea (a positioned layer of its own), the
+  // panel is what the pointer hits.
+  const p = (await panel.boundingBox())!;
+  const e = (await editor.boundingBox())!;
+  const overlap = {
+    left: Math.max(p.x, e.x), right: Math.min(p.x + p.width, e.x + e.width),
+    top: Math.max(p.y, e.y), bottom: Math.min(p.y + p.height, e.y + e.height)
+  };
+  expect(overlap.right).toBeGreaterThan(overlap.left);
+  expect(overlap.bottom).toBeGreaterThan(overlap.top);
+  const hitsPanel = await page.evaluate(({ x, y }) =>
+    document.elementFromPoint(x, y)?.closest('.focus-type-grid') !== null,
+  { x: (overlap.left + overlap.right) / 2, y: (overlap.top + overlap.bottom) / 2 });
+  expect(hitsPanel).toBe(true);
+});
+
+test('Esc closes an open chrome panel and returns to its summary before it exits focus mode', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const trigger = page.getByRole('button', { name: 'Focus', exact: true });
+  await trigger.click();
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  await expect(focus).toBeVisible();
+
+  for (const selector of ['details.focus-type:not(.focus-aids)', 'details.focus-aids']) {
+    const details = focus.locator(selector);
+    const summary = details.locator('summary');
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await expect(details).toHaveJSProperty('open', true);
+    // An open panel keeps the keyboard: arrows on its summary do not jump
+    // into the writing surface underneath it.
+    await page.keyboard.press('ArrowDown');
+    await expect(summary).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(details.locator('input[type="radio"]:focus')).toHaveCount(1);
+
+    await page.keyboard.press('Escape');
+    await expect(details).toHaveJSProperty('open', false);
+    await expect(summary).toBeFocused();
+    await expect(focus).toBeVisible();
+  }
+
+  // With no panel open, the next Esc leaves focus mode.
+  await page.keyboard.press('Escape');
+  await expect(focus).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test('opening one chrome panel closes the other', async ({ page }) => {
+  await installApi(page);
+  await openFileAndEnterFocus(page);
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  const typography = focus.locator('details.focus-type:not(.focus-aids)');
+  const aids = focus.locator('details.focus-aids');
+
+  await typography.locator('summary').click();
+  await expect(typography).toHaveJSProperty('open', true);
+  await aids.locator('summary').click();
+  await expect(aids).toHaveJSProperty('open', true);
+  await expect(typography).toHaveJSProperty('open', false);
+
+  // The keyboard path swaps them too (Enter on the other summary).
+  await typography.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  await expect(typography).toHaveJSProperty('open', true);
+  await expect(aids).toHaveJSProperty('open', false);
+
+  // The open summary still closes its own panel.
+  await typography.locator('summary').click();
+  await expect(focus.locator('details.focus-type[open]')).toHaveCount(0);
+});
+
+test('a press outside an open chrome panel closes it', async ({ page }) => {
+  await installApi(page);
+  const editor = await openFileAndEnterFocus(page);
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  const typography = focus.locator('details.focus-type:not(.focus-aids)');
+
+  await typography.locator('summary').click();
+  // Choosing inside the panel keeps it open.
+  await focus.getByRole('radio', { name: 'L', exact: true }).check();
+  await expect(typography).toHaveJSProperty('open', true);
+
+  // A press on the writing surface below the panel closes it and lands there.
+  const box = (await editor.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height - 24);
+  await expect(typography).toHaveJSProperty('open', false);
+  await expect(editor).toBeFocused();
+
+  // So does a press on the chrome band outside the panel.
+  await typography.locator('summary').click();
+  await expect(typography).toHaveJSProperty('open', true);
+  await focus.getByRole('heading', { name: 'Focus', level: 2 }).click();
+  await expect(typography).toHaveJSProperty('open', false);
+});

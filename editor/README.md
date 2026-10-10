@@ -445,8 +445,13 @@ and its preview origin terminates with the editor process.
 The UI reports idle, running, success, failed, and stale distinctly. If an
 existing `dist/index.html` is present at startup, it remains `stale` and the
 banner says that the output is from an earlier build; use **Rebuild preview**
-to refresh it. Boris's staged output commit preserves the last valid `dist/`
-tree after a failed rebuild; the iframe generation advances only on success.
+to refresh it. The host names which `stale` it means in `stale_reason`: that
+startup `earlier_build` reads as a warning, and a `failed_rebuild` (a rebuild
+that failed, timed out, or could not run, and kept the last valid tree) reads
+as a failure, because it is one. Against an older host without the field, the
+shell falls back to the exit code: none reads as a warning, non-zero as a
+failure. Boris's staged output commit preserves the last valid `dist/` tree
+after a failed rebuild; the iframe generation advances only on success.
 While #421 remains open, failures show bounded Boris stderr and identify that
 fallback. Embedded preview content is sandboxed; a named link opens the exact
 site origin in a new tab for full behavior.
@@ -476,6 +481,11 @@ relation rows taken from `.boris/completion.json`. The host exposes
 nodes, edges, or backlinks. Wiki-link tokens in the open buffer are scanned
 as `[[id]]` text and resolved against graph entities — the editor does not
 parse Markdown.
+
+The graph is a project-level artifact, so the pane is too: in Review density
+it is a top-level pane in the workspace rail (after Watch, before
+Publication), not a sub-pane of Source (#1067), and it is mounted whether or
+not a file is open (#970).
 
 From the current page the inspector can go to the parent, children, siblings,
 outgoing reference/include edges, reverse-index backlinks, and completion
@@ -650,7 +660,8 @@ The editor's full-page writing experience. The **Focus** button in the Source
 pane header (or `Enter focus writing mode` in the Ctrl+K command palette)
 expands the open buffer into a full-screen, word-processor style overlay;
 **Esc** (or `Exit focus`) returns to the workspace, restoring focus to the
-button that opened it.
+button that opened it. An open Typography or Writing aids panel takes the
+first **Esc** instead (see **Chrome panels** below).
 
 - **One buffer, one truth.** The overlay binds the same buffer state as the
   Source pane: edits made in focus mode are the workspace's edits, undo/redo
@@ -678,6 +689,14 @@ button that opened it.
   clicks, and it lifts entirely when the caret's paragraph fills the
   view. Both aids pause by construction in Preview layout (no writing
   surface to assist) and honor the reduced-motion posture.
+- **Chrome panels.** Typography and Writing aids stay native `<details>`
+  disclosures, but an open panel hangs under its summary as an overlay
+  (`--layer-focus-popover`) instead of expanding inside the header, so opening
+  one never reflows the chrome or resizes the writing surface (#1066). The two
+  act as one light-dismiss menu: opening one closes the other, a press outside
+  the open panel closes it, and **Esc** closes it and returns focus to its
+  summary — only an **Esc** with no panel open exits focus mode. A panel near
+  the right edge slides left just far enough to stay inside the chrome.
 - **The reading aid is a reading aid.** Split/Preview render a bounded,
   dependency-free subset of the authoring grammar — ATX headings,
   paragraphs, emphasis, inline code, fenced code blocks, block quotes,
@@ -742,9 +761,9 @@ labels.
   real line-height by default; headings take `--leading-tight` and controls
   opt in explicitly. `--measure-prose` caps a lede's line length.
 - **Heading roles.** `h1`–`h3` are app/pane/sub-pane titles. `h4` is
-  deliberately not a fourth size: it is a group label inside a sub-pane
-  (`Children`, `Backlinks`, `Ingredients`, `Targets`), so it renders as a
-  small-caps label instead of competing with the body copy it introduces.
+  deliberately not a fourth size: it is a group label inside a pane or
+  sub-pane (`Children`, `Backlinks`, `Ingredients`, `Targets`), so it renders
+  as a small-caps label instead of competing with the body copy it introduces.
   Authored Markdown rendered by Focus mode's reading surface resets that
   treatment — it is document content, not UI.
 - **One pane header row (`.pane-heading`).** Every pane and sub-pane header is
@@ -777,12 +796,15 @@ lives in one `--scale-*` list, and nothing else keeps a copy.
   and `--radius-pill`: three corner steps plus the pill, ascending.
 - **Stacking (`--scale-layer`).** One ladder for the whole editor,
   `--layer-focus-mirror` < `--layer-focus-editor` < `--layer-focus-zen` <
-  `--layer-nav` < `--layer-skip-link` < `--layer-overlay`. The first three order
-  elements inside the focus editor's own stacking context — the measuring
-  mirror, the text above it, the dimming veil over both; the last three are
-  global chrome: the sticky section nav, the skip link, and the full-viewport
-  focus overlay. `z-index` in `styles.css` must name a layer, because a bare
-  number is how two layers silently swap places.
+  `--layer-focus-popover` < `--layer-nav` < `--layer-skip-link` <
+  `--layer-overlay`. The first three order elements inside the focus editor's
+  own stacking context — the measuring mirror, the text above it, the dimming
+  veil over both; `--layer-focus-popover` lifts the Focus chrome's Typography
+  and Writing aids panels over all three, so an open panel overlays the writing
+  surface instead of reflowing the chrome (#1066); the last three are global
+  chrome: the sticky section nav, the skip link, and the full-viewport focus
+  overlay. `z-index` in `styles.css` must name a layer, because a bare number
+  is how two layers silently swap places.
 
 Elevation tiers (`--shadow-1`, `--shadow-2`, `--shadow-3`) are deliberately not
 a declared scale: a shadow list has no scalar order for a list to protect.
@@ -792,11 +814,72 @@ from `npm run check` — every declared token of each family is classified, ever
 listed name exists, each list ascends (numerically where a value is resolvable
 without a viewport, and reported as deferred where it is a `clamp`), spacing
 steps are whole multiples of the base, the layer ladder holds bare numbers, and
-this section names each scale's list. Then
+this section names each scale's list. It also holds `styles.css` to the scales
+(#1044): `font`/`font-size` take a `--text-*` step, `padding`/`margin`/`gap` a
+`--space-*` step, and `border-radius` a `--radius-*` step, so an absolute
+length (`px`, `rem`) in any of them fails, as does a step borrowed by another
+family's property. Relative units pass because they are proportions, not
+steps: `em` is how the Focus reading surface scales the author's document
+typography with the chosen text size, and viewport units place the command
+palette. Named component geometry (the tree's caret gutter, the measured nav
+height, the Focus text-size choice) stays a local custom property, never a
+spacing step. Then
 [`ui/tests/scales.spec.ts`](ui/tests/scales.spec.ts) re-reads the same lists out
 of the *applied* stylesheet: that is the half which catches what no file parse
 can, namely a value overridden in a later block, a media query, or the dark
 theme.
+
+## Component vocabulary and state honesty
+
+The design pass (#1044) gave the shell one small vocabulary, styled once in the
+vocabulary block of [`ui/src/styles.css`](ui/src/styles.css); panes add layout,
+not a parallel look.
+
+- **Buttons.** One base (secondary) and three intents: `primary` (at most one
+  per cluster), `danger`, and `ghost` for the rarer actions in a cluster.
+  `compact` sizes a button for dense rows (graph zoom, recipe table, Project
+  file actions), `row-button` makes a navigating list row (graph links, theme
+  assets, problems in this file), and `chrome-button` is the pill for controls
+  on the dark header bands (theme, connection, Focus actions). A link that
+  acts as a button (`button-link`) shares the base. A field and the action it
+  feeds share a `field-row`; in a card too narrow for both, the action wraps
+  below the field instead of overflowing.
+- **Badge** — a short status label (a command's exit class, the preview phase,
+  the buffer state). **Status text** — a sentence-length state with a tone dot
+  (validation and watch daemon states); sentences wrap, so they never sit in a
+  pill.
+- **Notice** — a callout for a reachable state: neutral information, `ok`,
+  `warn` (act on it), or `danger` (a failure). **Empty state** — nothing to show
+  yet, said plainly behind a dashed edge; its loading variant adds a busy ring.
+- **Cards** — `pane` for a top-level section (Project, Source, and the Review
+  rail's Problems, Preview, Watch, Graph, and Publication), `subpane` for a
+  card nested in one (Recipe, Theme, authoring hints, problems in this file,
+  analysis results). **Toolbar** — every row of actions. **Row list** — a list
+  whose rows navigate or name one fact each. **Disclosure** — an in-pane
+  `<details>` whose summary reads as a link.
+
+Tones only restate what the host sent; they never add a verdict. A problem
+group's tone is its Boris severity (error → danger, warning → warn, info →
+neutral), so a warning is not painted as an error. Status colors come only from
+`--color-ok`, `--color-warn`, and `--color-danger`, and the state is always in
+the text as well.
+
+Every pane renders a designed state for each one it can reach through the
+existing API, and makes no claim from a payload it does not have. Before the
+first host answer the panes say they are loading (Project, Source, Problems,
+Graph, Publication); when the host never connects (a failed connect or a
+missing token) they say they are unavailable instead of loading forever, the
+header chip turns loud, and Publication stops claiming "no profile" or "no
+Proof Pack". An artifact the host reports as `build_required` is a neutral
+notice, `unsupported` (stale) a warning, and a failed request a danger notice —
+including a refresh after a successful build that the host could not adapt,
+where the previous payload stays on screen under that error.
+A host refusal of a command colors the command status line; a Boris exit code
+stays in the result badge.
+
+[`ui/tests/design-vocabulary.spec.ts`](ui/tests/design-vocabulary.spec.ts) pins
+the honest pre-connection and unavailable states, the severity and preview
+tones, and primary-button legibility (label and key-hint chip) in both themes.
 
 ## Density modes and the writing surface
 
@@ -830,7 +913,18 @@ preferences. The mode is disposable UI state, never project truth:
     `aria-pressed` — a pressed state presumes a name that does not change with
     it — and Author takes a smaller product mark and tighter header/nav bands
     than Review.
-- **Review**: the full diagnostics chrome, unchanged.
+- **Review**: the full diagnostics chrome. Project and Source sit beside the
+  workspace rail, which holds every project-level pane as a peer (#1067):
+  Problems, Preview, Watch, Graph, and Publication, top to bottom, each a
+  top-level `pane` with an `h2` title. Source carries only the writing
+  surface and what belongs to the open file (its status, problems in this
+  file, authoring hints, Recipe, Theme), so it no longer grows into a tall
+  column beside a short rail. Problems leads the rail, and Problems and
+  Preview stay beside the editor above the fold at desktop widths (#463).
+  At 80rem and wider the rail is its own scroll container; below that it
+  spans the full width under Project and Source. The Project column is wide
+  enough for its compact file actions to pair up instead of stacking one per
+  line.
 
 Source is the hero in both modes (#989): the writing column outweighs the
 file and rail columns, and the editing surface is a bordered shell whose
@@ -878,7 +972,9 @@ under it, and filtering prunes the tree instead of leaving empty branches.
 - **One segment per row.** A row shows its own segment (`frontmatter.md`), and
   indentation plus a guide rule carry the rest of the path. That is what stops
   a long project path from breaking mid-token, and it is why rows can be denser
-  than the old full-path rows.
+  than the old full-path rows. A segment wider than the column truncates to one
+  line with an ellipsis (#1044) instead of wrapping mid-word; every row's
+  tooltip is its full project-relative path, so nothing is hidden.
 - **The full path is still the name.** Each file row's accessible name
   (`aria-label`) and tooltip are the complete project-relative path, so every
   name this pane has ever exposed to tests, keyboard users, and screen readers
@@ -929,12 +1025,26 @@ layers feedback on top:
 - **Sticky.** The nav pins below the viewport top; landed sections sit just
   under it via a `scroll-margin-top` sized from the measured nav height
   (`--section-nav-h`), not a hardcoded offset.
+- **Order.** Links follow the visual order (#1067): Project, Source, then the
+  workspace rail top to bottom — Problems, Preview, Watch, Graph, Publication.
+  In Author the rail destinations recede behind a `Review` caption, and each
+  of them switches to Review before it lands.
 - **Arrival highlight.** Activating a link focuses the target section and
   pulses it briefly. Under `prefers-reduced-motion` the pulse collapses to
-  a static highlight.
+  a static highlight, and transitions take `0s` rather than a token
+  `0.01ms`: with the default `transition-property: all`, any non-zero
+  duration makes every layout change trail by a few frames, so a jump right
+  after a mode switch would park its target on the previous mode's layout.
 - **Scrollspy.** The link for the section at the reading top carries
-  `aria-current="true"` and an active pill; a bottom rule keeps the last
-  section current where the page clamps at max scroll. On narrow viewports
+  `aria-current="true"` and an active pill. A jump target keeps it while it
+  stays where the jump left it: on the reading line, or — when the window
+  runs out of scroll first, as Review's short page does at wide viewports —
+  resting on screen below the line. Otherwise a bottom rule keeps the last
+  section current where the page clamps at max scroll, as long as that
+  section is on screen. At 80rem and wider the workspace rail is a second
+  scroll container, and the spy listens to it as well as the window — bound
+  whenever Review mounts the rail, including after a cold Author open; a
+  rail scroll releases a jump target outside the rail. On narrow viewports
   the active pill scrolls into the visible strip of the pill row, and edge
   bars hint content beyond the clip.
 - **Focus hand-off.** Every nav target is a programmatic focus target
@@ -953,4 +1063,6 @@ layers feedback on top:
   a page is selected.
 
 The Graph pane is always `id="graph"` (the former `graph-empty` stub is
-gone). Presentation-only: no new endpoints, no pipeline changes.
+gone) and the Publication pane `id="publication"`; the shell mounts both in
+the Review rail, not inside Source (#1067). Presentation-only: no new
+endpoints, no pipeline changes.

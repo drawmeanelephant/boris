@@ -21,6 +21,8 @@ import { authoring } from './authoring.svelte';
 export const graph = $state({
   payload: null as GraphPayload | null,
   status: 'Loading the Boris graph…',
+  // The last refresh request failed; any payload on screen is the previous one.
+  failed: false,
   exportFormat: 'mermaid' as GraphExportFormat,
   document: null as string | null,
   copied: false
@@ -62,6 +64,7 @@ export function bufferWikiLinks(): Array<{ id: string; node: GraphNode | null }>
 
 export function setGraph(payload: GraphPayload) {
   graph.payload = payload;
+  graph.failed = false;
   if (payload.graph_status === 'unsupported') {
     graph.status = 'graph.json is stale or unsupported. Build diagnostics to replace it.';
     return;
@@ -75,7 +78,10 @@ export async function refreshGraph() {
   graph.status = 'Refreshing the Boris graph…';
   const result = await api<GraphPayload>('/api/graph');
   if (result.response.ok) setGraph(result.data);
-  else graph.status = 'The Boris build succeeded, but graph.json could not be adapted.';
+  else {
+    graph.failed = true;
+    graph.status = 'The Boris build succeeded, but graph.json could not be adapted.';
+  }
 }
 
 let copiedExportTimer: ReturnType<typeof setTimeout> | undefined;

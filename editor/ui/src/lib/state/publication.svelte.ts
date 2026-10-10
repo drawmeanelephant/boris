@@ -9,6 +9,8 @@ import type { PublicationPayload, PublicationPlan } from '../types';
 export const publication = $state({
   payload: null as PublicationPayload | null,
   status: 'Loading publication profiles…',
+  // The last refresh request failed; any payload on screen is the previous one.
+  failed: false,
   selectedProfile: '',
   lastPlan: null as PublicationPlan | null,
   lastProofReport: null as string | null
@@ -16,6 +18,7 @@ export const publication = $state({
 
 export function setPublication(payload: PublicationPayload) {
   publication.payload = payload;
+  publication.failed = false;
   if (payload.profiles.length === 0) {
     publication.status = 'No publication profile found at the project root.';
     publication.selectedProfile = '';
@@ -36,5 +39,8 @@ export function setPublication(payload: PublicationPayload) {
 export async function refreshPublication() {
   const result = await api<PublicationPayload>('/api/publication');
   if (result.response.ok) setPublication(result.data);
-  else publication.status = 'Publication profiles could not be loaded.';
+  else {
+    publication.failed = true;
+    publication.status = 'Publication profiles could not be loaded.';
+  }
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fly } from 'svelte/transition';
   import { prefersReducedMotion } from 'svelte/motion';
+  import { motionMs } from '../lib/motion';
   import type { PaletteItem } from '../lib/types';
   import { paletteItemKey, paletteItemLabel, paletteItemDetailWrapper } from '../lib/utils';
   import { palette, paletteItems, paletteEnabled } from '../lib/state/palette.svelte';
@@ -48,7 +49,7 @@
   aria-labelledby="palette-heading"
 >
   <h2 id="palette-heading">Commands</h2>
-  <p>Ctrl+K anywhere opens this palette. Esc or a click outside closes it.</p>
+  <p class="dialog-lede">Ctrl+K anywhere opens this palette. Esc or a click outside closes it.</p>
   <label for="palette-query">Filter commands</label>
   <input
     id="palette-query"
@@ -72,7 +73,7 @@
           aria-disabled={isEnabled(item) ? 'false' : 'true'}
           class:selected={itemIndex === palette.selection}
           class:disabled={!isEnabled(item)}
-          in:fly={{ duration: prefersReducedMotion.current ? 0 : 150, y: prefersReducedMotion.current ? 0 : 4 }}
+          in:fly={{ duration: motionMs('fast'), y: prefersReducedMotion.current ? 0 : 4 }}
           onclick={() => { if (isEnabled(item)) onExecute(item); }}
           onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (isEnabled(item)) onExecute(item); } }}
         >
@@ -81,9 +82,9 @@
       {/each}
     </ul>
   {:else}
-    <p>No commands match “{palette.query}”.</p>
+    <p class="empty-state">No commands match “{palette.query}”.</p>
   {/if}
-  <div class="dialog-actions">
+  <div class="dialog-actions toolbar">
     <button type="button" aria-keyshortcuts="Escape" onclick={onCancel}>Cancel<kbd aria-hidden="true">Esc</kbd></button>
   </div>
 </dialog>

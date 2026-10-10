@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade } from 'svelte/transition';
-  import { prefersReducedMotion } from 'svelte/motion';
+  import { motionMs } from '../lib/motion';
+  import { stateTone } from '../lib/utils';
   import { buffer, dirty, editSource, undo, redo } from '../lib/state/buffer.svelte';
   import {
     focusMode,
@@ -246,22 +247,85 @@
 
   $effect(syncAssist);
 
+  // --- Chrome panels ----------------------------------------------------------
+  // Typography and Writing aids keep their native <details> disclosure, but
+  // the panel overlays the writing surface instead of reflowing the chrome.
+  // The two act as one light-dismiss menu: opening one closes the other, Esc
+  // or a press outside closes the open one, and an open panel slides left
+  // just far enough to stay inside the chrome's content box.
+  let typePanel = $state() as HTMLDetailsElement | undefined;
+  let aidsPanel = $state() as HTMLDetailsElement | undefined;
+  const panels = () => [typePanel, aidsPanel].filter((panel): panel is HTMLDetailsElement => panel !== undefined);
+
+  function showPanel(details: HTMLDetailsElement) {
+    for (const panel of panels()) if (panel !== details) panel.open = false;
+    placePanel(details);
+  }
+
+  // Opening runs synchronously on the summary's activation (click, Enter, or
+  // Space), so a panel never paints unplaced or beside the other one; the
+  // toggle handler covers any other opener, such as find-in-page.
+  function openPanel(event: MouseEvent) {
+    const details = (event.currentTarget as HTMLElement).parentElement as HTMLDetailsElement;
+    if (details.open) return;
+    event.preventDefault();
+    details.open = true;
+    showPanel(details);
+  }
+
+  function handlePanelToggle(event: Event) {
+    const details = event.currentTarget as HTMLDetailsElement;
+    if (details.open) showPanel(details);
+  }
+
+  function placePanel(details: HTMLDetailsElement) {
+    const panel = details.querySelector('.focus-type-grid');
+    const chrome = details.closest('.focus-chrome');
+    if (!panel || !chrome) return;
+    details.style.setProperty('--focus-panel-shift', '0px');
+    const box = chrome.getBoundingClientRect();
+    const style = getComputedStyle(chrome);
+    const min = box.left + parseFloat(style.paddingLeft);
+    const max = box.right - parseFloat(style.paddingRight);
+    const rect = panel.getBoundingClientRect();
+    details.style.setProperty('--focus-panel-shift', `${Math.max(min - rect.left, Math.min(0, max - rect.right))}px`);
+  }
+
+  function handleWindowPointerdown(event: PointerEvent) {
+    const target = event.target instanceof Node ? event.target : null;
+    for (const panel of panels()) if (panel.open && !panel.contains(target)) panel.open = false;
+  }
+
+  function handleWindowResize() {
+    for (const panel of panels()) if (panel.open) placePanel(panel);
+  }
+
   function handleWindowKeydown(event: KeyboardEvent) {
     if (!focusMode.open) return;
     if (document.querySelector('dialog[open]')) return;
     if (event.key === 'Escape') {
       event.preventDefault();
+      // An open panel takes the first Esc and hands focus back to its
+      // summary; only an Esc with no panel open leaves focus mode.
+      const open = panels().find(panel => panel.open);
+      if (open) {
+        open.open = false;
+        open.querySelector('summary')?.focus();
+        return;
+      }
       onExit();
       return;
     }
     // Plain arrows outside any interactive control still move the caret, so
     // a stray click on the overlay never traps keyboard navigation. Arrows on
-    // buttons/radios keep their native behavior (radio groups use them).
+    // buttons/radios, or anywhere in an open panel, keep their native
+    // behavior (radio groups use them).
     const active = document.activeElement;
     const interactive = active instanceof HTMLElement
       && (['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)
         || active.isContentEditable
-        || active.getAttribute('role') === 'option');
+        || active.getAttribute('role') === 'option'
+        || panels().some(panel => panel.open && panel.contains(active)));
     const area = textarea;
     if (
       showEditor() &&
@@ -285,7 +349,7 @@
   }
 </script>
 
-<svelte:window onkeydown={handleWindowKeydown} />
+<svelte:window onkeydown={handleWindowKeydown} onpointerdown={handleWindowPointerdown} onresize={handleWindowResize} />
 
 <div
   class="focus-overlay"
@@ -293,7 +357,7 @@
   role="dialog"
   aria-modal="true"
   aria-label="Focus writing mode"
-  transition:fade={{ duration: prefersReducedMotion.current ? 0 : 150 }}
+  transition:fade={{ duration: motionMs('fast') }}
 >
   <header class="focus-chrome">
     <div class="focus-title">
@@ -306,8 +370,8 @@
       <label><input type="radio" name="focus-layout" value="split" checked={focusMode.layout === 'split'} onchange={() => setFocusLayout('split')} /> Split</label>
       <label><input type="radio" name="focus-layout" value="preview" checked={focusMode.layout === 'preview'} onchange={() => setFocusLayout('preview')} /> Preview</label>
     </fieldset>
-    <details class="focus-type">
-      <summary>Typography</summary>
+    <details class="focus-type" bind:this={typePanel} ontoggle={handlePanelToggle}>
+      <summary class="chrome-button" onclick={openPanel}>Typography</summary>
       <div class="focus-type-grid">
         <fieldset class="focus-type-group">
           <legend>Text size</legend>
@@ -329,8 +393,8 @@
         </fieldset>
       </div>
     </details>
-    <details class="focus-type focus-aids">
-      <summary>Writing aids</summary>
+    <details class="focus-type focus-aids" bind:this={aidsPanel} ontoggle={handlePanelToggle}>
+      <summary class="chrome-button" onclick={openPanel}>Writing aids</summary>
       <div class="focus-type-grid focus-aids-grid">
         <fieldset class="focus-type-group">
           <legend>Typewriter scrolling</legend>
@@ -344,25 +408,28 @@
         </fieldset>
       </div>
     </details>
-    <div class="focus-actions">
-      <button type="button" disabled={buffer.undoStack.length === 0 || buffer.readOnly} onclick={undo}>Undo</button>
-      <button type="button" disabled={buffer.redoStack.length === 0 || buffer.readOnly} onclick={redo}>Redo</button>
-      <button type="button" class="primary" disabled={!dirty() || buffer.readOnly || buffer.saveInFlight} onclick={onSave}>Save file</button>
+    <div class="focus-actions toolbar">
+      <button type="button" class="chrome-button" disabled={buffer.undoStack.length === 0 || buffer.readOnly} onclick={undo}>Undo</button>
+      <button type="button" class="chrome-button" disabled={buffer.redoStack.length === 0 || buffer.readOnly} onclick={redo}>Redo</button>
+      <button type="button" class="chrome-button primary" disabled={!dirty() || buffer.readOnly || buffer.saveInFlight} onclick={onSave}>Save file</button>
       <button
         type="button"
+        class="chrome-button"
         disabled={preview.data?.phase === 'running'}
         onclick={onRebuild}
         title="Rebuild the compiled Boris preview (live in the workspace Preview pane)"
       >Rebuild preview</button>
-      <button type="button" onclick={onExit} aria-keyshortcuts="Escape" title="Exit focus mode (Esc)">Exit focus</button>
+      <button type="button" class="chrome-button" onclick={onExit} aria-keyshortcuts="Escape" title="Exit focus mode (Esc)">Exit focus</button>
     </div>
   </header>
 
   <div class="focus-surface" data-layout={focusMode.layout} data-size={focusType.size} data-measure={focusType.measure} data-face={focusType.face}>
     {#if !hasBuffer}
-      <div class="focus-reading" aria-label="Focus mode empty state" tabindex="-1">
-        <h3>No file is open</h3>
-        <p>Choose a file from Project files (Esc returns to the workspace) and re-enter focus mode to write.</p>
+      <div class="focus-reading focus-empty" aria-label="Focus mode empty state" tabindex="-1">
+        <div class="empty-state">
+          <h3>No file is open</h3>
+          <p>Choose a file from Project files (Esc returns to the workspace) and re-enter focus mode to write.</p>
+        </div>
       </div>
     {:else}
     {#if showEditor()}
@@ -400,8 +467,8 @@
   <footer class="focus-status">
     <span class="focus-words">{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>
     <span class="focus-caret">Line {buffer.cursor.line}, column {buffer.cursor.column}</span>
-    <span class:warning={dirty() || buffer.readOnly}>{buffer.readOnly ? 'Read-only file' : dirty() ? 'Unsaved changes' : 'Saved on disk'}</span>
-    <span class="focus-live">Boris preview build status: {preview.data?.phase ?? 'idle'}</span>
+    <span class="buffer-state badge" data-tone={buffer.readOnly ? 'neutral' : dirty() ? 'warn' : 'ok'}>{buffer.readOnly ? 'Read-only file' : dirty() ? 'Unsaved changes' : 'Saved on disk'}</span>
+    <span class="focus-live">Boris preview build status: <span class="badge" data-tone={stateTone(preview.data?.phase)}>{preview.data?.phase ?? 'idle'}</span></span>
     <p role="status" aria-label="Editing status" aria-live="polite" class="focus-editor-status">{buffer.editorStatus}</p>
   </footer>
 </div>

@@ -18,7 +18,7 @@
 </script>
 
 {#if large}
-  <details class="report-details">
+  <details class="report-details disclosure">
     <summary>Show {summary} ({lines} lines)</summary>
     <pre class="proof-report">{report}</pre>
   </details>

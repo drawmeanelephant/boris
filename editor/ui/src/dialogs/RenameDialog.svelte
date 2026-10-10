@@ -40,9 +40,9 @@
       }}
     />
     {#if dialogs.renameError}
-      <p id="rename-error" class="warning-text" role="alert">{dialogs.renameError}</p>
+      <p id="rename-error" class="notice" data-tone="danger" role="alert">{dialogs.renameError}</p>
     {/if}
-    <div class="dialog-actions">
+    <div class="dialog-actions toolbar">
       <button type="button" aria-keyshortcuts="Escape" onclick={onCancel}>Cancel<kbd aria-hidden="true">Esc</kbd></button>
       <button type="submit" class="primary" disabled={!submitReady} aria-keyshortcuts="Enter">Rename file<kbd aria-hidden="true">Enter</kbd></button>
     </div>

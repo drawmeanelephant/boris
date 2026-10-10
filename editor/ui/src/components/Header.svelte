@@ -1,7 +1,7 @@
 <script lang="ts">
   import { theme, toggleTheme } from '../lib/theme.svelte';
   import { density, setDensity } from '../lib/state/density.svelte';
-  import { connection } from '../lib/state/connection.svelte';
+  import { connection, connectionTone } from '../lib/state/connection.svelte';
 
   // The connection readout is a compact chip (#993): the live region announces
   // the short label, and the honest sentence is one activation away. The
@@ -41,7 +41,8 @@
       >
       <button
         type="button"
-        class="connection-chip"
+        class="connection-chip chrome-button"
+        data-tone={connectionTone()}
         aria-expanded={connectionDetailOpen}
         title={connectionDetailOpen ? 'Hide connection details' : 'Show connection details'}
         onclick={() => (connectionDetailOpen = !connectionDetailOpen)}
@@ -79,7 +80,7 @@
          name *is* the state. -->
     <button
       type="button"
-      class="theme-toggle"
+      class="theme-toggle chrome-button"
       title={`Theme: ${theme.current} — switch to ${theme.current === 'dark' ? 'light' : 'dark'}`}
       onclick={toggleTheme}>{theme.current === 'dark' ? 'Dark' : 'Light'}</button
     >
