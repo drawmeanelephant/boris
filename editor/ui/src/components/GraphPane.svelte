@@ -46,10 +46,10 @@
   }
 </script>
 
-<section id="graph" class="subpane graph-pane" tabindex="-1" aria-labelledby="graph-heading">
+<section id="graph" class="pane graph-pane" tabindex="-1" aria-labelledby="graph-heading">
   <div class="pane-heading">
     <div>
-      <h3 id="graph-heading">Graph</h3>
+      <h2 id="graph-heading">Graph</h2>
       <p>Read-only view of Boris <code>graph.json</code> and <code>completion.json</code>.</p>
     </div>
     <div class="graph-export toolbar" aria-label="Graph export">

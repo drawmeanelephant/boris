@@ -36,7 +36,7 @@ button, input, select, textarea { font: inherit; line-height: var(--leading-tigh
 
 /* Heading roles. Size steps come from lib/tokens.css and are never raw rems,
    so the order holds everywhere: h1 (app) > h2 (pane) > h3 (sub-pane) > body.
-   h4 is deliberately not a fifth size: it is a group label inside a sub-pane
+   h4 is deliberately not a fifth size: it is a group label inside a card
    (Children, Backlinks, Ingredients, Targets), so it reads as a label rather
    than competing with the body copy it introduces. */
 h1, h2, h3, h4, h5, h6 { margin-top: 0; line-height: var(--leading-tight); }
@@ -287,13 +287,13 @@ section {
   border-radius: var(--radius-md);
   background: var(--color-surface-tint);
 }
-/* h4 group labels sit above their list in every sub-pane; only the space
-   above them differs from the global heading defaults. */
-.subpane h4 { margin-top: var(--space-5); }
-.subpane dl { font-size: var(--text-sm); }
-.subpane dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: var(--space-3); padding: var(--space-1) 0; }
-.subpane dt { font-weight: 700; }
-.subpane dd { margin: 0; }
+/* h4 group labels sit above their list in every card; only the space above
+   them differs from the global heading defaults. */
+:is(.pane, .subpane) h4 { margin-top: var(--space-5); }
+:is(.pane, .subpane) dl { font-size: var(--text-sm); }
+:is(.pane, .subpane) dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: var(--space-3); padding: var(--space-1) 0; }
+:is(.pane, .subpane) dt { font-weight: 700; }
+:is(.pane, .subpane) dd { margin: 0; }
 
 /* Row list: a list whose rows navigate or name one fact each. Text-only rows
    take the same inset as button rows so the two line up. */
@@ -342,8 +342,11 @@ section {
 .pane-status.notice { margin: var(--space-3) 0; color: var(--color-text); }
 .pane-status.notice[data-tone='warn'] { color: var(--color-warn); }
 .pane-status.notice[data-tone='danger'] { color: var(--color-danger-strong); }
-/* A field and the action it feeds share one row. */
-.field-row { display: grid; grid-template-columns: minmax(12rem, 1fr) auto; gap: var(--space-2); max-width: 38rem; }
+/* A field and the action it feeds share one row; in a card too narrow for
+   both, the action wraps below the field instead of overflowing the card. */
+.field-row { display: flex; flex-wrap: wrap; gap: var(--space-2); max-width: 38rem; }
+.field-row > :first-child { flex: 1 1 12rem; min-width: 0; }
+.field-row > button { flex: 0 0 auto; }
 
 /* --- chrome ---------------------------------------------------------------- */
 
@@ -540,10 +543,12 @@ footer .key-hint { margin: 0 0 var(--space-1); }
 /* Source is the hero (#989): the writing column outweighs the file and rail
    columns at every breakpoint, and Author mode (#990) drops the rail entirely
    so the same column carries the page. */
-main { display: grid; grid-template-columns: minmax(15rem, 0.55fr) minmax(26rem, 2.1fr); gap: var(--space-4); padding: var(--space-5) var(--content-pad) var(--space-6); }
+main { display: grid; grid-template-columns: minmax(17.5rem, 0.55fr) minmax(26rem, 2.1fr); gap: var(--space-4); padding: var(--space-5) var(--content-pad) var(--space-6); }
 main.author-mode { grid-template-columns: minmax(15rem, 0.5fr) minmax(26rem, 2.2fr); }
 .project-pane, .source-pane, .problems-pane { min-height: 32rem; }
-.workspace-rail { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-4); }
+/* min-width: 0 like every pane: below 80rem the rail is not a scroll
+   container, so without it a wide graph map would stretch the grid track. */
+.workspace-rail { grid-column: 1 / -1; display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 /* #993: Author mode demotes Project from a peer card to a file drawer. Source
    is a page the author sits down at; the tree is a side tool, so it stops
    matching the page's height (align-self defeats the grid stretch), drops the
@@ -672,10 +677,10 @@ label[for='source-editor'] { color: var(--color-text-muted); }
    deliberately not a padding inset on a full-width pane — insetting the text
    while the box stays wide just re-draws the admin textarea with dead side
    margins, and it rents the line-number gutter away from the lines it
-   numbers. Capping the pane keeps heading, editor, gutter, status line, and
-   the nested Graph/Publication sub-panes on one shared column. Below the cap
-   the pane simply fills its column, so narrow layouts are unchanged, and the
-   cap is Author-only: Review keeps the wide working surface beside its rail. */
+   numbers. Capping the pane keeps heading, editor, gutter, and status line on
+   one shared column. Below the cap the pane simply fills its column, so
+   narrow layouts are unchanged, and the cap is Author-only: Review keeps the
+   wide working surface beside its rail. */
 main.author-mode #source {
   /* width:100% is load-bearing: a grid item with any justify-self other than
      `stretch` sizes to its content, so without it the pane would shrink to
@@ -1230,7 +1235,7 @@ dialog.command-palette .dialog-actions { margin-top: var(--space-3); }
   /* .pane-heading already wraps, so the text block takes the full width and
      the actions stack under it without any extra breakpoint rules. */
   .pane-heading > div:first-child { flex-basis: 100%; }
-  .field-row { grid-template-columns: 1fr; }
+  .field-row > :first-child, .field-row > button { flex-basis: 100%; }
   .completion-controls { grid-template-columns: 1fr; }
   .focus-surface[data-layout='split'] { flex-direction: column; }
   .focus-editor, .focus-reading { padding: var(--space-4); }
@@ -1240,27 +1245,32 @@ dialog.command-palette .dialog-actions { margin-top: var(--space-3); }
 @media (min-width: 80rem) {
   /* Three columns, sized by what has to fit rather than by equal thirds: the
      Project column needs enough width for a full content path to sit on one
-     line (a broken path is the one place where wrapping costs meaning), the
-     Source column is the working surface and takes the weight (#989), and the
-     rail carries prose. Author mode (#990) drops the rail: two columns, with
-     the writing surface taking the freed width. */
-  main { grid-template-columns: minmax(15rem, 0.5fr) minmax(28rem, 1.8fr) minmax(22rem, 1.15fr); }
+     line (a broken path is the one place where wrapping costs meaning) and
+     for its compact file actions to pair up instead of stacking one per line
+     (#1067), the Source column is the working surface and takes the weight
+     (#989), and the rail carries prose. Author mode (#990) drops the rail:
+     two columns, with the writing surface taking the freed width. */
+  main { grid-template-columns: minmax(17.5rem, 0.5fr) minmax(28rem, 1.8fr) minmax(22rem, 1.15fr); }
   main.author-mode { grid-template-columns: minmax(15rem, 0.5fr) minmax(28rem, 2.2fr); }
   .workspace-rail { grid-column: auto; max-height: calc(100vh - 14rem); overflow-y: auto; }
   /* Keep rail panes from shrinking below their content: a shrunken box spills
      its controls under the later-painted sibling pane, which covers clicks on
      the boundary buttons (#658; re-hit by the Watch pane over the preview
      viewport radios). The rail itself still scrolls. */
-  .problems-pane, #preview, .watch-pane { min-height: 0; flex-shrink: 0; }
+  .workspace-rail > .pane { min-height: 0; flex-shrink: 0; }
   #preview iframe { min-height: max(20rem, calc(100vh - 30rem)); }
 }
 
 /* The one reduced-motion gate: every transition and animation collapses, the
-   arrival highlight and busy rings stay as static cues, and scrolling jumps. */
+   arrival highlight and busy rings stay as static cues, and scrolling jumps.
+   Transitions take 0s rather than a token 0.01ms: transition-property
+   defaults to `all`, so any non-zero duration makes every layout change
+   trail by a few frames, and a section-nav jump measured in that window
+   parks its target on the previous layout (#1067). */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0s !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }

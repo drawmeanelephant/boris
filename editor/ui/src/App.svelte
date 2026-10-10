@@ -59,6 +59,8 @@
   import ProjectPane from './components/ProjectPane.svelte';
   import SourcePane from './components/SourcePane.svelte';
   import ProblemsPane from './components/ProblemsPane.svelte';
+  import GraphPane from './components/GraphPane.svelte';
+  import PublicationPane from './components/PublicationPane.svelte';
   import PreviewPane from './components/PreviewPane.svelte';
   import WatchPane from './components/WatchPane.svelte';
   import ConflictDialog from './dialogs/ConflictDialog.svelte';
@@ -954,12 +956,8 @@
     onNavigate={navigateToProblem}
     onOpenFile={openFile}
     onOpenGraphNode={openGraphNode}
-    onImpact={runImpactOnCurrent}
     onScale={() => runCommand('recipe_scale')}
     onReset={resetScale}
-    onRunPlan={() => runCommand('plan')}
-    onVerifyProof={() => runCommand('proof_verify')}
-    onExportGraph={() => runCommand('graph_export')}
     onEnterFocus={enterFocusMode}
   />
 
@@ -971,6 +969,13 @@
       />
       <PreviewPane onRebuild={() => rebuildPreview('manual')} />
       <WatchPane />
+      <GraphPane
+        onOpenPath={openFile}
+        onOpenNode={openGraphNode}
+        onImpact={runImpactOnCurrent}
+        onExport={() => runCommand('graph_export')}
+      />
+      <PublicationPane onRunPlan={() => runCommand('plan')} onVerifyProof={() => runCommand('proof_verify')} />
     </div>
   {/if}
 </main>

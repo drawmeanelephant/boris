@@ -12,6 +12,8 @@ type InstallOptions = {
   /** Launch `open=` param: a cold-launch URL opens this file at connect. */
   open?: string;
   files?: Array<{ path: string }>;
+  /** Stored density at load; Review unless a test exercises the cold open. */
+  density?: 'author' | 'review';
 };
 
 async function installApi(page: Page, options: InstallOptions = {}) {
@@ -113,7 +115,7 @@ async function installApi(page: Page, options: InstallOptions = {}) {
   // Nav currency and layout here assume every pane is mounted, i.e. Review
   // density (#990); the Author/Review switch itself is covered by
   // density-modes.spec.ts.
-  await page.addInitScript(() => localStorage.setItem('boris-editor-density', 'review'));
+  await page.addInitScript(mode => localStorage.setItem('boris-editor-density', mode), options.density ?? 'review');
   await page.goto(`/#${launchParams.toString()}`);
 }
 
@@ -195,11 +197,11 @@ test('scrollspy keeps aria-current on the section at the reading top', async ({ 
   await expect(navLink(page, 'Project')).not.toHaveAttribute('aria-current');
 
   // Jumping to the last section stays current even where the page clamps:
-  // a short document can never park Watch under the nav, so the spy's
-  // bottom rule must hand currency over regardless of geometry. The smooth
-  // scroll animates through intermediate sections, so this must poll.
-  await navLink(page, 'Watch').click();
-  await expect(navLink(page, 'Watch')).toHaveAttribute('aria-current', 'true');
+  // a short document can never park Publication under the nav, so the spy
+  // must keep currency on it regardless of geometry. The smooth scroll
+  // animates through intermediate sections, so this must poll.
+  await navLink(page, 'Publication').click();
+  await expect(navLink(page, 'Publication')).toHaveAttribute('aria-current', 'true');
 
   // Back to the top hands currency back to the leading section. Both scroll
   // containers must reset: at wide viewports the workspace rail scrolls
@@ -230,7 +232,67 @@ test('scrolling inside the workspace rail moves aria-current with no window scro
     const rail = document.querySelector('.workspace-rail');
     rail?.scrollTo(0, rail.scrollHeight);
   });
-  await expect(nav.locator('a[aria-current="true"]')).toHaveAttribute('href', /#(preview|watch)/);
+  await expect(nav.locator('a[aria-current="true"]')).toHaveAttribute('href', /#(graph|publication)/);
+  await page.evaluate(() => document.querySelector('.workspace-rail')?.scrollTo(0, 0));
+  await expect(navLink(page, 'Project')).toHaveAttribute('aria-current', 'true');
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});
+
+// Graph and Publication are project-level surfaces (#1067): in Review they
+// are top-level panes in the workspace rail, after Problems, Preview, and
+// Watch, and the nav lists every destination in the order it appears on
+// screen. No file is open, so Graph stays a real destination (#970).
+for (const width of [1440, 1200]) {
+  test(`Review mounts Graph and Publication as rail panes in nav order at ${width}px (#1067)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await installApi(page, { files: [{ path: 'boris.json' }] });
+    const rail = page.locator('.workspace-rail');
+    await expect(rail.locator(':scope > section')).toHaveCount(5);
+    expect(await rail.locator(':scope > section').evaluateAll(sections => sections.map(s => s.id)))
+      .toEqual(['problems', 'preview', 'watch', 'graph', 'publication']);
+    await expect(page.locator('#source #graph, #source #publication')).toHaveCount(0);
+
+    const nav = page.getByRole('navigation', { name: 'Editor sections' });
+    expect(await nav.getByRole('link').evaluateAll(links => links.map(a => a.getAttribute('href'))))
+      .toEqual(['#project', '#source', '#problems', '#preview', '#watch', '#graph', '#publication']);
+    // Visual order is nav order down the rail, measured in the rail's own
+    // content coordinates so its internal scroll cannot reorder anything.
+    const tops = await rail.evaluate(el => Array.from(el.children).map(child =>
+      child.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop));
+    expect(tops).toEqual([...tops].sort((a, b) => a - b));
+    expect(new Set(tops).size).toBe(tops.length);
+
+    // Peers of Problems/Preview/Watch: pane titles, programmatic focus
+    // targets, and the same named status regions as before.
+    for (const [id, name] of [['graph', 'Graph'], ['publication', 'Publication']] as const) {
+      const pane = page.locator(`#${id}`);
+      await expect(pane).toHaveClass(/\bpane\b/);
+      await expect(pane).toHaveAttribute('tabindex', '-1');
+      await expect(pane.getByRole('heading', { name, exact: true, level: 2 })).toBeVisible();
+      await expect(pane.getByRole('status', { name: `${name} status`, exact: true })).toHaveCount(1);
+    }
+  });
+}
+
+// The rail only exists in Review (#990). A cold open is Author, so the
+// rail's scroll listener must be bound when a later switch mounts it, or
+// rail scrolling never moves aria-current — the common path, and now the
+// path to Graph and Publication too (#1067).
+test('rail scrolling moves aria-current after a cold Author open switches to Review', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 720 });
+  await installApi(page, { density: 'author' });
+  await page.getByRole('group', { name: 'Editor density' }).getByRole('button', { name: 'Review', exact: true }).click();
+  await expect(page.locator('#problems')).toBeVisible();
+  await expect(navLink(page, 'Project')).toHaveAttribute('aria-current', 'true');
+
+  // Park Graph on the reading line with the rail's own scroll alone.
+  await page.evaluate(() => {
+    const rail = document.querySelector('.workspace-rail') as HTMLElement;
+    const graph = document.getElementById('graph') as HTMLElement;
+    const line = parseFloat(getComputedStyle(graph).scrollMarginTop) || 0;
+    rail.scrollTop += graph.getBoundingClientRect().top - line;
+  });
+  await expect(navLink(page, 'Graph')).toHaveAttribute('aria-current', 'true');
   await page.evaluate(() => document.querySelector('.workspace-rail')?.scrollTo(0, 0));
   await expect(navLink(page, 'Project')).toHaveAttribute('aria-current', 'true');
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
@@ -250,15 +312,16 @@ test('nav stays reachable while scrolled and keyboard activation works', async (
 test('arrival highlight collapses to a static cue under reduced motion', async ({ page }) => {
   await installApi(page, { files: [{ path: 'boris.json' }] });
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  const watch = page.locator('#watch');
-  await navLink(page, 'Watch').click();
+  const publication = page.locator('#publication');
+  await navLink(page, 'Publication').click();
   // The class (the attention cue) still applies...
-  await expect(watch).toHaveClass(/arrived/, { timeout: 2_000 });
-  // The jump is instant, not smooth. #watch is last in the diagnostics rail,
-  // but the Source column can be taller, so the window is not always at max
-  // scroll. The rest state is: Watch is on screen below the sticky nav.
+  await expect(publication).toHaveClass(/arrived/, { timeout: 2_000 });
+  // The jump is instant, not smooth. #publication is last in the diagnostics
+  // rail, but the Source column can be taller, so the window is not always at
+  // max scroll. The rest state is: Publication is on screen below the sticky
+  // nav.
   const landed = await page.evaluate(() => {
-    const el = document.getElementById('watch');
+    const el = document.getElementById('publication');
     if (!el) return false;
     const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
     const atMax = Math.abs(window.scrollY - maxScroll) < 2;
@@ -270,7 +333,7 @@ test('arrival highlight collapses to a static cue under reduced motion', async (
     return atMax || parked || onScreenBelowNav;
   });
   expect(landed).toBe(true);
-  await expect(watch).not.toHaveClass(/arrived/, { timeout: 3_000 });
+  await expect(publication).not.toHaveClass(/arrived/, { timeout: 3_000 });
 });
 
 test('mobile pill row scrolls and the active pill stays reachable', async ({ page }) => {
@@ -282,14 +345,14 @@ test('mobile pill row scrolls and the active pill stays reachable', async ({ pag
   // The narrow viewport must actually need scrolling for this assertion to
   // mean anything.
   expect(await row.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
-  await navLink(page, 'Watch').click();
-  await expect(page.locator('#watch')).toHaveClass(/arrived/, { timeout: 2_000 });
+  await navLink(page, 'Publication').click();
+  await expect(page.locator('#publication')).toHaveClass(/arrived/, { timeout: 2_000 });
   // The active pill was auto-scrolled into the visible strip. Polled: the
   // arrival class lands instantly, but the smooth jump is still animating
   // and currency (hence the row's scroll position) settles only at the
   // end of the scroll — poll for the end state, not a mid-flight frame.
   await expect.poll(async () => row.evaluate(el => {
-    const link = el.querySelector('a[href="#watch"]');
+    const link = el.querySelector('a[href="#publication"]');
     if (!link) return false;
     const a = link.getBoundingClientRect();
     const r = el.getBoundingClientRect();
@@ -406,14 +469,18 @@ test('a jump keeps currency on the target after the resync window', async ({ pag
 
 // The panes occupy different columns per breakpoint: one track at mobile,
 // two plus a full-width rail below the desktop breakpoint, and three at
-// >=80rem (Project / Source, with Graph and Publication nested inside Source,
-// / rail). Nav order is therefore NOT visual order at desktop widths — a
-// section later in nav order can sit higher on screen, or land at the same
-// reading offset in another column. Currency must still follow the pane the
-// author jumped to, in every layout; this pins that contract so a future
-// pane that breaks the order-versus-layout relationship fails here loudly
-// instead of silently mislabelling the active pane.
+// >=80rem (Project / Source / a rail holding Problems, Preview, Watch,
+// Graph, and Publication). Nav order follows reading order, but at desktop
+// widths the columns break it — a section later in nav order can sit higher
+// on screen, or land at the same reading offset in another column. Currency
+// must still follow the pane the author jumped to, in every layout; this
+// pins that contract so a future pane that breaks the order-versus-layout
+// relationship fails here loudly instead of silently mislabelling the active
+// pane.
 const NAV_LAYOUTS = [
+  // Wide and tall enough that Review's page barely scrolls: nearly every
+  // jump clamps short of the reading line.
+  { name: 'wide desktop three-column', viewport: { width: 1920, height: 1080 }, columns: 3 },
   { name: 'desktop three-column', viewport: { width: 1440, height: 720 }, columns: 3 },
   { name: 'narrow two-column', viewport: { width: 900, height: 800 }, columns: 2 },
   { name: 'mobile single-column', viewport: { width: 480, height: 800 }, columns: 1 }
@@ -422,11 +489,11 @@ const NAV_LAYOUTS = [
 const NAV_TARGETS = [
   { id: 'project', label: 'Project' },
   { id: 'source', label: 'Source' },
-  { id: 'graph', label: 'Graph' },
-  { id: 'publication', label: 'Publication' },
   { id: 'problems', label: 'Problems' },
   { id: 'preview', label: 'Preview' },
-  { id: 'watch', label: 'Watch' }
+  { id: 'watch', label: 'Watch' },
+  { id: 'graph', label: 'Graph' },
+  { id: 'publication', label: 'Publication' }
 ];
 
 for (const layout of NAV_LAYOUTS) {
@@ -454,9 +521,6 @@ for (const layout of NAV_LAYOUTS) {
       await navLink(page, target.label).click();
       await waitForJumpToSettle(page);
       const state = await page.evaluate((id) => {
-        const ids = Array.from(document.querySelectorAll('.section-nav a'))
-          .map(a => (a.getAttribute('href') ?? '').slice(1));
-        const present = ids.filter(pid => document.getElementById(pid));
         const el = document.getElementById(id);
         const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
         return {
@@ -465,19 +529,20 @@ for (const layout of NAV_LAYOUTS) {
           tops: Array.from(document.querySelectorAll('main section')).map(s => `${s.id}:${Math.round(s.getBoundingClientRect().top)}`).join(' '),
           targetTop: el ? Math.round(el.getBoundingClientRect().top) : null,
           targetMargin: el ? parseFloat(getComputedStyle(el).scrollMarginTop) || 0 : null,
-          lastPresent: present.length ? present[present.length - 1] : null,
           scrollY: Math.round(window.scrollY),
           maxScroll: Math.round(maxScroll)
         };
       }, target.id);
 
-      // A jump the document cannot satisfy — the target is already as far as
-      // the page can scroll — leaves it off the reading line. The contract
-      // there is the spy's bottom rule (the last present pane), which the
-      // component documents, not the target.
+      // A jump the document cannot satisfy — the window runs out of scroll
+      // before the target reaches the reading line — leaves the target
+      // resting on screen below the line. It is still the pane the author
+      // asked for and is looking at, so it keeps currency there too (#1067);
+      // the bottom rule (the last present pane) used to claim it, which
+      // pointed at a rail pane that could be clipped out of sight.
       const parked = state.targetTop !== null && state.targetMargin !== null
         && Math.abs(state.targetTop - state.targetMargin) <= 4;
-      const expected = parked ? target.id : state.lastPresent;
+      const expected = target.id;
       // Soft, so one run reports every pane that diverges rather than
       // stopping at the first — a layout regression usually moves several.
       expect.soft(

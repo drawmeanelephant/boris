@@ -50,9 +50,9 @@
       <p>{connection.compiler}</p>
     </div>
     <div class="file-actions toolbar" aria-label="File actions">
-      <button type="button" disabled={dirty()} onclick={onCreate}>Create file</button>
-      <button type="button" disabled={!buffer.activePath || dirty()} onclick={onRename}>Rename file</button>
-      <button type="button" class="danger" disabled={!buffer.activePath || dirty()} onclick={onDelete}>Delete file</button>
+      <button type="button" class="compact" disabled={dirty()} onclick={onCreate}>Create file</button>
+      <button type="button" class="compact" disabled={!buffer.activePath || dirty()} onclick={onRename}>Rename file</button>
+      <button type="button" class="compact danger" disabled={!buffer.activePath || dirty()} onclick={onDelete}>Delete file</button>
     </div>
   </div>
   {#if project.files.length > 0}

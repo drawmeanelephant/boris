@@ -25,10 +25,10 @@
   );
 </script>
 
-<section id="publication" class="subpane publication-pane" tabindex="-1" aria-labelledby="publication-heading">
+<section id="publication" class="pane publication-pane" tabindex="-1" aria-labelledby="publication-heading">
   <div class="pane-heading">
     <div>
-      <h3 id="publication-heading">Publication</h3>
+      <h2 id="publication-heading">Publication</h2>
       <p>The editor runs <code>boris plan --profile</code> and shows the normalized declaration. It does not deploy or store secrets.</p>
     </div>
     <button

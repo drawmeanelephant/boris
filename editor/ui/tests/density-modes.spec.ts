@@ -249,11 +249,13 @@ test('a nav link to a pane in the other mode switches modes and lands there', as
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Switched to Review mode');
 });
 
-test('a reduced-motion reveal keeps aria-current on the landed target at max scroll', async ({ page }) => {
-  // QA repro: a mode-gated reveal grows the page (Review mounts the Graph
-  // pane), the jump clamps at max scroll, and the reading line falls inside
-  // the Graph pane. The landed target must keep its active marker instead of
-  // the spy's bottom rule handing it to the last present pane.
+test('a reduced-motion reveal keeps aria-current on the landed target', async ({ page }) => {
+  // QA repro: a mode-gated reveal mounts the Review panes (Graph now in the
+  // rail, #1067) and grows the header and nav bands. The jump must park the
+  // target on that settled layout — under reduced motion a token transition
+  // once let it measure the Author layout, and the target drifted off the
+  // reading line — and the landed target keeps its active marker instead of
+  // the spy handing it to the last present pane or the leading one.
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installApi(page);
@@ -268,8 +270,7 @@ test('a reduced-motion reveal keeps aria-current on the landed target at max scr
   // wayfinding and no other link claims it.
   await page.waitForTimeout(800);
   await expect(graph).toHaveAttribute('aria-current', 'true');
-  await expect(page.getByRole('navigation', { name: 'Editor sections' }).getByRole('link', { name: 'Watch', exact: true }))
-    .not.toHaveAttribute('aria-current');
+  await expect(page.getByRole('navigation', { name: 'Editor sections' }).locator('a[aria-current="true"]')).toHaveCount(1);
 });
 
 // #993 residual polish: after the #989–#991 slices Author still read as an

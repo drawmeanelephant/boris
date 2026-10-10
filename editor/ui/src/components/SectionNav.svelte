@@ -44,20 +44,22 @@
 
   let { unavailable = {}, modeGated = {}, mode = 'review', onBlockedNav, onReveal }: Props = $props();
 
+  // Link order is visual order (#1067): Project, Source, then the workspace
+  // rail top to bottom.
   const links: SectionLink[] = [
     { id: 'project', label: 'Project' },
     { id: 'source', label: 'Source' },
-    { id: 'graph', label: 'Graph' },
-    { id: 'publication', label: 'Publication' },
     { id: 'problems', label: 'Problems' },
     { id: 'preview', label: 'Preview' },
-    { id: 'watch', label: 'Watch' }
+    { id: 'watch', label: 'Watch' },
+    { id: 'graph', label: 'Graph' },
+    { id: 'publication', label: 'Publication' }
   ];
 
   // The review-side destinations, in link order (#993). Author mode keeps
   // them reachable but stops the strip from advertising the whole product:
   // the boundary gets a caption and the group recedes to faint ink.
-  const REVIEW_IDS = new Set(['graph', 'publication', 'problems', 'preview', 'watch']);
+  const REVIEW_IDS = new Set(['problems', 'preview', 'watch', 'graph', 'publication']);
   const reviewBoundary = links.find(({ id }) => REVIEW_IDS.has(id))?.id ?? null;
 
   const ARRIVAL_MS = 1600;
@@ -100,6 +102,39 @@
     const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
     const rect = section.getBoundingClientRect();
     return rect.top <= margin + LINE_TOLERANCE_PX && rect.bottom > margin;
+  }
+
+  // The visible band a section can be seen in: the viewport, narrowed to the
+  // workspace rail's box while the rail scrolls on its own (≥80rem), because
+  // a rail pane scrolled past the rail's edge is clipped, not on screen.
+  function visibleBand(section: HTMLElement): { top: number; bottom: number } {
+    const rail = section.closest('.workspace-rail');
+    if (!rail || rail.scrollHeight <= rail.clientHeight) return { top: 0, bottom: window.innerHeight };
+    const box = rail.getBoundingClientRect();
+    return { top: Math.max(0, box.top), bottom: Math.min(window.innerHeight, box.bottom) };
+  }
+
+  function sectionOnScreen(section: HTMLElement): boolean {
+    const rect = section.getBoundingClientRect();
+    const band = visibleBand(section);
+    return rect.top < band.bottom && rect.bottom > band.top;
+  }
+
+  function windowClamped(): boolean {
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    return maxScroll <= 0 || window.scrollY >= maxScroll - 1;
+  }
+
+  // Where a jump leaves its target: on the reading line, or — when the
+  // window runs out of scroll before the target reaches the line (a short
+  // page) — resting on screen below it. Either way the author is looking at
+  // the pane they asked for.
+  function jumpTargetHolds(section: HTMLElement | null): boolean {
+    if (sectionCoversReadingLine(section)) return true;
+    if (!sectionVisible(section) || !windowClamped()) return false;
+    const margin = parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
+    const top = section.getBoundingClientRect().top;
+    return top > margin && top < visibleBand(section).bottom;
   }
 
   function clearArrival() {
@@ -207,22 +242,30 @@
     // reading line. A mode-gated reveal can leave the page clamped at max
     // scroll, where the bottom rule and the nearest-above heuristic would
     // hand currency to another pane even though the author's target is the
-    // visible destination (#992 review). Scrolling the target off the line
-    // releases it, so a stale jump never pins wayfinding.
-    if (jumpTarget && sectionCoversReadingLine(sectionFor(jumpTarget))) {
+    // visible destination (#992 review). The same holds for a target the
+    // clamped window could not lift to the line at all: Review's page is
+    // short once Graph and Publication sit in the rail (#1067), so at wide
+    // viewports most jumps end that way. Scrolling the target off the line
+    // (or off screen) releases it, so a stale jump never pins wayfinding.
+    if (jumpTarget && jumpTargetHolds(sectionFor(jumpTarget))) {
       current = jumpTarget;
       return;
     }
     // Bottom rule (standard scrollspy behavior): at max scroll the last
     // present section is current, because a short page or the footer clamp
-    // can keep it from ever reaching the reading line.
+    // can keep it from ever reaching the reading line. Only while that
+    // section is on screen: inside the scrolling rail the last pane can be
+    // clipped out of sight, and naming it would point at nothing.
     const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
     if (maxScroll > 0 && window.scrollY >= maxScroll - 1) {
       for (let i = links.length - 1; i >= 0; i--) {
-        if (sectionVisible(sectionFor(links[i].id))) {
+        const section = sectionFor(links[i].id);
+        if (!sectionVisible(section)) continue;
+        if (sectionOnScreen(section)) {
           current = links[i].id;
           return;
         }
+        break;
       }
     }
     // Reading line: among the sections whose top edge has reached it, the
@@ -230,12 +273,12 @@
     // qualifies, and there the journey starts at the first link so
     // wayfinding never reads as "nowhere".
     // Pick the qualifying section *nearest* the line, not the last one in
-    // `links` order. `links` is a logical order, but the panes sit in three
-    // columns — Project and Source, with Graph and Publication nested inside
-    // Source, and Problems/Preview/Watch in the rail. A column can therefore
-    // hold a section that is later in `links` yet higher on screen, and
-    // ordering by `links` handed currency to a section parked off the top of
-    // another column after a jump (a jump to Graph settled on Preview).
+    // `links` order. `links` follows the visual order, but the panes sit in
+    // three columns — Project, Source, and the rail (Problems, Preview,
+    // Watch, Graph, Publication). A column can therefore hold a section that
+    // is later in `links` yet higher on screen, and ordering by `links`
+    // handed currency to a section parked off the top of another column
+    // after a jump (a jump to Graph settled on Preview).
     // Nearest-to-the-line is order-independent: it agrees with the ordered
     // rule whenever order matches the layout, and is correct when it does not.
     let best: string | null = null;
@@ -274,24 +317,37 @@
     const onScroll = () => syncCurrent();
     const onRowScroll = () => updateEdges();
     const onResize = () => { setHeight(); onScroll(); };
-    // The workspace rail is a second scroll container at ≥80rem (overflow-y:
-    // auto): its inner scrolling moves Problems/Preview/Watch in viewport
-    // coordinates without any window scroll, so the spy must listen there
-    // too or aria-current goes stale. Queried live — the rail is App-owned
-    // chrome, not a component prop; at narrower widths it never scrolls, so
-    // the listener is simply quiet.
-    const rail = document.querySelector('.workspace-rail');
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onResize, { passive: true });
     rowEl.addEventListener('scroll', onRowScroll, { passive: true });
-    rail?.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
       rowEl.removeEventListener('scroll', onRowScroll);
-      rail?.removeEventListener('scroll', onScroll);
       document.documentElement.style.removeProperty('--section-nav-h');
     };
+  });
+
+  // The workspace rail is a second scroll container at ≥80rem (overflow-y:
+  // auto): its inner scrolling moves the rail panes in viewport
+  // coordinates without any window scroll, so the spy must listen there
+  // too or aria-current goes stale. Queried live — the rail is App-owned
+  // chrome, not a component prop; at narrower widths it never scrolls, so
+  // the listener is simply quiet. The rail only exists in Review (#990), so
+  // the listener is rebound per mode: a cold Author open has no rail to
+  // bind, and the one a later switch to Review mounts must still be heard.
+  $effect(() => {
+    void mode;
+    const rail = document.querySelector('.workspace-rail');
+    if (!rail) return;
+    // A jump never scrolls the rail for a target outside it, so a rail
+    // scroll is the author reading the rail: release such a target.
+    const onScroll = () => {
+      if (jumpTarget && !rail.contains(sectionFor(jumpTarget))) jumpTarget = null;
+      syncCurrent();
+    };
+    rail.addEventListener('scroll', onScroll, { passive: true });
+    return () => rail.removeEventListener('scroll', onScroll);
   });
 
   // Keep the active pill reachable on narrow viewports: when the current
