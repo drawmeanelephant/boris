@@ -7,8 +7,10 @@ port or an official adapter.
 - Layouts: `home`, `section`, `blog`, `archive`, `main`
 - Assets: `assets/css/press.css`, `assets/img/press-mark.svg`
 - Fonts: system Palatino/Georgia + UI sans + UI mono. No shipped webfont.
-- Sample site: [`examples/press-site/`](../../examples/press-site/)
+- Sample site: [`examples/press-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/press-site/)
 - Provenance: [`MIGRATION.md`](MIGRATION.md), [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

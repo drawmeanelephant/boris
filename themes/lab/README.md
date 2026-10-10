@@ -20,7 +20,7 @@ Dark-first lab-terminal documentation theme with three persisted color modes
   print pass are included. Details: [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 Select it with `--theme themes/lab`. A specimen site lives under
-[`examples/lab-site/`](../../examples/lab-site/).
+[`examples/lab-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/lab-site/).
 
 ## Intentionally absent slots
 

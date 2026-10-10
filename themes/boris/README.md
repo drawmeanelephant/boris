@@ -9,9 +9,9 @@ That oddness is the point — do not sand it into another calm docs skin.
 - Search: first-party inline consumer; nav remains the no-JS path
 - Slots: title, head, nav, breadcrumb, toc, metadata, content, children, relations, backlinks, footer, asset-url
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
-- Specimens: the repository's own [`content/`](../../content/) docs site
+- Specimens: the repository's own [`content/`](https://github.com/drawmeanelephant/boris/tree/main/content/) docs site
   (the command below, run from the repository root), and the shared
-  [`examples/studies-site/`](../../examples/studies-site/) corpus
+  [`examples/studies-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/studies-site/) corpus
 
 ```bash
 ./zig-out/bin/boris --theme themes/boris --html-dir dist --quiet
@@ -21,7 +21,7 @@ That oddness is the point — do not sand it into another calm docs skin.
 
 Single shape by design. `layouts/main.html` is the product default, the
 last fallback in layout selection
-([contract §4.2](../../docs/contracts/templating-and-themes.md#42-precedence)),
+([contract §4.2](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/templating-and-themes.md#42-precedence)),
 so it has to serve every page of any graph, from a one-page tree to this
 repository's docs. The sticky rail, search, and outline already work at
 every depth. Docs sites that want `home` / `section` shapes have

@@ -4,8 +4,10 @@ Soft cards and quiet docs. Hand-authored. Not DaisyUI.
 
 - Layouts: `main.html`, `home.html`
 - Assets: `assets/css/cards.css` (system stack)
-- Sample site: [`examples/cards-site/`](../../examples/cards-site/)
+- Sample site: [`examples/cards-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/cards-site/)
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

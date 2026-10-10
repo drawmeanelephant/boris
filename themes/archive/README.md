@@ -5,7 +5,9 @@ use the fallback layout. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `archive.html` (`id:archive`), `main.html`
 - Assets: `assets/archive.css`. System Palatino/Georgia serif.
-- Sample site: [`examples/archive-site/`](../../examples/archive-site/)
+- Sample site: [`examples/archive-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/archive-site/)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

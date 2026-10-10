@@ -5,8 +5,10 @@ sheet is original and is not Pure.css.
 
 - Layouts: `home.html` (`id:index`), `section.html` (`role:trunk`), `main.html`
 - Assets: `assets/field-notes.css` (system stack)
-- Sample site: [`examples/field-notes-site/`](../../examples/field-notes-site/)
+- Sample site: [`examples/field-notes-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/field-notes-site/)
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

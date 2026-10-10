@@ -5,7 +5,9 @@ Phosphor terminal diary. Native disclosure only. No JavaScript. See
 
 - Layouts: `main.html` (one dated entry), `archive.html` (the log index)
 - Assets: `assets/journal.css` (Courier New system stack)
-- Sample site: [`examples/journal-site/`](../../examples/journal-site/)
+- Sample site: [`examples/journal-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/journal-site/)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

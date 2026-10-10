@@ -6,7 +6,9 @@ one flat panel; tables, children, and relations are ruled lists.
 Navigation is the no-JavaScript path. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `main.html`
-- Specimen: [`examples/studies-site/`](../../examples/studies-site/)
+- Specimen: [`examples/studies-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/studies-site/)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

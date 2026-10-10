@@ -10,8 +10,10 @@ Boris-owned design with no upstream theme.
 - Fonts: system serif for prose, system UI sans for labels, UI mono for
   code. No shipped webfont.
 - Footer: `footer.html` (one static line)
-- Sample site: [`examples/gallery-site/`](../../examples/gallery-site/)
+- Sample site: [`examples/gallery-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/gallery-site/)
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

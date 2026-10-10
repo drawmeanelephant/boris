@@ -4,8 +4,10 @@ Mid-2000s personal blog. Graph nav is real. There is no fake blogroll.
 
 - Layouts: `main.html`
 - Assets: `assets/cozy.css` (Georgia / Verdana system stack)
-- Sample site: [`examples/cozy-site/`](../../examples/cozy-site/)
+- Sample site: [`examples/cozy-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/cozy-site/)
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

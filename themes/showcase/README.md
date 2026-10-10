@@ -6,7 +6,9 @@ labeled as such. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `home`, `section`, `blog`, `main`
 - Assets: local CSS and mark SVG. System UI stack.
-- Sample site: [`examples/showcase-site/`](../../examples/showcase-site/)
+- Sample site: [`examples/showcase-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/showcase-site/)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

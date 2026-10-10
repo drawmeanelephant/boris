@@ -6,7 +6,9 @@ visible focus, dark system preference, reduced motion, print. See
 
 - Layouts: `home.html` (`id:index`), `section.html` (`role:trunk`), `main.html`
 - Assets: local CSS and mark SVG. System Palatino/Georgia serif + UI sans.
-- Sample site: [`examples/reference-site/`](../../examples/reference-site/)
+- Sample site: [`examples/reference-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/reference-site/)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

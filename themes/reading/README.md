@@ -9,8 +9,10 @@ and refuse italic-as-emphasis. Mark those passages in the content with a
 
 - Layouts: `main.html`
 - Assets: `assets/reading.css`
-- Sample site: [`examples/reading-site/`](../../examples/reading-site/)
+- Sample site: [`examples/reading-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/reading-site/)
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

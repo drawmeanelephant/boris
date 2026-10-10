@@ -5,8 +5,10 @@ were removed before promotion. Navigation is the graph.
 
 - Layouts: `main.html`
 - Assets: `assets/ledger.css` (Verdana / Arial system stack)
-- Sample site: [`examples/ledger-site/`](../../examples/ledger-site/)
+- Sample site: [`examples/ledger-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/ledger-site/)
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \

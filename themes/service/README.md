@@ -5,7 +5,9 @@ CSS is original. Not GOV.UK Frontend. See
 [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `home.html` (`id:index`), `section.html` (`role:trunk`), `main.html`
-- Shared specimen: [`examples/studies-site/`](../../examples/studies-site/)
+- Shared specimen: [`examples/studies-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/studies-site/)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \
@@ -32,7 +34,7 @@ CSS is original. Not GOV.UK Frontend. See
 Every layout spends its one `{{title}}` slot on the visible `<h1>`, so the
 document `<title>` is the static word "Service" on every page. A slot may
 appear at most once per layout
-([`templating-and-themes.md`](../../docs/contracts/templating-and-themes.md)
+([`templating-and-themes.md`](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/templating-and-themes.md)
 §3), and moving `{{title}}` into `<title>` would leave the page without its
 heading. This needs a design decision (see `ACCESSIBILITY.md`). Search is
 not affected: the layout `<h1>` carries `data-boris-search-title="layout"`,

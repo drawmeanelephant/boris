@@ -3,7 +3,7 @@
 Select with `--theme themes/html4-strict --target-profile default=html4-strict`.
 The layout supplies the complete Strict DOCTYPE, head, and body; it uses only
 HTML 4.01 vocabulary. Boris checks the *assembled page*, including every slot,
-before publication. See [the profile contract](../../docs/contracts/html4-strict.md).
+before publication. See [the profile contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/html4-strict.md).
 
 This compatibility theme deliberately omits the JavaScript search UI and native
 HTML5 disclosure behavior. Aside and Details remain visible, but Details are
@@ -14,7 +14,7 @@ Accessibility guarantees: [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 ## Specimen
 
-The shared [`examples/studies-site/`](../../examples/studies-site/) corpus
+The shared [`examples/studies-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/studies-site/) corpus
 builds under this theme and profile, so the same pages can be compared with
 the HTML5 docs shells:
 
@@ -28,14 +28,14 @@ the HTML5 docs shells:
 ```
 
 The minimal regression fixture is
-[`fixtures/html4-strict/content`](../../fixtures/html4-strict/content/),
+[`fixtures/html4-strict/content`](https://github.com/drawmeanelephant/boris/tree/main/fixtures/html4-strict/content/),
 which builds with the same flags.
 
 ## Named layouts
 
 Single shape by design. This theme is a compatibility profile, not a voice.
 Any named layout would be a second complete Strict document that must pass
-[the profile contract](../../docs/contracts/html4-strict.md) on its own. It
+[the profile contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/html4-strict.md) on its own. It
 could not use the landmarks, `data-*` hooks, or ARIA labels that separate
 page shapes in the HTML5 themes, so a `home` or `section` here would differ
 from `main.html` only in class names. `print` is covered by the
@@ -43,7 +43,7 @@ stylesheet's `@media print`.
 
 ## Accessibility floor: what the profile forces
 
-Each floor item was checked against [the profile contract](../../docs/contracts/html4-strict.md).
+Each floor item was checked against [the profile contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/html4-strict.md).
 That contract constrains the **markup** in the assembled page. It does not
 constrain the stylesheet, so CSS features are not contract-forced.
 
@@ -73,7 +73,7 @@ Other themes wrap relations/backlinks and layout chrome in
 (`dl.page-metadata`, `ul.page-tags`, and the `div` shapes of `{{nav}}`,
 `{{breadcrumb}}`, `{{toc}}`, `{{children}}`, `{{parent}}`, `{{relations}}`,
 and `{{backlinks}}`; see the
-[rendered-search contract](../../docs/contracts/rendered-search.md)). The one
+[rendered-search contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/rendered-search.md)). The one
 remaining leak is theme-authored: the skip link's text, "Skip to content",
 is indexed as each page's level-0 section. Checked on 2026-10-10 against
 `_boris/search/search-index.json` from the shared specimen. The layout

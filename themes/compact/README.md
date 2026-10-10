@@ -5,7 +5,9 @@ and is not Chota. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `home.html` (`id:index`), `main.html`
 - Assets: `assets/css/compact.css` (system stack)
-- Sample site: [`examples/compact-site/`](../../examples/compact-site/)
+- Sample site: [`examples/compact-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/compact-site/)
+
+Build the specimen from a Boris checkout:
 
 ```bash
 ./zig-out/bin/boris \
