@@ -58,7 +58,7 @@ Each section requires all of these fields:
 |---|---|---|
 | `level` | integer | `0` for content before the first heading, otherwise heading level `1`–`6` |
 | `heading` | string | Normalized rendered heading text; empty for level zero |
-| `fragment` | string | Rendered heading `id`, or the producer's generated slug |
+| `fragment` | string | Rendered heading `id`; empty for level zero and for a heading without an `id` |
 | `text` | string | Normalized searchable prose, excluding code |
 | `code` | string | Normalized searchable code text |
 
@@ -172,8 +172,14 @@ compiler, the standalone CLI, and the publication check agree.
 Sections retain document order. Text before the first heading is level zero;
 each `h1`–`h6` begins the next section. An explicit heading `id` is copied as
 `fragment` after the same entity decode, so the fragment matches the live DOM
-id; absent ids use the current ASCII slug behavior (lowercase ASCII
-alphanumerics separated by single dashes). Documents are sorted by canonical
+id. A heading without an `id` (a layout `<h1>{{title}}</h1>`, raw HTML) has
+an empty `fragment`: the producer never fabricates an anchor the page does
+not carry, so every non-empty `fragment` resolves to a rendered id, which the
+`rendered-search` publication check enforces. Consumers already treat an
+empty `fragment` as a link to the page itself (as for level zero). Before
+this rule, id-less headings stored a generated ASCII slug that named no
+anchor; the change keeps the v1 shape and field type, so `schema_version`
+stays `1`. Documents are sorted by canonical
 `path` using bytewise ordering. The producer emits documents and sections in
 that order and emits the fixed v1 keys in a stable order.
 

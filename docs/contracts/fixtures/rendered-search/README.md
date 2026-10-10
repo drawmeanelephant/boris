@@ -2,9 +2,10 @@
 
 This fixture freezes a small nested rendered site and the exact v1 JSON bytes
 the shared producer should emit. The pages deliberately exercise bytewise
-path ordering, generated and explicit fragments, entity decoding, separate code
-text, the `data-boris-search-title` document-title override (#881), and
-compiler metadata exclusion alongside searchable definition-list boundaries.
+path ordering, explicit fragments and empty fragments for id-less headings,
+entity decoding, separate code text, the `data-boris-search-title`
+document-title override (#881), and compiler chrome exclusion alongside
+searchable definition-list boundaries.
 
 ## Cases
 

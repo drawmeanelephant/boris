@@ -245,19 +245,6 @@ fn decodeNormalize(a: std.mem.Allocator, raw: []const u8) ![]u8 {
     try appendDecoded(&decoded, a, raw);
     return normalize(a, decoded.items);
 }
-fn slugify(a: std.mem.Allocator, text: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(a);
-    var dash = false;
-    for (text) |c| {
-        if (std.ascii.isAlphanumeric(c)) {
-            if (dash and out.items.len > 0) try out.append(a, '-');
-            dash = false;
-            try out.append(a, std.ascii.toLower(c));
-        } else if (out.items.len > 0) dash = true;
-    }
-    return out.toOwnedSlice(a);
-}
 
 pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, require_marker: bool) !Document {
     const found = try findRoot(html, require_marker) orelse ExtractRoot{
@@ -423,7 +410,11 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
         errdefer a.free(text);
         const code = try normalize(a, s.code.items);
         errdefer a.free(code);
-        const frag = if (s.fragment.items.len > 0) try a.dupe(u8, s.fragment.items) else try slugify(a, h);
+        // Only a rendered `id` is a fragment. A slug of an id-less heading
+        // (typically a layout `<h1>{{title}}</h1>`) names no anchor in the
+        // page, so the result link was dead and the publication check
+        // reported SEARCH_CONTENT_MISMATCH; an empty fragment links the page.
+        const frag = try a.dupe(u8, s.fragment.items);
         final[si] = .{ .level = s.level, .heading = h, .fragment = frag, .text = text, .code = code };
     }
     return .{ .path = try a.dupe(u8, path), .title = title.?, .sections = final };
@@ -896,6 +887,23 @@ test "title fallback and heading fragments decode entities" {
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expectEqualStrings("Foo & Bar", d.title);
     try std.testing.expectEqualStrings("a&b", d.sections[0].fragment);
+}
+
+test "id-less headings get an empty fragment, never a fabricated slug" {
+    // A layout `<h1>{{title}}</h1>` has no id. Its slug resolved to nothing
+    // on the page, which the rendered-search publication check reports as
+    // SEARCH_CONTENT_MISMATCH. Every non-empty fragment must be a real id.
+    const html = "<!doctype html><main data-boris-search-root>" ++
+        "<h1 class=\"layout-title\">Field Notes Archive</h1><p>Intro.</p>" ++
+        "<h2 id=\"kept\">Kept id</h2><p>a</p><h3>Raw heading</h3><p>b</p></main>";
+    const d = try indexHtml(std.testing.allocator, "archive.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Field Notes Archive", d.title);
+    try std.testing.expectEqual(@as(usize, 3), d.sections.len);
+    try std.testing.expectEqualStrings("Field Notes Archive", d.sections[0].heading);
+    try std.testing.expectEqualStrings("", d.sections[0].fragment);
+    try std.testing.expectEqualStrings("kept", d.sections[1].fragment);
+    try std.testing.expectEqualStrings("", d.sections[2].fragment);
 }
 
 test "title element fallback is reached past a leading doctype" {
