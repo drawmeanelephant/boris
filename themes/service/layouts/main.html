@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="{{asset-url assets/css/service.css}}">
       {{head}}
   </head>
-  <body>
+  <body data-status="{{page-status}}">
     <a class="govuk-skip-link" href="#main-content">Skip to main content</a>
     <header class="govuk-header">
       <div class="govuk-width-container govuk-header__inner">
@@ -19,14 +19,13 @@
       <div class="govuk-grid-row">
         <article class="govuk-grid-column-two-thirds">
           <div class="govuk-breadcrumbs" aria-label="Breadcrumb">{{breadcrumb}}</div>
-          <header><h1 class="govuk-heading-xl">{{title}}</h1>{{metadata}}</header>
+          <header><h1 class="govuk-heading-xl" data-boris-search-exclude>{{title}}</h1>{{metadata}}</header>
           <div class="govuk-body prose">{{content}}</div>
-          <section class="govuk-contents-list" aria-labelledby="children-heading">
+          <section class="govuk-contents-list" aria-labelledby="children-heading" data-boris-search-exclude>
             <h2 id="children-heading" class="govuk-heading-m">In this section</h2>
             {{children}}
           </section>
-        {{relations}}
-        {{backlinks}}
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
         </article>
         <aside class="govuk-grid-column-one-third govuk-contents-rail" aria-label="On this page" data-boris-search-exclude>
           <p class="govuk-caption">Contents</p>{{toc}}
