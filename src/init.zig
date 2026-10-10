@@ -23,6 +23,8 @@
 //!   leaf entries) with cross-entry wiki links under `reference`;
 //!   `layout_rules` send `id:index` to `home.html` and `glob:wiki/*` hubs
 //!   to `section.html`, so `{{breadcrumb}}` and `{{toc}}` do real work.
+//! - `link-in-bio` — the smallest honest site: one trunk page holding a
+//!   personal link list, under `minimal`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -53,7 +55,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio" };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -997,6 +999,45 @@ const wiki_profile =
     \\
 ;
 
+// --- link-in-bio ------------------------------------------------------------
+
+const link_in_bio_index_md =
+    \\---
+    \\title: Robin Vale
+    \\tags: [links]
+    \\---
+    \\
+    \\# Robin Vale
+    \\
+    \\Letterpress printer and occasional bookbinder. This whole site is one
+    \\page: the smallest graph Boris builds, still parsed, validated, and
+    \\published through the same profile as any larger site.
+    \\
+    \\## Elsewhere
+    \\
+    \\- [Studio journal](https://example.com/journal)
+    \\- [Print shop](https://example.com/shop)
+    \\- [Newsletter](https://example.com/newsletter)
+    \\- [Email](mailto:robin@example.com)
+    \\
+    \\Replace these links with yours. Add a second page only when you need one.
+    \\
+;
+
+const link_in_bio_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Robin Vale" },
+    \\  "targets": [
+    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/minimal" }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -1123,6 +1164,15 @@ const wiki_files = [_]FileToWrite{
     .{ .path = "themes/reference/assets/img/mark.svg", .data = archetype_themes.reference_mark_svg },
     .{ .path = "themes/reference/README.md", .data = archetype_themes.reference_readme },
     .{ .path = "boris.json", .data = wiki_profile },
+};
+
+const link_in_bio_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = link_in_bio_index_md },
+    .{ .path = "themes/minimal/layouts/main.html", .data = archetype_themes.minimal_layout_main },
+    .{ .path = "themes/minimal/footer.html", .data = archetype_themes.minimal_footer },
+    .{ .path = "themes/minimal/assets/minimal.css", .data = archetype_themes.minimal_css },
+    .{ .path = "themes/minimal/README.md", .data = archetype_themes.minimal_readme },
+    .{ .path = "boris.json", .data = link_in_bio_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -1293,6 +1343,25 @@ const wiki_spec = ArchetypeSpec{
     ,
 };
 
+const link_in_bio_spec = ArchetypeSpec{
+    .layout_path = "themes/minimal/layouts/main.html",
+    .files = &link_in_bio_files,
+    .tree_report =
+    \\  content/index.md                  the only page — a trunk with your links
+    \\  themes/minimal/                   shipped "minimal" theme — same shell, no search
+    \\  boris.json                        profile (input_format: markdown, theme: minimal)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the one-page site
+    \\  boris check                           graph-health report (still runs on one page)
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  a single trunk page is a valid site; graph, validation, and profile still apply
+    \\  external links are plain Markdown links; [[wiki-links]] are for pages in this site
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -1302,6 +1371,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .textile => &textile_spec,
         .landing => &landing_spec,
         .wiki => &wiki_spec,
+        .@"link-in-bio" => &link_in_bio_spec,
     };
 }
 
@@ -1498,7 +1568,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -1553,8 +1623,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -1658,6 +1728,16 @@ test "wiki entries sit three levels deep under their hub" {
     // would be a selector tie (templating-and-themes.md §4.2).
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, wiki_profile, "\"glob:"));
     try std.testing.expect(std.mem.indexOf(u8, wiki_sharpening_md, "relations: [relates_to=wiki/tools/chisels]") != null);
+}
+
+test "link-in-bio is exactly one trunk page" {
+    var pages: usize = 0;
+    for (link_in_bio_spec.files) |f| {
+        if (std.mem.startsWith(u8, f.path, "content/")) pages += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), pages);
+    try std.testing.expect(std.mem.indexOf(u8, link_in_bio_index_md, "\nparent:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, link_in_bio_index_md, "\ntags: [links]\n") != null);
 }
 
 test "garden demonstrates include composition, components, and dense links" {

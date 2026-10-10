@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -202,6 +202,17 @@ done
 grep -q 'href="../techniques/sharpening.html"' "$W/wiki/tools/chisels.html" \
     || fail "wiki cross-entry link did not resolve"
 pass "wiki: index → hub → entry breadcrumb, home/section/main layouts, cross-entry links"
+
+note "link-in-bio: one page is a complete, checkable site"
+grep -q '^verified: starter compiled 1 page(s)$' "$OUT/arch-link-in-bio.stderr" \
+    || fail "link-in-bio probe did not compile exactly one page"
+[[ "$(find "$OUT/arch-link-in-bio/dist" -name '*.html' -not -path '*/_boris/*' | wc -l | tr -d ' ')" == 1 ]] \
+    || fail "link-in-bio profile build wrote more than one page"
+grep -q 'href="https://example.com/shop"' "$OUT/arch-link-in-bio/dist/index.html" \
+    || fail "link-in-bio link list did not render"
+(cd "$OUT/arch-link-in-bio" && "$ROOT/zig-out/bin/boris" check) >"$OUT/link-in-bio-check.stdout" 2>"$OUT/link-in-bio-check.stderr" \
+    || fail "boris check failed on the one-page site: $(head -3 "$OUT/link-in-bio-check.stderr")"
+pass "link-in-bio: one page compiled, built, and checked"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done

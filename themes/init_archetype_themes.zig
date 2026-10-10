@@ -52,3 +52,8 @@ pub const reference_footer = @embedFile("reference/footer.html");
 pub const reference_css = @embedFile("reference/assets/css/reference.css");
 pub const reference_mark_svg = @embedFile("reference/assets/img/mark.svg");
 pub const reference_readme = @embedFile("reference/README.md");
+
+pub const minimal_layout_main = @embedFile("minimal/layouts/main.html");
+pub const minimal_footer = @embedFile("minimal/footer.html");
+pub const minimal_css = @embedFile("minimal/assets/minimal.css");
+pub const minimal_readme = @embedFile("minimal/README.md");

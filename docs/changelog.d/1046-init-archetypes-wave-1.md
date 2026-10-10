@@ -15,3 +15,6 @@
   links; `layout_rules` send the index to `home.html` and the hubs, via a
   single `glob:wiki/*` rule, to `section.html`
   ([#1055](https://github.com/drawmeanelephant/boris/issues/1055)).
+- `boris init --type link-in-bio` writes the smallest starter: one trunk
+  page holding a personal link list, under `minimal`
+  ([#1057](https://github.com/drawmeanelephant/boris/issues/1057)).

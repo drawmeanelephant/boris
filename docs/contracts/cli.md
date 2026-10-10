@@ -168,6 +168,9 @@ catalog themes that fit each one.
   `id:index` to `home.html` and `glob:wiki/*` (the hubs only) to
   `section.html`; entries use `main.html`, whose `{{breadcrumb}}` shows
   the full chain.
+- `link-in-bio` — the smallest starter: a single trunk page holding a
+  personal link list, under `minimal`. It proves a one-page graph still
+  validates and builds through the profile.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format
