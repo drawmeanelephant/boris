@@ -36,14 +36,16 @@ button, input, select, textarea { font: inherit; line-height: var(--leading-tigh
 
 /* Heading roles. Size steps come from lib/tokens.css and are never raw rems,
    so the order holds everywhere: h1 (app) > h2 (pane) > h3 (sub-pane) > body.
-   h4 is deliberately not a fifth size: it is a group label inside a card
-   (Children, Backlinks, Ingredients, Targets), so it reads as a label rather
-   than competing with the body copy it introduces. */
+   .group-label is deliberately not a fifth size: it is a group label inside
+   a card (Children, Backlinks, Ingredients, Targets), so it reads as a label
+   rather than competing with the body copy it introduces. Its element follows
+   the outline — h3 directly under a pane title, h4 under a sub-pane title —
+   so no heading level is skipped; the bare h4 keeps the same treatment. */
 h1, h2, h3, h4, h5, h6 { margin-top: 0; line-height: var(--leading-tight); }
 h1 { margin-bottom: 0; font-size: var(--text-2xl); letter-spacing: -0.03em; }
 h2 { margin-bottom: var(--space-2); font-size: var(--text-xl); letter-spacing: -0.015em; }
 h3 { margin-bottom: var(--space-1); font-size: var(--text-lg); letter-spacing: -0.005em; }
-h4 {
+h4, .group-label {
   margin-bottom: var(--space-1);
   font-size: var(--text-sm);
   font-weight: 700;
@@ -287,9 +289,9 @@ section {
   border-radius: var(--radius-md);
   background: var(--color-surface-tint);
 }
-/* h4 group labels sit above their list in every card; only the space above
+/* Group labels sit above their list in every card; only the space above
    them differs from the global heading defaults. */
-:is(.pane, .subpane) h4 { margin-top: var(--space-5); }
+:is(.pane, .subpane) :is(h4, .group-label) { margin-top: var(--space-5); }
 :is(.pane, .subpane) dl { font-size: var(--text-sm); }
 :is(.pane, .subpane) dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: var(--space-3); padding: var(--space-1) 0; }
 :is(.pane, .subpane) dt { font-weight: 700; }
