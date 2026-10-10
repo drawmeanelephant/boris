@@ -37,3 +37,10 @@ pub const press_mark_svg = @embedFile("press/assets/img/press-mark.svg");
 pub const press_readme = @embedFile("press/README.md");
 pub const press_accessibility = @embedFile("press/ACCESSIBILITY.md");
 pub const press_migration = @embedFile("press/MIGRATION.md");
+
+pub const service_layout_main = @embedFile("service/layouts/main.html");
+pub const service_layout_home = @embedFile("service/layouts/home.html");
+pub const service_layout_section = @embedFile("service/layouts/section.html");
+pub const service_footer = @embedFile("service/footer.html");
+pub const service_css = @embedFile("service/assets/css/service.css");
+pub const service_readme = @embedFile("service/README.md");

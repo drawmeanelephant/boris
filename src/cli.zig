@@ -2769,7 +2769,7 @@ pub const usage_text =
     \\  nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
     \\  nostr sign          Sign a plan artifact into a signed-event bundle (offline; key via stdin)
     \\  nostr publish       Send a signed-event bundle to the plan's relays; writes the report
-    \\  init [DIR]          Write a starter site into DIR (default: .); --type picks docs, garden, cookbook, blog, or textile
+    \\  init [DIR]          Write a starter site into DIR (default: .); --type picks an archetype (see boris init --help)
     \\  (no command)        Same as build
     \\  standard-site publish options:
     \\  --profile PATH      Standard.site publication profile (required)
@@ -3016,17 +3016,19 @@ pub fn printInitUsage() void {
         \\
         \\  docs      Markdown documentation site (the historical starter)
         \\  garden    flat-ish digital garden: dense wiki links, semantic
-        \\            relations, {{include}} composition, an <Aside> component
+        \\            relations, {{{{include}}}} composition, an <Aside> component
         \\  cookbook  Cooklang .cook recipe box; profile declares input_format: cook
         \\  blog      dated posts on a parent chain (published_at + summary)
         \\  textile   Textile pages through the native adapter;
         \\            profile declares input_format: textile
+        \\  landing   one trunk page built from {{{{include}}}} sections, plus
+        \\            one satellite; layout_rules send index to home.html
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.
         \\DIR must be empty or not exist; the tree is byte-deterministic.
         \\
-        \\  --type NAME      Starter archetype (docs, garden, cookbook, blog, textile)
+        \\  --type NAME      Starter archetype (one of the names above)
         \\  --quiet          Suppress the success report; errors always print
         \\
         \\After writing, init compiles the fresh tree through the normal HTML

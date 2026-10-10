@@ -138,8 +138,10 @@ by this HTML path. See [the profile contract](publication-profile.md#offline-and
 ### `init`: deterministic starter scaffold with self-verification
 
 `boris init [DIR] [--type NAME]` (default `.`) writes a fixed starter tree
-into `DIR`, which must not exist or must be empty. `--type` selects one of
-five archetypes; the flag names are exactly the enum values the CLI reports:
+into `DIR`, which must not exist or must be empty. `--type` selects one
+archetype; the flag names are exactly the enum values the CLI reports. The
+[init theme coverage matrix](../init-theme-matrix.md) names the alternate
+catalog themes that fit each one.
 
 - `docs` (default) — the historical Markdown starter: three content pages
   exercising the graph, a closed-slot theme whose layout ships the
@@ -155,6 +157,11 @@ five archetypes; the flag names are exactly the enum values the CLI reports:
   under `cozy`.
 - `textile` — `.textile` pages through the native adapter under `press`;
   its profile declares `"input_format": "textile"`.
+- `landing` — a single-Trunk site: one long trunk page composed from
+  `{{include}}` section fragments under `content/includes/`, plus one
+  satellite, under `service`. Its profile's `layout_rules` send `id:index`
+  to `themes/service/layouts/home.html`; other pages use the theme's
+  `main.html`.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format
@@ -164,7 +171,9 @@ branches. An unknown `--type` is a usage error (exit `2`) that lists the
 valid names. Every tree is byte-deterministic across runs.
 
 After materializing, `init` compiles the fresh tree through the normal HTML
-pipeline — in the input format the archetype's profile declares — into a
+pipeline — in the input format the archetype's profile declares, with the
+theme's `main.html` as the only layout (profile `layout_rules` are
+exercised by `boris --profile boris.json`, not by the probe) — into a
 probe output directory (`DIR/.boris-init-probe`) and removes
 it again. Exit `0` therefore means "materialized **and** compiled": the
 success report includes the verified page count. Probe paths are resolved

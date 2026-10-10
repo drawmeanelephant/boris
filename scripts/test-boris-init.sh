@@ -22,6 +22,10 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
+# Every `--type` name, in enum order; docs is the default archetype.
+ARCHETYPES=(docs garden cookbook blog textile landing)
+ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
+
 note() { printf '==> %s\n' "$*"; }
 pass() { printf '    OK  %s\n' "$*"; }
 fail() { printf '    FAIL %s\n' "$*" >&2; exit 1; }
@@ -110,35 +114,49 @@ note "init --quiet prints nothing on success"
 pass "quiet silence honored"
 
 # --- --type selects a starter archetype -------------------------------------
+# Back to the workspace root: the archetype targets below must resolve inside
+# the cwd workspace, or init skips its compile probe instead of running it.
+cd "$ROOT"
 note "init --help names every archetype"
 "$ROOT/zig-out/bin/boris" init --help >"$OUT/init-help.stdout" 2>"$OUT/init-help.stderr" \
     || fail "init --help exited nonzero"
-for t in docs garden cookbook blog textile; do
-    grep -q "$t" "$OUT/init-help.stderr" || fail "init help does not name archetype $t"
+for t in "${ARCHETYPES[@]}"; do
+    grep -q "^  $t " "$OUT/init-help.stderr" || fail "init help does not name archetype $t"
 done
-pass "help names docs, garden, cookbook, blog, textile"
+pass "help names $ARCHETYPE_LIST"
 
 note "unknown --type is a usage error"
 if "$ROOT/zig-out/bin/boris" init --type bogus "$OUT/bogus" >"$OUT/bogus.stdout" 2>"$OUT/bogus.stderr"; then
     fail "init accepted an unknown archetype"
 fi
 grep -q 'unknown init type' "$OUT/bogus.stderr" || fail "unknown-type diagnostic missing"
-grep -q 'docs, garden, cookbook, blog, textile' "$OUT/bogus.stderr" || fail "unknown-type diagnostic did not list archetypes"
+grep -qF "expected one of: $ARCHETYPE_LIST)" "$OUT/bogus.stderr" \
+    || fail "unknown-type diagnostic did not list archetypes"
 [[ ! -e "$OUT/bogus" ]] || fail "unknown type still wrote a tree"
 pass "unknown archetype refused with the name list"
 
-note "each archetype materializes and compiles through its declared profile"
-for t in garden cookbook blog textile; do
+note "each archetype materializes, compiles, is deterministic, and refuses non-empty targets"
+for t in "${ARCHETYPES[@]:1}"; do
     "$ROOT/zig-out/bin/boris" init --type "$t" "$OUT/arch-$t" >"$OUT/arch-$t.stdout" 2>"$OUT/arch-$t.stderr" \
         || fail "init --type $t exited nonzero: $(head -3 "$OUT/arch-$t.stderr")"
+    grep -q '^verified: starter compiled [1-9][0-9]* page(s)$' "$OUT/arch-$t.stderr" \
+        || fail "init --type $t did not report a verified probe compile"
     [[ -f "$OUT/arch-$t/boris.json" ]] || fail "init --type $t wrote no boris.json"
     [[ ! -d "$OUT/arch-$t/.boris-init-probe" ]] || fail "init --type $t left its compile probe behind"
+    "$ROOT/zig-out/bin/boris" init --quiet --type="$t" "$OUT/arch-$t-b" >/dev/null 2>"$OUT/arch-$t-b.stderr" \
+        || fail "second init --type $t failed: $(head -3 "$OUT/arch-$t-b.stderr")"
+    diff -r "$OUT/arch-$t" "$OUT/arch-$t-b" >/dev/null || fail "two init --type $t runs produced different trees"
+    if "$ROOT/zig-out/bin/boris" init --type "$t" "$OUT/occupied" >/dev/null 2>"$OUT/refuse-$t.stderr"; then
+        fail "init --type $t accepted a non-empty directory"
+    fi
+    grep -q "refusing to overwrite" "$OUT/refuse-$t.stderr" || fail "init --type $t refusal message missing"
+    [[ "$(ls -A "$OUT/occupied")" == "keep.txt" ]] || fail "init --type $t modified the occupied directory"
     (cd "$OUT/arch-$t" && "$ROOT/zig-out/bin/boris" --profile boris.json --quiet) \
         >"$OUT/arch-$t-build.stdout" 2>"$OUT/arch-$t-build.stderr" \
         || fail "archetype $t does not build through its own profile: $(head -3 "$OUT/arch-$t-build.stderr")"
     [[ -f "$OUT/arch-$t/dist/index.html" ]] || fail "archetype $t profile build wrote no index.html"
 done
-pass "garden, cookbook, blog, textile all init + profile-build"
+pass "${ARCHETYPE_LIST#docs, }: init + byte-identical rerun + refusal + profile-build"
 
 note "archetype surfaces are honest"
 grep -q '"input_format": "cook"' "$OUT/arch-cookbook/boris.json" \
@@ -160,13 +178,18 @@ grep -q '<Aside kind=' "$OUT/arch-garden/content/index.md" \
 grep -q '"target": 4' "$OUT/recipe-scale.json" || fail "recipe-scale did not scale to 4 servings"
 pass "formats, includes, components, and recipe-scale all exercise their seams"
 
-note "archetype trees are deterministic too"
-"$ROOT/zig-out/bin/boris" init --type=garden "$OUT/arch-garden-b" >"$OUT/garden-b.stdout" 2>"$OUT/garden-b.stderr" \
-    || fail "second garden init failed"
-diff -r "$OUT/arch-garden" "$OUT/arch-garden-b" -x dist >/dev/null \
-    || fail "two garden inits produced different trees"
-pass "byte-identical garden trees (--type=NAME form accepted)"
+# --- wave-1 archetypes: each teaches the primitive its issue names ---------
+note "landing: one trunk page composed from includes, index on the home layout"
+L="$OUT/arch-landing/dist"
+grep -q 'govuk-home-grid' "$L/index.html" || fail "landing index does not use the service home layout"
+grep -q 'govuk-home-grid' "$L/about.html" && fail "landing about should fall back to main.html"
+grep -q 'govuk-breadcrumbs' "$L/about.html" || fail "landing about is not on the service main layout"
+grep -q 'What we do' "$L/index.html" || fail "landing index did not splice includes/services.md"
+grep -q 'Do I need an appointment' "$L/index.html" || fail "landing index did not splice includes/faq.md"
+grep -q 'Open Tuesday to Saturday' "$L/index.html" || fail "landing index did not splice includes/visit.md"
+[[ ! -e "$L/includes" ]] || fail "landing include fragments compiled as pages"
+pass "landing: home layout on index, main on about, three fragments spliced"
 
-rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site" \
-    "$OUT/arch-garden" "$OUT/arch-cookbook" "$OUT/arch-blog" "$OUT/arch-textile" "$OUT/arch-garden-b"
+rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
+for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done
 echo "boris-init: all assertions passed"

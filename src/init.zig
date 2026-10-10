@@ -16,6 +16,9 @@
 //!   entries with `published_at` + `summary`) under the `cozy` theme.
 //! - `textile` — `.textile` pages through the native adapter under `press`,
 //!   whose profile declares `input_format: textile`.
+//! - `landing` — a single-Trunk page composed from `{{include}}` section
+//!   fragments, plus one satellite, under `service`; the profile's
+//!   `layout_rules` send `id:index` to the theme's `home.html`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -46,10 +49,10 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing };
 
-/// Comptime-joined `docs, garden, cookbook, blog, textile` for diagnostics
-/// and help text — the table below is the single source of truth.
+/// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
+/// text — the table below is the single source of truth.
 pub const archetype_names: []const u8 = blk: {
     var names: []const u8 = "";
     for (@typeInfo(Archetype).@"enum".field_names, 0..) |name, i| {
@@ -695,6 +698,108 @@ const textile_profile =
     \\
 ;
 
+// --- landing ----------------------------------------------------------------
+
+const landing_index_md =
+    \\---
+    \\title: Fieldstone Cycle Repair
+    \\tags: [home]
+    \\---
+    \\
+    \\# Fieldstone Cycle Repair
+    \\
+    \\Honest repairs for everyday bikes, done the same week. Bring it in, get a
+    \\ticket, ride it home tuned.
+    \\
+    \\**Next step:** read [[about]] to see how this one-page site is put
+    \\together, then replace this prose with your own pitch.
+    \\
+    \\{{include includes/services.md}}
+    \\
+    \\{{include includes/faq.md}}
+    \\
+    \\{{include includes/visit.md}}
+    \\
+;
+
+const landing_about_md =
+    \\---
+    \\title: About
+    \\parent: index
+    \\tags: [about]
+    \\---
+    \\
+    \\# About
+    \\
+    \\A landing site is a legitimate Boris graph: one trunk page, [[index]],
+    \\and only as many satellites as the story needs. This page is the one
+    \\satellite, so the navigation and breadcrumb have something to show.
+    \\
+    \\## How this starter is wired
+    \\
+    \\- `content/index.md` is the long page. Its sections come from
+    \\  `content/includes/*.md` through `{{include}}` directives, so each
+    \\  section stays a small file you can edit on its own.
+    \\- `boris.json` declares one `layout_rules` entry that sends `id:index`
+    \\  to `themes/service/layouts/home.html`. Every other page, including
+    \\  this one, falls back to the theme's `main.html`.
+    \\
+;
+
+const landing_services_md =
+    \\## What we do
+    \\
+    \\- **Tune-ups** — brakes, gears, and bearings, back the same week.
+    \\- **Wheel builds** — hand-laced and trued on the stand.
+    \\- **Fittings** — saddle, bar, and cleat set-up for long days out.
+    \\
+;
+
+const landing_faq_md =
+    \\## Questions
+    \\
+    \\### Do I need an appointment?
+    \\
+    \\No. Drop in during opening hours; bigger jobs get a ticket and a date.
+    \\
+    \\### How is this page built?
+    \\
+    \\From fragments. Each section of the front page is a file under
+    \\`content/includes/`, spliced into [[index]] by an `{{include}}`
+    \\directive. Fragments never compile as pages of their own.
+    \\
+;
+
+const landing_visit_md =
+    \\## Visit
+    \\
+    \\Open Tuesday to Saturday, 9:00–17:30. The story behind the shop is on
+    \\the [[about]] page.
+    \\
+;
+
+const landing_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Fieldstone Cycle Repair" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/service",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/service/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -788,6 +893,21 @@ const textile_files = [_]FileToWrite{
     .{ .path = "themes/press/ACCESSIBILITY.md", .data = archetype_themes.press_accessibility },
     .{ .path = "themes/press/MIGRATION.md", .data = archetype_themes.press_migration },
     .{ .path = "boris.json", .data = textile_profile },
+};
+
+const landing_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = landing_index_md },
+    .{ .path = "content/about.md", .data = landing_about_md },
+    .{ .path = "content/includes/services.md", .data = landing_services_md },
+    .{ .path = "content/includes/faq.md", .data = landing_faq_md },
+    .{ .path = "content/includes/visit.md", .data = landing_visit_md },
+    .{ .path = "themes/service/layouts/main.html", .data = archetype_themes.service_layout_main },
+    .{ .path = "themes/service/layouts/home.html", .data = archetype_themes.service_layout_home },
+    .{ .path = "themes/service/layouts/section.html", .data = archetype_themes.service_layout_section },
+    .{ .path = "themes/service/footer.html", .data = archetype_themes.service_footer },
+    .{ .path = "themes/service/assets/css/service.css", .data = archetype_themes.service_css },
+    .{ .path = "themes/service/README.md", .data = archetype_themes.service_readme },
+    .{ .path = "boris.json", .data = landing_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -911,6 +1031,29 @@ const textile_spec = ArchetypeSpec{
     ,
 };
 
+const landing_spec = ArchetypeSpec{
+    .layout_path = "themes/service/layouts/main.html",
+    .files = &landing_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the whole landing page
+    \\  content/about.md                  the one satellite page
+    \\  content/includes/                 section fragments spliced by {{include}} (never pages)
+    \\  themes/service/                   shipped "service" theme — public-service information
+    \\  boris.json                        profile (theme: service, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the site (index renders through home.html)
+    \\  boris check                           graph-health report
+    \\  boris plan --profile boris.json       inspect the normalized layout rules
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  one trunk page is a complete site; add satellites only when the story needs them
+    \\  {{include includes/NAME.md}} splices a section fragment; links inside it count as edges
+    \\  layout_rules in boris.json pick named layouts (id:, glob:, role:); frontmatter never does
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -918,6 +1061,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .cookbook => &cookbook_spec,
         .blog => &blog_spec,
         .textile => &textile_spec,
+        .landing => &landing_spec,
     };
 }
 
@@ -1114,7 +1258,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -1169,8 +1313,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -1195,6 +1339,61 @@ test "each archetype profile declares the format and theme its spec uses" {
         }));
         try std.testing.expectEqual(declared, spec.input_format);
     }
+}
+
+fn writesFile(spec: *const ArchetypeSpec, path: []const u8) bool {
+    for (spec.files) |f| {
+        if (std.mem.eql(u8, f.path, path)) return true;
+    }
+    return false;
+}
+
+test "every profile layout rule and include directive names a written file" {
+    // A `layout_rules` layout or `{{include}}` fragment the starter does not
+    // write would only fail at `boris --profile boris.json`, after init has
+    // already claimed success (the probe compiles with the fallback layout).
+    inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
+        const spec = specFor(@fromBackingInt(@intCast(value)));
+        for (spec.files) |f| {
+            if (std.mem.eql(u8, f.path, "boris.json")) {
+                const needle = "\"layout\": \"";
+                var at: usize = 0;
+                while (std.mem.indexOfPos(u8, f.data, at, needle)) |start| {
+                    const path_start = start + needle.len;
+                    const path_end = std.mem.indexOfScalarPos(u8, f.data, path_start, '"').?;
+                    try std.testing.expect(writesFile(spec, f.data[path_start..path_end]));
+                    at = path_end;
+                }
+            }
+            if (std.mem.startsWith(u8, f.path, "content/")) {
+                const needle = "{{include ";
+                var at: usize = 0;
+                while (std.mem.indexOfPos(u8, f.data, at, needle)) |start| {
+                    const path_start = start + needle.len;
+                    const path_end = std.mem.indexOfPos(u8, f.data, path_start, "}}").?;
+                    var buf: [256]u8 = undefined;
+                    const written = try std.fmt.bufPrint(&buf, "content/{s}", .{f.data[path_start..path_end]});
+                    try std.testing.expect(writesFile(spec, written));
+                    at = path_end;
+                }
+            }
+        }
+    }
+}
+
+test "landing is one trunk page composed from include fragments" {
+    var pages: usize = 0;
+    var trunks: usize = 0;
+    for (landing_spec.files) |f| {
+        if (std.mem.startsWith(u8, f.path, "content/") and !std.mem.startsWith(u8, f.path, "content/includes/")) {
+            pages += 1;
+            if (std.mem.indexOf(u8, f.data, "\nparent: ") == null) trunks += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), pages);
+    try std.testing.expectEqual(@as(usize, 1), trunks);
+    try std.testing.expectEqual(@as(usize, 3), std.mem.count(u8, landing_index_md, "{{include includes/"));
+    try std.testing.expect(std.mem.indexOf(u8, landing_profile, "\"selector\": \"id:index\", \"layout\": \"themes/service/layouts/home.html\"") != null);
 }
 
 test "garden demonstrates include composition, components, and dense links" {
