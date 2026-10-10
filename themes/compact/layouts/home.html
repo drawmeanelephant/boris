@@ -28,7 +28,8 @@
     <main id="main-content" class="reading-panel" tabindex="-1" data-boris-search-root>
       {{metadata}}
       <article class="prose">{{content}}</article>
-      <section class="children-panel" aria-labelledby="home-children-heading">
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+      <section class="children-panel" aria-labelledby="home-children-heading" data-boris-search-exclude>
         <h2 id="home-children-heading">Start with a trail</h2>
         {{children}}
       </section>

@@ -27,7 +27,8 @@
     <main id="main-content" class="reading-panel" tabindex="-1" data-boris-search-root>
       {{metadata}}
       <article class="prose">{{content}}</article>
-      <section class="children-panel" aria-labelledby="children-heading">
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+      <section class="children-panel" aria-labelledby="children-heading" data-boris-search-exclude>
         <h2 id="children-heading">In this section</h2>
         {{children}}
       </section>
