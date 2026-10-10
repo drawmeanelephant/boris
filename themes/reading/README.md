@@ -20,6 +20,14 @@ and refuse italic-as-emphasis. Mark those passages in the content with a
   --quiet
 ```
 
+## Named layouts
+
+Single shape by design. A typesetting theme sets one measure for running
+text in any script. A `home`, `section`, `blog`, or `archive` shape would
+add chrome around that text, and this theme exists to stay out of its way.
+`@media print` already sets the same page for paper, so `print` is
+declined too.
+
 ## Slot coverage
 
 `{{relations}}` and `{{backlinks}}` sit under the article. Their visible

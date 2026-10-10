@@ -14,6 +14,14 @@ the no-JavaScript path. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
   --quiet
 ```
 
+## Named layouts
+
+Single shape by design. Minimal is Corporate's shell without search. It
+stays one layout so the pair stays comparable on the shared specimen. The
+starter that uses it, `link-in-bio`, is a one-page site and has no second
+page to shape. As the `portfolio` alternate it renders the project list
+through `main.html`'s `{{children}}`.
+
 ## Slot coverage
 
 | Slot | Decision |

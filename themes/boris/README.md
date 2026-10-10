@@ -9,10 +9,25 @@ That oddness is the point — do not sand it into another calm docs skin.
 - Search: first-party inline consumer; nav remains the no-JS path
 - Slots: title, head, nav, breadcrumb, toc, metadata, content, children, relations, backlinks, footer, asset-url
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
+- Specimens: the repository's own [`content/`](../../content/) docs site
+  (the command below, run from the repository root), and the shared
+  [`examples/studies-site/`](../../examples/studies-site/) corpus
 
 ```bash
 ./zig-out/bin/boris --theme themes/boris --html-dir dist --quiet
 ```
+
+## Named layouts
+
+Single shape by design. `layouts/main.html` is the product default, the
+last fallback in layout selection
+([contract §4.2](../../docs/contracts/templating-and-themes.md#42-precedence)),
+so it has to serve every page of any graph, from a one-page tree to this
+repository's docs. The sticky rail, search, and outline already work at
+every depth. Docs sites that want `home` / `section` shapes have
+`reference`, `engineering`, and `semantic`. Which theme the `docs` starter
+ships is open in [#1063](https://github.com/drawmeanelephant/boris/issues/1063),
+and a `home.html` here would pre-empt that decision.
 
 ## Intentionally absent slots
 

@@ -15,6 +15,15 @@ Mid-2000s personal blog. Graph nav is real. There is no fake blogroll.
   --quiet
 ```
 
+## Named layouts
+
+Single shape by design. A mid-2000s personal blog has one page shape: the
+entry column beside the sidebar. The front page is an entry too. Its
+"Recent posts" panel is `{{children}}`, so a blog index lists its posts
+without a separate `home`, `blog`, or `archive` layout. That includes the
+`blog` starter tree. `section` has no meaning in a flat blog, and
+`@media print` already drops the sidebar for paper.
+
 ## Slot coverage
 
 - `{{relations}}` renders as "Related entries" and `{{backlinks}}` as
