@@ -495,6 +495,94 @@ a:hover {
   margin-top: 1.35rem;
 }
 
+/* —— Semantic relations / backlinks (Boris-emitted) —— */
+
+.graph-links:empty {
+  display: none;
+}
+
+.semantic-relations,
+.semantic-backlinks {
+  margin-top: 1.75rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--r-line);
+  font-family: var(--r-sans);
+}
+
+.semantic-relations + .semantic-backlinks {
+  margin-top: 1.1rem;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.semantic-relations::before,
+.semantic-backlinks::before {
+  display: block;
+  margin: 0 0 0.6rem;
+  font-family: var(--r-font);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.semantic-relations::before {
+  content: "Related pages";
+  content: "Related pages" / "";
+}
+
+.semantic-backlinks::before {
+  content: "Pages that link here";
+  content: "Pages that link here" / "";
+}
+
+.semantic-relations ul,
+.semantic-backlinks ul {
+  display: grid;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.semantic-relations li,
+.semantic-backlinks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--r-line);
+  border-radius: var(--r-radius-sm);
+  background: var(--r-surface);
+}
+
+.semantic-relations li::before,
+.semantic-backlinks li::before {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--r-accent-soft);
+  color: var(--r-accent);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.semantic-backlinks li::before {
+  order: 1;
+}
+
+[data-relation-kind]::before { content: attr(data-relation-kind); }
+[data-relation-kind="relates_to"]::before { content: "relates to"; }
+[data-relation-kind="depends_on"]::before { content: "depends on"; }
+[data-relation-kind="implements"]::before { content: "implements"; }
+[data-relation-kind="supersedes"]::before { content: "supersedes"; }
+
+.semantic-relations a,
+.semantic-backlinks a {
+  font-weight: 650;
+}
+
 /* —— Prose —— */
 
 .prose {
@@ -806,6 +894,24 @@ a:hover {
 /* —— Print —— */
 
 @media print {
+  :root,
+  [data-theme="boris-reference"] {
+    color-scheme: light;
+    --r-canvas: #fff;
+    --r-surface: #fff;
+    --r-surface-2: #f4f4f4;
+    --r-ink: #000;
+    --r-muted: #333;
+    --r-line: #bbb;
+    --r-primary: #000;
+    --r-primary-soft: #eee;
+    --r-accent: #000;
+    --r-accent-soft: #eee;
+    --r-code-bg: #f4f4f4;
+    --r-code-fg: #000;
+    background: #fff;
+  }
+
   body {
     background: #fff;
     color: #000;

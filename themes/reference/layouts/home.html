@@ -7,6 +7,7 @@
   <title>{{title}} · Boris Reference</title>
   <link rel="stylesheet" href="{{asset-url assets/css/reference.css}}">
   <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+  {{head}}
 </head>
 <body data-layout="home">
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -34,6 +35,7 @@
       <article class="prose">
         {{content}}
       </article>
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
     </main>
   </div>
   <footer class="site-footer" role="contentinfo">{{footer}}</footer>

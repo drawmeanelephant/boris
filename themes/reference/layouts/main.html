@@ -7,6 +7,7 @@
   <title>{{title}} · Boris Reference</title>
   <link rel="stylesheet" href="{{asset-url assets/css/reference.css}}">
   <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+  {{head}}
 </head>
 <body data-layout="main">
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -30,6 +31,7 @@
       <article class="prose">
         {{content}}
       </article>
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
     </main>
     <aside class="rail rail--toc" aria-label="On this page">
       <p class="rail__label" id="toc-label">On this page</p>
