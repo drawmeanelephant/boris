@@ -25,7 +25,7 @@
       {{nav}}
     </aside>
     <main id="main-content" class="section-reading" tabindex="-1" data-boris-search-root>
-      {{metadata}}
+      <div class="note-meta"><p class="note-status note-status--{{page-status}}">{{page-status}}</p>{{parent}}{{tags}}</div>
       <article class="prose">
         {{content}}
       </article>
@@ -33,6 +33,8 @@
         <p class="rail__eyebrow" id="children-heading">In this section</p>
         {{children}}
       </section>
+      {{relations}}
+      {{backlinks}}
     </main>
   </div>
   <footer class="theme-footer" role="contentinfo">{{footer}}</footer>

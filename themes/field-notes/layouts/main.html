@@ -27,10 +27,12 @@
       </details>
     </aside>
     <main id="main-content" class="reading-column" tabindex="-1" data-boris-search-root>
-      {{metadata}}
+      <div class="note-meta"><p class="note-status note-status--{{page-status}}">{{page-status}}</p>{{parent}}{{tags}}</div>
       <article class="prose">
         {{content}}
       </article>
+      {{relations}}
+      {{backlinks}}
     </main>
     <aside class="rail rail--toc" aria-label="On this page" data-boris-search-exclude>
       <p class="rail__eyebrow">On this page</p>
