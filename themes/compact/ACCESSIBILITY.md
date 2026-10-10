@@ -15,6 +15,10 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
   `#606c65` (4.97:1 on the soft metadata strip; the previous `#68746d`
   measured 4.42:1). Relation kind tags are 11.61:1 (light) and 8.61:1 (dark).
 - **Not colour alone.** Callouts keep a text title; relation kinds are words.
+  The callout edge colour is a secondary cue: tip `#197149` (6.00:1 on
+  white), note/info `#1d5fa8` (6.45:1), warning `#a94a00` (5.73:1), danger
+  `#b42318` (6.57:1); dark `#8cddb0`, `#8cc4ff` (8.71:1), `#ffd08a`, `#ff9b8f`
+  (7.86:1) on `#1a241e`.
 - **Motion.** The theme has no animation; `prefers-reduced-motion: reduce`
   disables smooth scrolling.
 - **Print.** `@media print` forces black on white even for dark-mode
