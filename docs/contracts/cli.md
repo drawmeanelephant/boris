@@ -202,6 +202,15 @@ catalog themes that fit each one.
   `{{relations}}` and the `{{backlinks}}` derived from them. Its profile's
   `layout_rules` send `id:index` to `themes/archive/layouts/archive.html`;
   every other page uses `main.html`.
+- `dashboard` — a project-status board under `engineering`: trunk `index`
+  (the board table plus the documented mapping `published` = active,
+  `draft` = proposed, `archived` = retired) and three `projects/`
+  satellites, one per `status:` value, with `depends_on` / `supersedes`
+  relations and status-history tables. Each project page shows its status
+  as a visible label (the theme styles `{{metadata}}`'s Status entry from
+  `<body data-status="{{page-status}}">`); the draft project renders but
+  is not advertised. Its profile's `layout_rules` send `id:index` to
+  `themes/engineering/layouts/home.html`.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

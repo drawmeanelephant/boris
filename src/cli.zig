@@ -3036,6 +3036,8 @@ pub fn printInitUsage() void {
         \\            send index to showcase's home.html
         \\  archive   tagged entries joined by relates_to/supersedes relations,
         \\            rendered with relations and backlinks; a hand-kept topics index
+        \\  dashboard project-status board: one project per status: value
+        \\            (published/draft/archived), shown as a visible status label
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.

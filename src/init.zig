@@ -43,6 +43,12 @@
 //!   render `{{relations}}` and `{{backlinks}}`), one `status: archived`
 //!   record, and a hand-kept `topics` index by tag; `layout_rules` send
 //!   `id:index` to `archive.html`.
+//! - `dashboard` — a project-status board under `engineering`: the trunk
+//!   board table and three `projects/` satellites, one per `status:` value
+//!   (`published` = active, `draft` = proposed, `archived` = retired, the
+//!   mapping documented on the board), with `depends_on` / `supersedes`
+//!   relations and status-history tables; `layout_rules` send `id:index`
+//!   to `home.html`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -73,7 +79,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -1684,6 +1690,142 @@ const archive_profile =
     \\
 ;
 
+// --- dashboard --------------------------------------------------------------
+
+const dashboard_index_md =
+    \\---
+    \\title: Harbor Systems Status Board
+    \\---
+    \\
+    \\One page per project, each a satellite of this board. A project's
+    \\`status:` frontmatter is its state: the theme shows it as a label under
+    \\the page title, and Boris uses the same field to decide what it
+    \\advertises.
+    \\
+    \\## Projects
+    \\
+    \\| Project | `status:` | State | Depends on |
+    \\|---|---|---|---|
+    \\| [[projects/tide-gauge-network]] | `published` | Active | — |
+    \\| [[projects/harbor-sensor-pilot]] | `draft` | Proposed | Tide gauge network |
+    \\| [[projects/telemetry-relay]] | `archived` | Retired | — |
+    \\
+    \\## Status vocabulary
+    \\
+    \\Boris has exactly three status values. This board maps them to project
+    \\states:
+    \\
+    \\| `status:` | Project state | What Boris does with the page |
+    \\|---|---|---|
+    \\| `published` | Active: running and supported | Renders and advertises it (search, sitemap, feeds, nav) |
+    \\| `draft` | Proposed: not yet approved | Renders it at its route but does not advertise it |
+    \\| `archived` | Retired: kept for the record | Renders and advertises it like `published`; the label says archived |
+    \\
+    \\There is no "blocked" or "at risk" value. Put that in the project's
+    \\status-history table, not in `status:`.
+    \\
+;
+
+const dashboard_tide_gauge_md =
+    \\---
+    \\title: Tide gauge network
+    \\parent: index
+    \\status: published
+    \\summary: Six harbor tide gauges reporting every five minutes.
+    \\tags: [sensors, operations]
+    \\relations: [supersedes=projects/telemetry-relay]
+    \\---
+    \\
+    \\Six gauges along the harbor wall, each reporting water level every five
+    \\minutes over the cellular uplink that replaced the [[projects/telemetry-relay]].
+    \\
+    \\## Status history
+    \\
+    \\| Date | `status:` | Note |
+    \\|---|---|---|
+    \\| 2025-03-02 | `draft` | Proposed with two pilot gauges |
+    \\| 2025-09-15 | `published` | All six gauges live |
+    \\| 2026-06-01 | `published` | Cellular uplink replaces the radio relay |
+    \\
+    \\## Service
+    \\
+    \\| Gauge | Location | Uptime (90 days) |
+    \\|---|---|---|
+    \\| G1 | North mole | 99.8% |
+    \\| G2 | Ferry slip | 99.5% |
+    \\| G3 | East landing | 98.9% |
+    \\
+;
+
+const dashboard_sensor_pilot_md =
+    \\---
+    \\title: Harbor sensor pilot
+    \\parent: index
+    \\status: draft
+    \\summary: A proposed water-quality pilot on two existing gauges.
+    \\tags: [sensors, proposal]
+    \\relations: [depends_on=projects/tide-gauge-network]
+    \\---
+    \\
+    \\A proposal to add temperature and turbidity sensors to gauges G1 and G2
+    \\of the [[projects/tide-gauge-network]]. Until it is approved the page is
+    \\`status: draft`: it renders here but stays out of search and the sitemap.
+    \\
+    \\## Status history
+    \\
+    \\| Date | `status:` | Note |
+    \\|---|---|---|
+    \\| 2026-09-20 | `draft` | Proposal written; waiting on the harbor board |
+    \\
+    \\To approve it, change `status: draft` to `status: published`.
+    \\
+;
+
+const dashboard_telemetry_relay_md =
+    \\---
+    \\title: Telemetry relay
+    \\parent: index
+    \\status: archived
+    \\summary: The retired radio relay that carried gauge data until 2026.
+    \\tags: [operations]
+    \\---
+    \\
+    \\A VHF radio relay on the harbor office roof that carried gauge readings
+    \\from 2019 until the cellular uplink replaced it. The page is
+    \\`status: archived`: it is still published, and its backlinks name the
+    \\project that superseded it.
+    \\
+    \\## Status history
+    \\
+    \\| Date | `status:` | Note |
+    \\|---|---|---|
+    \\| 2019-04-11 | `published` | Relay commissioned |
+    \\| 2026-06-01 | `archived` | Retired; replaced by the cellular uplink |
+    \\
+;
+
+const dashboard_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Harbor Systems Status Board" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/engineering",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/engineering/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -1902,6 +2044,21 @@ const archive_files = [_]FileToWrite{
     .{ .path = "themes/archive/README.md", .data = archetype_themes.archive_readme },
     .{ .path = "themes/archive/ACCESSIBILITY.md", .data = archetype_themes.archive_accessibility },
     .{ .path = "boris.json", .data = archive_profile },
+};
+
+const dashboard_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = dashboard_index_md },
+    .{ .path = "content/projects/tide-gauge-network.md", .data = dashboard_tide_gauge_md },
+    .{ .path = "content/projects/harbor-sensor-pilot.md", .data = dashboard_sensor_pilot_md },
+    .{ .path = "content/projects/telemetry-relay.md", .data = dashboard_telemetry_relay_md },
+    .{ .path = "themes/engineering/layouts/main.html", .data = archetype_themes.engineering_layout_main },
+    .{ .path = "themes/engineering/layouts/home.html", .data = archetype_themes.engineering_layout_home },
+    .{ .path = "themes/engineering/layouts/section.html", .data = archetype_themes.engineering_layout_section },
+    .{ .path = "themes/engineering/footer.html", .data = archetype_themes.engineering_footer },
+    .{ .path = "themes/engineering/assets/css/engineering.css", .data = archetype_themes.engineering_css },
+    .{ .path = "themes/engineering/README.md", .data = archetype_themes.engineering_readme },
+    .{ .path = "themes/engineering/ACCESSIBILITY.md", .data = archetype_themes.engineering_accessibility },
+    .{ .path = "boris.json", .data = dashboard_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -2204,6 +2361,28 @@ const archive_spec = ArchetypeSpec{
     ,
 };
 
+const dashboard_spec = ArchetypeSpec{
+    .layout_path = "themes/engineering/layouts/main.html",
+    .files = &dashboard_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the status board and the status vocabulary
+    \\  content/projects/                 three projects, one per status (published, draft, archived)
+    \\  themes/engineering/               shipped "engineering" theme — dense boxes and status labels
+    \\  boris.json                        profile (theme: engineering, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json                build the board (each project shows its status label)
+    \\  boris impact projects/tide-gauge-network  what depends on the active project
+    \\  boris check                               graph-health report
+    \\  boris watch --profile boris.json          rebuild on change
+    ,
+    .conventions =
+    \\  status: is the project state: published = active, draft = proposed, archived = retired
+    \\  drafts render at their route but stay out of search, sitemap, feeds, and nav
+    \\  relations: [depends_on=ID, supersedes=ID] cross-reference projects; backlinks derive from them
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -2219,6 +2398,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .newsletter => &newsletter_spec,
         .portfolio => &portfolio_spec,
         .archive => &archive_spec,
+        .dashboard => &dashboard_spec,
     };
 }
 
@@ -2415,7 +2595,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive, dashboard", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -2470,8 +2650,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive", "themes/engineering" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -2714,6 +2894,31 @@ test "archive entries share tags and relations give every entry backlinks or rel
     try std.testing.expect(std.mem.indexOf(u8, archive_profile, "\"selector\": \"id:index\", \"layout\": \"themes/archive/layouts/archive.html\"") != null);
     for ([_][]const u8{ archetype_themes.archive_layout_main, archetype_themes.archive_layout_archive }) |layout| {
         try std.testing.expect(std.mem.indexOf(u8, layout, "{{relations}}{{backlinks}}") != null);
+    }
+}
+
+test "dashboard has one project per status value and documents the mapping" {
+    var seen = [_]bool{ false, false, false };
+    const values = [_][]const u8{ "published", "draft", "archived" };
+    for (dashboard_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/projects/")) continue;
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "## Status history") != null);
+        for (values, 0..) |v, i| {
+            var buf: [32]u8 = undefined;
+            if (std.mem.indexOf(u8, f.data, try std.fmt.bufPrint(&buf, "\nstatus: {s}\n", .{v})) != null) seen[i] = true;
+        }
+    }
+    for (seen) |s| try std.testing.expect(s);
+    // The board names every value and the project state it stands for.
+    for ([_][]const u8{ "| `published` | Active", "| `draft` | Proposed", "| `archived` | Retired" }) |row| {
+        try std.testing.expect(std.mem.indexOf(u8, dashboard_index_md, row) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, dashboard_profile, "\"selector\": \"id:index\", \"layout\": \"themes/engineering/layouts/home.html\"") != null);
+    // Status is legible only because every engineering layout carries it.
+    for ([_][]const u8{ archetype_themes.engineering_layout_main, archetype_themes.engineering_layout_home }) |layout| {
+        try std.testing.expect(std.mem.indexOf(u8, layout, "data-status=\"{{page-status}}\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, layout, "{{metadata}}") != null);
     }
 }
 

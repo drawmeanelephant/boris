@@ -90,3 +90,11 @@ pub const archive_footer = @embedFile("archive/footer.html");
 pub const archive_css = @embedFile("archive/assets/archive.css");
 pub const archive_readme = @embedFile("archive/README.md");
 pub const archive_accessibility = @embedFile("archive/ACCESSIBILITY.md");
+
+pub const engineering_layout_main = @embedFile("engineering/layouts/main.html");
+pub const engineering_layout_home = @embedFile("engineering/layouts/home.html");
+pub const engineering_layout_section = @embedFile("engineering/layouts/section.html");
+pub const engineering_footer = @embedFile("engineering/footer.html");
+pub const engineering_css = @embedFile("engineering/assets/css/engineering.css");
+pub const engineering_readme = @embedFile("engineering/README.md");
+pub const engineering_accessibility = @embedFile("engineering/ACCESSIBILITY.md");

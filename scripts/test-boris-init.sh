@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive dashboard)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -314,6 +314,23 @@ for e in 2020-harbor-lights 2023-pier-closing 2019-ferry-timetable 2021-ferry-ti
     grep -q "href=\"entries/$e.html\"" "$A/topics.html" || fail "archive topics index does not link $e"
 done
 pass "archive: archive layout on index; relations + backlinks on entries; status archived; topics index by tag"
+
+note "dashboard: every project page shows its status, and the board maps each value"
+D="$OUT/arch-dashboard/dist"
+grep -q 'data-layout="home"' "$D/index.html" || fail "dashboard board does not use the engineering home layout"
+for pair in tide-gauge-network:published harbor-sensor-pilot:draft telemetry-relay:archived; do
+    page="${pair%%:*}" status="${pair#*:}"
+    grep -q 'data-layout="main"' "$D/projects/$page.html" || fail "dashboard $page is not on the engineering main layout"
+    grep -q "<body data-status=\"$status\">" "$D/projects/$page.html" || fail "dashboard $page body does not carry status $status"
+    # The theme styles the metadata's first entry as the status label.
+    sed -n '/<dl class="page-metadata">/,/<\/dl>/p' "$D/projects/$page.html" | sed -n 2p \
+        | grep -qF "<div><dt>Status</dt><dd>$status</dd></div>" || fail "dashboard $page shows no visible $status label"
+    grep -q "href=\"projects/$page.html\"" "$D/index.html" || fail "dashboard board does not link $page"
+done
+grep -q 'data-relation-kind="depends_on"' "$D/projects/tide-gauge-network.html" \
+    || fail "dashboard active project has no depends_on backlink"
+grep -q 'harbor-sensor-pilot' "$D/_boris/search/search-index.json" && fail "dashboard draft project leaked into search"
+pass "dashboard: home layout board; published/draft/archived labels on project pages; drafts unadvertised"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done
