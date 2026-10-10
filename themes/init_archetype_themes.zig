@@ -9,6 +9,12 @@
 //! (wired in `build.zig`). Add a starter-facing theme's files here when a
 //! new archetype adopts it.
 
+pub const boris_layout_main = @embedFile("boris/layouts/main.html");
+pub const boris_footer = @embedFile("boris/footer.html");
+pub const boris_css = @embedFile("boris/assets/css/boris.css");
+pub const boris_readme = @embedFile("boris/README.md");
+pub const boris_accessibility = @embedFile("boris/ACCESSIBILITY.md");
+
 pub const ledger_layout_main = @embedFile("ledger/layouts/main.html");
 pub const ledger_footer = @embedFile("ledger/footer.html");
 pub const ledger_css = @embedFile("ledger/assets/ledger.css");

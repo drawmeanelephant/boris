@@ -1,11 +1,19 @@
 //! `boris init`: materialize a deterministic starter site and prove it compiles.
 //!
 //! `boris init [DIR] [--type NAME]` writes a fixed starter tree selected by
-//! `--type` (default `docs`, byte-identical to the historical starter):
+//! `--type` (default `docs`):
 //!
 //! - `docs`     — Markdown documentation tree: trunk/satellite graph, wiki
-//!   links, a semantic relation, a starter theme with a wired browser
-//!   search client, and both publication profiles.
+//!   links, a semantic relation, the catalog `boris` theme (whose layout
+//!   ships the browser search client), and both publication profiles.
+//!   Until #1063 it embedded a private two-file starter theme from
+//!   `src/init_templates/`. That theme had no `{{relations}}`,
+//!   `{{backlinks}}`, `{{children}}`, or `{{metadata}}`, so the starter's
+//!   own index promised a semantic relation its theme could not show, and
+//!   it drifted from every catalog `boris` fix (slot adoption, the a11y
+//!   floor, the #1049 visual pass, the search-title marker). `docs` now
+//!   embeds `themes/boris` like every sibling embeds its theme. The cost:
+//!   it no longer writes the historical starter bytes.
 //! - `garden`  — a flat-ish digital garden: dense `[[wiki-links]]`,
 //!   semantic relations, `{{include}}` composition from `content/includes/`,
 //!   and a registered `<Aside>` component, under the shipped `ledger` theme.
@@ -86,8 +94,7 @@ const Io = std.Io;
 
 const ExitCode = diagnostic.ExitCode;
 
-/// Starter archetypes accepted by `--type`. `docs` is the default and
-/// writes the same bytes `init` has always written.
+/// Starter archetypes accepted by `--type`. `docs` is the default.
 pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard, @"photo-gallery" };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
@@ -100,10 +107,7 @@ pub const archetype_names: []const u8 = blk: {
     break :blk names;
 };
 
-const starter_layout = @embedFile("init_templates/layouts/main.html");
-const starter_css = @embedFile("init_templates/assets/css/boris.css");
-
-// --- docs (default; the historical starter, unchanged) ----------------------
+// --- docs (default) ---------------------------------------------------------
 
 const index_md =
     \\---
@@ -132,10 +136,15 @@ const index_md =
     \\  index.md                    trunk page (this one)
     \\  guides/getting-started.md   satellite, parent: index
     \\  guides/publishing.md        satellite, parent: index
-    \\themes/boris/                 starter theme (closed layout slots, search UI)
+    \\themes/boris/                 the catalog boris theme (graph slots, search UI)
     \\boris.json                    publication profile (GitHub Pages)
     \\standard-site.json            Atmosphere profile (edit the fake DID/URL)
     \\```
+    \\
+    \\The theme renders the graph, not just the prose: tags in the page
+    \\header, this page's satellites under "In this section", and the
+    \\relation at the foot of [[guides/publishing]] ("Related") and of
+    \\[[guides/getting-started]] ("Linked from").
     \\
     \\Search is wired up: the compiler publishes
     \\`dist/_boris/search/search-index.json` and this theme ships the
@@ -228,7 +237,9 @@ const publishing_md =
     \\retains a separate evidence artifact. Atmosphere publication uses
     \\`standard-site.json`: replace the obviously-fake DID and URL
     \\before `standard-site publish`. This starter page is related to
-    \\[[guides/getting-started]] so the semantic graph has an edge to inspect.
+    \\[[guides/getting-started]] so the semantic graph has an edge to inspect:
+    \\the theme lists it below this page under "Related", and Getting
+    \\Started lists this page under "Linked from".
     \\
 ;
 
@@ -2016,8 +2027,11 @@ const docs_files = [_]FileToWrite{
     .{ .path = "content/index.md", .data = index_md },
     .{ .path = "content/guides/getting-started.md", .data = getting_started_md },
     .{ .path = "content/guides/publishing.md", .data = publishing_md },
-    .{ .path = "themes/boris/layouts/main.html", .data = starter_layout },
-    .{ .path = "themes/boris/assets/css/boris.css", .data = starter_css },
+    .{ .path = "themes/boris/layouts/main.html", .data = archetype_themes.boris_layout_main },
+    .{ .path = "themes/boris/footer.html", .data = archetype_themes.boris_footer },
+    .{ .path = "themes/boris/assets/css/boris.css", .data = archetype_themes.boris_css },
+    .{ .path = "themes/boris/README.md", .data = archetype_themes.boris_readme },
+    .{ .path = "themes/boris/ACCESSIBILITY.md", .data = archetype_themes.boris_accessibility },
     .{ .path = "boris.json", .data = starter_profile },
     .{ .path = "standard-site.json", .data = standard_site_profile },
 };
@@ -2250,7 +2264,7 @@ const docs_spec = ArchetypeSpec{
     \\  content/index.md                  trunk page
     \\  content/guides/getting-started.md satellite page
     \\  content/guides/publishing.md      satellite page with a relation
-    \\  themes/boris/                     starter theme (closed layout slots, search UI)
+    \\  themes/boris/                     the catalog "boris" theme: relations, backlinks, search UI
     \\  boris.json                        publication profile (GitHub Pages)
     \\  standard-site.json                Atmosphere profile (replace the fake DID/URL)
     ,
@@ -2265,6 +2279,7 @@ const docs_spec = ArchetypeSpec{
     ,
     .conventions =
     \\  search works out of the box: the theme ships the client for dist/_boris/search/search-index.json
+    \\  themes/boris/ is your copy: its layout's brand line and footer.html still say "Boris"
     \\  shared fragments live under content/includes/ and never compile as pages
     \\  page images live in <stem>.assets/ beside the page that owns them
     ,
@@ -2819,22 +2834,20 @@ test "archetype names cover the CLI surface" {
     }
 }
 
-test "starter layout marks the search extraction root" {
-    const marker = "<main class=\"site-body\" data-boris-search-root>";
-    var count: usize = 0;
-    var idx: usize = 0;
-    while (std.mem.indexOfPos(u8, starter_layout, idx, marker)) |at| {
-        count += 1;
-        idx = at + marker.len;
-    }
-    try std.testing.expectEqual(@as(usize, 1), count);
+test "docs starter layout marks the search extraction root" {
+    const layout = archetype_themes.boris_layout_main;
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, layout, "data-boris-search-root"));
+    try std.testing.expect(std.mem.indexOf(u8, layout, "<main id=\"main-content\" tabindex=\"-1\" data-boris-search-root>") != null);
 }
 
-test "starter layout carries the search client seams" {
+test "docs starter layout carries the search client seams and graph slots" {
     // These strings are the browser/compiler seam from the rendered-search
-    // contract and the hooks the embedded client queries. If the starter and
-    // the repo theme's search UI ever drift apart, this test names what went
-    // missing instead of leaving a starter site with silent search.
+    // contract and the hooks the embedded client queries. The docs starter
+    // advertises search ("Press `/` on any page") and a visible relation, so
+    // if the catalog `boris` layout ever drops either, this test names what
+    // went missing instead of shipping a starter whose prose lies.
+    const starter_layout = archetype_themes.boris_layout_main;
+    const starter_css = archetype_themes.boris_css;
     const layout_markers = [_][]const u8{
         "data-boris-search-ui",
         "data-boris-search-form",
@@ -2845,6 +2858,11 @@ test "starter layout carries the search client seams" {
         // The Standard.site contract requires the init reference layout to
         // include the closed {{head}} slot.
         "{{head}}",
+        "event.key === \"/\"",
+        "{{metadata}}",
+        "{{children}}",
+        "{{relations}}",
+        "{{backlinks}}",
     };
     for (layout_markers) |marker| {
         try std.testing.expect(std.mem.indexOf(u8, starter_layout, marker) != null);
@@ -3284,7 +3302,8 @@ test "materialized starter compiles and the probe cleans up after itself" {
     try std.testing.expect(skip == .skipped);
 
     // One real compile to lock the rendered seams: the search index artifact
-    // exists and a rendered page carries the search UI from the starter theme.
+    // exists, a rendered page carries the search UI from the starter theme,
+    // and the starter's one relation is visible on both of its ends.
     const content_root = try std.fmt.allocPrint(gpa, "{s}/content", .{root});
     defer gpa.free(content_root);
     const layout_path = try std.fmt.allocPrint(gpa, "{s}/themes/boris/layouts/main.html", .{root});
@@ -3309,6 +3328,22 @@ test "materialized starter compiles and the probe cleans up after itself" {
     defer gpa.free(index_html);
     try std.testing.expect(std.mem.indexOf(u8, index_html, "data-boris-search-ui") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_html, "_boris/search/search-index.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "<nav class=\"page-children\"") != null);
+    const ends = [_][2][]const u8{
+        .{ "guides/publishing.html", "<section class=\"semantic-relations\"" },
+        .{ "guides/getting-started.html", "<section class=\"semantic-backlinks\"" },
+    };
+    for (ends) |end| {
+        const html = blk: {
+            var file = try dist_dir.openFile(io, end[0], .{});
+            defer file.close(io);
+            var reader = file.reader(io, &.{});
+            break :blk try reader.interface.allocRemaining(gpa, .unlimited);
+        };
+        defer gpa.free(html);
+        const at = std.mem.indexOf(u8, html, end[1]) orelse return error.TestUnexpectedResult;
+        try std.testing.expect(std.mem.indexOfPos(u8, html, at, "data-relation-kind=\"relates_to\"") != null);
+    }
 }
 
 test "every archetype materializes and compiles through its declared adapter" {
