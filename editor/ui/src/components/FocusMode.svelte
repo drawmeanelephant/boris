@@ -247,22 +247,85 @@
 
   $effect(syncAssist);
 
+  // --- Chrome panels ----------------------------------------------------------
+  // Typography and Writing aids keep their native <details> disclosure, but
+  // the panel overlays the writing surface instead of reflowing the chrome.
+  // The two act as one light-dismiss menu: opening one closes the other, Esc
+  // or a press outside closes the open one, and an open panel slides left
+  // just far enough to stay inside the chrome's content box.
+  let typePanel = $state() as HTMLDetailsElement | undefined;
+  let aidsPanel = $state() as HTMLDetailsElement | undefined;
+  const panels = () => [typePanel, aidsPanel].filter((panel): panel is HTMLDetailsElement => panel !== undefined);
+
+  function showPanel(details: HTMLDetailsElement) {
+    for (const panel of panels()) if (panel !== details) panel.open = false;
+    placePanel(details);
+  }
+
+  // Opening runs synchronously on the summary's activation (click, Enter, or
+  // Space), so a panel never paints unplaced or beside the other one; the
+  // toggle handler covers any other opener, such as find-in-page.
+  function openPanel(event: MouseEvent) {
+    const details = (event.currentTarget as HTMLElement).parentElement as HTMLDetailsElement;
+    if (details.open) return;
+    event.preventDefault();
+    details.open = true;
+    showPanel(details);
+  }
+
+  function handlePanelToggle(event: Event) {
+    const details = event.currentTarget as HTMLDetailsElement;
+    if (details.open) showPanel(details);
+  }
+
+  function placePanel(details: HTMLDetailsElement) {
+    const panel = details.querySelector('.focus-type-grid');
+    const chrome = details.closest('.focus-chrome');
+    if (!panel || !chrome) return;
+    details.style.setProperty('--focus-panel-shift', '0px');
+    const box = chrome.getBoundingClientRect();
+    const style = getComputedStyle(chrome);
+    const min = box.left + parseFloat(style.paddingLeft);
+    const max = box.right - parseFloat(style.paddingRight);
+    const rect = panel.getBoundingClientRect();
+    details.style.setProperty('--focus-panel-shift', `${Math.max(min - rect.left, Math.min(0, max - rect.right))}px`);
+  }
+
+  function handleWindowPointerdown(event: PointerEvent) {
+    const target = event.target instanceof Node ? event.target : null;
+    for (const panel of panels()) if (panel.open && !panel.contains(target)) panel.open = false;
+  }
+
+  function handleWindowResize() {
+    for (const panel of panels()) if (panel.open) placePanel(panel);
+  }
+
   function handleWindowKeydown(event: KeyboardEvent) {
     if (!focusMode.open) return;
     if (document.querySelector('dialog[open]')) return;
     if (event.key === 'Escape') {
       event.preventDefault();
+      // An open panel takes the first Esc and hands focus back to its
+      // summary; only an Esc with no panel open leaves focus mode.
+      const open = panels().find(panel => panel.open);
+      if (open) {
+        open.open = false;
+        open.querySelector('summary')?.focus();
+        return;
+      }
       onExit();
       return;
     }
     // Plain arrows outside any interactive control still move the caret, so
     // a stray click on the overlay never traps keyboard navigation. Arrows on
-    // buttons/radios keep their native behavior (radio groups use them).
+    // buttons/radios, or anywhere in an open panel, keep their native
+    // behavior (radio groups use them).
     const active = document.activeElement;
     const interactive = active instanceof HTMLElement
       && (['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)
         || active.isContentEditable
-        || active.getAttribute('role') === 'option');
+        || active.getAttribute('role') === 'option'
+        || panels().some(panel => panel.open && panel.contains(active)));
     const area = textarea;
     if (
       showEditor() &&
@@ -286,7 +349,7 @@
   }
 </script>
 
-<svelte:window onkeydown={handleWindowKeydown} />
+<svelte:window onkeydown={handleWindowKeydown} onpointerdown={handleWindowPointerdown} onresize={handleWindowResize} />
 
 <div
   class="focus-overlay"
@@ -307,8 +370,8 @@
       <label><input type="radio" name="focus-layout" value="split" checked={focusMode.layout === 'split'} onchange={() => setFocusLayout('split')} /> Split</label>
       <label><input type="radio" name="focus-layout" value="preview" checked={focusMode.layout === 'preview'} onchange={() => setFocusLayout('preview')} /> Preview</label>
     </fieldset>
-    <details class="focus-type">
-      <summary class="chrome-button">Typography</summary>
+    <details class="focus-type" bind:this={typePanel} ontoggle={handlePanelToggle}>
+      <summary class="chrome-button" onclick={openPanel}>Typography</summary>
       <div class="focus-type-grid">
         <fieldset class="focus-type-group">
           <legend>Text size</legend>
@@ -330,8 +393,8 @@
         </fieldset>
       </div>
     </details>
-    <details class="focus-type focus-aids">
-      <summary class="chrome-button">Writing aids</summary>
+    <details class="focus-type focus-aids" bind:this={aidsPanel} ontoggle={handlePanelToggle}>
+      <summary class="chrome-button" onclick={openPanel}>Writing aids</summary>
       <div class="focus-type-grid focus-aids-grid">
         <fieldset class="focus-type-group">
           <legend>Typewriter scrolling</legend>

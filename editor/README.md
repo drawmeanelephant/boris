@@ -655,7 +655,8 @@ The editor's full-page writing experience. The **Focus** button in the Source
 pane header (or `Enter focus writing mode` in the Ctrl+K command palette)
 expands the open buffer into a full-screen, word-processor style overlay;
 **Esc** (or `Exit focus`) returns to the workspace, restoring focus to the
-button that opened it.
+button that opened it. An open Typography or Writing aids panel takes the
+first **Esc** instead (see **Chrome panels** below).
 
 - **One buffer, one truth.** The overlay binds the same buffer state as the
   Source pane: edits made in focus mode are the workspace's edits, undo/redo
@@ -683,6 +684,14 @@ button that opened it.
   clicks, and it lifts entirely when the caret's paragraph fills the
   view. Both aids pause by construction in Preview layout (no writing
   surface to assist) and honor the reduced-motion posture.
+- **Chrome panels.** Typography and Writing aids stay native `<details>`
+  disclosures, but an open panel hangs under its summary as an overlay
+  (`--layer-focus-popover`) instead of expanding inside the header, so opening
+  one never reflows the chrome or resizes the writing surface (#1066). The two
+  act as one light-dismiss menu: opening one closes the other, a press outside
+  the open panel closes it, and **Esc** closes it and returns focus to its
+  summary — only an **Esc** with no panel open exits focus mode. A panel near
+  the right edge slides left just far enough to stay inside the chrome.
 - **The reading aid is a reading aid.** Split/Preview render a bounded,
   dependency-free subset of the authoring grammar — ATX headings,
   paragraphs, emphasis, inline code, fenced code blocks, block quotes,
@@ -782,12 +791,15 @@ lives in one `--scale-*` list, and nothing else keeps a copy.
   and `--radius-pill`: three corner steps plus the pill, ascending.
 - **Stacking (`--scale-layer`).** One ladder for the whole editor,
   `--layer-focus-mirror` < `--layer-focus-editor` < `--layer-focus-zen` <
-  `--layer-nav` < `--layer-skip-link` < `--layer-overlay`. The first three order
-  elements inside the focus editor's own stacking context — the measuring
-  mirror, the text above it, the dimming veil over both; the last three are
-  global chrome: the sticky section nav, the skip link, and the full-viewport
-  focus overlay. `z-index` in `styles.css` must name a layer, because a bare
-  number is how two layers silently swap places.
+  `--layer-focus-popover` < `--layer-nav` < `--layer-skip-link` <
+  `--layer-overlay`. The first three order elements inside the focus editor's
+  own stacking context — the measuring mirror, the text above it, the dimming
+  veil over both; `--layer-focus-popover` lifts the Focus chrome's Typography
+  and Writing aids panels over all three, so an open panel overlays the writing
+  surface instead of reflowing the chrome (#1066); the last three are global
+  chrome: the sticky section nav, the skip link, and the full-viewport focus
+  overlay. `z-index` in `styles.css` must name a layer, because a bare number
+  is how two layers silently swap places.
 
 Elevation tiers (`--shadow-1`, `--shadow-2`, `--shadow-3`) are deliberately not
 a declared scale: a shadow list has no scalar order for a list to protect.
