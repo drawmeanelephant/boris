@@ -162,6 +162,12 @@ catalog themes that fit each one.
   satellite, under `service`. Its profile's `layout_rules` send `id:index`
   to `themes/service/layouts/home.html`; other pages use the theme's
   `main.html`.
+- `wiki` — a three-level reference tree (trunk `index` → two section hubs
+  under `wiki/` → four leaf entries) with cross-entry wiki links and one
+  semantic relation, under `reference`. Its profile's `layout_rules` send
+  `id:index` to `home.html` and `glob:wiki/*` (the hubs only) to
+  `section.html`; entries use `main.html`, whose `{{breadcrumb}}` shows
+  the full chain.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

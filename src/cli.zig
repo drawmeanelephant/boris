@@ -3023,6 +3023,8 @@ pub fn printInitUsage() void {
         \\            profile declares input_format: textile
         \\  landing   one trunk page built from {{{{include}}}} sections, plus
         \\            one satellite; layout_rules send index to home.html
+        \\  wiki      three-level reference tree (index, hubs, entries) with
+        \\            breadcrumbs, per-page contents, and cross-entry links
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.

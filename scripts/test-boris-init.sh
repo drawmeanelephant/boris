@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -189,6 +189,19 @@ grep -q 'Do I need an appointment' "$L/index.html" || fail "landing index did no
 grep -q 'Open Tuesday to Saturday' "$L/index.html" || fail "landing index did not splice includes/visit.md"
 [[ ! -e "$L/includes" ]] || fail "landing include fragments compiled as pages"
 pass "landing: home layout on index, main on about, three fragments spliced"
+
+note "wiki: breadcrumbs walk the three-level chain; hubs and index use named layouts"
+W="$OUT/arch-wiki/dist"
+grep -q 'home-shell' "$W/index.html" || fail "wiki index does not use the reference home layout"
+grep -q 'section-children' "$W/wiki/tools.html" || fail "wiki hub does not use the reference section layout"
+grep -q 'section-children' "$W/wiki/tools/chisels.html" && fail "wiki entry should fall back to main.html"
+crumbs="$(sed -n '/<nav class="breadcrumb"/,/<\/nav>/p' "$W/wiki/tools/chisels.html")"
+for crumb in '>Workshop Wiki</a>' '>Tools</a>' 'aria-current="page">Chisels<'; do
+    grep -qF "$crumb" <<<"$crumbs" || fail "wiki entry breadcrumb is missing $crumb"
+done
+grep -q 'href="../techniques/sharpening.html"' "$W/wiki/tools/chisels.html" \
+    || fail "wiki cross-entry link did not resolve"
+pass "wiki: index → hub → entry breadcrumb, home/section/main layouts, cross-entry links"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done

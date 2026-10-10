@@ -44,3 +44,11 @@ pub const service_layout_section = @embedFile("service/layouts/section.html");
 pub const service_footer = @embedFile("service/footer.html");
 pub const service_css = @embedFile("service/assets/css/service.css");
 pub const service_readme = @embedFile("service/README.md");
+
+pub const reference_layout_main = @embedFile("reference/layouts/main.html");
+pub const reference_layout_home = @embedFile("reference/layouts/home.html");
+pub const reference_layout_section = @embedFile("reference/layouts/section.html");
+pub const reference_footer = @embedFile("reference/footer.html");
+pub const reference_css = @embedFile("reference/assets/css/reference.css");
+pub const reference_mark_svg = @embedFile("reference/assets/img/mark.svg");
+pub const reference_readme = @embedFile("reference/README.md");

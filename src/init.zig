@@ -19,6 +19,10 @@
 //! - `landing` — a single-Trunk page composed from `{{include}}` section
 //!   fragments, plus one satellite, under `service`; the profile's
 //!   `layout_rules` send `id:index` to the theme's `home.html`.
+//! - `wiki`    — a three-level reference tree (`index` → section hubs →
+//!   leaf entries) with cross-entry wiki links under `reference`;
+//!   `layout_rules` send `id:index` to `home.html` and `glob:wiki/*` hubs
+//!   to `section.html`, so `{{breadcrumb}}` and `{{toc}}` do real work.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -49,7 +53,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -800,6 +804,199 @@ const landing_profile =
     \\
 ;
 
+// --- wiki -------------------------------------------------------------------
+
+const wiki_index_md =
+    \\---
+    \\title: Workshop Wiki
+    \\tags: [wiki]
+    \\---
+    \\
+    \\# Workshop Wiki
+    \\
+    \\A reference wiki three levels deep: this trunk page, two section hubs,
+    \\and leaf entries under each hub. Every entry's breadcrumb walks the whole
+    \\chain, and every `[[link]]` between entries is a validated graph edge.
+    \\
+    \\## Sections
+    \\
+    \\- [[wiki/tools]] — what is on the bench.
+    \\- [[wiki/techniques]] — what you do with it.
+    \\
+    \\## Start anywhere
+    \\
+    \\[[wiki/techniques/sharpening]] is the entry most others point at.
+    \\
+;
+
+const wiki_tools_md =
+    \\---
+    \\title: Tools
+    \\parent: index
+    \\tags: [wiki, tools]
+    \\---
+    \\
+    \\# Tools
+    \\
+    \\A hub page: it declares `parent: index`, and every tool entry declares
+    \\`parent: wiki/tools`. The profile sends hubs to the theme's
+    \\`section.html` layout, whose `{{children}}` slot lists the entries
+    \\without a hand-kept index.
+    \\
+    \\- [[wiki/tools/chisels]] — paring and chopping.
+    \\- [[wiki/tools/hand-planes]] — flattening and smoothing.
+    \\
+;
+
+const wiki_techniques_md =
+    \\---
+    \\title: Techniques
+    \\parent: index
+    \\tags: [wiki, techniques]
+    \\---
+    \\
+    \\# Techniques
+    \\
+    \\The second hub. Entries here link sideways into [[wiki/tools]], so the
+    \\graph is a web across sections, not just a tree.
+    \\
+    \\- [[wiki/techniques/sharpening]] — the skill every tool depends on.
+    \\- [[wiki/techniques/dovetails]] — the joint everyone wants to cut.
+    \\
+;
+
+const wiki_chisels_md =
+    \\---
+    \\title: Chisels
+    \\parent: wiki/tools
+    \\tags: [tools]
+    \\---
+    \\
+    \\# Chisels
+    \\
+    \\A bench chisel pares; a mortise chisel levers. Both only work sharp —
+    \\see [[wiki/techniques/sharpening]].
+    \\
+    \\## Bench chisels
+    \\
+    \\Bevel-edged, 6–25 mm, for paring to a line and for cleaning out the
+    \\waste in [[wiki/techniques/dovetails]].
+    \\
+    \\## Mortise chisels
+    \\
+    \\Thick and square-sided, struck with a mallet, levered against the
+    \\mortise walls.
+    \\
+    \\## Care
+    \\
+    \\Keep the backs flat and the edges covered in the tool roll.
+    \\
+;
+
+const wiki_hand_planes_md =
+    \\---
+    \\title: Hand Planes
+    \\parent: wiki/tools
+    \\tags: [tools]
+    \\---
+    \\
+    \\# Hand Planes
+    \\
+    \\A plane is a chisel held at a fixed angle in a body. The iron is sharpened
+    \\exactly like a chisel: [[wiki/techniques/sharpening]].
+    \\
+    \\## Jack plane
+    \\
+    \\The first plane: removes stock fast and flattens rough boards.
+    \\
+    \\## Smoothing plane
+    \\
+    \\Takes the last gossamer shavings before finish.
+    \\
+    \\## Setting the iron
+    \\
+    \\Advance the iron until it just bites, then take test shavings on scrap.
+    \\
+;
+
+const wiki_sharpening_md =
+    \\---
+    \\title: Sharpening
+    \\parent: wiki/techniques
+    \\tags: [techniques]
+    \\relations: [relates_to=wiki/tools/chisels]
+    \\---
+    \\
+    \\# Sharpening
+    \\
+    \\Every edge tool in [[wiki/tools]] dulls. Sharpening is three steps, and
+    \\the same for [[wiki/tools/chisels]] and [[wiki/tools/hand-planes]].
+    \\
+    \\## Grind
+    \\
+    \\Restore the primary bevel on a coarse stone only when the edge is chipped.
+    \\
+    \\## Hone
+    \\
+    \\Raise a burr with a fine stone at the secondary bevel angle.
+    \\
+    \\## Strop
+    \\
+    \\Remove the burr on leather. The `relations:` frontmatter on this page
+    \\records a typed `relates_to` edge to [[wiki/tools/chisels]] as well.
+    \\
+;
+
+const wiki_dovetails_md =
+    \\---
+    \\title: Dovetails
+    \\parent: wiki/techniques
+    \\tags: [techniques, joinery]
+    \\---
+    \\
+    \\# Dovetails
+    \\
+    \\The interlocking corner joint. Saw the tails, mark the pins from them,
+    \\then pare to the line with sharp [[wiki/tools/chisels]].
+    \\
+    \\## Layout
+    \\
+    \\Mark the baseline with a gauge and the slopes with a bevel.
+    \\
+    \\## Sawing
+    \\
+    \\Saw on the waste side of every line.
+    \\
+    \\## Fitting
+    \\
+    \\Pare, test, and pare again. A dull edge crushes fibres, so revisit
+    \\[[wiki/techniques/sharpening]] before the final fit.
+    \\
+;
+
+const wiki_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Workshop Wiki" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/reference",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/reference/layouts/home.html" },
+    \\        { "selector": "glob:wiki/*", "layout": "themes/reference/layouts/section.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -908,6 +1105,24 @@ const landing_files = [_]FileToWrite{
     .{ .path = "themes/service/assets/css/service.css", .data = archetype_themes.service_css },
     .{ .path = "themes/service/README.md", .data = archetype_themes.service_readme },
     .{ .path = "boris.json", .data = landing_profile },
+};
+
+const wiki_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = wiki_index_md },
+    .{ .path = "content/wiki/tools.md", .data = wiki_tools_md },
+    .{ .path = "content/wiki/techniques.md", .data = wiki_techniques_md },
+    .{ .path = "content/wiki/tools/chisels.md", .data = wiki_chisels_md },
+    .{ .path = "content/wiki/tools/hand-planes.md", .data = wiki_hand_planes_md },
+    .{ .path = "content/wiki/techniques/sharpening.md", .data = wiki_sharpening_md },
+    .{ .path = "content/wiki/techniques/dovetails.md", .data = wiki_dovetails_md },
+    .{ .path = "themes/reference/layouts/main.html", .data = archetype_themes.reference_layout_main },
+    .{ .path = "themes/reference/layouts/home.html", .data = archetype_themes.reference_layout_home },
+    .{ .path = "themes/reference/layouts/section.html", .data = archetype_themes.reference_layout_section },
+    .{ .path = "themes/reference/footer.html", .data = archetype_themes.reference_footer },
+    .{ .path = "themes/reference/assets/css/reference.css", .data = archetype_themes.reference_css },
+    .{ .path = "themes/reference/assets/img/mark.svg", .data = archetype_themes.reference_mark_svg },
+    .{ .path = "themes/reference/README.md", .data = archetype_themes.reference_readme },
+    .{ .path = "boris.json", .data = wiki_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -1054,6 +1269,30 @@ const landing_spec = ArchetypeSpec{
     ,
 };
 
+const wiki_spec = ArchetypeSpec{
+    .layout_path = "themes/reference/layouts/main.html",
+    .files = &wiki_files,
+    .tree_report =
+    \\  content/index.md                  trunk page
+    \\  content/wiki/tools.md             section hub (parent: index)
+    \\  content/wiki/techniques.md        section hub (parent: index)
+    \\  content/wiki/<hub>/               four leaf entries, two per hub
+    \\  themes/reference/                 shipped "reference" theme — calm documentation
+    \\  boris.json                        profile (theme: reference, layout_rules for index and hubs)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json                 build the wiki (index → home, hubs → section)
+    \\  boris check                                graph-health report — try breaking a link
+    \\  boris impact wiki/techniques/sharpening    what depends on the most-linked entry
+    \\  boris watch --profile boris.json           rebuild on change
+    ,
+    .conventions =
+    \\  parent: is the chain — an entry's breadcrumb walks index → hub → entry
+    \\  glob:wiki/* matches exactly two segments, so hubs get section.html and entries keep main.html
+    \\  two globs with the same literal-segment count would tie; ties are usage errors, not order
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -1062,6 +1301,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .blog => &blog_spec,
         .textile => &textile_spec,
         .landing => &landing_spec,
+        .wiki => &wiki_spec,
     };
 }
 
@@ -1258,7 +1498,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -1313,8 +1553,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -1394,6 +1634,30 @@ test "landing is one trunk page composed from include fragments" {
     try std.testing.expectEqual(@as(usize, 1), trunks);
     try std.testing.expectEqual(@as(usize, 3), std.mem.count(u8, landing_index_md, "{{include includes/"));
     try std.testing.expect(std.mem.indexOf(u8, landing_profile, "\"selector\": \"id:index\", \"layout\": \"themes/service/layouts/home.html\"") != null);
+}
+
+test "wiki entries sit three levels deep under their hub" {
+    var entries: usize = 0;
+    for (wiki_spec.files) |f| {
+        const prefix = "content/wiki/";
+        if (!std.mem.startsWith(u8, f.path, prefix)) continue;
+        const rest = f.path[prefix.len..];
+        if (std.mem.indexOfScalar(u8, rest, '/')) |slash| {
+            // content/wiki/<hub>/<entry>.md declares `parent: wiki/<hub>`.
+            var buf: [64]u8 = undefined;
+            const want = try std.fmt.bufPrint(&buf, "\nparent: wiki/{s}\n", .{rest[0..slash]});
+            try std.testing.expect(std.mem.indexOf(u8, f.data, want) != null);
+            try std.testing.expect(std.mem.indexOf(u8, f.data, "\n## ") != null);
+            entries += 1;
+        } else {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 4), entries);
+    // One glob rule only: a second glob with the same literal-segment count
+    // would be a selector tie (templating-and-themes.md §4.2).
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, wiki_profile, "\"glob:"));
+    try std.testing.expect(std.mem.indexOf(u8, wiki_sharpening_md, "relations: [relates_to=wiki/tools/chisels]") != null);
 }
 
 test "garden demonstrates include composition, components, and dense links" {
