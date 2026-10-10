@@ -3286,10 +3286,16 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
     files: [{ path: 'boris.json' }, { path: 'content/guides/start.md' }]
   });
   await expect(await expandConnection(page)).toContainText('Connected to boris-editor');
-  const holdOpenMs = 300;
+  // The routes stay parked on test-owned promises so the in-flight copy is
+  // observable for as long as the assertions need and the resolved copy only
+  // races a release the test issues itself — not a fixed clock (#1069).
+  let releaseOpen!: () => void;
+  let releaseSave!: () => void;
+  const holdOpen = new Promise<void>(resolve => { releaseOpen = resolve; });
+  const holdSave = new Promise<void>(resolve => { releaseSave = resolve; });
   await page.route('**/api/files/open', async route => {
     const { path } = route.request().postDataJSON() as { path: string };
-    await new Promise(resolve => setTimeout(resolve, holdOpenMs));
+    await holdOpen;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -3300,7 +3306,7 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
   });
   await page.route('**/api/files/save', async route => {
     const body = route.request().postDataJSON() as { path: string; content: string };
-    await new Promise(resolve => setTimeout(resolve, holdOpenMs));
+    await holdSave;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -3312,12 +3318,14 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
   const opening = page.getByRole('button', { name: 'content/guides/start.md', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opening content/guides/start.md');
   await opening;
+  releaseOpen();
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opened content/guides/start.md.');
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('s)');
   await page.getByRole('textbox', { name: 'Source for content/guides/start.md' }).fill('# Wait\n');
   const saving = page.getByRole('button', { name: 'Save file', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saving content/guides/start.md');
   await saving;
+  releaseSave();
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/guides/start.md.');
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('s)');
 });
