@@ -445,8 +445,11 @@ and its preview origin terminates with the editor process.
 The UI reports idle, running, success, failed, and stale distinctly. If an
 existing `dist/index.html` is present at startup, it remains `stale` and the
 banner says that the output is from an earlier build; use **Rebuild preview**
-to refresh it. Boris's staged output commit preserves the last valid `dist/`
-tree after a failed rebuild; the iframe generation advances only on success.
+to refresh it. That startup `stale` reads as a warning; a `stale` that the host
+returns with a non-zero exit code (a failed rebuild that kept the last valid
+tree) reads as a failure, because it is one. Boris's staged output commit
+preserves the last valid `dist/` tree after a failed rebuild; the iframe
+generation advances only on success.
 While #421 remains open, failures show bounded Boris stderr and identify that
 fallback. Embedded preview content is sandboxed; a named link opens the exact
 site origin in a new tab for full behavior.
@@ -792,11 +795,67 @@ from `npm run check` — every declared token of each family is classified, ever
 listed name exists, each list ascends (numerically where a value is resolvable
 without a viewport, and reported as deferred where it is a `clamp`), spacing
 steps are whole multiples of the base, the layer ladder holds bare numbers, and
-this section names each scale's list. Then
+this section names each scale's list. It also holds `styles.css` to the scales
+(#1044): `font`/`font-size` take a `--text-*` step, `padding`/`margin`/`gap` a
+`--space-*` step, and `border-radius` a `--radius-*` step, so an absolute
+length (`px`, `rem`) in any of them fails, as does a step borrowed by another
+family's property. Relative units pass because they are proportions, not
+steps: `em` is how the Focus reading surface scales the author's document
+typography with the chosen text size, and viewport units place the command
+palette. Named component geometry (the tree's caret gutter, the measured nav
+height, the Focus text-size choice) stays a local custom property, never a
+spacing step. Then
 [`ui/tests/scales.spec.ts`](ui/tests/scales.spec.ts) re-reads the same lists out
 of the *applied* stylesheet: that is the half which catches what no file parse
 can, namely a value overridden in a later block, a media query, or the dark
 theme.
+
+## Component vocabulary and state honesty
+
+The design pass (#1044) gave the shell one small vocabulary, styled once in the
+vocabulary block of [`ui/src/styles.css`](ui/src/styles.css); panes add layout,
+not a parallel look.
+
+- **Buttons.** One base (secondary) and three intents: `primary` (at most one
+  per cluster), `danger`, and `ghost` for the rarer actions in a cluster.
+  `compact` sizes a button for dense rows (graph zoom, recipe table),
+  `row-button` makes a navigating list row (graph links, theme assets, problems
+  in this file), and `chrome-button` is the pill for controls on the dark
+  header bands (theme, connection, Focus actions). A link that acts as a
+  button (`button-link`) shares the base.
+- **Badge** — a short status label (a command's exit class, the preview phase,
+  the buffer state). **Status text** — a sentence-length state with a tone dot
+  (validation and watch daemon states); sentences wrap, so they never sit in a
+  pill.
+- **Notice** — a callout for a reachable state: neutral information, `ok`,
+  `warn` (act on it), or `danger` (a failure). **Empty state** — nothing to show
+  yet, said plainly behind a dashed edge; its loading variant adds a busy ring.
+- **Cards** — `pane` for a top-level section, `subpane` for a card nested in one
+  (Graph, Publication, Recipe, Theme, authoring hints, analysis results).
+  **Toolbar** — every row of actions. **Row list** — a list whose rows navigate
+  or name one fact each. **Disclosure** — an in-pane `<details>` whose summary
+  reads as a link.
+
+Tones only restate what the host sent; they never add a verdict. A problem
+group's tone is its Boris severity (error → danger, warning → warn, info →
+neutral), so a warning is not painted as an error. Status colors come only from
+`--color-ok`, `--color-warn`, and `--color-danger`, and the state is always in
+the text as well.
+
+Every pane renders a designed state for each one it can reach through the
+existing API, and makes no claim from a payload it does not have. Before the
+first host answer the panes say they are loading (Project, Source, Problems,
+Graph, Publication); when the host never connects (a failed connect or a
+missing token) they say they are unavailable instead of loading forever, the
+header chip turns loud, and Publication stops claiming "no profile" or "no
+Proof Pack". An artifact the host reports as `build_required` is a neutral
+notice, `unsupported` (stale) a warning, and a failed request a danger notice.
+A host refusal of a command colors the command status line; a Boris exit code
+stays in the result badge.
+
+[`ui/tests/design-vocabulary.spec.ts`](ui/tests/design-vocabulary.spec.ts) pins
+the honest pre-connection and unavailable states, the severity and preview
+tones, and primary-button legibility (label and key-hint chip) in both themes.
 
 ## Density modes and the writing surface
 
@@ -878,7 +937,9 @@ under it, and filtering prunes the tree instead of leaving empty branches.
 - **One segment per row.** A row shows its own segment (`frontmatter.md`), and
   indentation plus a guide rule carry the rest of the path. That is what stops
   a long project path from breaking mid-token, and it is why rows can be denser
-  than the old full-path rows.
+  than the old full-path rows. A segment wider than the column truncates to one
+  line with an ellipsis (#1044) instead of wrapping mid-word; every row's
+  tooltip is its full project-relative path, so nothing is hidden.
 - **The full path is still the name.** Each file row's accessible name
   (`aria-label`) and tooltip are the complete project-relative path, so every
   name this pane has ever exposed to tests, keyboard users, and screen readers
