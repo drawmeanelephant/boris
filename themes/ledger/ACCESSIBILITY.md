@@ -16,8 +16,9 @@
 - Reduced-motion preferences disable transitions and smooth scrolling.
 - `@media print` drops the skip link and nodelets, flattens the grid, removes
   the top-bar fill, and wraps code blocks.
-- The on-page TOC nodelet is `data-boris-search-exclude`; tags and the parent
-  link are compiler chrome and stay out of the rendered-search index.
+- The on-page TOC nodelet and the status/parent/tags header are
+  `data-boris-search-exclude`, so none of them enter the rendered-search
+  index.
 
 This is a theme-level pass. It does not replace a manual screen-reader,
 keyboard, zoom, or contrast review of a rendered site.

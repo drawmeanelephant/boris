@@ -23,8 +23,7 @@ built output (`--target-profile default=html4-strict`) and
 - `@media print` hides the skip link, navigation, and TOC, removes width
   caps, and wraps code blocks.
 - No search UI ships: `data-boris-search-*` hooks are outside the Strict
-  vocabulary. The compiler still excludes `dl.page-metadata` from any
-  rendered-search index it builds.
+  vocabulary.
 
 The profile contract states that neither Boris nor this theme claims
 accessibility conformance. This is a theme-level pass. It does not replace a
