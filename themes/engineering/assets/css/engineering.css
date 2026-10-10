@@ -70,10 +70,10 @@ a:hover { color: #0550ae; }
 .markdown-body [align="center"] { text-align: center; }
 .markdown-body [align="right"] { text-align: right; }
 .markdown-body blockquote { margin-inline: 0; padding-inline-start: 1rem; border-inline-start: 0.25rem solid var(--primer-border); color: var(--primer-muted); }
-.Box--nested ul, .primer-sidebar ul { margin: 0.55rem 0 0; padding-left: 0; list-style: none; }
-.Box--nested li, .primer-sidebar li { margin-block: 0.3rem; }
-.primer-sidebar a { color: var(--primer-ink); text-decoration: none; font-size: 0.875rem; }
-.primer-sidebar a:hover { color: var(--primer-accent); text-decoration: underline; }
+.Box--nested ul, .primer-sidebar ul, .primer-home__rail ul { margin: 0.55rem 0 0; padding-left: 0; list-style: none; }
+.Box--nested li, .primer-sidebar li, .primer-home__rail li { margin-block: 0.3rem; }
+.primer-sidebar a, .primer-home__rail .page-toc a { color: var(--primer-ink); text-decoration: none; font-size: 0.875rem; }
+.primer-sidebar a:hover, .primer-home__rail .page-toc a:hover { color: var(--primer-accent); text-decoration: underline; }
 .admonition { margin-block: 0 1rem; padding: 0.5rem 1rem; border-left: 0.25rem solid var(--primer-border); color: inherit; }
 .admonition--note, .admonition--info { --kind: var(--primer-accent); }
 .admonition--tip { --kind: var(--primer-success); }
