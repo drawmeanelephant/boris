@@ -39,13 +39,13 @@ api_post() {
 }
 
 initial="$(api_get /api/preview/state)"
-node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.generation!==0||r.message!=="Showing existing preview output from an earlier build; rebuild to refresh.") throw Error("preview did not identify existing output as stale")' "$initial"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.stale_reason!=="earlier_build"||r.generation!==0||r.exit_code!==null||r.message!=="Showing existing preview output from an earlier build; rebuild to refresh.") throw Error("preview did not identify existing output as stale from an earlier build")' "$initial"
 initial_preview_url="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).preview_url)' "$initial")"
 curl --fail --silent --show-error --cookie-jar "$work/initial-cookies" "$initial_preview_url" >"$work/initial.html"
 cmp "$work/initial.html" "$work/project/dist/index.html"
 
 current="$(api_post /api/preview/rebuild '{}')"
-node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="success"||r.generation!==1||r.exit_code!==0) throw Error("first preview build failed")' "$current"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="success"||r.stale_reason!==null||r.generation!==1||r.exit_code!==0) throw Error("first preview build failed or kept a stale reason")' "$current"
 preview_url="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).preview_url)' "$current")"
 preview_origin="$(node -e 'process.stdout.write(new URL(process.argv[1]).origin)' "$preview_url")"
 
@@ -68,20 +68,23 @@ fingerprint="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).fingerp
 saved="$(api_post /api/files/save "{\"path\":\"content/index.md\",\"content\":\"# Preview changed\\n\",\"fingerprint\":\"$fingerprint\"}")"
 node -e 'const r=JSON.parse(process.argv[1]); if(r.status!=="saved") throw Error("source save failed")' "$saved"
 current="$(api_post /api/preview/rebuild '{}')"
-node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="success"||r.generation!==2) throw Error("save rebuild did not advance")' "$current"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="success"||r.stale_reason!==null||r.generation!==2) throw Error("save rebuild did not advance")' "$current"
 curl --fail --silent --show-error --cookie "$work/cookies" "$preview_origin/" >"$work/last-good.html"
 grep -q 'Preview changed' "$work/last-good.html"
 
 NODE_PATH="$(dirname "$3")/node_modules" node "$(dirname "$0")/preview-frame-check.cjs" "$base_url/#token=$token" "Preview changed"
 
 stale_state="$(api_get /api/preview/state)"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="success"||r.stale_reason!==null) throw Error("successful preview state kept a stale reason")' "$stale_state"
 stale_generation="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).generation))' "$stale_state")"
 
 opened="$(api_post /api/files/open '{"path":"content/index.md"}')"
 fingerprint="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).fingerprint)' "$opened")"
 api_post /api/files/save "{\"path\":\"content/index.md\",\"content\":\"---\\nid: broken\\n\",\"fingerprint\":\"$fingerprint\"}" >/dev/null
 failed="$(api_post /api/preview/rebuild '{}')"
-node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.generation!==Number(process.argv[2])||r.exit_code!==1||!r.used_stderr_fallback||!r.message.includes("error:")) throw Error("failure state was not honest")' "$failed" "$stale_generation"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.stale_reason!=="failed_rebuild"||r.generation!==Number(process.argv[2])||r.exit_code!==1||!r.used_stderr_fallback||!r.message.includes("error:")) throw Error("failure state was not honest")' "$failed" "$stale_generation"
+failed_state="$(api_get /api/preview/state)"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.stale_reason!=="failed_rebuild") throw Error("preview state did not keep the failed-rebuild reason")' "$failed_state"
 curl --fail --silent --show-error --cookie "$work/cookies" "$preview_origin/" >"$work/after-failure.html"
 cmp "$work/last-good.html" "$work/after-failure.html"
 

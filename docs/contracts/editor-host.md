@@ -46,9 +46,10 @@ version negotiation and no `Accept`-style content negotiation; the API is
   change** and must update this document, `editor/ui/src/lib/types.ts`, and
   every affected spec in `editor/ui/tests/` in the same change;
 - additive fields are allowed, but must be documented here as additive so a
-  consumer knows they may be absent (existing examples: `watch_active` on
-  `/api/preview/state`, `supported`/`validate_watch`/`watch_json` on
-  `/api/version`, `skipped` on `/api/recovery`);
+  consumer knows they may be absent (existing examples: `watch_active` and
+  `stale_reason` on `/api/preview/state`,
+  `supported`/`validate_watch`/`watch_json` on `/api/version`, `skipped` on
+  `/api/recovery`);
 - changing a fixed Boris invocation in §6 or §7 is also a contract change:
   operators and tests depend on *which* command ran, not only on the response;
 - an artifact the host does not recognize by discriminator/version must surface
@@ -699,7 +700,8 @@ committed. Boris's staged commit preserves the last valid `dist/` tree after a
 failed rebuild.
 
 `GET /api/preview/state` returns `{phase, generation, exit_code,
-used_stderr_fallback, message, preview_url, watch_active}`:
+used_stderr_fallback, message, preview_url, watch_active, stale_reason}`, and a
+`200` from `POST /api/preview/rebuild` returns the same object after the build:
 
 | `phase` | Meaning |
 |---|---|
@@ -707,11 +709,24 @@ used_stderr_fallback, message, preview_url, watch_active}`:
 | `running` | A rebuild is in flight |
 | `success` | The rebuild succeeded; `generation` advanced |
 | `failed` | The rebuild failed and no valid output exists |
-| `stale` | Output exists from an earlier build, a failed rebuild, or a `dist/` tree that was already on disk when the editor started |
+| `stale` | Output exists from an earlier build, a failed rebuild, or a `dist/` tree that was already on disk when the editor started; `stale_reason` names which |
 
 If `dist/index.html` is present when the host process starts, the first
 `/api/preview/state` is `stale` (generation `0`) rather than empty `idle`, so
 the shell can frame the existing bytes.
+
+`stale_reason` (additive) names the host fact behind `stale`, and is `null`
+whenever `phase` is anything else:
+
+| `stale_reason` | Meaning |
+|---|---|
+| `earlier_build` | `dist/index.html` was already on disk when the host started and no rebuild has run since; `exit_code` is `null` |
+| `failed_rebuild` | A rebuild failed — a non-zero exit, a timeout, or a compiler process that could not complete — and Boris's last valid `dist/` tree was kept |
+
+A shell talking to a host without the field may fall back to `exit_code`
+(`null` → earlier build, non-zero → failed rebuild), but that inference reads a
+timed-out or unspawnable rebuild as an earlier build, because its `exit_code`
+is also `null`.
 
 `generation` advances **only** on success, so the shell can reload the iframe
 exactly once per successful build. On failure `message` is the last
@@ -800,7 +815,7 @@ integration scripts; a change here must keep all of them green.
 | `editor/scripts/test-diagnostics.sh` | Structured reports, stderr fallback, exit classes 1/2/3, packets |
 | `editor/scripts/test-validation-daemon.sh` | One daemon across validates, save → cycle waiting, backoff recovery, SIGTERM reaping |
 | `editor/scripts/test-watch-daemon.sh` | Explicit start, schema handshake, event ring and `seq`, dist-writer refusal, coexistence, reaping |
-| `editor/scripts/test-preview.sh` | Rebuild byte identity, last-good preservation, preview-origin defenses, CSP framing |
+| `editor/scripts/test-preview.sh` | Rebuild byte identity, last-good preservation, `stale_reason` on both stale paths, preview-origin defenses, CSP framing |
 
 The conformance script drives **every** code in §9 to its documented status
 with a live request — including fixture-heavy scenarios (a 50 000-file project

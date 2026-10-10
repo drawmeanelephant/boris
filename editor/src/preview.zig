@@ -15,11 +15,14 @@ const project = @import("project.zig");
 
 pub const Phase = enum { idle, running, success, failed, stale };
 
+pub const StaleReason = enum { earlier_build, failed_rebuild };
+
 pub const Manager = struct {
     project_root: []const u8,
     boris_path: []const u8,
     port: u16,
     phase: Phase,
+    stale_reason: ?StaleReason = null,
     generation: u64 = 0,
     exit_code: ?u8 = null,
     used_stderr_fallback: bool = false,
@@ -27,11 +30,13 @@ pub const Manager = struct {
     message_len: usize = 0,
 
     pub fn init(io: Io, project_root: []const u8, boris_path: []const u8, port: u16) Manager {
+        const existing = hasIndex(io, project_root);
         var result: Manager = .{
             .project_root = project_root,
             .boris_path = boris_path,
             .port = port,
-            .phase = if (hasIndex(io, project_root)) .stale else .idle,
+            .phase = if (existing) .stale else .idle,
+            .stale_reason = if (existing) .earlier_build else null,
         };
         result.setMessage(if (result.phase == .stale) "Showing existing preview output from an earlier build; rebuild to refresh." else "Preview has not been built yet.");
         return result;
@@ -39,6 +44,7 @@ pub const Manager = struct {
 
     pub fn rebuild(self: *Manager, allocator: std.mem.Allocator, io: Io) !void {
         self.phase = .running;
+        self.stale_reason = null;
         self.exit_code = null;
         self.used_stderr_fallback = false;
         self.setMessage("Boris incremental preview build is running.");
@@ -60,6 +66,7 @@ pub const Manager = struct {
             .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(120) } },
         }) catch |err| {
             self.phase = if (hasIndex(io, self.project_root)) .stale else .failed;
+            self.stale_reason = if (self.phase == .stale) .failed_rebuild else null;
             self.setMessage(if (err == error.Timeout) "Boris preview build timed out; last valid output is stale." else "Boris preview process could not complete; last valid output is stale.");
             return;
         };
@@ -73,6 +80,7 @@ pub const Manager = struct {
             self.setMessage("Preview is current from a successful Boris incremental build.");
         } else {
             self.phase = if (hasIndex(io, self.project_root)) .stale else .failed;
+            self.stale_reason = if (self.phase == .stale) .failed_rebuild else null;
             self.used_stderr_fallback = true;
             self.setStderrSummary(execution.stderr);
         }
@@ -93,6 +101,7 @@ pub const Manager = struct {
             // `watch_daemon_active` and the tree refreshes come from the
             // daemon's own cycles.
             .watch_active = watch_active,
+            .stale_reason = self.stale_reason,
         }, .{});
     }
 
@@ -284,4 +293,52 @@ test "preview authorization and path guards are exact" {
     try std.testing.expect(safePath("guides/start.html"));
     try std.testing.expect(!safePath("guides/../secret"));
     try std.testing.expect(!safePath("%2e%2e/secret"));
+}
+
+test "stale_reason names the earlier build at startup and the failed rebuild after one" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try temp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(root);
+    const missing_boris = try std.fs.path.join(allocator, &.{ root, "missing-boris" });
+    defer allocator.free(missing_boris);
+
+    const empty = Manager.init(io, root, missing_boris, 0);
+    try std.testing.expectEqual(Phase.idle, empty.phase);
+    try std.testing.expectEqual(@as(?StaleReason, null), empty.stale_reason);
+
+    try temp.dir.createDirPath(io, "dist");
+    try temp.dir.writeFile(io, .{ .sub_path = "dist/index.html", .data = "<!doctype html>" });
+    var manager = Manager.init(io, root, missing_boris, 0);
+    try std.testing.expectEqual(Phase.stale, manager.phase);
+    try std.testing.expectEqual(@as(?StaleReason, .earlier_build), manager.stale_reason);
+    try std.testing.expectEqual(@as(?u8, null), manager.exit_code);
+
+    try manager.rebuild(allocator, io);
+    try std.testing.expectEqual(Phase.stale, manager.phase);
+    try std.testing.expectEqual(@as(?StaleReason, .failed_rebuild), manager.stale_reason);
+
+    try temp.dir.deleteTree(io, "dist");
+    try manager.rebuild(allocator, io);
+    try std.testing.expectEqual(Phase.failed, manager.phase);
+    try std.testing.expectEqual(@as(?StaleReason, null), manager.stale_reason);
+}
+
+test "preview state serializes stale_reason and null unless stale" {
+    const allocator = std.testing.allocator;
+    const token: [32]u8 = "0123456789abcdef0123456789abcdef".*;
+    var manager: Manager = .{ .project_root = "", .boris_path = "boris", .port = 8123, .phase = .stale, .stale_reason = .earlier_build };
+    inline for (.{
+        .{ Phase.stale, @as(?StaleReason, .earlier_build), "\"stale_reason\":\"earlier_build\"" },
+        .{ Phase.stale, @as(?StaleReason, .failed_rebuild), "\"stale_reason\":\"failed_rebuild\"" },
+        .{ Phase.success, @as(?StaleReason, null), "\"stale_reason\":null" },
+    }) |case| {
+        manager.phase = case[0];
+        manager.stale_reason = case[1];
+        const bytes = try manager.renderState(allocator, &token, false);
+        defer allocator.free(bytes);
+        try std.testing.expect(std.mem.indexOf(u8, bytes, case[2]) != null);
+    }
 }
