@@ -5,7 +5,23 @@ body { color: #18212a; background: #fff; font: 1em/1.6 Georgia, serif; margin: 0
 .site-nav ul, .breadcrumb ol { padding-left: 1.5em; }
 a { color: #174781; }
 a:focus { outline: 2px solid #174781; }
+a:focus-visible { outline: 3px solid #174781; outline-offset: 2px; }
+.skip a { position: absolute; left: -999em; padding: .4em .7em; background: #174781; color: #fff; }
+.skip a:focus { left: 1em; top: 1em; outline-color: #18212a; }
+.page-metadata, .semantic-relations, .semantic-backlinks { margin-top: 1.5em; font-family: Arial, sans-serif; font-size: .9em; }
+.semantic-relations:before, .semantic-backlinks:before { display: block; font-weight: bold; }
+.semantic-relations:before { content: "Related"; }
+.semantic-backlinks:before { content: "Linked from"; }
 .admonition { border-left: 3px solid #174781; padding-left: 1em; }
 .admonition__title { font-weight: bold; }
 pre { overflow: auto; }
 img { max-width: 100%; }
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
+@media print {
+  .skip, .site-nav, .page-toc { display: none; }
+  .site, .page { max-width: none; padding: 0; }
+  a { color: #000; }
+  pre { overflow: visible; white-space: pre-wrap; }
+}
