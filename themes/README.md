@@ -30,7 +30,7 @@ themes/<name>/
 | [`cozy`](cozy/) | Mid-2000s personal blog | `main` (single shape by design) | `--theme themes/cozy` |
 | [`journal`](journal/) | Phosphor terminal diary | `main`, `archive` | `--theme themes/journal` |
 | [`ledger`](ledger/) | Dense early-web nodes | `main` (single shape by design) | `--theme themes/ledger` |
-| [`reading`](reading/) | Typesetting for non-US-docs English | `main` (single shape by design) | `--theme themes/reading` |
+| [`reading`](reading/) | Ink-only typesetting for text that is not US-docs English | `main` (single shape by design) | `--theme themes/reading` |
 | [`semantic`](semantic/) | HTML-first, class-light docs | `main`, `home`, `section` | `--theme themes/semantic` |
 | [`columns`](columns/) | Boxed CSS-only docs | `main`, `home`, `section` | `--theme themes/columns` |
 | [`service`](service/) | Public-service information | `main`, `home`, `section` | `--theme themes/service` |

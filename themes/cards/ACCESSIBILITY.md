@@ -19,7 +19,6 @@ What Cards guarantees, checked against the built output and
 - The TOC rail, the "In this section" card, and the `graph-links`
   relations/backlinks wrapper are `data-boris-search-exclude`; compiler
   metadata stays out of the rendered-search index.
-
 - Visited links shift to violet (`#5a48b8`, 6.88:1 on the card, 6.11:1 on
   the muted surface; `#c4b5fd`, 8.81:1 on the dark card). The current page
   in the nav has a tinted pill and bold weight as well as
