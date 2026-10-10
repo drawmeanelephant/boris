@@ -40,7 +40,8 @@
 //!   with autodiscovery links in every issue's head.
 //! - `portfolio` — a studio front (`index`, an `about` satellite, three
 //!   dated `projects/` satellites) under `showcase`; `layout_rules` send
-//!   `id:index` to `home.html` and every other page uses `main.html`.
+//!   `id:index` to `home.html`, whose `{{children}}` lists the work, and
+//!   every other page uses `main.html`.
 //! - `archive` — a long-lived archive under `archive`: four tagged
 //!   entries joined by `relates_to` / `supersedes` relations (so entries
 //!   render `{{relations}}` and `{{backlinks}}`), one `status: archived`
@@ -1444,19 +1445,13 @@ const portfolio_index_md =
     \\
     \\# Mara Lindqvist Studio
     \\
-    \\Wayfinding, print, and type for public places. Each project under
-    \\`content/projects/` is a satellite of this page (`parent: index`) with
-    \\a `published_at` date and a one-line `summary`. A layout's
-    \\`{{children}}` slot lists a page's direct satellites; this page also
-    \\links the work by hand.
+    \\Wayfinding, print, and type for public places.
     \\
-    \\## Selected work
-    \\
-    \\- [[projects/harbor-signage]]
-    \\- [[projects/field-almanac]]
-    \\- [[projects/specimen-book]]
-    \\
-    \\More about the studio: [[about]].
+    \\Each project under `content/projects/` is a satellite of this page
+    \\(`parent: index`) with a `published_at` date and a one-line `summary`.
+    \\The showcase home layout's `{{children}}` slot lists this page's direct
+    \\satellites under "Explore", so a new project file joins that list on
+    \\the next build without an edit here.
     \\
 ;
 
@@ -2508,7 +2503,7 @@ const portfolio_spec = ArchetypeSpec{
     .layout_path = "themes/showcase/layouts/main.html",
     .files = &portfolio_files,
     .tree_report =
-    \\  content/index.md                  trunk page — the studio front (home layout)
+    \\  content/index.md                  trunk page — the studio front (home layout lists the work)
     \\  content/about.md                  satellite page
     \\  content/projects/                 three project satellites (published_at + summary)
     \\  themes/showcase/                  shipped "showcase" theme — soft docs + blog shell
@@ -2523,7 +2518,7 @@ const portfolio_spec = ArchetypeSpec{
     .conventions =
     \\  a project is a satellite of index with published_at + summary; add one per piece of work
     \\  layout_rules pick named layouts by id:, glob:, or role:; every other page uses main.html
-    \\  {{children}} lists a page's direct satellites in layouts that carry the slot
+    \\  {{children}} lists a page's direct satellites; the home page's project list is never hand-kept
     ,
 };
 
@@ -3081,6 +3076,9 @@ test "portfolio projects are dated satellites of index and one carries a relatio
     try std.testing.expectEqual(@as(usize, 3), projects);
     try std.testing.expectEqual(@as(usize, 1), related);
     try std.testing.expect(std.mem.indexOf(u8, portfolio_profile, "\"selector\": \"id:index\", \"layout\": \"themes/showcase/layouts/home.html\"") != null);
+    // The home layout lists the work; the index keeps no hand-written copy.
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.showcase_layout_home, "{{children}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, portfolio_index_md, "[[projects/") == null);
 }
 
 test "archive entries share tags and relations give every entry backlinks or relations" {

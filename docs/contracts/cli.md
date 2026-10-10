@@ -199,8 +199,9 @@ catalog themes that fit each one.
 - `portfolio` — a studio site under `showcase`: trunk `index`, an `about`
   satellite, and three `projects/` satellites with `published_at` +
   `summary` (one `relates_to` edge). Its profile's `layout_rules` send
-  `id:index` to `themes/showcase/layouts/home.html`; every other page
-  uses `main.html`.
+  `id:index` to `themes/showcase/layouts/home.html`, whose `{{children}}`
+  lists the `about` page and the three projects (the index carries no
+  hand-written list); every other page uses `main.html`.
 - `archive` — a long-lived archive under `archive`: trunk `index`, four
   tagged `entries/` satellites joined by `relates_to` and `supersedes`
   relations (one entry is `status: archived`), and a hand-kept `topics`

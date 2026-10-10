@@ -300,15 +300,20 @@ grep -q 'application/rss+xml' "$ND/dist/issues/2026-10-10-held-back.html" && fai
 rm -rf "$ND"
 pass "newsletter: home/archive/blog layouts, dist/feed.xml with three items + head autodiscovery, sitemap; drafts held back"
 
-note "portfolio: index on the showcase home layout, satellites on main"
+note "portfolio: index on the showcase home layout lists the work through {{children}}"
 P="$OUT/arch-portfolio/dist"
 grep -q 'home-card' "$P/index.html" || fail "portfolio index does not use the showcase home layout"
+# The list is the layout's {{children}}, not prose: the article links no page.
+work="$(sed -n '/<section class="children-panel home-work"/,/<\/section>/p' "$P/index.html")"
+grep -q '<nav class="page-children"' <<<"$work" || fail "portfolio home has no {{children}} list"
+sed -n '/<article class="prose">/,/<\/article>/p' "$P/index.html" | grep -q '<a href=' \
+    && fail "portfolio index still carries a hand-written page list"
 for page in about projects/harbor-signage projects/field-almanac projects/specimen-book; do
     grep -q 'class="main card"' "$P/$page.html" || fail "portfolio $page is not on the showcase main layout"
     grep -q 'home-card' "$P/$page.html" && fail "portfolio $page should not use the home layout"
-    grep -q "href=\"${page}.html\"" "$P/index.html" || fail "portfolio index does not link $page"
+    grep -q "href=\"${page}.html\"" <<<"$work" || fail "portfolio home {{children}} does not list $page"
 done
-pass "portfolio: home layout on index; about and three projects on main, all linked"
+pass "portfolio: home layout on index lists about and three projects via nav.page-children; satellites on main"
 
 note "archive: entries render their relations and the backlinks derived from them"
 A="$OUT/arch-archive/dist"
