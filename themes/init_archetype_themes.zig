@@ -68,3 +68,12 @@ pub const corporate_layout_main = @embedFile("corporate/layouts/main.html");
 pub const corporate_footer = @embedFile("corporate/footer.html");
 pub const corporate_css = @embedFile("corporate/assets/corporate.css");
 pub const corporate_readme = @embedFile("corporate/README.md");
+
+pub const showcase_layout_main = @embedFile("showcase/layouts/main.html");
+pub const showcase_layout_home = @embedFile("showcase/layouts/home.html");
+pub const showcase_layout_section = @embedFile("showcase/layouts/section.html");
+pub const showcase_layout_blog = @embedFile("showcase/layouts/blog.html");
+pub const showcase_footer = @embedFile("showcase/footer.html");
+pub const showcase_css = @embedFile("showcase/assets/css/showcase.css");
+pub const showcase_mark_svg = @embedFile("showcase/assets/img/mark.svg");
+pub const showcase_readme = @embedFile("showcase/README.md");

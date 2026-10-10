@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -255,6 +255,16 @@ grep -q '<loc>https://saturday-sheet.example.com/issues/2026-09-19-first-edition
     >/dev/null 2>"$OUT/newsletter-rss.stderr" || fail "newsletter RSS export failed: $(head -3 "$OUT/newsletter-rss.stderr")"
 [[ "$(grep -c '<item>' "$N/feed/rss.xml")" == 3 ]] || fail "newsletter issues are not all feed-eligible"
 pass "newsletter: home/archive/blog layouts, dist/sitemap.xml, three feed-eligible issues"
+
+note "portfolio: index on the showcase home layout, satellites on main"
+P="$OUT/arch-portfolio/dist"
+grep -q 'home-card' "$P/index.html" || fail "portfolio index does not use the showcase home layout"
+for page in about projects/harbor-signage projects/field-almanac projects/specimen-book; do
+    grep -q 'class="main card"' "$P/$page.html" || fail "portfolio $page is not on the showcase main layout"
+    grep -q 'home-card' "$P/$page.html" && fail "portfolio $page should not use the home layout"
+    grep -q "href=\"${page}.html\"" "$P/index.html" || fail "portfolio index does not link $page"
+done
+pass "portfolio: home layout on index; about and three projects on main, all linked"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done

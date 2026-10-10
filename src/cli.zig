@@ -3032,6 +3032,8 @@ pub fn printInitUsage() void {
         \\            print the page for the PDF
         \\  newsletter  weekly paper of dated issues on press's named layouts;
         \\            profile declares site.url and a sitemap
+        \\  portfolio studio front plus dated project satellites; layout_rules
+        \\            send index to showcase's home.html
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.

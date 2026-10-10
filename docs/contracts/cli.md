@@ -189,6 +189,11 @@ catalog themes that fit each one.
   an enabled `head` and `{{head}}` in every selected layout
   ([head metadata](head-metadata.md#bounded-rss-rider-and-execution-boundary)),
   and the press layouts do not carry it yet.
+- `portfolio` — a studio site under `showcase`: trunk `index`, an `about`
+  satellite, and three `projects/` satellites with `published_at` +
+  `summary` (one `relates_to` edge). Its profile's `layout_rules` send
+  `id:index` to `themes/showcase/layouts/home.html`; every other page
+  uses `main.html`.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

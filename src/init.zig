@@ -34,6 +34,9 @@
 //!   under `press`; `layout_rules` route the masthead, archive, and issues
 //!   to press's named layouts, and the profile declares `site.url` plus a
 //!   target `sitemap`. Profile `rss` waits on `{{head}}` in press layouts.
+//! - `portfolio` — a studio front (`index`, an `about` satellite, three
+//!   dated `projects/` satellites) under `showcase`; `layout_rules` send
+//!   `id:index` to `home.html` and every other page uses `main.html`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -64,7 +67,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -1388,6 +1391,139 @@ const newsletter_profile =
     \\
 ;
 
+// --- portfolio --------------------------------------------------------------
+
+const portfolio_index_md =
+    \\---
+    \\title: Mara Lindqvist Studio
+    \\tags: [home]
+    \\---
+    \\
+    \\# Mara Lindqvist Studio
+    \\
+    \\Wayfinding, print, and type for public places. Each project under
+    \\`content/projects/` is a satellite of this page (`parent: index`) with
+    \\a `published_at` date and a one-line `summary`. A layout's
+    \\`{{children}}` slot lists a page's direct satellites; this page also
+    \\links the work by hand.
+    \\
+    \\## Selected work
+    \\
+    \\- [[projects/harbor-signage]]
+    \\- [[projects/field-almanac]]
+    \\- [[projects/specimen-book]]
+    \\
+    \\More about the studio: [[about]].
+    \\
+;
+
+const portfolio_about_md =
+    \\---
+    \\title: About
+    \\parent: index
+    \\tags: [about]
+    \\---
+    \\
+    \\# About
+    \\
+    \\A two-person studio working with towns, museums, and small publishers.
+    \\
+    \\## How this starter is wired
+    \\
+    \\`boris.json` declares a `layout_rules` entry that sends `id:index` to
+    \\`themes/showcase/layouts/home.html`. Every other page, including this
+    \\one and each project, falls back to the theme's `main.html`. Layout
+    \\choice is build configuration in the profile, never page frontmatter.
+    \\
+    \\Back to the [[index]].
+    \\
+;
+
+const portfolio_harbor_signage_md =
+    \\---
+    \\title: Harbor Signage
+    \\parent: index
+    \\published_at: 2026-06-12T09:00:00Z
+    \\summary: A wayfinding system for a working harbor front.
+    \\tags: [wayfinding]
+    \\---
+    \\
+    \\# Harbor Signage
+    \\
+    \\Forty signs, two languages, one typeface tuned for salt and glare.
+    \\
+    \\## Brief
+    \\
+    \\Make the harbor walkable for visitors without slowing the people who
+    \\work there.
+    \\
+    \\## Outcome
+    \\
+    \\Installed in spring; the same grid later set the
+    \\[[projects/field-almanac]] pages.
+    \\
+;
+
+const portfolio_field_almanac_md =
+    \\---
+    \\title: Field Almanac
+    \\parent: index
+    \\published_at: 2026-08-03T09:00:00Z
+    \\summary: A pocket almanac for a regional nature trust.
+    \\tags: [print, editorial]
+    \\relations: [relates_to=projects/harbor-signage]
+    \\---
+    \\
+    \\# Field Almanac
+    \\
+    \\A 96-page pocket book of tides, moon phases, and walking routes.
+    \\
+    \\## Approach
+    \\
+    \\The layout grid comes from [[projects/harbor-signage]]; the `relations:`
+    \\frontmatter records that lineage as a typed `relates_to` edge.
+    \\
+;
+
+const portfolio_specimen_book_md =
+    \\---
+    \\title: Specimen Book
+    \\parent: index
+    \\published_at: 2026-09-22T09:00:00Z
+    \\summary: A type specimen for the studio's harbor typeface.
+    \\tags: [type]
+    \\---
+    \\
+    \\# Specimen Book
+    \\
+    \\Every weight of the harbor face, set at reading and display sizes.
+    \\
+    \\Back to the [[index]].
+    \\
+;
+
+const portfolio_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Mara Lindqvist Studio" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/showcase",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/showcase/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -1567,6 +1703,23 @@ const newsletter_files = [_]FileToWrite{
     .{ .path = "themes/press/ACCESSIBILITY.md", .data = archetype_themes.press_accessibility },
     .{ .path = "themes/press/MIGRATION.md", .data = archetype_themes.press_migration },
     .{ .path = "boris.json", .data = newsletter_profile },
+};
+
+const portfolio_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = portfolio_index_md },
+    .{ .path = "content/about.md", .data = portfolio_about_md },
+    .{ .path = "content/projects/harbor-signage.md", .data = portfolio_harbor_signage_md },
+    .{ .path = "content/projects/field-almanac.md", .data = portfolio_field_almanac_md },
+    .{ .path = "content/projects/specimen-book.md", .data = portfolio_specimen_book_md },
+    .{ .path = "themes/showcase/layouts/main.html", .data = archetype_themes.showcase_layout_main },
+    .{ .path = "themes/showcase/layouts/home.html", .data = archetype_themes.showcase_layout_home },
+    .{ .path = "themes/showcase/layouts/section.html", .data = archetype_themes.showcase_layout_section },
+    .{ .path = "themes/showcase/layouts/blog.html", .data = archetype_themes.showcase_layout_blog },
+    .{ .path = "themes/showcase/footer.html", .data = archetype_themes.showcase_footer },
+    .{ .path = "themes/showcase/assets/css/showcase.css", .data = archetype_themes.showcase_css },
+    .{ .path = "themes/showcase/assets/img/mark.svg", .data = archetype_themes.showcase_mark_svg },
+    .{ .path = "themes/showcase/README.md", .data = archetype_themes.showcase_readme },
+    .{ .path = "boris.json", .data = portfolio_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -1822,6 +1975,29 @@ const newsletter_spec = ArchetypeSpec{
     ,
 };
 
+const portfolio_spec = ArchetypeSpec{
+    .layout_path = "themes/showcase/layouts/main.html",
+    .files = &portfolio_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the studio front (home layout)
+    \\  content/about.md                  satellite page
+    \\  content/projects/                 three project satellites (published_at + summary)
+    \\  themes/showcase/                  shipped "showcase" theme — soft docs + blog shell
+    \\  boris.json                        profile (theme: showcase, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the portfolio (index renders through home.html)
+    \\  boris plan --profile boris.json       inspect the normalized layout rules
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  a project is a satellite of index with published_at + summary; add one per piece of work
+    \\  layout_rules pick named layouts by id:, glob:, or role:; every other page uses main.html
+    \\  {{children}} lists a page's direct satellites in layouts that carry the slot
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -1835,6 +2011,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .changelog => &changelog_spec,
         .@"resume" => &resume_spec,
         .newsletter => &newsletter_spec,
+        .portfolio => &portfolio_spec,
     };
 }
 
@@ -2031,7 +2208,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -2086,8 +2263,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -2245,6 +2422,22 @@ test "newsletter issues are dated and the profile declares a sitemap with its si
     // declare a feed it cannot build.
     try std.testing.expect(std.mem.indexOf(u8, archetype_themes.press_layout_main, "{{head}}") != null or
         std.mem.indexOf(u8, newsletter_profile, "\"rss\"") == null);
+}
+
+test "portfolio projects are dated satellites of index and one carries a relation" {
+    var projects: usize = 0;
+    var related: usize = 0;
+    for (portfolio_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/projects/")) continue;
+        for ([_][]const u8{ "\nparent: index\n", "\npublished_at: 2026-", "\nsummary: " }) |key| {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, key) != null);
+        }
+        if (std.mem.indexOf(u8, f.data, "\nrelations: [") != null) related += 1;
+        projects += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), projects);
+    try std.testing.expectEqual(@as(usize, 1), related);
+    try std.testing.expect(std.mem.indexOf(u8, portfolio_profile, "\"selector\": \"id:index\", \"layout\": \"themes/showcase/layouts/home.html\"") != null);
 }
 
 test "garden demonstrates include composition, components, and dense links" {

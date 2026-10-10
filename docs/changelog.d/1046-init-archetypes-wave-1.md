@@ -36,3 +36,8 @@
   layouts lack the `{{head}}` slot the RSS rider requires
   ([#1060](https://github.com/drawmeanelephant/boris/issues/1060),
   [head metadata](/docs/contracts/head-metadata.md#bounded-rss-rider-and-execution-boundary)).
+- `boris init --type portfolio` writes a studio site under `showcase`: an
+  index, an about page, and three dated project satellites, with profile
+  `layout_rules` sending `id:index` to the theme's `home.html` and every
+  other page to `main.html`
+  ([#1053](https://github.com/drawmeanelephant/boris/issues/1053)).
