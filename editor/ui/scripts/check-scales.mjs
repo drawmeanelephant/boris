@@ -28,6 +28,12 @@
 // Globally, against styles.css:
 //  10. no `z-index` is a bare number — the ladder is the only authority on
 //      stacking order — and every `--layer-*` name it uses is declared.
+//  11. no type, spacing, or corner property spells an absolute length
+//      (`px`, `rem`, …): `font`/`font-size` take a `--text-*` step,
+//      `padding`/`margin`/`gap` a `--space-*` step, `border-radius` a
+//      `--radius-*` step, and a scale token is never borrowed by another
+//      family's property. Relative units (`em`, `%`, viewport units) are
+//      proportions of a step or of the viewport, not steps, so they pass.
 //
 // Zero dependencies: plain Node, regex over the three files. Runs built-in
 // self-tests first, then checks the real source.
@@ -205,6 +211,40 @@ export function stackingProblems(stylesCss) {
     const value = match[1].trim();
     if (!/^var\(--layer-[a-z0-9-]+\)$/.test(value)) {
       problems.push(`styles.css sets z-index: ${value} — name a layer token instead`);
+    }
+  }
+  return problems;
+}
+
+/** The scale a type, spacing, or corner property must draw from, or null for
+ *  any other property. Custom properties (`--x:`) are never matched here: the
+ *  caller only hands over real declarations. */
+export function propertyScale(property) {
+  if (property === 'font' || property === 'font-size') return 'type';
+  if (/^(padding|margin)(-[a-z-]+)?$/.test(property) || /^(row-|column-)?gap$/.test(property)) return 'space';
+  if (property === 'border-radius' || /^border-(top|bottom|start|end)-(left|right|start|end)-radius$/.test(property)) return 'radius';
+  return null;
+}
+
+/** Off-scale values in type, spacing, and corner properties. */
+export function offScaleProblems(scales, stylesCss) {
+  const problems = [];
+  const declaration = /(^|[;{\s])([a-z][a-z-]*)\s*:\s*([^;{}]+)/g;
+  for (const match of stripComments(stylesCss).matchAll(declaration)) {
+    const property = match[2];
+    const family = propertyScale(property);
+    if (!family) continue;
+    const value = match[3].trim();
+    for (const ref of value.matchAll(/var\(\s*(--[a-z0-9-]+)/g)) {
+      const owner = scales.find(candidate => candidate.family.test(ref[1]));
+      if (owner && owner.id !== family) {
+        problems.push(`styles.css sets ${property}: ${value} — ${ref[1]} is a ${owner.id} step, not a ${family} step`);
+      }
+    }
+    const literals = value.replace(/var\(\s*--[a-z0-9-]+\s*\)/g, '');
+    for (const length of literals.matchAll(/(?<![\w.#-])(-?\d*\.?\d+)(px|rem|pt|pc|cm|mm|in|q)\b/gi)) {
+      if (Number.parseFloat(length[1]) === 0) continue;
+      problems.push(`styles.css sets ${property}: ${value} — ${length[0]} is off the ${family} scale; use a declared step`);
     }
   }
   return problems;
@@ -388,6 +428,26 @@ function runSelfTests() {
       expected: ['editor/README.md\'s "Spacing" section does not name --scale-space']
     },
     {
+      name: 'an absolute length in a spacing property is off-scale',
+      actual: offScaleProblems(SCALES, '.f { padding: 0.55rem var(--space-4); }'),
+      expected: ['styles.css sets padding: 0.55rem var(--space-4) — 0.55rem is off the space scale; use a declared step']
+    },
+    {
+      name: 'scale steps, zero, auto, relative units, and non-scale props pass',
+      actual: offScaleProblems(SCALES, '.f { margin: 0 auto; gap: var(--space-2); font: var(--text-sm)/1.3 var(--font-mono); padding: 0.2em 1em; width: 3.4rem; --pad: 1rem; scroll-margin-top: 1rem; }'),
+      expected: []
+    },
+    {
+      name: 'a scale token borrowed by another family is caught',
+      actual: offScaleProblems(SCALES, '.f { gap: var(--radius-md); }'),
+      expected: ['styles.css sets gap: var(--radius-md) — --radius-md is a radius step, not a space step']
+    },
+    {
+      name: 'an absolute fallback inside var() is still a literal',
+      actual: offScaleProblems(SCALES, '.f { border-radius: var(--corner, 6px); }'),
+      expected: ['styles.css sets border-radius: var(--corner, 6px) — 6px is off the radius scale; use a declared step']
+    },
+    {
       name: 'the list name satisfies its own pointer',
       actual: readmeProblems(
         { id: 'space', list: '--scale-space', family: /^--space-/, readme: 'Spacing', kind: 'length' },
@@ -450,13 +510,14 @@ for (const scale of SCALES) {
 
 problems.push(...stackingProblems(stylesCss));
 problems.push(...placementProblems(SCALES, tokens, stripComments(stylesCss)));
+problems.push(...offScaleProblems(SCALES, stylesCss));
 
 for (const problem of problems) console.error(`  - ${problem}`);
 if (problems.length > 0) {
   console.error(`\nscale conformance: ${problems.length} problem(s)`);
   process.exitCode = 1;
 } else {
-  console.log(`scale conformance: OK (${summary.join(', ')}; no bare z-index)`);
+  console.log(`scale conformance: OK (${summary.join(', ')}; no bare z-index; no off-scale type, space, or radius value)`);
 }
 
 if (selfTestFailures > 0) process.exitCode = 1;
