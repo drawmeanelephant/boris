@@ -31,4 +31,9 @@ use the fallback layout. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 No search UI ships. Each `main` carries `data-boris-search-root`. The index
 masthead, section label, children list, and relations wrapper carry
 `data-boris-search-exclude`, so the rendered search index stays limited to
-note prose.
+note prose. The masthead `<h1>` also carries
+`data-boris-search-title="layout"`, so the index document's search title is
+the page title even though the heading itself is excluded.
+
+The index section and the "More entries" panel hide when the page has no
+children, and a sidebar module hides when its slot is empty.
