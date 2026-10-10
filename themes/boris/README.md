@@ -25,9 +25,10 @@ last fallback in layout selection
 so it has to serve every page of any graph, from a one-page tree to this
 repository's docs. The sticky rail, search, and outline already work at
 every depth. Docs sites that want `home` / `section` shapes have
-`reference`, `engineering`, and `semantic`. Which theme the `docs` starter
-ships is open in [#1063](https://github.com/drawmeanelephant/boris/issues/1063),
-and a `home.html` here would pre-empt that decision.
+`reference`, `engineering`, and `semantic`. This theme is also what
+`boris init --type docs` ships
+([#1063](https://github.com/drawmeanelephant/boris/issues/1063)), so the
+starter gets the same single shape.
 
 ## Intentionally absent slots
 
