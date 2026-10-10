@@ -15,6 +15,7 @@ compiler metadata exclusion alongside searchable definition-list boundaries.
 | `site/guides/layout-title.html` | Search-excluded layout `h1` marked `data-boris-search-title` | Golden `title` = layout heading text; no section for it |
 | `site/guides/title-element.html` | No heading: doctype-led page falls back to `<title>` | Golden `title` = `<title>` text, not the path |
 | `site/guides/definition-list.html` | Compiler metadata is chrome; authored `<dl>` remains searchable | Metadata is absent and `dt`/`dd` values are separated |
+| `site/guides/relations.html` | Compiler `{{relations}}` `<section>` and Strict `{{backlinks}}` `<div>` are chrome | Linked titles are absent; authored prose remains |
 | `malformed/pages-file.txt` | `.` / `..` page-list components | Reject with `InvalidPath`; publish no replacement |
 | `malformed/missing-root.html` | Required marker absent | Reject with `MissingSearchRoot` when marker mode is enabled |
 | `incompatible/search-index-v2.json` | Unsupported schema version | A v1 consumer must reject it and never use it as a v1 index |

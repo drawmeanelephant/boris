@@ -99,18 +99,36 @@ fn hasClass(txt: []const u8, class_name: []const u8) bool {
     return false;
 }
 
+/// Compiler-emitted layout-slot chrome, identified by the exact element and
+/// class the emitters write (`compile.zig`, `html_nav.zig`, `html_toc.zig`,
+/// `html_relations.zig`). The fragments cannot carry the search marker on
+/// HTML 4.01 Strict layouts, so the class is the stable identity. Non-Strict
+/// nav/children/parent/breadcrumb/toc emit `<nav>`, which
+/// isAlwaysExcludedName already covers; relations/backlinks emit `<section>`
+/// outside Strict and `<div>` under Strict. Theme-authored chrome (skip
+/// links, sidebars) is not listed: themes mark it `data-boris-search-exclude`.
+const compiler_chrome = [_]struct { []const u8, []const u8 }{
+    .{ "dl", "page-metadata" },
+    .{ "ul", "page-tags" }, // #1007
+    .{ "div", "page-parent" },
+    .{ "div", "site-nav" },
+    .{ "div", "page-children" },
+    .{ "div", "breadcrumb" },
+    .{ "div", "page-toc" },
+    .{ "section", "semantic-relations" },
+    .{ "section", "semantic-backlinks" },
+    .{ "div", "semantic-relations" },
+    .{ "div", "semantic-backlinks" },
+};
+
 fn isSearchExcludeMarker(name: []const u8, txt: []const u8) bool {
-    return hasAttr(txt, "data-boris-search-exclude") or
+    if (hasAttr(txt, "data-boris-search-exclude") or
         hasAttr(txt, "data-boris-search-ignore") or
-        hasAttr(txt, "data-boris-noindex") or
-        // The frozen metadata fragment cannot carry the search marker on
-        // HTML 4.01 Strict layouts, so identify this compiler-owned chrome by
-        // its stable class as well. Same rule for the `{{tags}}` list (#1007)
-        // and the Strict `{{parent}}` shape (non-Strict emits `<nav>`, which
-        // isAlwaysExcludedName already covers).
-        (std.ascii.eqlIgnoreCase(name, "dl") and hasClass(txt, "page-metadata")) or
-        (std.ascii.eqlIgnoreCase(name, "ul") and hasClass(txt, "page-tags")) or
-        (std.ascii.eqlIgnoreCase(name, "div") and hasClass(txt, "page-parent"));
+        hasAttr(txt, "data-boris-noindex")) return true;
+    for (compiler_chrome) |chrome| {
+        if (std.ascii.eqlIgnoreCase(name, chrome[0]) and hasClass(txt, chrome[1])) return true;
+    }
+    return false;
 }
 
 fn isHidden(txt: []const u8) bool {
@@ -832,6 +850,43 @@ test "compiler tag list and strict parent chrome are excluded (#1007)" {
     try std.testing.expect(std.mem.indexOf(u8, hay, "authored list") != null);
     try std.testing.expect(std.mem.indexOf(u8, hay, "onboarding") == null);
     try std.testing.expect(std.mem.indexOf(u8, hay, "Guides Label") == null);
+}
+
+test "compiler relations, backlinks, and strict slot chrome are excluded" {
+    // Shapes are the exact emitter output: `<section>` relations/backlinks
+    // outside Strict, `<div class=...>` slot wrappers under HTML 4.01 Strict
+    // (which cannot carry `data-boris-search-exclude`).
+    const html =
+        \\<main data-boris-search-root>
+        \\<div class="site-nav">
+        \\<ul><li class="site-nav__trunk"><a href="index.html">NavTrunk</a></li></ul></div>
+        \\<div class="breadcrumb">
+        \\<ol><li><a href="index.html">CrumbHome</a></li></ol></div>
+        \\<div class="page-toc">
+        \\<ul><li class="page-toc__l2"><a href="#a">TocEntry</a></li></ul></div>
+        \\<h1 id="body">Body</h1><p>Searchable prose.</p>
+        \\<div class="page-children">
+        \\<ul><li><a href="c.html">ChildLink</a></li></ul></div>
+        \\<section class="semantic-relations" aria-label="Semantic relations">
+        \\<ul><li data-relation-kind="cites" class="semantic-relation--cites"><a href="r.html">RelatedTitle</a></li></ul></section>
+        \\<section class="semantic-backlinks" aria-label="Backlinks">
+        \\<ul><li class="semantic-relation--cites"><a href="b.html">BacklinkTitle</a></li></ul></section>
+        \\<div class="semantic-relations"><ul><li><a href="r.html">StrictRelated</a></li></ul></div>
+        \\<div class="semantic-backlinks"><ul><li><a href="b.html">StrictBacklink</a></li></ul></div>
+        \\<section class="notes"><p>Authored section stays.</p></section>
+        \\<div class="toc"><p>Authored div stays.</p></div>
+        \\</main>
+    ;
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Searchable prose") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Authored section stays") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Authored div stays") != null);
+    inline for (.{ "NavTrunk", "CrumbHome", "TocEntry", "ChildLink", "RelatedTitle", "BacklinkTitle", "StrictRelated", "StrictBacklink" }) |noise| {
+        try std.testing.expect(std.mem.indexOf(u8, hay, noise) == null);
+    }
 }
 
 test "title fallback and heading fragments decode entities" {

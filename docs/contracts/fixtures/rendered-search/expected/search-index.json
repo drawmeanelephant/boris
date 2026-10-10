@@ -32,6 +32,13 @@
       ]
     },
     {
+      "path": "guides/relations.html",
+      "title": "Relations",
+      "sections": [
+        {"level": 1, "heading": "Relations", "fragment": "relations", "text": "Authored prose only.", "code": ""}
+      ]
+    },
+    {
       "path": "guides/title-element.html",
       "title": "Title element fallback",
       "sections": [

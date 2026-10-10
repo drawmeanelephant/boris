@@ -109,12 +109,31 @@ are treated as layout chrome and skipped. Navigation, footer,
 executable/non-visible elements, and regions marked
 `data-boris-search-exclude`, `data-boris-search-ignore`, or `data-boris-noindex`
 are never indexed. Nested markup inside an excluded region does not re-enter
-the index. The compiler-emitted `<dl class="page-metadata">` block and the
-`{{tags}}` `<ul class="page-tags">` list are also excluded as layout chrome,
-including on HTML 4.01 Strict layouts that cannot use the
-`data-boris-search-exclude` attribute; the Strict `{{parent}}` shape
-(`<div class="page-parent">`) is excluded the same way, while the default
-`<nav class="page-parent">` is already navigation chrome.
+the index. Compiler-emitted layout-slot chrome is also excluded by its exact
+element name and class, so it stays out of the index on HTML 4.01 Strict
+layouts that cannot use the `data-boris-search-exclude` attribute:
+
+| Slot | Element and class excluded |
+|---|---|
+| `{{metadata}}` | `<dl class="page-metadata">` |
+| `{{tags}}` | `<ul class="page-tags">` |
+| `{{relations}}` | `<section class="semantic-relations">`; Strict `<div class="semantic-relations">` |
+| `{{backlinks}}` | `<section class="semantic-backlinks">`; Strict `<div class="semantic-backlinks">` |
+| `{{nav}}` | Strict `<div class="site-nav">` |
+| `{{breadcrumb}}` | Strict `<div class="breadcrumb">` |
+| `{{toc}}` | Strict `<div class="page-toc">` |
+| `{{children}}` | Strict `<div class="page-children">` |
+| `{{parent}}` | Strict `<div class="page-parent">` |
+
+The non-Strict `{{nav}}`, `{{breadcrumb}}`, `{{toc}}`, `{{children}}`, and
+`{{parent}}` shapes are `<nav>` elements and are already navigation chrome.
+Matching is by element name plus one whitespace-separated class token, so an
+authored element with the same name and class is treated as the same chrome,
+while a different token (`page-toc__l2`, or an authored
+`<section class="notes">`) is not matched.
+Theme-authored chrome such as a skip link, sidebar, or layout heading is not
+compiler-owned; themes exclude it with `data-boris-search-exclude` (or keep it
+outside the extraction root).
 
 Rendered entities (`amp`, `lt`, `gt`, `quot`, `apos`, `nbsp`, and numeric
 character references) are decoded before title, heading, fragment, text, or
