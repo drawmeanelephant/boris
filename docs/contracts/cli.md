@@ -171,6 +171,11 @@ catalog themes that fit each one.
 - `link-in-bio` — the smallest starter: a single trunk page holding a
   personal link list, under `minimal`. It proves a one-page graph still
   validates and builds through the profile.
+- `changelog` — release notes under `journal`: trunk `index` → `changes`
+  hub → dated entries with `published_at` + `summary`. One entry is
+  `status: draft` (the unreleased section): it renders at its route but is
+  excluded from the search index, RSS, and sitemap per
+  [status gating](html-output.md).
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

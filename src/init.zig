@@ -25,6 +25,9 @@
 //!   to `section.html`, so `{{breadcrumb}}` and `{{toc}}` do real work.
 //! - `link-in-bio` — the smallest honest site: one trunk page holding a
 //!   personal link list, under `minimal`.
+//! - `changelog` — release notes (`index` → `changes` hub → dated entries
+//!   with `published_at` + `summary`) under `journal`; one entry is
+//!   `status: draft`, the unreleased section that renders unadvertised.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -55,7 +58,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio" };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -1038,6 +1041,128 @@ const link_in_bio_profile =
     \\
 ;
 
+// --- changelog --------------------------------------------------------------
+
+const changelog_index_md =
+    \\---
+    \\title: Tidepool Release Notes
+    \\tags: [home]
+    \\---
+    \\
+    \\# Tidepool Release Notes
+    \\
+    \\Release notes for Tidepool, a small command-line tide-table tool. Every
+    \\release is a dated page under [[changes]]; the newest shipped release is
+    \\[[changes/2026-09-28-v0-2-0]].
+    \\
+;
+
+const changelog_changes_md =
+    \\---
+    \\title: Changes
+    \\parent: index
+    \\tags: [changes]
+    \\---
+    \\
+    \\# Changes
+    \\
+    \\Every release is a satellite of this hub, newest first. The entry marked
+    \\`status: draft` is the unreleased section: it renders at its normal
+    \\route, but stays out of the search index, feeds, and the sitemap until
+    \\you change it to `status: published`.
+    \\
+    \\- [[changes/unreleased]] — next release (draft)
+    \\- [[changes/2026-09-28-v0-2-0]]
+    \\- [[changes/2026-08-17-v0-1-0]]
+    \\
+;
+
+const changelog_unreleased_md =
+    \\---
+    \\title: Unreleased
+    \\parent: changes
+    \\status: draft
+    \\published_at: 2026-10-10T00:00:00Z
+    \\summary: Work merged since v0.2.0 that has not shipped yet.
+    \\tags: [release]
+    \\---
+    \\
+    \\# Unreleased
+    \\
+    \\## Added
+    \\
+    \\- `tidepool export --ics` writes a calendar of the week's high tides.
+    \\
+    \\## Changed
+    \\
+    \\- Station names match case-insensitively.
+    \\
+    \\When this ships, set the real `published_at`, rename the file to its
+    \\version, and drop `status: draft` (or set `status: published`).
+    \\
+;
+
+const changelog_v0_2_0_md =
+    \\---
+    \\title: v0.2.0
+    \\parent: changes
+    \\published_at: 2026-09-28T12:00:00Z
+    \\summary: Station search, metric heights by default, and a faster parser.
+    \\tags: [release]
+    \\---
+    \\
+    \\# v0.2.0
+    \\
+    \\## Added
+    \\
+    \\- `tidepool search NAME` finds stations by name.
+    \\
+    \\## Changed
+    \\
+    \\- Heights print in metres by default; `--feet` restores the old unit.
+    \\
+    \\## Fixed
+    \\
+    \\- Daylight-saving transitions no longer drop a tide.
+    \\
+    \\Previous release: [[changes/2026-08-17-v0-1-0]].
+    \\
+;
+
+const changelog_v0_1_0_md =
+    \\---
+    \\title: v0.1.0
+    \\parent: changes
+    \\published_at: 2026-08-17T12:00:00Z
+    \\summary: First public release — today's tides for one station.
+    \\tags: [release]
+    \\---
+    \\
+    \\# v0.1.0
+    \\
+    \\## Added
+    \\
+    \\- `tidepool today STATION` prints the day's highs and lows.
+    \\- A bundled station list for the home coast.
+    \\
+    \\Next release: [[changes/2026-09-28-v0-2-0]].
+    \\
+;
+
+const changelog_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Tidepool Release Notes" },
+    \\  "targets": [
+    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/journal" }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -1173,6 +1298,20 @@ const link_in_bio_files = [_]FileToWrite{
     .{ .path = "themes/minimal/assets/minimal.css", .data = archetype_themes.minimal_css },
     .{ .path = "themes/minimal/README.md", .data = archetype_themes.minimal_readme },
     .{ .path = "boris.json", .data = link_in_bio_profile },
+};
+
+const changelog_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = changelog_index_md },
+    .{ .path = "content/changes.md", .data = changelog_changes_md },
+    .{ .path = "content/changes/unreleased.md", .data = changelog_unreleased_md },
+    .{ .path = "content/changes/2026-09-28-v0-2-0.md", .data = changelog_v0_2_0_md },
+    .{ .path = "content/changes/2026-08-17-v0-1-0.md", .data = changelog_v0_1_0_md },
+    .{ .path = "themes/journal/layouts/main.html", .data = archetype_themes.journal_layout_main },
+    .{ .path = "themes/journal/footer.html", .data = archetype_themes.journal_footer },
+    .{ .path = "themes/journal/assets/journal.css", .data = archetype_themes.journal_css },
+    .{ .path = "themes/journal/README.md", .data = archetype_themes.journal_readme },
+    .{ .path = "themes/journal/ACCESSIBILITY.md", .data = archetype_themes.journal_accessibility },
+    .{ .path = "boris.json", .data = changelog_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -1362,6 +1501,28 @@ const link_in_bio_spec = ArchetypeSpec{
     ,
 };
 
+const changelog_spec = ArchetypeSpec{
+    .layout_path = "themes/journal/layouts/main.html",
+    .files = &changelog_files,
+    .tree_report =
+    \\  content/index.md                  trunk page
+    \\  content/changes.md                satellite hub listing the releases
+    \\  content/changes/                  two dated releases plus an unreleased status: draft entry
+    \\  themes/journal/                   shipped "journal" theme — phosphor terminal diary
+    \\  boris.json                        profile (input_format: markdown, theme: journal)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the release notes (the draft renders, unadvertised)
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  each release is a satellite of changes with published_at + summary
+    \\  status: draft renders at its route but stays out of search, RSS, sitemap, and nav
+    \\  ship a release: set its real published_at and drop status: draft
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -1372,6 +1533,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .landing => &landing_spec,
         .wiki => &wiki_spec,
         .@"link-in-bio" => &link_in_bio_spec,
+        .changelog => &changelog_spec,
     };
 }
 
@@ -1568,7 +1730,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -1623,8 +1785,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -1738,6 +1900,22 @@ test "link-in-bio is exactly one trunk page" {
     try std.testing.expectEqual(@as(usize, 1), pages);
     try std.testing.expect(std.mem.indexOf(u8, link_in_bio_index_md, "\nparent:") == null);
     try std.testing.expect(std.mem.indexOf(u8, link_in_bio_index_md, "\ntags: [links]\n") != null);
+}
+
+test "changelog entries are dated and exactly one is a draft" {
+    var entries: usize = 0;
+    var drafts: usize = 0;
+    for (changelog_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/changes/")) continue;
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: changes\n") != null);
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\npublished_at: 2026-") != null);
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\nsummary: ") != null);
+        if (std.mem.indexOf(u8, f.data, "\nstatus: draft\n") != null) drafts += 1;
+        entries += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), entries);
+    try std.testing.expectEqual(@as(usize, 1), drafts);
+    try std.testing.expect(std.mem.indexOf(u8, changelog_unreleased_md, "\nstatus: draft\n") != null);
 }
 
 test "garden demonstrates include composition, components, and dense links" {

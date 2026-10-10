@@ -18,3 +18,9 @@
 - `boris init --type link-in-bio` writes the smallest starter: one trunk
   page holding a personal link list, under `minimal`
   ([#1057](https://github.com/drawmeanelephant/boris/issues/1057)).
+- `boris init --type changelog` writes release notes under `journal`: an
+  `index` → `changes` → dated-entry chain with `published_at` +
+  `summary`, and one `status: draft` unreleased entry that renders but
+  stays out of search, RSS, and sitemap output
+  ([#1056](https://github.com/drawmeanelephant/boris/issues/1056),
+  [status gating](/docs/contracts/html-output.md)).

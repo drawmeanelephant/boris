@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -213,6 +213,26 @@ grep -q 'href="https://example.com/shop"' "$OUT/arch-link-in-bio/dist/index.html
 (cd "$OUT/arch-link-in-bio" && "$ROOT/zig-out/bin/boris" check) >"$OUT/link-in-bio-check.stdout" 2>"$OUT/link-in-bio-check.stderr" \
     || fail "boris check failed on the one-page site: $(head -3 "$OUT/link-in-bio-check.stderr")"
 pass "link-in-bio: one page compiled, built, and checked"
+
+note "changelog: the draft entry renders but is kept out of search, RSS, and sitemap"
+C="$OUT/arch-changelog"
+[[ -f "$C/dist/changes/unreleased.html" ]] || fail "changelog draft entry did not render"
+grep -q '"path": "changes/2026-09-28-v0-2-0.html"' "$C/dist/_boris/search/search-index.json" \
+    || fail "changelog search index is missing a published release"
+grep -q 'changes/unreleased' "$C/dist/_boris/search/search-index.json" \
+    && fail "changelog draft entry leaked into the search index"
+(cd "$C" && "$ROOT/zig-out/bin/boris" --rss --input content --site-url https://tidepool.example.com/ \
+    --rss-title "Tidepool" --rss-description "Release notes" --rss-path feed/rss.xml --quiet) \
+    >/dev/null 2>"$OUT/changelog-rss.stderr" || fail "changelog RSS export failed: $(head -3 "$OUT/changelog-rss.stderr")"
+grep -q '<link>https://tidepool.example.com/changes/2026-08-17-v0-1-0.html</link>' "$C/feed/rss.xml" \
+    || fail "changelog feed is missing a published release"
+grep -q 'unreleased' "$C/feed/rss.xml" && fail "changelog draft entry leaked into the RSS feed"
+(cd "$C" && "$ROOT/zig-out/bin/boris" --input content --html-dir dist-sitemap --theme themes/journal \
+    --sitemap --site-url https://tidepool.example.com/ --quiet) >/dev/null 2>"$OUT/changelog-sitemap.stderr" \
+    || fail "changelog sitemap build failed: $(head -3 "$OUT/changelog-sitemap.stderr")"
+grep -q 'changes/2026-09-28-v0-2-0.html' "$C/dist-sitemap/sitemap.xml" || fail "changelog sitemap is missing a release"
+grep -q 'unreleased' "$C/dist-sitemap/sitemap.xml" && fail "changelog draft entry leaked into the sitemap"
+pass "changelog: draft emitted at its route; absent from search index, RSS, and sitemap"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done

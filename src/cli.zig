@@ -3026,6 +3026,8 @@ pub fn printInitUsage() void {
         \\  wiki      three-level reference tree (index, hubs, entries) with
         \\            breadcrumbs, per-page contents, and cross-entry links
         \\  link-in-bio  one trunk page holding a personal link list
+        \\  changelog dated release notes (published_at + summary) with a
+        \\            status: draft unreleased entry kept out of search and feeds
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.
