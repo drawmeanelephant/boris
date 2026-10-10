@@ -197,6 +197,7 @@ a:hover {
   padding: 0.1em 0.35em;
   border-radius: 0.3rem;
   background: color-mix(in oklab, var(--b-primary) 12%, var(--b-base-100));
+  white-space: nowrap;
 }
 
 /* —— Layout shells —— */
@@ -209,11 +210,11 @@ a:hover {
   margin: 0 auto;
   padding: 0.75rem 1.1rem 1.5rem;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
 }
 
 .shell {
-  grid-template-columns: 1fr;
   align-items: start;
 }
 
@@ -238,6 +239,11 @@ a:hover {
 .home-card--wide {
   min-width: 0;
 }
+
+.home-outline {
+  margin-top: 1.25rem;
+}
+
 
 /* —— Cards / badges —— */
 
@@ -331,6 +337,12 @@ a:hover {
   font-weight: 700;
   color: var(--b-primary);
   background: color-mix(in oklab, var(--b-primary) 12%, transparent);
+  box-shadow: inset 3px 0 var(--b-primary);
+}
+
+.site-nav .is-ancestor > a {
+  font-weight: 600;
+  color: var(--b-primary);
 }
 
 .breadcrumb ol {
@@ -479,6 +491,23 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
   margin-top: 1.5rem;
   padding-top: 1rem;
   border-top: 1px solid var(--b-line);
+}
+
+.children-panel:not(:has(.page-children)) {
+  display: none;
+}
+
+.main > .page-toc::before,
+.blog-post > .page-toc::before {
+  content: "On this page";
+  content: "On this page" / "";
+  display: block;
+  margin: 0 0 0.4rem;
+  color: var(--b-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .page-children ul {
@@ -657,6 +686,10 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
   margin-top: 0;
 }
 
+.prose > :is(p, ul, ol, dl) {
+  max-width: 70ch;
+}
+
 .prose h1,
 .prose h2,
 .prose h3 {
@@ -677,8 +710,17 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
 }
 
 .prose h3 {
-  font-size: 1.08rem;
-  margin: 1.25rem 0 0.45rem;
+  font-size: 1.12rem;
+  margin: 1.5rem 0 0.45rem;
+}
+
+.prose h4 {
+  margin: 1.25rem 0 0.4rem;
+  color: var(--b-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .prose--blog h1 {
@@ -691,8 +733,132 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
   margin: 0.7rem 0;
 }
 
+.prose ul,
+.prose ol {
+  padding-left: 1.4rem;
+}
+
 .prose li + li {
   margin-top: 0.25rem;
+}
+
+.prose li > ul,
+.prose li > ol {
+  margin: 0.3rem 0;
+}
+
+.prose li::marker {
+  color: var(--b-primary);
+  font-weight: 700;
+}
+
+.prose dl {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.prose dt {
+  margin: 0;
+  font-weight: 700;
+}
+
+.prose dd {
+  margin: 0 0 0.35rem;
+  padding: 0.1rem 0 0.1rem 0.85rem;
+  border-left: 3px solid color-mix(in oklab, var(--b-primary) 35%, var(--b-base-100));
+  color: color-mix(in oklab, var(--b-base-content) 85%, var(--b-muted));
+}
+
+.prose hr {
+  margin: 2rem 0;
+  border: 0;
+  border-top: 1px solid var(--b-line);
+}
+
+.prose img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--b-radius-sm);
+}
+
+.prose p > img {
+  box-shadow: var(--b-shadow);
+}
+
+.prose figure {
+  margin: 1.25rem 0;
+  padding: 0.5rem;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius);
+  background: var(--b-base-100);
+  box-shadow: var(--b-shadow);
+}
+
+.prose figure > p {
+  margin: 0;
+}
+
+.prose figcaption {
+  padding: 0.55rem 0.45rem 0.2rem;
+  color: var(--b-muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.prose .footnotes {
+  margin: 1rem 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--b-radius-sm);
+  background: color-mix(in oklab, var(--b-base-200) 70%, var(--b-base-100));
+  color: var(--b-muted);
+  font-size: 0.86rem;
+}
+
+.prose .footnotes ol {
+  margin: 0;
+}
+
+.prose .footnote-ref a {
+  padding: 0 0.15em;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.prose .footnote-backref {
+  text-decoration: none;
+}
+
+.prose .details {
+  margin: 1.15rem 0;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  background: var(--b-base-100);
+}
+
+.prose .details > summary {
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--b-radius-sm);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.prose .details > summary::marker {
+  color: var(--b-primary);
+}
+
+.prose .details > summary:hover {
+  background: color-mix(in oklab, var(--b-primary) 8%, var(--b-base-100));
+}
+
+.prose .details[open] > summary {
+  border-bottom: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm) var(--b-radius-sm) 0 0;
+}
+
+.prose .details__body {
+  padding: 0.1rem 0.9rem 0.4rem;
 }
 
 .prose code {
@@ -734,9 +900,22 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
 .prose th,
 .prose td {
   padding: 0.55rem 0.7rem;
-  text-align: left;
+  text-align: start;
   vertical-align: top;
   border-bottom: 1px solid var(--b-line);
+  font-variant-numeric: tabular-nums;
+}
+
+.prose :is(th, td)[align="center"] {
+  text-align: center;
+}
+
+.prose :is(th, td)[align="right"] {
+  text-align: end;
+}
+
+.prose tbody tr:hover {
+  background: color-mix(in oklab, var(--b-primary) 5%, var(--b-base-100));
 }
 
 .prose th {
@@ -760,38 +939,52 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
 /* Asides / admonitions emitted by Boris */
 
 .admonition {
+  --kind: var(--b-muted);
   margin: 1.15rem 0;
-  padding: 0.8rem 1rem;
+  padding: 0.75rem 1rem 0.85rem;
   border-radius: var(--b-radius-sm);
-  border: 1px solid var(--b-line);
-  border-left-width: 4px;
-  background: color-mix(in oklab, var(--b-base-200) 70%, var(--b-base-100));
+  border: 1px solid color-mix(in srgb, var(--kind) 25%, var(--b-line));
+  border-left: 4px solid var(--kind);
+  background: color-mix(in srgb, var(--kind) 6%, var(--b-base-100));
 }
 
 .admonition__title {
-  margin: 0 0 0.3rem;
-  font-size: 0.72rem;
+  display: inline-block;
+  margin: 0 0 0.4rem;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kind) 14%, var(--b-base-100));
+  color: color-mix(in srgb, var(--kind) 55%, var(--b-base-content));
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.06em;
+  line-height: 1.5;
   text-transform: uppercase;
-  opacity: 0.85;
+}
+
+.admonition__body > :first-child {
+  margin-top: 0;
+}
+
+.admonition__body > :last-child {
+  margin-bottom: 0;
 }
 
 .admonition--tip {
-  border-left-color: var(--b-ok);
+  --kind: var(--b-ok);
 }
 
 .admonition--info,
 .admonition--note {
-  border-left-color: var(--b-info);
+  --kind: var(--b-info);
 }
 
 .admonition--warning {
-  border-left-color: var(--b-warn);
+  --kind: var(--b-warn);
 }
 
 .admonition--danger {
-  border-left-color: var(--b-danger);
+  --kind: var(--b-danger);
 }
 
 /* —— Footer —— */
@@ -895,6 +1088,13 @@ body[data-layout="section"] .section-intro {
     background: #f4f4f4;
     color: #000;
     white-space: pre-wrap;
+  }
+
+  .prose figure,
+  .prose img,
+  .admonition {
+    box-shadow: none;
+    break-inside: avoid;
   }
 
   .home-work .page-children ul {
