@@ -87,6 +87,15 @@
     return document.getElementById(id);
   }
 
+  // The nav publishes its own height as --section-nav-h so each pane's
+  // scroll-margin-top can land a jumped-to section just below the sticky
+  // band without a hardcoded constant. Measured, not guessed: the band's
+  // height moves when a density switch swaps its padding (#1078), when
+  // fonts finish loading, and when the pill row wraps.
+  function publishNavHeight() {
+    if (nav) document.documentElement.style.setProperty('--section-nav-h', `${nav.offsetHeight}px`);
+  }
+
   // A section hidden by the current density mode renders no boxes (unmounted
   // by the mode switch), so the spy must not let it claim the reading line.
   function sectionVisible(section: HTMLElement | null): section is HTMLElement {
@@ -199,6 +208,10 @@
       event.preventDefault();
       await onReveal?.(id);
       await tick();
+      // The reveal resizes the band (density padding): republish before
+      // the jump reads scroll-margin-top — the ResizeObserver cannot
+      // report ahead of this same-task scroll (#1078).
+      publishNavHeight();
     }
     const section = sectionFor(id);
     if (!section) return;
@@ -308,19 +321,24 @@
     const navEl = nav;
     const rowEl = row;
     if (!navEl || !rowEl) return;
-    // Expose the measured nav height so pane scroll-margin-top can sit the
-    // landed section just below the sticky bar without a hardcoded constant.
-    const setHeight = () => document.documentElement.style.setProperty('--section-nav-h', `${navEl.offsetHeight}px`);
-    setHeight();
+    // A ResizeObserver owns the published height: the band resizes on
+    // density switches, font loading, and pill-row wrapping — none of
+    // which fire window resize (#1078). border-box matches the offsetHeight
+    // being published; the default content-box observation would miss a
+    // padding-only change like the density switch.
+    const navObserver = new ResizeObserver(publishNavHeight);
+    navObserver.observe(navEl, { box: 'border-box' });
+    publishNavHeight();
     updateEdges();
     syncCurrent();
     const onScroll = () => syncCurrent();
     const onRowScroll = () => updateEdges();
-    const onResize = () => { setHeight(); onScroll(); };
+    const onResize = () => { publishNavHeight(); onScroll(); };
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onResize, { passive: true });
     rowEl.addEventListener('scroll', onRowScroll, { passive: true });
     return () => {
+      navObserver.disconnect();
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
       rowEl.removeEventListener('scroll', onRowScroll);
