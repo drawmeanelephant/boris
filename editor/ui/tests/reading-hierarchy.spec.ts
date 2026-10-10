@@ -306,3 +306,26 @@ for (const width of [1440, 1280, 1024]) {
     expect(overflows.docScrollWidth).toBeLessThanOrEqual(overflows.innerWidth);
   });
 }
+
+// #1067: in Review the Project column sat at a width where Create, Rename,
+// and Delete file stacked one per line in both the two- and three-column
+// layouts. The actions take the compact size and the column leaves room for
+// two of them per row; their names stay exactly the visible labels.
+for (const width of [1200, 1440]) {
+  test(`the Project file actions pair up instead of stacking one per line at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await installApi(page);
+    await openHome(page);
+    const actions = page.locator('#project .file-actions');
+    const names = ['Create file', 'Rename file', 'Delete file'];
+    const tops: number[] = [];
+    for (const name of names) {
+      const button = actions.getByRole('button', { name, exact: true });
+      await expect(button).toHaveText(name);
+      await expect(button).toHaveClass(/\bcompact\b/);
+      tops.push(Math.round((await button.boundingBox())!.y));
+    }
+    expect(tops[0], 'Create file and Rename file share the first row').toBe(tops[1]);
+    expect(new Set(tops).size, `file actions occupy ${new Set(tops).size} rows`).toBeLessThan(names.length);
+  });
+}

@@ -6,34 +6,24 @@
   import { activeProblems, staleProblems } from '../lib/state/problems.svelte';
   import { problemLocationLabel } from '../lib/utils';
   import AuthoringTools from './AuthoringTools.svelte';
-  import GraphPane from './GraphPane.svelte';
   import RecipePane from './RecipePane.svelte';
   import ThemePane from './ThemePane.svelte';
-  import PublicationPane from './PublicationPane.svelte';
 
   let {
     onSave,
     onNavigate,
     onOpenFile,
     onOpenGraphNode,
-    onImpact,
     onScale,
     onReset,
-    onRunPlan,
-    onVerifyProof,
-    onExportGraph,
     onEnterFocus
   }: {
     onSave: () => void;
     onNavigate: (problem: Problem) => void;
     onOpenFile: (path: string) => void;
     onOpenGraphNode: (node: GraphNode | null) => void;
-    onImpact: () => void;
     onScale: () => void;
     onReset: () => void;
-    onRunPlan: () => void;
-    onVerifyProof: () => void;
-    onExportGraph: () => void;
     onEnterFocus: (trigger: HTMLElement | null) => void;
   } = $props();
 
@@ -435,14 +425,5 @@
       onOpenFile={onOpenFile}
       onNavigate={onNavigate}
     />
-  {/if}
-  {#if density.mode === 'review'}
-    <GraphPane
-      onOpenPath={onOpenFile}
-      onOpenNode={onOpenGraphNode}
-      onImpact={onImpact}
-      onExport={onExportGraph}
-    />
-    <PublicationPane onRunPlan={onRunPlan} onVerifyProof={onVerifyProof} />
   {/if}
 </section>
