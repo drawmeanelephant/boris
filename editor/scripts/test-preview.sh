@@ -94,4 +94,35 @@ editor_pid=""
 stopped="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 1 "$preview_origin/" || true)"
 [[ "$stopped" == "000" ]]
 
+# A compiler that exits 0 without committing dist/index.html must land the
+# preview on a terminal phase — never leave state reads stuck on "running".
+stub_boris="$work/boris-no-output"
+printf '#!/bin/sh\nexit 0\n' >"$stub_boris"
+chmod +x "$stub_boris"
+"$boris_bin" init "$work/stub-project" >/dev/null
+"$editor_bin" "$work/stub-project" --boris "$stub_boris" --ui-dir "$ui_dir" --port 0 >"$work/stub-host.log" 2>&1 &
+editor_pid=$!
+for _ in $(seq 1 100); do
+  grep -q 'BORIS_EDITOR_URL=' "$work/stub-host.log" && break
+  kill -0 "$editor_pid" 2>/dev/null || { sed -n '1,120p' "$work/stub-host.log" >&2; exit 1; }
+  sleep 0.05
+done
+launch_url="$(sed -n 's/^BORIS_EDITOR_URL=//p' "$work/stub-host.log" | head -1)"
+base_url="${launch_url%%/#*}"
+token="${launch_url##*#token=}"
+port="$(printf '%s' "$base_url" | sed -E 's#.*:([0-9]+)$#\1#')"
+
+empty="$(api_get /api/preview/state)"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="idle") throw Error("unbuilt project did not start idle")' "$empty"
+missing="$(api_post /api/preview/rebuild '{}')"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="failed"||r.stale_reason!==null||r.exit_code!==0||r.generation!==0||!r.message.includes("dist/index.html")) throw Error("exit-0 build without dist/index.html was not reported as a failed rebuild")' "$missing"
+missing_state="$(api_get /api/preview/state)"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="failed") throw Error("preview state did not stay on the terminal failed phase")' "$missing_state"
+again="$(api_post /api/preview/rebuild '{}')"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="failed"||r.exit_code!==0) throw Error("a rebuild after missing output was not accepted")' "$again"
+
+kill "$editor_pid"
+wait "$editor_pid" 2>/dev/null || true
+editor_pid=""
+
 echo "editor live preview integration: ok"

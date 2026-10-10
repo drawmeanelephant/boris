@@ -299,7 +299,16 @@
       // the Watch pane instead of a generic host failure.
       if (previousData) preview.data = previousData;
       noteWatchRefusal();
-    } else preview.status = `Preview host failed: ${(result.data as ErrorResponse).error ?? 'request failed'}. Existing output is not current.`;
+    } else {
+      // Any other failure must not leave the optimistic 'running' phase
+      // behind: re-read the authoritative host state (the rebuild may still
+      // have landed, or the host may have recorded a terminal failure), and
+      // fall back to the pre-rebuild payload when the host is unreachable.
+      const error = (result.data as ErrorResponse).error ?? 'request failed';
+      await refreshPreviewState();
+      if (preview.data?.phase === 'running') preview.data = previousData;
+      preview.status = `Preview host failed: ${error}. Existing output is not current.`;
+    }
   }
 
   async function openGraphPath(path: string) {

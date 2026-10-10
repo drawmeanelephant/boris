@@ -1412,6 +1412,23 @@ test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#4
   await expect(page.getByTitle('Boris site preview')).toHaveAttribute('src', /generation=2/);
 });
 
+test('a host-failed rebuild re-reads preview state instead of sticking on running (#1073)', async ({ page }) => {
+  await installApi(page);
+  // A rebuild that fails at the host layer (any non-OK response that is not
+  // the watch_daemon_active refusal) must not leave the optimistic 'running'
+  // phase behind: the shell re-reads /api/preview/state and the Rebuild
+  // preview action stays usable.
+  await page.route('**/api/preview/rebuild', route => route.fulfill({
+    status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'io_error' })
+  }));
+  await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
+  const previewState = page.locator('.preview-state');
+  await expect(previewState).toContainText('Preview host failed: io_error');
+  await expect(previewState).toContainText('idle:');
+  await expect(previewState).not.toContainText('running');
+  await expect(page.getByRole('button', { name: 'Rebuild preview', exact: true })).toBeEnabled();
+});
+
 test('switching completion category focuses the filter (#615)', async ({ page }) => {
   await installApi(page, { disk: '' });
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
