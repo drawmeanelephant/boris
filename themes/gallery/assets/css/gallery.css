@@ -1,0 +1,868 @@
+/* Gallery — a Boris-owned image-first theme.
+   Pale wall, dark ink, museum-label captions. System fonts only; no remote
+   resources, no JavaScript. Images are the author's hand-scaled files from
+   `{stem}.assets/`; the theme only sizes and frames them. */
+
+:root {
+  color-scheme: light dark;
+  --g-wall: #f4f1ec;
+  --g-mat: #fbfaf7;
+  --g-ink: #1d1c1a;
+  --g-muted: #5c5852;
+  --g-rule: #d8d2c8;
+  --g-frame: #2a2825;
+  --g-accent: #8a3b12;
+  --g-accent-ink: #fff;
+  --g-focus: #0b5cad;
+  --g-code-bg: #ebe6de;
+  --g-note: #4d6a86;
+  --g-tip: #3f7250;
+  --g-info: #46667c;
+  --g-warning: #8a5a00;
+  --g-danger: #a12c2c;
+  --g-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --g-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --g-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --g-text: 40rem;
+  --g-wide: 72rem;
+  --g-gap: clamp(1rem, 3vw, 2rem);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --g-wall: #151413;
+    --g-mat: #1e1d1b;
+    --g-ink: #ece8e1;
+    --g-muted: #a9a399;
+    --g-rule: #3a3733;
+    --g-frame: #050505;
+    --g-accent: #f0a46c;
+    --g-accent-ink: #151413;
+    --g-focus: #8cc4ff;
+    --g-code-bg: #262422;
+    --g-note: #8fb1d1;
+    --g-tip: #8cc79c;
+    --g-info: #8fb3c9;
+    --g-warning: #e0b35a;
+    --g-danger: #f08c8c;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--g-wall);
+  color: var(--g-ink);
+  font-family: var(--g-serif);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--g-accent);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+a:hover {
+  text-decoration-thickness: 0.14em;
+}
+
+:focus-visible {
+  outline: 3px solid var(--g-focus);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+main:focus {
+  outline: none;
+}
+
+/* —— Skip link —— */
+
+.skip-link {
+  position: absolute;
+  inset-inline-start: 1rem;
+  inset-block-start: -4rem;
+  z-index: 10;
+  padding: 0.6rem 0.9rem;
+  background: var(--g-ink);
+  color: var(--g-wall);
+  font-family: var(--g-sans);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  inset-block-start: 1rem;
+}
+
+/* —— Header —— */
+
+.g-header {
+  border-block-end: 1px solid var(--g-rule);
+}
+
+.g-header__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1.5rem;
+  max-inline-size: var(--g-wide);
+  margin-inline: auto;
+  padding: 1.1rem var(--g-gap);
+}
+
+.g-wordmark {
+  margin: 0;
+  font-family: var(--g-sans);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.g-header--home .g-wordmark {
+  font-size: 0.9rem;
+}
+
+.g-trail {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--g-sans);
+  font-size: 0.85rem;
+  color: var(--g-muted);
+}
+
+.breadcrumb li + li::before {
+  content: "/";
+  padding-inline: 0.5rem;
+  color: var(--g-rule);
+}
+
+.breadcrumb a {
+  color: inherit;
+}
+
+.breadcrumb [aria-current="page"] {
+  color: var(--g-ink);
+}
+
+/* —— Main column —— */
+
+.g-main {
+  max-inline-size: var(--g-wide);
+  margin-inline: auto;
+  padding: clamp(1.5rem, 5vw, 3.5rem) var(--g-gap) 3rem;
+}
+
+body[data-status="draft"] .g-main::before {
+  content: "Draft";
+  display: inline-block;
+  margin-block-end: 1rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--g-warning);
+  color: var(--g-warning);
+  font-family: var(--g-sans);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* Text runs at a reading measure; images and grids break out to the wall. */
+
+.prose > * {
+  max-inline-size: var(--g-text);
+  margin-inline: auto;
+}
+
+.prose > figure,
+.prose > .gallery-grid,
+.prose > p:has(> img:only-child),
+.prose > table,
+.prose > pre {
+  max-inline-size: var(--g-wide);
+}
+
+.prose > table,
+.prose > pre {
+  max-inline-size: min(var(--g-wide), 52rem);
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  font-family: var(--g-sans);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.prose h1 {
+  margin-block: 0 1.25rem;
+  font-size: clamp(1.9rem, 4.5vw, 3rem);
+  font-weight: 650;
+}
+
+.prose h2 {
+  margin-block: 2.5rem 0.75rem;
+  font-size: 1.4rem;
+  font-weight: 650;
+}
+
+.prose h3 {
+  margin-block: 2rem 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 650;
+}
+
+.prose p,
+.prose ul,
+.prose ol,
+.prose dl,
+.prose blockquote {
+  margin-block: 0 1.1rem;
+}
+
+.prose ul,
+.prose ol {
+  padding-inline-start: 1.4rem;
+}
+
+.prose li + li {
+  margin-block-start: 0.3rem;
+}
+
+.prose hr {
+  max-inline-size: 8rem;
+  margin-block: 2.5rem;
+  border: 0;
+  border-block-start: 1px solid var(--g-rule);
+}
+
+/* —— Images and figures —— */
+
+.prose img {
+  display: block;
+  max-inline-size: 100%;
+  block-size: auto;
+  max-block-size: 85vh;
+  margin-inline: auto;
+  background: var(--g-mat);
+}
+
+.prose p > img:not(:only-child) {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.prose figure,
+.prose > p:has(> img:only-child) {
+  margin: 2.25rem auto;
+}
+
+.prose figure {
+  padding: clamp(0.6rem, 2vw, 1.25rem);
+  background: var(--g-mat);
+  border: 1px solid var(--g-rule);
+}
+
+.prose figure > p {
+  margin: 0;
+}
+
+.prose figure img {
+  box-shadow: 0 1px 0 var(--g-rule);
+}
+
+.prose figcaption {
+  max-inline-size: var(--g-text);
+  margin: 0.85rem auto 0 0;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 2px solid var(--g-ink);
+  color: var(--g-muted);
+  font-family: var(--g-sans);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.prose figcaption strong,
+.prose figcaption b {
+  color: var(--g-ink);
+  font-weight: 650;
+}
+
+.prose figcaption > p {
+  margin: 0;
+}
+
+/* Opt-in author hook: wrap several figures in <div class="gallery-grid">. */
+
+.prose .gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+  align-items: start;
+  gap: var(--g-gap);
+  margin-block: 2.25rem;
+}
+
+.prose .gallery-grid > figure {
+  margin: 0;
+}
+
+.prose .gallery-grid img {
+  max-block-size: 60vh;
+}
+
+/* —— Children: the grid wall —— */
+
+.g-wall:not(:has(.page-children)) {
+  display: none;
+}
+
+.g-wall {
+  margin-block-start: 3rem;
+  padding-block-start: 2rem;
+  border-block-start: 1px solid var(--g-rule);
+}
+
+.g-wall__heading {
+  margin: 0 0 1.25rem;
+  font-family: var(--g-sans);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--g-muted);
+}
+
+.page-children ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: var(--g-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: g-plate;
+}
+
+.page-children li {
+  counter-increment: g-plate;
+}
+
+/* Boris emits only a title link per child; the tile is an empty mat with a
+   museum label, not an invented thumbnail. */
+.page-children a {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  min-block-size: 100%;
+  aspect-ratio: 4 / 3;
+  padding: 1.35rem 1.5rem;
+  background: var(--g-mat);
+  border: 1px solid var(--g-rule);
+  box-shadow: inset 0 0 0 0.6rem var(--g-wall), inset 0 0 0 calc(0.6rem + 1px) var(--g-rule);
+  color: var(--g-ink);
+  font-family: var(--g-sans);
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-decoration: none;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.page-children a::before {
+  content: "No. " counter(g-plate, decimal-leading-zero);
+  color: var(--g-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.page-children a:hover {
+  border-color: var(--g-ink);
+  transform: translateY(-2px);
+}
+
+.page-children a:focus-visible {
+  outline-offset: 4px;
+}
+
+/* —— Wall label: parent, metadata, tags —— */
+
+.g-label:not(:has(*)) {
+  display: none;
+}
+
+.g-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem 1.5rem;
+  max-inline-size: var(--g-text);
+  margin: 2.5rem auto 0;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--g-rule);
+  color: var(--g-muted);
+  font-family: var(--g-sans);
+  font-size: 0.82rem;
+}
+
+.page-parent a::before {
+  content: "\2190\00a0" / "";
+}
+
+.page-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0;
+}
+
+.page-metadata > div {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.page-metadata dt {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  align-self: center;
+}
+
+.page-metadata dd {
+  margin: 0;
+  color: var(--g-ink);
+}
+
+/* Tags sit above the title as subject chips. The same values also appear in
+   the frozen {{metadata}} <dl> colophon below; see README. */
+.page-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-inline-size: var(--g-text);
+  margin: 0 auto 0.9rem;
+  padding: 0;
+  list-style: none;
+  font-family: var(--g-sans);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+}
+
+.page-tags li {
+  padding: 0.05rem 0.6rem;
+  border: 1px solid var(--g-rule);
+  border-radius: 999px;
+  color: var(--g-muted);
+}
+
+/* —— Relations and backlinks —— */
+
+.g-graph:not(:has(*)) {
+  display: none;
+}
+
+.g-graph {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 1rem var(--g-gap);
+  max-inline-size: var(--g-text);
+  margin: 1.5rem auto 0;
+  font-family: var(--g-sans);
+  font-size: 0.88rem;
+}
+
+.semantic-relations::before,
+.semantic-backlinks::before {
+  display: block;
+  margin-block-end: 0.35rem;
+  color: var(--g-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.semantic-relations::before {
+  content: "See also";
+}
+
+.semantic-backlinks::before {
+  content: "Referenced by";
+}
+
+.semantic-relations ul,
+.semantic-backlinks ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.semantic-relations li,
+.semantic-backlinks li {
+  padding-block: 0.2rem;
+}
+
+/* —— Footer and site index —— */
+
+.g-footer {
+  margin-block-start: 2rem;
+  border-block-start: 1px solid var(--g-rule);
+  color: var(--g-muted);
+  font-family: var(--g-sans);
+  font-size: 0.85rem;
+}
+
+.g-footer > * {
+  max-inline-size: var(--g-wide);
+  margin-inline: auto;
+  padding-inline: var(--g-gap);
+}
+
+.g-index {
+  padding-block: 1rem 0.25rem;
+}
+
+.g-index summary {
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+.site-nav ul {
+  margin: 0.5rem 0 0;
+  padding-inline-start: 1.1rem;
+}
+
+.site-nav > ul {
+  padding-inline-start: 0;
+  list-style: none;
+}
+
+.site-nav li {
+  padding-block: 0.15rem;
+}
+
+.site-nav .is-current > a {
+  color: var(--g-ink);
+  font-weight: 700;
+}
+
+.g-footer__line {
+  margin: 0;
+  padding-block: 0.75rem 1.5rem;
+}
+
+/* —— Aside callouts —— */
+
+.prose .admonition {
+  --g-kind: var(--g-note);
+  margin-block: 1.75rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--g-rule);
+  border-inline-start: 4px solid var(--g-kind);
+  background: var(--g-mat);
+  font-family: var(--g-sans);
+  font-size: 0.95rem;
+}
+
+.prose .admonition--tip { --g-kind: var(--g-tip); }
+.prose .admonition--info { --g-kind: var(--g-info); }
+.prose .admonition--warning { --g-kind: var(--g-warning); }
+.prose .admonition--danger { --g-kind: var(--g-danger); }
+
+.prose .admonition__title {
+  margin: 0 0 0.35rem;
+  color: var(--g-kind);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.prose .admonition > :last-child,
+.prose .admonition__body > :last-child,
+.prose .details__body > :last-child {
+  margin-block-end: 0;
+}
+
+/* —— Details disclosures —— */
+
+.prose details {
+  margin-block: 1.5rem;
+  border: 1px solid var(--g-rule);
+  background: var(--g-mat);
+}
+
+.prose details > summary {
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  font-family: var(--g-sans);
+  font-weight: 600;
+}
+
+.prose details[open] > summary {
+  border-block-end: 1px solid var(--g-rule);
+}
+
+.prose .details__body,
+.prose details > :not(summary):not(.details__body) {
+  padding: 0.85rem 1rem;
+}
+
+/* —— Tables —— */
+
+.prose table {
+  display: block;
+  inline-size: max-content;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  margin-block: 1.75rem;
+  border-collapse: collapse;
+  font-family: var(--g-sans);
+  font-size: 0.9rem;
+}
+
+.prose th,
+.prose td {
+  padding: 0.5rem 0.9rem;
+  border-block-end: 1px solid var(--g-rule);
+  text-align: start;
+  vertical-align: top;
+}
+
+.prose thead th {
+  border-block-end: 2px solid var(--g-ink);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* —— Definition lists —— */
+
+.prose dl {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) 1fr;
+  gap: 0.35rem 1.25rem;
+}
+
+.prose dt {
+  font-family: var(--g-sans);
+  font-weight: 650;
+}
+
+.prose dd {
+  margin: 0;
+}
+
+/* —— Blockquotes —— */
+
+.prose blockquote {
+  padding-inline-start: 1.25rem;
+  border-inline-start: 2px solid var(--g-rule);
+  color: var(--g-muted);
+  font-style: italic;
+  font-size: 1.15rem;
+}
+
+.prose blockquote > :last-child {
+  margin-block-end: 0;
+}
+
+/* —— Code —— */
+
+.prose code,
+.prose kbd,
+.prose samp {
+  font-family: var(--g-mono);
+  font-size: 0.85em;
+}
+
+.prose :not(pre) > code {
+  padding: 0.08em 0.35em;
+  background: var(--g-code-bg);
+  border-radius: 3px;
+}
+
+.prose pre {
+  overflow-x: auto;
+  margin-block: 1.5rem;
+  padding: 1rem 1.15rem;
+  background: var(--g-code-bg);
+  border: 1px solid var(--g-rule);
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+/* —— Footnotes —— */
+
+.prose .footnotes {
+  margin-block-start: 3rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--g-rule);
+  color: var(--g-muted);
+  font-family: var(--g-sans);
+  font-size: 0.85rem;
+}
+
+.prose .footnotes ol {
+  padding-inline-start: 1.2rem;
+}
+
+.prose .footnote-ref a {
+  padding-inline: 0.1em;
+  font-family: var(--g-sans);
+  font-size: 0.8em;
+  text-decoration: none;
+}
+
+.prose .footnote-backref {
+  text-decoration: none;
+}
+
+/* —— Narrow screens —— */
+
+@media (max-width: 40rem) {
+  body {
+    font-size: 1rem;
+  }
+
+  .prose figure {
+    margin-inline: calc(var(--g-gap) * -1);
+    border-inline: 0;
+  }
+
+  .prose dl {
+    grid-template-columns: 1fr;
+  }
+
+  .prose dd {
+    margin-block-end: 0.5rem;
+  }
+
+  .page-children a {
+    aspect-ratio: auto;
+    min-block-size: 6rem;
+  }
+}
+
+/* —— Motion —— */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .page-children a:hover {
+    transform: none;
+  }
+}
+
+/* —— Print —— */
+
+@media print {
+  :root {
+    color-scheme: light;
+    --g-wall: #fff;
+    --g-mat: #fff;
+    --g-ink: #000;
+    --g-muted: #333;
+    --g-rule: #999;
+    --g-accent: #000;
+    --g-code-bg: #f2f2f2;
+  }
+
+  body {
+    font-size: 11pt;
+  }
+
+  .skip-link,
+  .g-trail,
+  .g-index,
+  .g-wall,
+  .g-graph {
+    display: none !important;
+  }
+
+  .g-main {
+    max-inline-size: none;
+    padding: 0;
+  }
+
+  .prose > * {
+    max-inline-size: none;
+  }
+
+  .prose figure {
+    padding: 0;
+    border: 0;
+    break-inside: avoid;
+  }
+
+  .prose img {
+    max-block-size: 75vh;
+    box-shadow: none;
+  }
+
+  .prose .gallery-grid {
+    display: block;
+  }
+
+  .prose .gallery-grid > figure {
+    margin-block: 0 1.5rem;
+  }
+
+  .prose pre,
+  .prose table,
+  .prose .admonition,
+  .prose details {
+    break-inside: avoid;
+  }
+
+  .prose pre {
+    white-space: pre-wrap;
+  }
+
+  .prose a {
+    color: inherit;
+  }
+}
