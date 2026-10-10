@@ -22,14 +22,22 @@ page depend on color, hover, a pointer, or a runtime script.
   class from Oliver.
 - The desktop two/three-column compositions collapse into a single reading
   order at 860px. Navigation, metadata, children, and the TOC are never
-  hidden; they become normal stacked regions.
+  hidden; they become normal stacked regions. A children block whose
+  `{{children}}` slot is empty (a leaf page) is hidden entirely, so its
+  label is not announced over nothing.
 - `prefers-color-scheme: dark` changes the paper, ink, rule, and code tokens,
   while `prefers-reduced-motion: reduce` disables smooth scrolling and
   transitions.
+- Visited links darken to `#681717` (12.18:1 on white, 11.67:1 on the soft
+  paper of table stripes; `#ffb1a5`, 8.11:1 on the dark paper). Hover adds a
+  heavier underline rather than relying on the colour shift alone.
 - Callouts retain a text label (`Note`, `Tip`, `Info`, `Warning`, or `Danger`)
-  in addition to their border color. Native disclosure summaries retain a
-  visible marker and focus state. Draft and archived status stamps keep the
-  status word; relation kinds are printed as words ("depends on").
+  in addition to their border color. Warning and Danger labels are crimson
+  (7.00:1 on the blush fill; `#e18c82`, 5.09:1 on the dark blush), and Danger
+  adds a full border so it is not distinguished from Warning by hue alone.
+  Native disclosure summaries retain a visible marker and focus state. Draft
+  and archived status stamps keep the status word; relation kinds are
+  printed as words ("depends on").
 - `@media print` resets every palette token to black on white, even for
   dark-mode readers, hides the skip link, sidebars, and footer, and keeps
   the article, metadata, tags, and relations in one column.
