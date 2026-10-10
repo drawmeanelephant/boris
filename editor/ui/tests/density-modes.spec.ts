@@ -27,7 +27,7 @@ const PLAIN_CONTENT = '# Home\n\nNo frontmatter here.\n';
 type MockOptions = {
   mode?: 'author' | 'review';
   content?: string;
-  commandDelayMs?: number;
+  holdCommand?: Promise<void>;
   proofReport?: string | null;
 };
 
@@ -114,7 +114,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
   });
   await page.route('**/api/commands/run', async route => {
     const { mode } = route.request().postDataJSON() as { mode: string };
-    if (options.commandDelayMs) await new Promise(resolve => setTimeout(resolve, options.commandDelayMs));
+    await options.holdCommand;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(commandResult(mode, { proof_report: options.proofReport ?? null }))
@@ -591,17 +591,21 @@ test('Problems leads with primary actions and keeps analysis in a secondary grou
 });
 
 test('the running command carries aria-busy and an in-button progress affordance', async ({ page }) => {
-  await installApi(page, { mode: 'review', commandDelayMs: 150 });
+  let releaseCommand!: () => void;
+  const holdCommand = new Promise<void>(resolve => { releaseCommand = resolve; });
+  await installApi(page, { mode: 'review', holdCommand });
   const problems = page.locator('#problems');
+  const status = page.getByRole('status', { name: 'Boris command status' });
   await openHome(page);
 
   const diagnostics = problems.getByRole('button', { name: 'Build diagnostics', exact: true });
   await diagnostics.click();
   await expect(diagnostics).toHaveAttribute('aria-busy', 'true');
   await expect(diagnostics).toHaveClass(/is-running/);
-  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Running Build diagnostics');
-  await expect(diagnostics).not.toHaveAttribute('aria-busy', 'true', { timeout: 5_000 });
-  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('finished');
+  await expect(status).toContainText('Running Build diagnostics');
+  releaseCommand();
+  await expect(diagnostics).not.toHaveAttribute('aria-busy', 'true');
+  await expect(status).toContainText('Build diagnostics finished');
 });
 
 test('the command palette still lists the secondary commands', async ({ page }) => {
