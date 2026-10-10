@@ -94,6 +94,16 @@ a:hover {
   text-decoration-thickness: 2px;
 }
 
+:focus-visible {
+  outline: 3px solid var(--b-primary);
+  outline-offset: 3px;
+  border-radius: 0.3rem;
+}
+
+.skip-link:focus-visible {
+  outline-color: var(--b-secondary);
+}
+
 /* —— Chrome —— */
 
 .navbar,
@@ -269,12 +279,12 @@ a:hover {
 
 .badge--secondary {
   background: color-mix(in oklab, var(--b-secondary) 18%, var(--b-base-100));
-  color: var(--b-secondary);
+  color: color-mix(in oklab, var(--b-secondary) 70%, var(--b-base-content));
 }
 
 .badge--accent {
   background: color-mix(in oklab, var(--b-accent) 22%, var(--b-base-100));
-  color: color-mix(in oklab, var(--b-accent) 70%, var(--b-base-content));
+  color: color-mix(in oklab, var(--b-accent) 55%, var(--b-base-content));
 }
 
 /* —— Nav / breadcrumb / TOC / metadata (Boris-emitted classes) —— */
@@ -381,6 +391,62 @@ a:hover {
   margin: 0;
 }
 
+[data-status="draft"] .page-metadata > div:first-child dd,
+[data-status="published"] .page-metadata > div:first-child dd,
+[data-status="archived"] .page-metadata > div:first-child dd {
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+  text-transform: uppercase;
+}
+
+[data-status="draft"] .page-metadata > div:first-child dd {
+  background: color-mix(in oklab, var(--b-secondary) 18%, var(--b-base-100));
+  color: color-mix(in oklab, var(--b-secondary) 70%, var(--b-base-content));
+}
+
+[data-status="published"] .page-metadata > div:first-child dd {
+  background: color-mix(in oklab, var(--b-accent) 22%, var(--b-base-100));
+  color: color-mix(in oklab, var(--b-accent) 55%, var(--b-base-content));
+}
+
+[data-status="archived"] .page-metadata > div:first-child dd {
+  background: var(--b-base-300);
+  color: var(--b-muted);
+}
+
+body:has(.page-tags) .page-metadata > div:last-child,
+body:has(.page-tags) .page-metadata:has(> div:only-child) {
+  display: none;
+}
+
+.page-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: -0.4rem 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.page-tags li {
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--b-primary) 18%, var(--b-base-100));
+  color: var(--b-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.page-tags li::before {
+  content: "#";
+  opacity: 0.7;
+}
+
 .page-toc ul {
   list-style: none;
   margin: 0;
@@ -440,6 +506,93 @@ a:hover {
 
 .section-toc-label {
   margin-top: 1.25rem;
+}
+
+/* —— Semantic relations / backlinks (Boris-emitted) —— */
+
+.graph-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--b-line);
+}
+
+.graph-links:empty {
+  display: none;
+}
+
+.semantic-relations,
+.semantic-backlinks {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  background: color-mix(in oklab, var(--b-base-200) 80%, var(--b-base-100));
+}
+
+.semantic-relations::before,
+.semantic-backlinks::before {
+  display: block;
+  margin: 0 0 0.55rem;
+  color: var(--b-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.semantic-relations::before {
+  content: "Related";
+  content: "Related" / "";
+}
+
+.semantic-backlinks::before {
+  content: "Backlinks";
+  content: "Backlinks" / "";
+}
+
+.semantic-relations ul,
+.semantic-backlinks ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.semantic-relations li,
+.semantic-backlinks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.5rem;
+  margin: 0.3rem 0;
+}
+
+.semantic-relations li::before,
+.semantic-backlinks li::before {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--b-accent) 22%, var(--b-base-100));
+  color: color-mix(in oklab, var(--b-accent) 55%, var(--b-base-content));
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.semantic-backlinks li::before {
+  order: 1;
+}
+
+[data-relation-kind]::before { content: attr(data-relation-kind); }
+[data-relation-kind="relates_to"]::before { content: "relates to"; }
+[data-relation-kind="depends_on"]::before { content: "depends on"; }
+[data-relation-kind="implements"]::before { content: "implements"; }
+[data-relation-kind="supersedes"]::before { content: "supersedes"; }
+
+.semantic-relations a,
+.semantic-backlinks a {
+  font-weight: 600;
 }
 
 /* —— Prose —— */
@@ -626,4 +779,74 @@ body[data-layout="blog"] .blog-post {
 
 body[data-layout="section"] .section-intro {
   min-width: 0;
+}
+
+/* —— Motion and print —— */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  :root,
+  [data-theme="boris-showcase"] {
+    color-scheme: light;
+    --b-base-100: #fff;
+    --b-base-200: #fff;
+    --b-base-300: #eee;
+    --b-base-content: #000;
+    --b-primary: #000;
+    --b-secondary: #000;
+    --b-accent: #000;
+    --b-muted: #333;
+    --b-line: #bbb;
+    --b-shadow: none;
+    background: #fff;
+  }
+
+  .skip-link,
+  .sidebar,
+  .blog-rail,
+  .section-children,
+  .home-card:not(.home-card--wide),
+  .footer {
+    display: none !important;
+  }
+
+  .shell,
+  .home-grid,
+  .blog-shell,
+  .section-main {
+    display: block;
+    max-width: none;
+    padding: 0;
+  }
+
+  .card,
+  .hero__inner {
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .prose pre {
+    background: #f4f4f4;
+    color: #000;
+    white-space: pre-wrap;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: underline;
+  }
 }

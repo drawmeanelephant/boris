@@ -7,8 +7,9 @@
   <title>{{title}} · Boris Showcase</title>
   <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
   <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+  {{head}}
 </head>
-<body data-layout="main">
+<body data-layout="main" data-status="{{page-status}}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="navbar">
     <div class="navbar__brand">
@@ -19,20 +20,21 @@
     {{breadcrumb}}
   </header>
   <div class="shell">
-    <aside class="sidebar card">
+    <aside class="sidebar card" aria-label="Site navigation">
       <p class="sidebar__label">Site</p>
       {{nav}}
     </aside>
-    <main id="main-content" class="main card" tabindex="-1">
+    <main id="main-content" class="main card" tabindex="-1" data-boris-search-root>
       {{metadata}}
       {{toc}}
       <article class="prose">
         {{content}}
       </article>
-      <section class="children-panel" aria-labelledby="main-children-heading">
+      <section class="children-panel" aria-labelledby="main-children-heading" data-boris-search-exclude>
         <p class="sidebar__label" id="main-children-heading">Related pages</p>
         {{children}}
       </section>
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
     </main>
   </div>
   <footer class="footer">{{footer}}</footer>

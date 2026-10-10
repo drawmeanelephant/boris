@@ -7,8 +7,9 @@
   <title>{{title}} · Boris Showcase</title>
   <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
   <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+  {{head}}
 </head>
-<body data-layout="home">
+<body data-layout="home" data-status="{{page-status}}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="hero">
     <div class="hero__inner">
@@ -30,12 +31,13 @@
       <h2 class="card__title">Browse the site</h2>
       {{nav}}
     </section>
-    <main id="main-content" class="card home-card home-card--wide" tabindex="-1">
+    <main id="main-content" class="card home-card home-card--wide" tabindex="-1" data-boris-search-root>
       {{metadata}}
       <article class="prose">
         {{content}}
       </article>
-      <section class="home-outline" aria-label="On this page">
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+      <section class="home-outline" aria-label="On this page" data-boris-search-exclude>
         <p class="sidebar__label">On this page</p>
         {{toc}}
       </section>
