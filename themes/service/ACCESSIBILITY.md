@@ -10,9 +10,9 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 - **Focus.** Two-tone focus in the public-service style. Links get a yellow
   `#ffdd00` fill with black text (14.55:1) and a black underline bar;
   other controls get a 0.2rem black outline inside a yellow halo. One of the
-  two tones clears 3:1 on every surface: black on the light page, yellow on
-  the dark page and the blue masthead. The previous yellow-only outline
-  measured about 1.3:1 on the light page.
+  two tones clears 3:1 on every surface: black on the light page (17.52:1),
+  yellow on the dark page (12.68:1) and the blue masthead (9.21:1). The
+  previous yellow-only outline measured 1.20:1 on the light page.
 - **Contrast.** Ink `#0b0c0c` on `#f3f2f1` is 17.52:1; links `#1d70b8` are
   4.62:1 on the page and 5.17:1 on white. In dark mode links switch to
   `#5694ca` (5.27:1 on `#1b1c1c`, 4.63:1 on the dark surface); the previous
