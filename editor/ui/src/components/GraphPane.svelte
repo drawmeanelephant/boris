@@ -89,7 +89,7 @@
       <button type="button" disabled={problems.running} onclick={onImpact}>Run impact on {node.id}</button>
     </div>
     {#if children.length > 0}
-      <h4>Children</h4>
+      <h3 class="group-label">Children</h3>
       <ul class="graph-links row-list">
         {#each children as link (link.path)}
           <li><button type="button" class="row-button" onclick={() => onOpenPath(link.path)}>Go to child {link.label}</button></li>
@@ -97,7 +97,7 @@
       </ul>
     {/if}
     {#if siblings.length > 0}
-      <h4>Siblings</h4>
+      <h3 class="group-label">Siblings</h3>
       <ul class="graph-links row-list">
         {#each siblings as link (link.path)}
           <li><button type="button" class="row-button" onclick={() => onOpenPath(link.path)}>Go to sibling {link.label}</button></li>
@@ -105,7 +105,7 @@
       </ul>
     {/if}
     {#if outgoing.length > 0}
-      <h4>Outgoing references and includes</h4>
+      <h3 class="group-label">Outgoing references and includes</h3>
       <ul class="graph-links row-list">
         {#each outgoing as link (`${link.kind}:${link.path}`)}
           <li><button type="button" class="row-button" onclick={() => onOpenPath(link.path)}>Go to {link.label}</button></li>
@@ -113,7 +113,7 @@
       </ul>
     {/if}
     {#if backlinks.length > 0}
-      <h4>Backlinks</h4>
+      <h3 class="group-label">Backlinks</h3>
       <ul class="graph-links row-list">
         {#each backlinks as link (`back:${link.kind}:${link.path}`)}
           <li><button type="button" class="row-button" onclick={() => onOpenPath(link.path)}>Go to backlink {link.label}</button></li>
@@ -121,7 +121,7 @@
       </ul>
     {/if}
     {#if relations.length > 0}
-      <h4>Relations from completion.json</h4>
+      <h3 class="group-label">Relations from completion.json</h3>
       <ul class="graph-links row-list">
         {#each relations as relation (`${relation.kind}:${relation.target}`)}
           <li>
@@ -137,7 +137,7 @@
       </ul>
     {/if}
     {#if wikiLinks.length > 0}
-      <h4>Wiki links in this buffer</h4>
+      <h3 class="group-label">Wiki links in this buffer</h3>
       <ul class="graph-links row-list">
         {#each wikiLinks as link (link.id)}
           <li>
