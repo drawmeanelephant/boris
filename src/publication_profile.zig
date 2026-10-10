@@ -1820,7 +1820,9 @@ test "a disabled nostr section needs no identity, selection, or relays (#894)" {
 fn sweepParseAllocations(source: []const u8, overrides: ProfileOverrides) !void {
     var fail_index: usize = 0;
     while (true) : (fail_index += 1) {
-        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        // resize_fail_index = 0 forces every grow/remap onto the counted alloc
+        // path so fail_index maps stably to allocation sites.
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index, .resize_fail_index = 0 });
         // Retain the exact allocator value so a successful request is deinited
         // through the same wrapper that constructed it.
         const allocator = failing.allocator();
