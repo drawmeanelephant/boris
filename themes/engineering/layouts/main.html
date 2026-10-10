@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="{{asset-url assets/css/engineering.css}}">
       {{head}}
   </head>
-  <body>
+  <body data-status="{{page-status}}">
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="primer-header">
       <div class="primer-container primer-header__inner">
@@ -18,11 +18,10 @@
     <main id="main-content" class="primer-container primer-grid" data-boris-search-root>
       <article class="Box primer-article">
         <div class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</div>
-        <header><h1 class="primer-title">{{title}}</h1>{{metadata}}</header>
+        <header><h1 class="primer-title" data-boris-search-exclude>{{title}}</h1>{{metadata}}</header>
         <div class="markdown-body">{{content}}</div>
-        <section class="Box Box--nested" aria-labelledby="children-heading"><h2 id="children-heading" class="h2">In this section</h2>{{children}}</section>
-        {{relations}}
-        {{backlinks}}
+        <section class="Box Box--nested" aria-labelledby="children-heading" data-boris-search-exclude><h2 id="children-heading" class="h2">In this section</h2>{{children}}</section>
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
       </article>
       <aside class="primer-sidebar" aria-label="On this page" data-boris-search-exclude><div class="Box"><p class="primer-kicker">On this page</p>{{toc}}</div></aside>
     </main>

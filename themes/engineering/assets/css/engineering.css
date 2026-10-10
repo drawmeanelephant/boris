@@ -20,7 +20,7 @@ body { margin: 0; background: var(--primer-canvas); color: var(--primer-ink); li
 a { color: var(--primer-accent); text-decoration-thickness: 0.1em; text-underline-offset: 0.14em; }
 a:hover { color: #0550ae; }
 .primer-container { width: min(calc(100% - 2rem), 76rem); margin-inline: auto; }
-.skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 5; padding: 0.55rem 0.8rem; border-radius: 0.35rem; background: var(--primer-focus); color: #fff; font-weight: 700; }
+.skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 5; padding: 0.55rem 0.8rem; border-radius: 0.35rem; background: #0969da; color: #fff; font-weight: 700; }
 .skip-link:focus { top: 1rem; }
 .primer-header { border-bottom: 1px solid var(--primer-border); background: #24292f; color: #fff; }
 .primer-header--home { background: linear-gradient(135deg, #24292f, #323b45); }
@@ -65,7 +65,7 @@ details summary { cursor: pointer; font-weight: 700; }
 .primer-footer__inner p { margin: 0.2rem 0; }
 .fg-muted { color: var(--primer-muted); }
 :focus-visible { outline: 0.2rem solid var(--primer-focus); outline-offset: 0.2rem; }
-@media (prefers-color-scheme: dark) { :root { --primer-canvas: #0d1117; --primer-canvas-subtle: #161b22; --primer-surface: #161b22; --primer-border: #30363d; --primer-ink: #e6edf3; --primer-muted: #8b949e; --primer-accent-soft: #122b42; } .Label--accent { color: #79c0ff; } }
+@media (prefers-color-scheme: dark) { :root { --primer-canvas: #0d1117; --primer-canvas-subtle: #161b22; --primer-surface: #161b22; --primer-border: #30363d; --primer-ink: #e6edf3; --primer-muted: #8b949e; --primer-accent-soft: #122b42; --primer-accent: #4493f8; --primer-focus: #4493f8; } a:hover { color: #79c0ff; } .Label--accent { color: #79c0ff; } }
 @media (max-width: 48rem) { .primer-header__inner { display: grid; align-items: start; } .primer-nav ul { justify-content: start; } .primer-grid, .primer-home { grid-template-columns: 1fr; } .primer-sidebar { position: static; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 @media print { .primer-header, .primer-footer, .primer-sidebar, .primer-home__rail, .skip-link { display: none; } .primer-grid, .primer-home { display: block; padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } }
@@ -86,4 +86,39 @@ details summary { cursor: pointer; font-weight: 700; }
 .footnotes { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--primer-border); color: var(--primer-muted); font-size: 0.88rem; }
 .admonition__title { margin: 0 0 0.3rem; font-size: 0.74rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
 .details__body > :first-child { margin-top: 0.7rem; }
-.semantic-relations, .semantic-backlinks { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--primer-border); }
+.primer-header :focus-visible { outline-color: #58a6ff; }
+.graph-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; margin-top: 2rem; }
+.graph-links:empty { display: none; }
+.semantic-relations, .semantic-backlinks { padding: 1rem 1.2rem; border: 1px solid var(--primer-border); border-radius: 0.45rem; background: var(--primer-canvas-subtle); }
+.semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 0.6rem; font-size: 1rem; font-weight: 700; line-height: 1.2; }
+.semantic-relations::before { content: "Relations"; content: "Relations" / ""; }
+.semantic-backlinks::before { content: "Backlinks"; content: "Backlinks" / ""; }
+.semantic-relations ul, .semantic-backlinks ul { margin: 0; padding: 0; list-style: none; }
+.semantic-relations li, .semantic-backlinks li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.5rem; margin-block: 0.45rem; }
+.semantic-relations li::before, .semantic-backlinks li::before { padding: 0.05rem 0.45rem; border: 1px solid var(--primer-border); border-radius: 2rem; color: var(--primer-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; font-weight: 600; }
+.semantic-backlinks li::before { order: 1; }
+.semantic-relations li::before, .semantic-backlinks li::before { content: attr(data-relation-kind); }
+[data-status="draft"] .page-metadata > div:first-child,
+[data-status="published"] .page-metadata > div:first-child,
+[data-status="archived"] .page-metadata > div:first-child { align-items: center; padding: 0.1rem 0.6rem; border: 1px solid; border-radius: 2rem; font-size: 0.78rem; font-weight: 600; }
+[data-status="draft"] .page-metadata > div:first-child dt,
+[data-status="published"] .page-metadata > div:first-child dt,
+[data-status="archived"] .page-metadata > div:first-child dt { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+[data-status="draft"] .page-metadata > div:first-child dd::before,
+[data-status="published"] .page-metadata > div:first-child dd::before,
+[data-status="archived"] .page-metadata > div:first-child dd::before { content: "●"; content: "●" / ""; margin-right: 0.35rem; }
+[data-status="draft"] .page-metadata > div:first-child { border-color: #d4a72c; background: #fff8c5; color: #9a6700; }
+[data-status="published"] .page-metadata > div:first-child { border-color: #4ac26b; background: #dafbe1; color: #1a7f37; }
+[data-status="archived"] .page-metadata > div:first-child { border-color: var(--primer-border); background: var(--primer-canvas-subtle); color: var(--primer-muted); }
+@media (prefers-color-scheme: dark) {
+  [data-status="draft"] .page-metadata > div:first-child { border-color: #9e6a03; background: #3b2e00; color: #d29922; }
+  [data-status="published"] .page-metadata > div:first-child { border-color: #238636; background: #12261e; color: #3fb950; }
+  [data-status="archived"] .page-metadata > div:first-child { background: #21262d; }
+}
+@media print {
+  :root { color-scheme: light; --primer-canvas: #fff; --primer-canvas-subtle: #fff; --primer-surface: #fff; --primer-border: #999; --primer-ink: #000; --primer-muted: #333; --primer-accent: #000; --primer-accent-soft: #fff; }
+  .Box { border: 0; box-shadow: none; padding: 0; }
+  .Box--nested, .semantic-relations, .semantic-backlinks { border: 1px solid #999; padding: 0.6rem 0.8rem; }
+  .markdown-body pre { background: #fff; color: #000; border: 1px solid #999; white-space: pre-wrap; }
+  [data-status] .page-metadata > div:first-child { background: #fff !important; color: #000 !important; border-color: #000 !important; }
+}
