@@ -480,6 +480,11 @@ nodes, edges, or backlinks. Wiki-link tokens in the open buffer are scanned
 as `[[id]]` text and resolved against graph entities — the editor does not
 parse Markdown.
 
+The graph is a project-level artifact, so the pane is too: in Review density
+it is a top-level pane in the workspace rail (after Watch, before
+Publication), not a sub-pane of Source (#1067), and it is mounted whether or
+not a file is open (#970).
+
 From the current page the inspector can go to the parent, children, siblings,
 outgoing reference/include edges, reverse-index backlinks, and completion
 relations. The command palette jumps to an entity by id or title and can run
@@ -745,9 +750,9 @@ labels.
   real line-height by default; headings take `--leading-tight` and controls
   opt in explicitly. `--measure-prose` caps a lede's line length.
 - **Heading roles.** `h1`–`h3` are app/pane/sub-pane titles. `h4` is
-  deliberately not a fourth size: it is a group label inside a sub-pane
-  (`Children`, `Backlinks`, `Ingredients`, `Targets`), so it renders as a
-  small-caps label instead of competing with the body copy it introduces.
+  deliberately not a fourth size: it is a group label inside a pane or
+  sub-pane (`Children`, `Backlinks`, `Ingredients`, `Targets`), so it renders
+  as a small-caps label instead of competing with the body copy it introduces.
   Authored Markdown rendered by Focus mode's reading surface resets that
   treatment — it is document content, not UI.
 - **One pane header row (`.pane-heading`).** Every pane and sub-pane header is
@@ -818,11 +823,13 @@ not a parallel look.
 
 - **Buttons.** One base (secondary) and three intents: `primary` (at most one
   per cluster), `danger`, and `ghost` for the rarer actions in a cluster.
-  `compact` sizes a button for dense rows (graph zoom, recipe table),
-  `row-button` makes a navigating list row (graph links, theme assets, problems
-  in this file), and `chrome-button` is the pill for controls on the dark
-  header bands (theme, connection, Focus actions). A link that acts as a
-  button (`button-link`) shares the base.
+  `compact` sizes a button for dense rows (graph zoom, recipe table, Project
+  file actions), `row-button` makes a navigating list row (graph links, theme
+  assets, problems in this file), and `chrome-button` is the pill for controls
+  on the dark header bands (theme, connection, Focus actions). A link that
+  acts as a button (`button-link`) shares the base. A field and the action it
+  feeds share a `field-row`; in a card too narrow for both, the action wraps
+  below the field instead of overflowing.
 - **Badge** — a short status label (a command's exit class, the preview phase,
   the buffer state). **Status text** — a sentence-length state with a tone dot
   (validation and watch daemon states); sentences wrap, so they never sit in a
@@ -830,11 +837,12 @@ not a parallel look.
 - **Notice** — a callout for a reachable state: neutral information, `ok`,
   `warn` (act on it), or `danger` (a failure). **Empty state** — nothing to show
   yet, said plainly behind a dashed edge; its loading variant adds a busy ring.
-- **Cards** — `pane` for a top-level section, `subpane` for a card nested in one
-  (Graph, Publication, Recipe, Theme, authoring hints, analysis results).
-  **Toolbar** — every row of actions. **Row list** — a list whose rows navigate
-  or name one fact each. **Disclosure** — an in-pane `<details>` whose summary
-  reads as a link.
+- **Cards** — `pane` for a top-level section (Project, Source, and the Review
+  rail's Problems, Preview, Watch, Graph, and Publication), `subpane` for a
+  card nested in one (Recipe, Theme, authoring hints, problems in this file,
+  analysis results). **Toolbar** — every row of actions. **Row list** — a list
+  whose rows navigate or name one fact each. **Disclosure** — an in-pane
+  `<details>` whose summary reads as a link.
 
 Tones only restate what the host sent; they never add a verdict. A problem
 group's tone is its Boris severity (error → danger, warning → warn, info →
@@ -891,7 +899,18 @@ preferences. The mode is disposable UI state, never project truth:
     `aria-pressed` — a pressed state presumes a name that does not change with
     it — and Author takes a smaller product mark and tighter header/nav bands
     than Review.
-- **Review**: the full diagnostics chrome, unchanged.
+- **Review**: the full diagnostics chrome. Project and Source sit beside the
+  workspace rail, which holds every project-level pane as a peer (#1067):
+  Problems, Preview, Watch, Graph, and Publication, top to bottom, each a
+  top-level `pane` with an `h2` title. Source carries only the writing
+  surface and what belongs to the open file (its status, problems in this
+  file, authoring hints, Recipe, Theme), so it no longer grows into a tall
+  column beside a short rail. Problems leads the rail, and Problems and
+  Preview stay beside the editor above the fold at desktop widths (#463).
+  At 80rem and wider the rail is its own scroll container; below that it
+  spans the full width under Project and Source. The Project column is wide
+  enough for its compact file actions to pair up instead of stacking one per
+  line.
 
 Source is the hero in both modes (#989): the writing column outweighs the
 file and rail columns, and the editing surface is a bordered shell whose
@@ -992,12 +1011,26 @@ layers feedback on top:
 - **Sticky.** The nav pins below the viewport top; landed sections sit just
   under it via a `scroll-margin-top` sized from the measured nav height
   (`--section-nav-h`), not a hardcoded offset.
+- **Order.** Links follow the visual order (#1067): Project, Source, then the
+  workspace rail top to bottom — Problems, Preview, Watch, Graph, Publication.
+  In Author the rail destinations recede behind a `Review` caption, and each
+  of them switches to Review before it lands.
 - **Arrival highlight.** Activating a link focuses the target section and
   pulses it briefly. Under `prefers-reduced-motion` the pulse collapses to
-  a static highlight.
+  a static highlight, and transitions take `0s` rather than a token
+  `0.01ms`: with the default `transition-property: all`, any non-zero
+  duration makes every layout change trail by a few frames, so a jump right
+  after a mode switch would park its target on the previous mode's layout.
 - **Scrollspy.** The link for the section at the reading top carries
-  `aria-current="true"` and an active pill; a bottom rule keeps the last
-  section current where the page clamps at max scroll. On narrow viewports
+  `aria-current="true"` and an active pill. A jump target keeps it while it
+  stays where the jump left it: on the reading line, or — when the window
+  runs out of scroll first, as Review's short page does at wide viewports —
+  resting on screen below the line. Otherwise a bottom rule keeps the last
+  section current where the page clamps at max scroll, as long as that
+  section is on screen. At 80rem and wider the workspace rail is a second
+  scroll container, and the spy listens to it as well as the window — bound
+  whenever Review mounts the rail, including after a cold Author open; a
+  rail scroll releases a jump target outside the rail. On narrow viewports
   the active pill scrolls into the visible strip of the pill row, and edge
   bars hint content beyond the clip.
 - **Focus hand-off.** Every nav target is a programmatic focus target
@@ -1016,4 +1049,6 @@ layers feedback on top:
   a page is selected.
 
 The Graph pane is always `id="graph"` (the former `graph-empty` stub is
-gone). Presentation-only: no new endpoints, no pipeline changes.
+gone) and the Publication pane `id="publication"`; the shell mounts both in
+the Review rail, not inside Source (#1067). Presentation-only: no new
+endpoints, no pipeline changes.
