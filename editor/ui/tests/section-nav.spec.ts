@@ -298,6 +298,55 @@ test('rail scrolling moves aria-current after a cold Author open switches to Rev
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
 });
 
+// #1078: --section-nav-h must track the band actually on screen, not the
+// one measured at mount. Author's quiet band is shorter than Review's
+// (padding-block var(--space-2) vs var(--space-3), and quieter review
+// links), so a mode-gated jump that switches densities used to park its
+// pane at the stale Author margin — a few px too tight under the taller
+// Review band. The same staleness applies to the density toggle, font
+// loading, and pill-row wrapping, so the component observes the band's
+// box instead of re-measuring only on window resize.
+test('a mode-gated density switch republishes the nav height before the pane lands (#1078)', async ({ page }) => {
+  // Reduced motion makes the jump instant, so the margin is read once at
+  // invocation with no animation frames to blur a stale value.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  // Below 80rem the rail is not its own scroll container, so the window
+  // jump parks the section exactly at its scroll-margin-top.
+  await page.setViewportSize({ width: 900, height: 800 });
+  await installApi(page, { density: 'author' });
+  const nav = page.getByRole('navigation', { name: 'Editor sections' });
+  const authorHeight = (await nav.boundingBox())!.height;
+  const authorPublished = await page.evaluate(() =>
+    parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--section-nav-h')));
+  expect(Math.abs(authorPublished - authorHeight)).toBeLessThanOrEqual(1);
+
+  // Problems lives in Review: activating the link switches densities and
+  // lands in one activation (#990).
+  await navLink(page, 'Problems').click();
+  await expect(page.locator('#problems')).toBeFocused();
+
+  const landed = await page.evaluate(() => {
+    const navEl = document.querySelector('.section-nav');
+    const section = document.getElementById('problems');
+    if (!navEl || !section) return null;
+    return {
+      navHeight: navEl.getBoundingClientRect().height,
+      published: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--section-nav-h')),
+      margin: parseFloat(getComputedStyle(section).scrollMarginTop),
+      top: section.getBoundingClientRect().top
+    };
+  });
+  expect(landed).not.toBeNull();
+  // The Review band is taller than Author's quiet one, and the published
+  // var now describes it rather than the stale mount-time measurement.
+  expect(landed!.navHeight).toBeGreaterThan(authorHeight);
+  expect(Math.abs(landed!.published - landed!.navHeight)).toBeLessThanOrEqual(1);
+  // scroll-margin-top is the band height plus the 0.75rem gap, and the
+  // pane parked exactly there — not at the Author margin.
+  expect(Math.abs(landed!.margin - (landed!.navHeight + 12))).toBeLessThanOrEqual(1);
+  expect(Math.abs(landed!.top - landed!.margin)).toBeLessThanOrEqual(1);
+});
+
 test('nav stays reachable while scrolled and keyboard activation works', async ({ page }) => {
   await installApi(page);
   await page.locator('#watch').scrollIntoViewIfNeeded();
