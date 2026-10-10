@@ -27,7 +27,7 @@ without a separate `home`, `blog`, or `archive` layout. That includes the
 ## Slot coverage
 
 - `{{relations}}` renders as "Related entries" and `{{backlinks}}` as
-  "TrackBacks" under the entry footer, with the relation kind in
+  "TrackBacks" under the entry, with the relation kind in
   parentheses. Both emit nothing on a page without semantic relations.
 - `{{page-status}}` is a class token on the entry (`entry--draft`,
   `entry--archived`). A draft gets a dashed "Draft — not yet published"
