@@ -504,6 +504,10 @@ pub fn parseBytes(allocator: std.mem.Allocator, workspace: ProfileWorkspace, byt
             return error.DuplicateKey;
         },
         error.ValueTooLong => error.StringTooLong,
+        // Allocator failure is a system error, not malformed input: keep it
+        // out of the InvalidJson bucket so the CLI reports exit 3, not the
+        // exit-2 usage class (#1042).
+        error.OutOfMemory => error.OutOfMemory,
         else => error.InvalidJson,
     };
     defer parsed.deinit();
@@ -1460,6 +1464,54 @@ test "structural rejections record the offending key and object path (#1038)" {
     // A clean parse leaves no stale locus for the next report.
     var request = try parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"editions\":{\"ir\":{\"output\":\".boris\"}}}", .{});
     defer request.deinit(std.testing.allocator);
+    try std.testing.expect(lastErrorDetail() == null);
+}
+
+test "head wrong-type rejections name the field, not a coerced value (#1042)" {
+    // std.json's typed parse coerces JSON integers and numeric strings into
+    // enum tags and integer arrays into byte strings; the closed head grammar
+    // rejects them as wrong types instead.
+    const cases = [_]struct { text: []const u8, detail: []const u8 }{
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":{\"type\":0}}}]}",
+            .detail = "wrong type for field \"type\" in targets[0].head.defaults",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":{\"type\":\"0\"}}}]}",
+            .detail = "invalid value \"0\" for field \"type\" in targets[0].head.defaults",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"ogp\":1}}]}",
+            .detail = "wrong type for field \"ogp\" in targets[0].head",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":{\"title\":[116,105,116]}}}]}",
+            .detail = "wrong type for field \"title\" in targets[0].head.defaults",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"pages\":[{\"id\":[97],\"values\":{\"title\":\"x\"}}]}}]}",
+            .detail = "wrong type for field \"id\" in targets[0].head.pages[0]",
+        },
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"defaults\":{\"image\":{\"source\":0,\"path\":\"a.png\",\"alt\":\"x\"}}}}]}",
+            .detail = "wrong type for field \"source\" in targets[0].head.defaults.image",
+        },
+    };
+    for (cases) |case| {
+        try std.testing.expectError(error.InvalidHead, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, case.text, .{}));
+        try std.testing.expectEqualStrings(case.detail, lastErrorDetail().?);
+    }
+}
+
+test "initial JSON parse propagates OutOfMemory instead of reporting InvalidJson (#1042)" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    // parseBytes owns the workspace even on failure; the free routes through
+    // the wrapper to the testing allocator, so nothing real is leaked.
+    try std.testing.expectError(
+        error.OutOfMemory,
+        parseBytes(failing.allocator(), .{ .root = try std.testing.allocator.dupe(u8, "/work") }, "{\"format\":\"boris-publication-profile\",\"schema_version\":1}", .{}),
+    );
+    // A system error carries no JSON locus: the CLI reports the error name.
     try std.testing.expect(lastErrorDetail() == null);
 }
 

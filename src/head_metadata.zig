@@ -89,6 +89,7 @@ fn validateFields(fields: Fields) !void {
 
 pub fn parse(gpa: std.mem.Allocator, value: std.json.Value) !std.json.Parsed(Declaration) {
     try rejectNulls(value);
+    try checkShape(Declaration, value);
     var parsed = std.json.parseFromValue(Declaration, gpa, value, .{ .allocate = .alloc_always }) catch |err| {
         if (err == error.OutOfMemory) return err;
         return error.InvalidHead;
@@ -118,6 +119,56 @@ pub fn parse(gpa: std.mem.Allocator, value: std.json.Value) !std.json.Parsed(Dec
         if (p.modified_time) |date| _ = rss_date.parse(date) catch return error.InvalidHead;
     }
     return parsed;
+}
+
+/// `parseFromValue` coerces: a JSON integer or numeric string becomes an enum
+/// tag, and an integer array becomes a `[]const u8` byte string. The `head`
+/// grammar is closed (docs/contracts/head-metadata.md): a wrong JSON type is
+/// a rejection, not a coercion. Walk the value against the declared shape
+/// before the lossy parse so `type: 0`, `type: "0"`, or `title: [116,105,116]`
+/// fail rather than silently becoming `.article`, `.website`, or "tit" (#1042).
+/// Unknown keys and missing required fields remain `parseFromValue`'s job.
+fn checkShape(comptime T: type, value: std.json.Value) Error!void {
+    switch (@typeInfo(T)) {
+        .optional => |info| switch (value) {
+            // rejectNulls already forbids null anywhere in the declaration.
+            .null => return error.InvalidHead,
+            else => return checkShape(info.child, value),
+        },
+        .bool => if (value != .bool) return error.InvalidHead,
+        .int => if (value != .integer) return error.InvalidHead,
+        .@"enum" => {
+            const s = switch (value) {
+                .string => |s| s,
+                else => return error.InvalidHead,
+            };
+            // A tag name only: `stringToEnum` is what `parseFromValue`'s
+            // numeric-string coercion bypasses.
+            if (std.meta.stringToEnum(T, s) == null) return error.InvalidHead;
+        },
+        .pointer => |info| {
+            if (info.size != .slice) return;
+            if (info.child == u8) {
+                if (value != .string) return error.InvalidHead;
+                return;
+            }
+            const items = switch (value) {
+                .array => |a| a.items,
+                else => return error.InvalidHead,
+            };
+            for (items) |item| try checkShape(info.child, item);
+        },
+        .@"struct" => |info| {
+            const obj = switch (value) {
+                .object => |o| o,
+                else => return error.InvalidHead,
+            };
+            inline for (info.field_names, info.field_types) |name, field_type| {
+                if (obj.get(name)) |child| try checkShape(field_type, child);
+            }
+        },
+        else => {},
+    }
 }
 
 fn rejectNulls(value: std.json.Value) Error!void {
@@ -328,6 +379,18 @@ test "closed head declaration rejects passthrough, duplicates, unsafe URLs and m
         "{\"defaults\":{\"image\":{\"source\":\"theme\",\"path\":\"../x.png\",\"alt\":\"x\"}}}",
         "{\"pages\":[{\"id\":\"a\",\"modified_time\":\"2026-02-30T00:00:00Z\"}]}",
         "{\"pages\":[{\"id\":\"a\"},{\"id\":\"a\"}]}",
+        // Wrong JSON types fail rather than coerce (#1042): numeric and
+        // numeric-string enum values, and byte arrays where the grammar
+        // declares a string.
+        "{\"defaults\":{\"type\":0}}",
+        "{\"defaults\":{\"type\":\"0\"}}",
+        "{\"defaults\":{\"twitter_card\":1}}",
+        "{\"ogp\":1}",
+        "{\"defaults\":{\"image\":{\"source\":0,\"path\":\"a.png\",\"alt\":\"x\"}}}",
+        "{\"defaults\":{\"title\":[116,105,116]}}",
+        "{\"base_url\":[104,116,116,112,115]}",
+        "{\"pages\":[{\"id\":[97]}]}",
+        "{\"pages\":[{\"id\":\"a\",\"modified_time\":[50,48]}]}",
     };
     for (invalid) |bytes| {
         var value = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
