@@ -694,7 +694,9 @@ first **Esc** instead (see **Chrome panels** below).
   (`--layer-focus-popover`) instead of expanding inside the header, so opening
   one never reflows the chrome or resizes the writing surface (#1066). The two
   act as one light-dismiss menu: opening one closes the other, a press outside
-  the open panel closes it, and **Esc** closes it and returns focus to its
+  the open panel closes it, focus leaving it (Tab past the last control or
+  Shift+Tab before the summary) closes it without pulling focus back, and
+  **Esc** closes it and returns focus to its
   summary — only an **Esc** with no panel open exits focus mode. A panel near
   the right edge slides left just far enough to stay inside the chrome.
 - **The reading aid is a reading aid.** Split/Preview render a bounded,

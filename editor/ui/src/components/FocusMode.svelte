@@ -250,9 +250,10 @@
   // --- Chrome panels ----------------------------------------------------------
   // Typography and Writing aids keep their native <details> disclosure, but
   // the panel overlays the writing surface instead of reflowing the chrome.
-  // The two act as one light-dismiss menu: opening one closes the other, Esc
-  // or a press outside closes the open one, and an open panel slides left
-  // just far enough to stay inside the chrome's content box.
+  // The two act as one light-dismiss menu: opening one closes the other, Esc,
+  // a press outside, or focus leaving the panel closes the open one, and an
+  // open panel slides left just far enough to stay inside the chrome's
+  // content box.
   let typePanel = $state() as HTMLDetailsElement | undefined;
   let aidsPanel = $state() as HTMLDetailsElement | undefined;
   const panels = () => [typePanel, aidsPanel].filter((panel): panel is HTMLDetailsElement => panel !== undefined);
@@ -294,6 +295,20 @@
   function handleWindowPointerdown(event: PointerEvent) {
     const target = event.target instanceof Node ? event.target : null;
     for (const panel of panels()) if (panel.open && !panel.contains(target)) panel.open = false;
+  }
+
+  // Light dismiss for the keyboard: focus leaving an open panel — Tab past
+  // its last control, Shift+Tab before its summary, or a programmatic move —
+  // closes it behind the moving focus rather than leaving it over the
+  // writing surface. Focus is not redirected; it keeps moving to whatever
+  // the author Tabbed to. The summary is inside the details element, so
+  // contains() covers focus bouncing between summary and panel controls.
+  function handlePanelFocusout(event: FocusEvent) {
+    const details = event.currentTarget as HTMLDetailsElement;
+    if (!details.open) return;
+    const next = event.relatedTarget;
+    if (next instanceof Node && details.contains(next)) return;
+    details.open = false;
   }
 
   function handleWindowResize() {
@@ -370,7 +385,7 @@
       <label><input type="radio" name="focus-layout" value="split" checked={focusMode.layout === 'split'} onchange={() => setFocusLayout('split')} /> Split</label>
       <label><input type="radio" name="focus-layout" value="preview" checked={focusMode.layout === 'preview'} onchange={() => setFocusLayout('preview')} /> Preview</label>
     </fieldset>
-    <details class="focus-type" bind:this={typePanel} ontoggle={handlePanelToggle}>
+    <details class="focus-type" bind:this={typePanel} ontoggle={handlePanelToggle} onfocusout={handlePanelFocusout}>
       <summary class="chrome-button" onclick={openPanel}>Typography</summary>
       <div class="focus-type-grid">
         <fieldset class="focus-type-group">
@@ -393,7 +408,7 @@
         </fieldset>
       </div>
     </details>
-    <details class="focus-type focus-aids" bind:this={aidsPanel} ontoggle={handlePanelToggle}>
+    <details class="focus-type focus-aids" bind:this={aidsPanel} ontoggle={handlePanelToggle} onfocusout={handlePanelFocusout}>
       <summary class="chrome-button" onclick={openPanel}>Writing aids</summary>
       <div class="focus-type-grid focus-aids-grid">
         <fieldset class="focus-type-group">
