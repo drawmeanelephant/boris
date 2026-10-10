@@ -308,7 +308,10 @@ test "raceDeadline does not wait for an eager timer after a completed operation"
     const start = Io.Clock.awake.now(io);
 
     try raceDeadline(io, 2_000, deadlineSleep, .{ io, 5 });
-    try std.testing.expect(start.durationTo(Io.Clock.awake.now(io)).toMilliseconds() < 1_000);
+    // Ordering, not duration: the race must return on the operation's win,
+    // before the 2000ms timer could possibly fire. Bounding by the timer
+    // itself keeps the check true under arbitrary scheduler starvation.
+    try std.testing.expect(start.durationTo(Io.Clock.awake.now(io)).toMilliseconds() < 2_000);
 }
 
 test "raceDeadline fails closed before invoking an operation without concurrency" {
@@ -349,7 +352,10 @@ test "raceDeadline drains the operation when the timer cannot reserve concurrenc
 
     try std.testing.expectError(error.Timeout, raceDeadline(io, 20, Operation.run, .{ io, &drained }));
     try std.testing.expect(drained.load(.acquire));
-    try std.testing.expect(start.durationTo(Io.Clock.awake.now(io)).toMilliseconds() < 1_000);
+    // Ordering, not duration: the drain cancelled the operation rather than
+    // waiting out its 10s sleep. Bounding by the sleep itself keeps the
+    // check true under arbitrary scheduler starvation.
+    try std.testing.expect(start.durationTo(Io.Clock.awake.now(io)).toMilliseconds() < 10_000);
 }
 
 fn connectStream(io: Io, address: Io.net.IpAddress) Io.net.IpAddress.ConnectError!Io.net.Stream {

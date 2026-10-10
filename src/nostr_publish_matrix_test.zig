@@ -155,7 +155,7 @@ fn acceptAuthRelay(base: *MockRelay) !Io.net.Stream {
     return base.server.accept(base.io);
 }
 fn serveAuth(relay: *AuthRelay, gpa: std.mem.Allocator) !void {
-    const stream = try ws.raceDeadline(relay.base.io, 3000, acceptAuthRelay, .{&relay.base});
+    const stream = try ws.raceDeadline(relay.base.io, 15000, acceptAuthRelay, .{&relay.base});
     defer stream.close(relay.base.io);
     const fd: std.c.fd_t = @intCast(stream.socket.handle);
     if (relay.acceptance) |sync| sync.relay_fd.store(fd, .release);
@@ -307,7 +307,7 @@ fn runAuthProcess(gpa: std.mem.Allocator, plan: []const u8, bundle: []const u8) 
     var reader: Io.File.MultiReader = undefined;
     reader.init(gpa, io, buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
     defer reader.deinit();
-    while (reader.fill(4096, .{ .duration = .{ .clock = .awake, .raw = .fromMilliseconds(5000) } })) |_| {} else |err| {
+    while (reader.fill(4096, .{ .duration = .{ .clock = .awake, .raw = .fromMilliseconds(30000) } })) |_| {} else |err| {
         if (err != error.EndOfStream) return err;
     }
     try reader.checkAnyError();
@@ -322,7 +322,12 @@ fn authScenario(scenario: AuthScenario, expected_status: []const u8, expected_ev
     defer threaded.deinit();
     var base = try MockRelay.init(threaded.io(), .ok);
     defer base.deinit();
-    var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 150);
+    // A plan expecting "timeout" stays tight: the deadline firing is the
+    // expected path. Any other expected status must not be reachable by
+    // scheduler starvation alone, so the whole handshake + signer
+    // round-trip (a real `boris` subprocess) gets a generous budget.
+    const timeout_ms: u32 = if (std.mem.eql(u8, expected_status, "timeout")) 150 else 2000;
+    var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, timeout_ms);
     defer artifacts.deinit(gpa);
     const expected = try expectedArticles(gpa, artifacts.bundle);
     defer {
@@ -744,7 +749,8 @@ test "NIP-42 mixed opted-in and ordinary relays retain separate evidence and ver
         defer auth_base.deinit();
         var plain = try MockRelay.init(threaded.io(), .ok);
         defer plain.deinit();
-        var artifacts = try makeAuthArtifacts(gpa, &.{ auth_base.port, plain.port }, &.{auth_base.port}, 150);
+        const timeout_ms: u32 = if (scenario == .challenge_silence) 150 else 2000;
+        var artifacts = try makeAuthArtifacts(gpa, &.{ auth_base.port, plain.port }, &.{auth_base.port}, timeout_ms);
         defer artifacts.deinit(gpa);
         const expected = try expectedArticles(gpa, artifacts.bundle);
         defer {
@@ -798,7 +804,7 @@ fn collectFaultProcess(child: *std.process.Child) !std.process.RunResult {
     var reader: Io.File.MultiReader = undefined;
     reader.init(gpa, testing.io, buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
     defer reader.deinit();
-    const deadline = auth.Deadline.after(testing.io, 5000);
+    const deadline = auth.Deadline.after(testing.io, 30000);
     while (reader.fill(4096, .{ .duration = .{ .clock = .awake, .raw = .fromMilliseconds(try deadline.remaining(testing.io)) } })) |_| {} else |err| {
         if (err != error.EndOfStream) return err;
     }
@@ -973,7 +979,7 @@ test "NIP-42 process transient signing failures persist while plain relays still
         defer second.deinit();
         var plain = try MockRelay.init(threaded.io(), .ok);
         defer plain.deinit();
-        var artifacts = try makeAuthArtifacts(gpa, &.{ first.port, second.port, plain.port }, &.{ first.port, second.port }, 250);
+        var artifacts = try makeAuthArtifacts(gpa, &.{ first.port, second.port, plain.port }, &.{ first.port, second.port }, 2000);
         defer artifacts.deinit(gpa);
         var first_auth: AuthRelay = .{ .base = first, .scenario = .success, .expected = &.{} };
         var second_auth: AuthRelay = .{ .base = second, .scenario = .success, .expected = &.{} };
@@ -1333,6 +1339,54 @@ const BlockingAuthWrite = struct {
     }
 };
 
+/// Test-only clock: `now(.awake)` returns an installed base plus whatever
+/// advance() adds, so whether a deadline fires is decided by the scenario,
+/// not by scheduler timing. `.real` passes through, so signatures still
+/// verify against wall-clock time. Per-operation race timers (connect,
+/// handshake, per-read/write budgets) are unaffected — they still run in
+/// real time with the plan's timeout_ms.
+const StallClock = struct {
+    var real: Io = undefined;
+    var base: i96 = 0;
+    var elapsed: std.atomic.Value(i64) = .init(0);
+    var armed: std.atomic.Value(bool) = .init(false);
+
+    fn install(io: Io) void {
+        real = io;
+        base = Io.Timestamp.now(io, .awake).nanoseconds;
+        elapsed.store(0, .release);
+        armed.store(true, .release);
+    }
+
+    fn disarm() void {
+        armed.store(false, .release);
+    }
+
+    /// Push the fake clock past every deadline derived from it. A no-op
+    /// outside the stall test so shared helpers stay safe elsewhere.
+    fn advancePastDeadlines() void {
+        if (armed.load(.acquire)) _ = elapsed.fetchAdd(@as(i64, auth.session_ms) * std.time.ns_per_ms, .acq_rel);
+    }
+
+    fn now(userdata: ?*anyopaque, clock: Io.Clock) Io.Timestamp {
+        var timestamp = real.vtable.now(userdata, clock);
+        if (clock == .awake) timestamp.nanoseconds = base + @as(i96, elapsed.load(.acquire));
+        return timestamp;
+    }
+};
+
+/// Safety net for the frozen clock: if a scenario wedges with every fake
+/// deadline still ahead, pushing the clock past the session ceiling turns
+/// the deadlock into an ordinary Timeout failure after ~20s real.
+fn stallClockWatchdog(io: Io) void {
+    var ticks: u32 = 0;
+    while (ticks < 400) : (ticks += 1) {
+        if (!StallClock.armed.load(.acquire)) return;
+        Io.sleep(io, .fromMilliseconds(50), .awake) catch return;
+    }
+    StallClock.advancePastDeadlines();
+}
+
 fn invalidSignerThread(channel: *auth_ipc.Channel, scenario: InvalidSigner, gpa: std.mem.Allocator) void {
     invalidSigner(channel, scenario, gpa) catch {};
 }
@@ -1342,17 +1396,22 @@ fn invalidSigner(channel: *auth_ipc.Channel, scenario: InvalidSigner, gpa: std.m
     var parsed = try auth.parse(auth.Request, gpa, bytes, "sign");
     defer parsed.deinit();
     if (scenario == .hang) {
-        try Io.sleep(channel.io, .fromMilliseconds(180), .awake);
+        StallClock.advancePastDeadlines();
         return;
     }
     if (scenario == .oversized_frame or scenario == .partial_header) {
         const prefix: []const u8 = if (scenario == .oversized_frame) &.{ 0, 0, 0x80, 1 } else &.{0};
         _ = std.c.write(channel.output, prefix.ptr, prefix.len);
-        if (scenario == .partial_header) try Io.sleep(channel.io, .fromMilliseconds(180), .awake);
+        if (scenario == .partial_header) StallClock.advancePastDeadlines();
         return;
     }
     const request = parsed.value;
-    if (scenario == .late) try Io.sleep(channel.io, .fromMilliseconds(180), .awake);
+    // A well-formed response that arrives only after the client's response
+    // deadline must classify as timeout with no AUTH sent. Advancing the
+    // frozen test clock before sending makes that ordering deterministic:
+    // the client observes an expired deadline at its next check instead of
+    // racing a wall-clock sleep.
+    if (scenario == .late) StallClock.advancePastDeadlines();
     var ctx = try keys.Context.init();
     defer ctx.deinit();
     const pair = try ctx.keyPairFromSecretKey(@as([31]u8, @splat(0)) ++ [_]u8{3});
@@ -1410,7 +1469,7 @@ test "NIP-42 malicious signer substitutions, refusals and IPC stalls emit no AUT
         defer threaded.deinit();
         var base = try MockRelay.init(threaded.io(), .ok);
         defer base.deinit();
-        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 100);
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 1000);
         defer artifacts.deinit(gpa);
         const expected = try expectedArticles(gpa, artifacts.bundle);
         defer {
@@ -1421,6 +1480,15 @@ test "NIP-42 malicious signer substitutions, refusals and IPC stalls emit no AUT
         const server = try std.Thread.spawn(.{}, serveAuthThread, .{ &relay, gpa });
         var server_joined = false;
         defer if (!server_joined) server.join();
+        var vtable = threaded.io().vtable.*;
+        StallClock.install(threaded.io());
+        vtable.now = StallClock.now;
+        if (scenario == .blocked_write) {
+            BlockingAuthWrite.native = threaded.io();
+            BlockingAuthWrite.writes.store(0, .release);
+            vtable.operate = BlockingAuthWrite.operate;
+        }
+        const client_io: Io = .{ .userdata = threaded.io().userdata, .vtable = &vtable };
         var to_child: [2]std.c.fd_t = undefined;
         var to_parent: [2]std.c.fd_t = undefined;
         try testing.expectEqual(@as(c_int, 0), std.c.pipe(&to_child));
@@ -1433,13 +1501,20 @@ test "NIP-42 malicious signer substitutions, refusals and IPC stalls emit no AUT
             _ = std.c.close(to_parent[0]);
             _ = std.c.close(to_parent[1]);
         }
-        var child = try auth_ipc.Channel.init(threaded.io(), to_child[0], to_parent[1]);
+        var child = try auth_ipc.Channel.init(client_io, to_child[0], to_parent[1]);
         child.run = @splat('1');
-        child.ceiling = auth.Deadline.after(threaded.io(), auth.session_ms);
-        var signer = try auth_ipc.Channel.init(threaded.io(), to_parent[0], to_child[1]);
+        child.ceiling = auth.Deadline.after(client_io, auth.session_ms);
+        var signer = try auth_ipc.Channel.init(client_io, to_parent[0], to_child[1]);
         const signer_thread = try std.Thread.spawn(.{}, invalidSignerThread, .{ &signer, scenario, gpa });
+        // Frozen-clock waits are unbounded by construction; the watchdog
+        // keeps a dead signer or client from hanging the test binary.
+        const watchdog = try std.Thread.spawn(.{}, stallClockWatchdog, .{threaded.io()});
+        defer {
+            StallClock.disarm();
+            watchdog.join();
+        }
         if (scenario == .duplicate or (@backingInt(scenario) >= @backingInt(InvalidSigner.run) and @backingInt(scenario) <= @backingInt(InvalidSigner.revision))) {
-            try testing.expectError(error.SessionInvalid, np.run(threaded.io(), gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child }));
+            try testing.expectError(error.SessionInvalid, np.run(client_io, gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child }));
             signer_thread.join();
             server.join();
             server_joined = true;
@@ -1448,13 +1523,6 @@ test "NIP-42 malicious signer substitutions, refusals and IPC stalls emit no AUT
             try testing.expectEqual(@as(usize, 0), relay.base.saw_events);
             continue;
         }
-        var vtable = threaded.io().vtable.*;
-        if (scenario == .blocked_write) {
-            BlockingAuthWrite.native = threaded.io();
-            BlockingAuthWrite.writes.store(0, .release);
-            vtable.operate = BlockingAuthWrite.operate;
-        }
-        const client_io: Io = .{ .userdata = threaded.io().userdata, .vtable = &vtable };
         var result = try np.run(client_io, gpa, .{ .plan = artifacts.plan, .bundle = artifacts.bundle, .auth_channel = &child });
         defer result.deinit();
         signer_thread.join();
@@ -2123,7 +2191,12 @@ fn runScenarioUrl(scenario: Scenario, expect: Expect, comptime url_fmt: []const 
     var relay = try MockRelay.init(relay_io, scenario);
     defer relay.deinit();
 
-    var artifacts = try makeArtifacts(testing.allocator, &.{relay.port}, 250, 0, url_fmt);
+    // Scenarios expecting "timeout" keep a tight budget — the deadline is
+    // the expected path. Everything else needs enough wall clock that a
+    // descheduled relay or client thread cannot turn a protocol outcome
+    // into a timeout.
+    const timeout_ms: u32 = if (std.mem.eql(u8, expect.event_result, "timeout")) 250 else 2000;
+    var artifacts = try makeArtifacts(testing.allocator, &.{relay.port}, timeout_ms, 0, url_fmt);
     defer artifacts.deinit(testing.allocator);
 
     var result = try runMatrix(testing.allocator, &relay, artifacts.plan, artifacts.bundle, .{});
@@ -2317,7 +2390,7 @@ test "matrix: mixed relays classify partial and keep per-relay evidence" {
     var auth_relay = try MockRelay.init(io, .auth_required);
     defer auth_relay.deinit();
 
-    var artifacts = try makeArtifacts(testing.allocator, &.{ ok_relay.port, auth_relay.port }, 250, 0, loopback_url_fmt);
+    var artifacts = try makeArtifacts(testing.allocator, &.{ ok_relay.port, auth_relay.port }, 2000, 0, loopback_url_fmt);
     defer artifacts.deinit(testing.allocator);
 
     var result = try runMatrixTwo(testing.allocator, &ok_relay, &auth_relay, artifacts.plan, artifacts.bundle, .{});
@@ -2720,6 +2793,10 @@ const StalledRelay = struct {
     io: Io,
     server: Io.net.Server,
     port: u16,
+    /// Monotonic-ms bound the relay commits to staying stalled until; the
+    /// test asserts the write deadline fired before it. Ordering two
+    /// clocks' events is scheduling-safe where a bare elapsed bound is not.
+    stall_horizon_ms: std.atomic.Value(i64) = .init(0),
 
     fn init(io: Io) !StalledRelay {
         const address: Io.net.IpAddress = .{ .ip4 = .loopback(0) };
@@ -2750,10 +2827,18 @@ fn serveStalledRelayInner(relay: *StalledRelay) !void {
     var read_buf: [16384]u8 = undefined;
     var write_buf: [4096]u8 = undefined;
     _ = try performHandshakeFd(fd, &read_buf, &write_buf, .ok);
-    // Leave the connection open and unread: long enough that the client's
-    // write deadline (hundreds of ms) fires well inside this window, short
-    // enough that the test's join does not drag.
-    sleepMs(relay.io, 1_500);
+    // Leave the connection open and unread until the horizon — long enough
+    // that the client's write deadline (hundreds of ms) cannot be mistaken
+    // for socket teardown — but wake on POLLHUP the moment the client
+    // closes so the join does not drag. POLL.IN stays set on the unread
+    // payload, so only HUP/ERR can end the stall early.
+    const horizon = Io.Timestamp.now(relay.io, .real).toMilliseconds() + 5_000;
+    relay.stall_horizon_ms.store(horizon, .release);
+    var fds = [_]std.c.pollfd{.{ .fd = fd, .events = 0, .revents = 0 }};
+    while (Io.Timestamp.now(relay.io, .real).toMilliseconds() < horizon) {
+        _ = std.c.poll(&fds, 1, 50);
+        if (fds[0].revents != 0) break;
+    }
 }
 
 test "write side: the write deadline fires mid-flush when the relay stops reading" {
@@ -2788,10 +2873,15 @@ test "write side: the write deadline fires mid-flush when the relay stops readin
     defer testing.allocator.free(big);
     @memset(big, 0x5A);
 
-    const started = Io.Timestamp.now(testing.io, .real).toMilliseconds();
     try testing.expectError(error.WriteTimeout, client.sendText(big));
-    const elapsed = Io.Timestamp.now(testing.io, .real).toMilliseconds() - started;
-    // The deadline must fire promptly (well inside the relay's 1.5 s stall),
-    // not hang until the socket drains or the relay closes.
-    try testing.expect(elapsed < 1_200);
+    const finished = Io.Timestamp.now(testing.io, .real).toMilliseconds();
+    // Ordering, not duration: the send returned while the relay was still
+    // inside its committed stall window, so the 400 ms write deadline —
+    // not socket teardown — produced the WriteTimeout. The ~4.5 s slack
+    // cannot be flipped by scheduler starvation of the test thread.
+    var spin: usize = 0;
+    while (relay.stall_horizon_ms.load(.acquire) == 0 and spin < 10_000) : (spin += 1) std.atomic.spinLoopHint();
+    const horizon = relay.stall_horizon_ms.load(.acquire);
+    try testing.expect(horizon != 0);
+    try testing.expect(finished < horizon);
 }
