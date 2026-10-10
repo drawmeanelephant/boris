@@ -79,6 +79,7 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
 .userpic { display: grid; place-items: center; flex: 0 0 6rem; min-height: 6rem; border: 1px solid var(--signal); background: #111; color: var(--quiet); font-size: .75rem; text-align: center; }
 .entry-content { margin-top: 1.5rem; }
 .archive-children { margin-top: 2rem; border-top: 1px solid var(--signal); padding-top: 1rem; }
+.archive-children:not(:has(.page-children)) { display: none; }
 .archive-children h2 { color: var(--signal); font-size: 1.1rem; }
 .page-children ul, .page-toc ul, .site-nav ul { margin: 0; padding: 0; list-style: none; }
 .page-children li, .page-toc li, .site-nav li { margin: .35rem 0; }
@@ -88,13 +89,28 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
 .page-toc__l2 { padding-left: .75rem; }
 .page-toc__l3 { padding-left: 1.35rem; }
 .journal-toc { margin-top: 1.5rem; color: var(--quiet); font-size: .85rem; }
+.journal-toc:not(:has(.page-toc)) { display: none; }
 .journal-footer { margin-top: 2rem; border-top: 1px dashed var(--line); padding-top: 1rem; }
+
+/* archive.html: the log index. The entry listing is the page, not an afterthought. */
+.log-intro { border-bottom: 1px dashed var(--line); padding-bottom: 1rem; }
+.log-intro .entry-content { margin-top: .75rem; }
+.log-meta:not(:has(.page-metadata, .page-tags)) { display: none; }
+.log-listing { margin-top: 1.5rem; border: 1px solid var(--line); border-left: 5px solid var(--signal); background: var(--panel); padding: 1rem clamp(1rem, 3vw, 1.5rem); }
+.log-listing:not(:has(.page-children)) { display: none; }
+.log-listing h2 { margin: 0 0 .75rem; color: var(--signal); font-size: 1.1rem; }
+.log-listing h2::before { content: "$ ls entries/ — "; content: "$ ls entries/ — " / ""; color: var(--quiet); font-weight: normal; text-transform: none; }
+.log-listing .page-children li { display: flex; gap: .75ch; margin: .45rem 0; padding-bottom: .45rem; border-bottom: 1px dashed var(--line); }
+.log-listing .page-children li:last-child { border-bottom: 0; padding-bottom: 0; }
+.log-listing .page-children li::before { content: "-r--r--r--"; content: "-r--r--r--" / ""; flex: none; color: var(--quiet); }
+.log-listing .page-children a { font-size: 1.05rem; }
 
 @media (max-width: 560px) {
   body { padding: .5rem; }
   .journal-frame { padding: 1rem; }
   .entry-header { display: block; }
   .userpic { margin-top: 1rem; width: 6rem; }
+  .log-listing .page-children li::before { content: ">"; content: ">" / ""; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -107,6 +123,7 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
   .journal-frame { max-width: none; border: 0; padding: 0; }
   th { background: #fff; }
   .userpic { background: #fff; }
+  .log-listing { border-left-width: 1px; }
   [data-status="draft"] .page-metadata > div:first-child { background: none; color: #000; border: 1px solid #000; }
   a { text-decoration: underline; }
   pre { white-space: pre-wrap; }

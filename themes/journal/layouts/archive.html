@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-layout="journal-index">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{{title}} // system.log</title>
+  <link rel="stylesheet" href="{{asset-url assets/journal.css}}">
+  {{head}}
+</head>
+<body data-status="{{page-status}}">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <div class="journal-frame">
+    <header class="journal-header" role="banner">
+      <p class="prompt" aria-label="shell prompt">root@localhost:~# ls /var/log/entries</p>
+      <h1>system.log</h1>
+      <p class="status-line">static archive // entries listed in id order</p>
+      <nav class="journal-nav" aria-label="Archive navigation">{{nav}}</nav>
+    </header>
+
+    <main id="main-content" class="journal-main journal-main--index" tabindex="-1" data-boris-search-root>
+      <div class="journal-breadcrumb" data-boris-search-exclude>{{breadcrumb}}</div>
+      <section class="log-intro">
+        <div class="log-meta" data-boris-search-exclude>{{metadata}}{{tags}}</div>
+        <div class="entry-content">{{content}}</div>
+      </section>
+
+      <section class="log-listing" aria-labelledby="log-listing-heading" data-boris-search-exclude>
+        <h2 id="log-listing-heading">Entries</h2>
+        {{children}}
+      </section>
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+
+      <aside class="journal-toc" aria-label="On this page" data-boris-search-exclude>
+        <p class="entry-kicker">ON THIS PAGE</p>
+        {{toc}}
+      </aside>
+    </main>
+
+    <footer class="journal-footer">{{footer}}</footer>
+  </div>
+</body>
+</html>
