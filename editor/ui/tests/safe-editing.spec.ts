@@ -1412,6 +1412,23 @@ test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#4
   await expect(page.getByTitle('Boris site preview')).toHaveAttribute('src', /generation=2/);
 });
 
+test('a host-failed rebuild re-reads preview state instead of sticking on running (#1073)', async ({ page }) => {
+  await installApi(page);
+  // A rebuild that fails at the host layer (any non-OK response that is not
+  // the watch_daemon_active refusal) must not leave the optimistic 'running'
+  // phase behind: the shell re-reads /api/preview/state and the Rebuild
+  // preview action stays usable.
+  await page.route('**/api/preview/rebuild', route => route.fulfill({
+    status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'io_error' })
+  }));
+  await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
+  const previewState = page.locator('.preview-state');
+  await expect(previewState).toContainText('Preview host failed: io_error');
+  await expect(previewState).toContainText('idle:');
+  await expect(previewState).not.toContainText('running');
+  await expect(page.getByRole('button', { name: 'Rebuild preview', exact: true })).toBeEnabled();
+});
+
 test('switching completion category focuses the filter (#615)', async ({ page }) => {
   await installApi(page, { disk: '' });
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
@@ -3286,10 +3303,16 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
     files: [{ path: 'boris.json' }, { path: 'content/guides/start.md' }]
   });
   await expect(await expandConnection(page)).toContainText('Connected to boris-editor');
-  const holdOpenMs = 300;
+  // The routes stay parked on test-owned promises so the in-flight copy is
+  // observable for as long as the assertions need and the resolved copy only
+  // races a release the test issues itself — not a fixed clock (#1069).
+  let releaseOpen!: () => void;
+  let releaseSave!: () => void;
+  const holdOpen = new Promise<void>(resolve => { releaseOpen = resolve; });
+  const holdSave = new Promise<void>(resolve => { releaseSave = resolve; });
   await page.route('**/api/files/open', async route => {
     const { path } = route.request().postDataJSON() as { path: string };
-    await new Promise(resolve => setTimeout(resolve, holdOpenMs));
+    await holdOpen;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -3300,7 +3323,7 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
   });
   await page.route('**/api/files/save', async route => {
     const body = route.request().postDataJSON() as { path: string; content: string };
-    await new Promise(resolve => setTimeout(resolve, holdOpenMs));
+    await holdSave;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -3312,12 +3335,14 @@ test('opening and saving a file name the wait and elapsed time (#418 M11)', asyn
   const opening = page.getByRole('button', { name: 'content/guides/start.md', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opening content/guides/start.md');
   await opening;
+  releaseOpen();
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Opened content/guides/start.md.');
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('s)');
   await page.getByRole('textbox', { name: 'Source for content/guides/start.md' }).fill('# Wait\n');
   const saving = page.getByRole('button', { name: 'Save file', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saving content/guides/start.md');
   await saving;
+  releaseSave();
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/guides/start.md.');
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('s)');
 });

@@ -225,7 +225,7 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
             if (config.watch.distOwned()) {
                 return respondJson(request, .conflict, "{\"error\":\"watch_daemon_active\"}");
             }
-            config.preview.rebuild(allocator, io) catch |err| return respondApiError(request, err);
+            config.preview.rebuild(allocator, io);
             return servePreviewState(allocator, request, config);
         }
         return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8", config.preview.port);
