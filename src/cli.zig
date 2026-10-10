@@ -3018,6 +3018,7 @@ pub fn printInitUsage() void {
         \\  garden    flat-ish digital garden: dense wiki links, semantic
         \\            relations, {{{{include}}}} composition, an <Aside> component
         \\  cookbook  Cooklang .cook recipe box; profile declares input_format: cook
+        \\            and layout_rules send index to cards' home.html recipe deck
         \\  blog      dated posts on a parent chain (published_at + summary)
         \\  textile   Textile pages through the native adapter;
         \\            profile declares input_format: textile
@@ -3027,7 +3028,8 @@ pub fn printInitUsage() void {
         \\            breadcrumbs, per-page contents, and cross-entry links
         \\  link-in-bio  one trunk page holding a personal link list
         \\  changelog dated release notes (published_at + summary) with a
-        \\            status: draft unreleased entry kept out of search and feeds
+        \\            status: draft unreleased entry kept out of search and feeds;
+        \\            layout_rules send the changes hub to journal's archive.html
         \\  resume    single-page CV with tags for {{{{metadata}}}} plus a "now" page;
         \\            print the page for the PDF
         \\  newsletter  weekly paper of dated issues on press's named layouts;

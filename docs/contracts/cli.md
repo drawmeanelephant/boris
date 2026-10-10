@@ -152,7 +152,10 @@ catalog themes that fit each one.
   registered `<Aside>` component, under the shipped `ledger` theme.
 - `cookbook` — a Cooklang recipe box (`.cook` pages exercising ingredients,
   cookware, timers, and sub-recipe references) under `cards`; its profile
-  declares `"input_format": "cook"`.
+  declares `"input_format": "cook"`. Its `layout_rules` send `id:index` to
+  `themes/cards/layouts/home.html`, whose `{{children}}` deck lists the
+  three recipes (each a direct satellite of `index`); selectors match
+  `.cook` pages by entity id like any other input.
 - `blog` — dated posts on a parent chain (`published_at` + `summary`)
   under `cozy`.
 - `textile` — `.textile` pages through the native adapter under `press`;
@@ -175,7 +178,10 @@ catalog themes that fit each one.
   hub → dated entries with `published_at` + `summary`. One entry is
   `status: draft` (the unreleased section): it renders at its route but is
   excluded from the search index, RSS, and sitemap per
-  [status gating](html-output.md).
+  [status gating](html-output.md). Its profile's `layout_rules` send
+  `id:changes` to `themes/journal/layouts/archive.html`, whose
+  `{{children}}` listing names the published releases in id order; the
+  draft is absent from it, so the hub links the draft by hand.
 - `resume` — a single-page CV (trunk `index` with `tags`, `published_at`,
   and `summary`) plus one "now" satellite, under `corporate`. `{{metadata}}`
   renders the page's status and tags; the theme's `@media print` rules

@@ -11,7 +11,8 @@
 //!   and a registered `<Aside>` component, under the shipped `ledger` theme.
 //! - `cookbook` — a `.cook` Cooklang recipe box (ingredients, cookware,
 //!   timers, sub-recipe references, `servings`) under `cards`, whose
-//!   profile declares `input_format: cook`.
+//!   profile declares `input_format: cook`; `layout_rules` send `id:index`
+//!   to `home.html`, whose `{{children}}` deck shows each recipe as a card.
 //! - `blog`    — dated posts on a parent chain (`index` → `posts` → dated
 //!   entries with `published_at` + `summary`) under the `cozy` theme.
 //! - `textile` — `.textile` pages through the native adapter under `press`,
@@ -28,6 +29,8 @@
 //! - `changelog` — release notes (`index` → `changes` hub → dated entries
 //!   with `published_at` + `summary`) under `journal`; one entry is
 //!   `status: draft`, the unreleased section that renders unadvertised.
+//!   `layout_rules` send `id:changes` to `archive.html`, whose
+//!   `{{children}}` listing names the published releases.
 //! - `resume`  — a single-page CV with `tags` for `{{metadata}}` and one
 //!   "now" satellite under `corporate`, whose print stylesheet is the PDF.
 //! - `newsletter` — a weekly paper (`index` → `issues` hub → dated issues)
@@ -427,6 +430,10 @@ const cookbook_index_cook =
     \\-- a plain `boris --profile boris.json` build (or --cooklang on the
     \\-- CLI) runs the native adapter; there is no per-site switch in the
     \\-- compiler. Lines like this one are comments and never render.
+    \\--
+    \\-- The profile's layout_rules render this page through the cards
+    \\-- theme's home.html: every recipe declares parent: index, so the
+    \\-- "In this collection" deck under the menu lists each one as a card.
     \\
     \\Tonight's menu: @./mains/carbonara{1} finished with
     \\@./sauces/pepper-oil{1%tbsp}.
@@ -517,7 +524,15 @@ const cookbook_profile =
     \\  "input_format": "cook",
     \\  "site": { "title": "Recipe Box" },
     \\  "targets": [
-    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/cards" }
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/cards",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/cards/layouts/home.html" }
+    \\      ]
+    \\    }
     \\  ]
     \\}
     \\
@@ -1092,14 +1107,15 @@ const changelog_changes_md =
     \\
     \\# Changes
     \\
-    \\Every release is a satellite of this hub, newest first. The entry marked
-    \\`status: draft` is the unreleased section: it renders at its normal
-    \\route, but stays out of the search index, feeds, and the sitemap until
-    \\you change it to `status: published`.
+    \\Every release is a satellite of this hub (`parent: changes`). The
+    \\profile's `layout_rules` render this page through the journal theme's
+    \\`archive.html`, whose entry listing is `{{children}}`: each published
+    \\release, in id order, so the date-prefixed ids sort oldest first.
     \\
-    \\- [[changes/unreleased]] — next release (draft)
-    \\- [[changes/2026-09-28-v0-2-0]]
-    \\- [[changes/2026-08-17-v0-1-0]]
+    \\The entry marked `status: draft` is the unreleased section: it renders
+    \\at its normal route, but stays out of that listing, the search index,
+    \\feeds, and the sitemap until you change it to `status: published`.
+    \\Until then, this hand-written link reaches it: [[changes/unreleased]].
     \\
 ;
 
@@ -1183,7 +1199,15 @@ const changelog_profile =
     \\  "input_format": "markdown",
     \\  "site": { "title": "Tidepool Release Notes" },
     \\  "targets": [
-    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/journal" }
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/journal",
+    \\      "layout_rules": [
+    \\        { "selector": "id:changes", "layout": "themes/journal/layouts/archive.html" }
+    \\      ]
+    \\    }
     \\  ]
     \\}
     \\
@@ -2281,14 +2305,14 @@ const cookbook_spec = ArchetypeSpec{
     .layout_path = "themes/cards/layouts/main.html",
     .files = &cookbook_files,
     .tree_report =
-    \\  content/index.cook                trunk page (prose plus recipe references)
+    \\  content/index.cook                trunk page (prose plus recipe references; home layout)
     \\  content/mains/                    two recipe satellites
     \\  content/sauces/pepper-oil.cook    sub-recipe used as an ingredient
     \\  themes/cards/                     shipped "cards" theme — soft recipe cards
-    \\  boris.json                        profile (input_format: cook, theme: cards)
+    \\  boris.json                        profile (input_format: cook, theme: cards, layout_rules id:index → home)
     ,
     .next_steps =
-    \\  boris --profile boris.json                                     build the recipe box
+    \\  boris --profile boris.json                                     build the recipe box (index shows a recipe deck)
     \\  boris recipe-scale --cooklang --id mains/carbonara --servings 4   scaled view (never rewrites source)
     \\  boris check --cooklang --input content                          graph-health report
     \\  boris watch --profile boris.json                                rebuild on change
@@ -2297,6 +2321,7 @@ const cookbook_spec = ArchetypeSpec{
     \\  @name{amount%unit} is an ingredient, #name{} cookware, ~{n%unit} a timer
     \\  @./sauces/pepper-oil{1%tbsp} references another page as a validated graph edge
     \\  servings in frontmatter feeds `recipe-scale --servings`; = and == are section headings
+    \\  parent: index puts a recipe in the home deck; layout_rules match .cook pages by id like any other
     ,
 };
 
@@ -2416,19 +2441,21 @@ const changelog_spec = ArchetypeSpec{
     .files = &changelog_files,
     .tree_report =
     \\  content/index.md                  trunk page
-    \\  content/changes.md                satellite hub listing the releases
+    \\  content/changes.md                satellite hub; its archive layout lists the releases
     \\  content/changes/                  two dated releases plus an unreleased status: draft entry
     \\  themes/journal/                   shipped "journal" theme — phosphor terminal diary
-    \\  boris.json                        profile (input_format: markdown, theme: journal)
+    \\  boris.json                        profile (theme: journal, layout_rules id:changes → archive)
     ,
     .next_steps =
     \\  boris --profile boris.json            build the release notes (the draft renders, unadvertised)
+    \\  boris plan --profile boris.json       inspect the normalized layout rules
     \\  boris check                           graph-health report
     \\  boris watch --profile boris.json      rebuild on change
     ,
     .conventions =
     \\  each release is a satellite of changes with published_at + summary
-    \\  status: draft renders at its route but stays out of search, RSS, sitemap, and nav
+    \\  the hub's {{children}} listing is id order: date-prefixed ids sort oldest first
+    \\  status: draft renders at its route but stays out of search, RSS, sitemap, nav, and children
     \\  ship a release: set its real published_at and drop status: draft
     ,
 };
@@ -3002,6 +3029,10 @@ test "changelog entries are dated and exactly one is a draft" {
     try std.testing.expectEqual(@as(usize, 3), entries);
     try std.testing.expectEqual(@as(usize, 1), drafts);
     try std.testing.expect(std.mem.indexOf(u8, changelog_unreleased_md, "\nstatus: draft\n") != null);
+    // Drafts leave {{children}}, so the hub links the draft by hand.
+    try std.testing.expect(std.mem.indexOf(u8, changelog_changes_md, "[[changes/unreleased]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, changelog_profile, "\"selector\": \"id:changes\", \"layout\": \"themes/journal/layouts/archive.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.journal_layout_archive, "{{children}}") != null);
 }
 
 test "resume is one CV page with metadata-bearing frontmatter and a print stylesheet" {
@@ -3181,6 +3212,14 @@ test "cookbook exercises the Cooklang constructs and names recipe-scale" {
     try std.testing.expect(std.mem.indexOf(u8, cookbook_carbonara_cook, "servings: 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, cookbook_carbonara_cook, "@./sauces/pepper-oil{1%tbsp}") != null);
     try std.testing.expect(std.mem.indexOf(u8, cookbook_index_cook, "recipe-scale") != null);
+    // Every recipe is a direct satellite of index, so the home deck lists it.
+    for (cookbook_spec.files) |f| {
+        if (std.mem.startsWith(u8, f.path, "content/") and !std.mem.eql(u8, f.path, "content/index.cook")) {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+        }
+    }
+    try std.testing.expect(std.mem.indexOf(u8, cookbook_profile, "\"selector\": \"id:index\", \"layout\": \"themes/cards/layouts/home.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.cards_layout_home, "{{children}}") != null);
 }
 
 test "blog posts carry the dated-post frontmatter pair" {

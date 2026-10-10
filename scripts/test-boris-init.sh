@@ -183,7 +183,17 @@ grep -q '<Aside kind=' "$OUT/arch-garden/content/index.md" \
     >"$OUT/recipe-scale.json" 2>"$OUT/recipe-scale.stderr" \
     || fail "recipe-scale failed inside the cookbook starter: $(head -3 "$OUT/recipe-scale.stderr")"
 grep -q '"target": 4' "$OUT/recipe-scale.json" || fail "recipe-scale did not scale to 4 servings"
-pass "formats, includes, components, and recipe-scale all exercise their seams"
+# The profile's id:index rule selects a .cook page like any other input.
+K="$OUT/arch-cookbook/dist"
+grep -q 'data-layout="home"' "$K/index.html" || fail "cookbook index does not use the cards home layout"
+deck="$(sed -n '/<section class="home-deck"/,/<\/section>/p' "$K/index.html")"
+grep -q '<nav class="page-children"' <<<"$deck" || fail "cookbook home deck has no {{children}} list"
+for recipe in mains/carbonara mains/pancakes sauces/pepper-oil; do
+    grep -q '<main id="content" class="article-card"' "$K/$recipe.html" || fail "cookbook $recipe is not on the cards main layout"
+    grep -q 'data-layout="home"' "$K/$recipe.html" && fail "cookbook $recipe should fall back to main.html"
+    grep -q "href=\"$recipe.html\"" <<<"$deck" || fail "cookbook home deck does not list $recipe"
+done
+pass "formats, includes, components, and recipe-scale all exercise their seams; cookbook index deck on home.html"
 
 # --- wave-1 archetypes: each teaches the primitive its issue names ---------
 note "landing: one trunk page composed from includes, index on the home layout"
@@ -221,9 +231,19 @@ grep -q 'href="https://example.com/shop"' "$OUT/arch-link-in-bio/dist/index.html
     || fail "boris check failed on the one-page site: $(head -3 "$OUT/link-in-bio-check.stderr")"
 pass "link-in-bio: one page compiled, built, and checked"
 
-note "changelog: the draft entry renders but is kept out of search, RSS, and sitemap"
+note "changelog: the draft entry renders but is kept out of search, RSS, sitemap, and the hub listing"
 C="$OUT/arch-changelog"
 [[ -f "$C/dist/changes/unreleased.html" ]] || fail "changelog draft entry did not render"
+grep -q 'data-layout="journal-index"' "$C/dist/changes.html" || fail "changelog changes hub does not use the journal archive layout"
+for page in index changes/2026-09-28-v0-2-0; do
+    grep -q 'data-layout="journal-archive"' "$C/dist/$page.html" || fail "changelog $page should fall back to main.html"
+done
+listing="$(sed -n '/<section class="log-listing"/,/<\/section>/p' "$C/dist/changes.html")"
+for release in 2026-08-17-v0-1-0 2026-09-28-v0-2-0; do
+    grep -q "href=\"changes/$release.html\"" <<<"$listing" || fail "changelog hub listing is missing $release"
+done
+grep -q 'unreleased' <<<"$listing" && fail "changelog draft entry leaked into the hub listing"
+grep -q 'href="changes/unreleased.html"' "$C/dist/changes.html" || fail "changelog hub lost its hand link to the draft"
 grep -q '"path": "changes/2026-09-28-v0-2-0.html"' "$C/dist/_boris/search/search-index.json" \
     || fail "changelog search index is missing a published release"
 grep -q 'changes/unreleased' "$C/dist/_boris/search/search-index.json" \
@@ -239,7 +259,7 @@ grep -q 'unreleased' "$C/feed/rss.xml" && fail "changelog draft entry leaked int
     || fail "changelog sitemap build failed: $(head -3 "$OUT/changelog-sitemap.stderr")"
 grep -q 'changes/2026-09-28-v0-2-0.html' "$C/dist-sitemap/sitemap.xml" || fail "changelog sitemap is missing a release"
 grep -q 'unreleased' "$C/dist-sitemap/sitemap.xml" && fail "changelog draft entry leaked into the sitemap"
-pass "changelog: draft emitted at its route; absent from search index, RSS, and sitemap"
+pass "changelog: hub on archive.html lists both releases; draft emitted at its route; absent from listing, search index, RSS, and sitemap"
 
 note "resume: the CV page carries its tags through {{metadata}} and ships a print stylesheet"
 R="$OUT/arch-resume"
