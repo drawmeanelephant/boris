@@ -12,6 +12,11 @@ What the default theme guarantees, checked against the built output and
   accent ink, offset 3px. Measured against the page canvas it is 5.68:1 in
   light mode (`#ae4622` on `#fff`) and 5.6–6.3:1 in dark mode (`#e17955` on
   `#1e1e1e`–`#121212`), above the 3:1 non-text contrast floor.
+- Aside titles are mixed from the kind colour and `CanvasText` on a kind tint
+  of `Canvas`. Measured title contrast in light mode: note/info 8.51:1
+  (`#254b5e` on `#f0f5f8`), tip 7.2:1, warning 7.18:1, danger 9.99:1. In dark
+  mode (`#121212` canvas): note/info 8.77:1, tip 9.32:1, warning 9.66:1,
+  danger 7.26:1. Body text in every Aside is above 17:1.
 - Colors come from system `Canvas`/`CanvasText`, so `prefers-color-scheme`
   and forced-colors modes keep the browser's own contrast.
 - Relations and backlinks keep their compiler `aria-label`s ("Semantic
