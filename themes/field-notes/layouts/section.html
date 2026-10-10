@@ -25,14 +25,15 @@
       {{nav}}
     </aside>
     <main id="main-content" class="section-reading" tabindex="-1" data-boris-search-root>
-      {{metadata}}
+      <div class="note-meta" data-boris-search-exclude><p class="note-status note-status--{{page-status}}">{{page-status}}</p>{{parent}}{{tags}}</div>
       <article class="prose">
         {{content}}
       </article>
-      <section class="children-panel" aria-labelledby="children-heading">
+      <section class="children-panel" aria-labelledby="children-heading" data-boris-search-exclude>
         <p class="rail__eyebrow" id="children-heading">In this section</p>
         {{children}}
       </section>
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
     </main>
   </div>
   <footer class="theme-footer" role="contentinfo">{{footer}}</footer>

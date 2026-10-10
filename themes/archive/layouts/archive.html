@@ -4,33 +4,34 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Field Notes Archive</title>
+  <title>Archive</title>
   <link rel="stylesheet" href="{{asset-url assets/archive.css}}">
+  {{head}}
 </head>
-<body class="archive-page">
+<body class="archive-page" data-status="{{page-status}}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="archive-header" role="banner">
     <div class="archive-shell">
-      <p class="eyebrow">Field Notes Archive</p>
+      <p class="eyebrow">Archive</p>
       {{breadcrumb}}
     </div>
   </header>
   <div class="archive-shell archive-layout">
-    <main id="main-content" tabindex="-1">
-    <header class="masthead">
-      <p class="eyebrow">Personal index · 2018—2024</p>
-      <h1>{{title}}</h1>
-      <p class="lede">Small records, held in order.</p>
+    <main id="main-content" tabindex="-1" data-boris-search-root>
+    <header class="masthead" data-boris-search-exclude>
+      <p class="eyebrow">Index</p>
+      <h1 data-boris-search-title="layout">{{title}}</h1>
     </header>
-    {{metadata}}
+    {{metadata}}{{tags}}
     <section class="archive-index" aria-labelledby="archive-entries">
-      <div class="section-label">
+      <div class="section-label" data-boris-search-exclude>
         <p id="archive-entries">Selected entries</p>
         <span aria-hidden="true">↓</span>
       </div>
       {{children}}
     </section>
     <article class="archive-note">{{content}}</article>
+    <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
     </main>
     <aside class="archive-sidebar" aria-label="Archive tools">
       <section class="archive-module">

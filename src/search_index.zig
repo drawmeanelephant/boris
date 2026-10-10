@@ -99,24 +99,46 @@ fn hasClass(txt: []const u8, class_name: []const u8) bool {
     return false;
 }
 
+/// Compiler-emitted layout-slot chrome, identified by the exact element and
+/// class the emitters write (`compile.zig`, `html_nav.zig`, `html_toc.zig`,
+/// `html_relations.zig`). The fragments cannot carry the search marker on
+/// HTML 4.01 Strict layouts, so the class is the stable identity. Non-Strict
+/// nav/children/parent/breadcrumb/toc emit `<nav>`, which
+/// isAlwaysExcludedName already covers; relations/backlinks emit `<section>`
+/// outside Strict and `<div>` under Strict. Theme-authored chrome (skip
+/// links, sidebars) is not listed: themes mark it `data-boris-search-exclude`.
+const compiler_chrome = [_]struct { []const u8, []const u8 }{
+    .{ "dl", "page-metadata" },
+    .{ "ul", "page-tags" }, // #1007
+    .{ "div", "page-parent" },
+    .{ "div", "site-nav" },
+    .{ "div", "page-children" },
+    .{ "div", "breadcrumb" },
+    .{ "div", "page-toc" },
+    .{ "section", "semantic-relations" },
+    .{ "section", "semantic-backlinks" },
+    .{ "div", "semantic-relations" },
+    .{ "div", "semantic-backlinks" },
+};
+
 fn isSearchExcludeMarker(name: []const u8, txt: []const u8) bool {
-    return hasAttr(txt, "data-boris-search-exclude") or
+    if (hasAttr(txt, "data-boris-search-exclude") or
         hasAttr(txt, "data-boris-search-ignore") or
-        hasAttr(txt, "data-boris-noindex") or
-        // The frozen metadata fragment cannot carry the search marker on
-        // HTML 4.01 Strict layouts, so identify this compiler-owned chrome by
-        // its stable class as well. Same rule for the `{{tags}}` list (#1007)
-        // and the Strict `{{parent}}` shape (non-Strict emits `<nav>`, which
-        // isAlwaysExcludedName already covers).
-        (std.ascii.eqlIgnoreCase(name, "dl") and hasClass(txt, "page-metadata")) or
-        (std.ascii.eqlIgnoreCase(name, "ul") and hasClass(txt, "page-tags")) or
-        (std.ascii.eqlIgnoreCase(name, "div") and hasClass(txt, "page-parent"));
+        hasAttr(txt, "data-boris-noindex")) return true;
+    for (compiler_chrome) |chrome| {
+        if (std.ascii.eqlIgnoreCase(name, chrome[0]) and hasClass(txt, chrome[1])) return true;
+    }
+    return false;
 }
 
 fn isHidden(txt: []const u8) bool {
     return hasAttr(txt, "hidden") or
         hasAttr(txt, "inert") or
         std.mem.eql(u8, attrValue(txt, "aria-hidden") orelse "", "true");
+}
+
+fn isHeadingName(n: []const u8) bool {
+    return n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6';
 }
 
 fn opensElement(tag: Tag) bool {
@@ -223,19 +245,6 @@ fn decodeNormalize(a: std.mem.Allocator, raw: []const u8) ![]u8 {
     try appendDecoded(&decoded, a, raw);
     return normalize(a, decoded.items);
 }
-fn slugify(a: std.mem.Allocator, text: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(a);
-    var dash = false;
-    for (text) |c| {
-        if (std.ascii.isAlphanumeric(c)) {
-            if (dash and out.items.len > 0) try out.append(a, '-');
-            dash = false;
-            try out.append(a, std.ascii.toLower(c));
-        } else if (out.items.len > 0) dash = true;
-    }
-    return out.toOwnedSlice(a);
-}
 
 pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, require_marker: bool) !Document {
     const found = try findRoot(html, require_marker) orelse ExtractRoot{
@@ -256,6 +265,12 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
     }
     try sections.append(a, .{});
     var title: ?[]u8 = null;
+    // A `data-boris-search-title` heading inside an excluded region still
+    // names the document; it contributes no section. `title_capture` is the
+    // exclusion depth of that heading while its text is being collected.
+    var title_capture: ?usize = null;
+    var title_text: std.ArrayList(u8) = .empty;
+    defer title_text.deinit(a);
     var heading: bool = false;
     var heading_marked = false;
     var code_depth: usize = 0;
@@ -265,7 +280,9 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
     while (i < root.end) {
         if (html[i] != '<') {
             const end = std.mem.indexOfScalarPos(u8, html, i, '<') orelse root.end;
-            if (excluded == 0) {
+            if (excluded > 0) {
+                if (title_capture != null) try appendDecoded(&title_text, a, html[i..end]);
+            } else {
                 if (heading) try appendDecoded(&sections.items[sections.items.len - 1].heading, a, html[i..end]) else if (code_depth > 0) try appendDecoded(&sections.items[sections.items.len - 1].code, a, html[i..end]) else try appendDecoded(&sections.items[sections.items.len - 1].prose, a, html[i..end]);
             }
             i = end;
@@ -292,8 +309,15 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
             if (excluded_name or excluded > 0) {
                 if (opensElement(tag)) excluded += 1;
             }
-            if (excluded == 0) {
-                if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6') {
+            if (excluded > 0) {
+                if (title_capture == null and opensElement(tag) and isHeadingName(n) and
+                    attrValue(txt, "data-boris-search-title") != null)
+                {
+                    title_capture = excluded;
+                    title_text.clearRetainingCapacity();
+                }
+            } else {
+                if (isHeadingName(n)) {
                     try sections.append(a, .{ .level = n[1] - '0' });
                     heading = true;
                     heading_marked = attrValue(txt, "data-boris-search-title") != null;
@@ -310,7 +334,15 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
                 }
                 if (isBlock(n) or isBreak(n)) try sections.items[sections.items.len - 1].prose.append(a, ' ');
             }
-        } else if (excluded > 0) excluded -= 1 else if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6' and heading) {
+        } else if (excluded > 0) {
+            if (title_capture == excluded and isHeadingName(n)) {
+                const marked_title = try normalize(a, title_text.items);
+                if (title) |old| a.free(old);
+                title = marked_title;
+                title_capture = null;
+            }
+            excluded -= 1;
+        } else if (isHeadingName(n) and heading) {
             heading = false;
             const heading_title = try normalize(a, sections.items[sections.items.len - 1].heading.items);
             if (heading_marked or (level == 1 and title == null)) {
@@ -330,7 +362,13 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
         var ti: usize = 0;
         while (ti < html.len) {
             const s = std.mem.indexOfScalarPos(u8, html, ti, '<') orelse break;
-            const t = tagAt(html, s) orelse break;
+            // `<!doctype html>` (and any other `<` that is not a tag) must be
+            // skipped, not end the scan, or the fallback never reaches
+            // `<title>` on a real rendered page.
+            const t = tagAt(html, s) orelse {
+                ti = s + 1;
+                continue;
+            };
             if (!t.closing and std.ascii.eqlIgnoreCase(t.name, "title")) if (matchingRange(html, s, "title")) |r| {
                 title = try decodeNormalize(a, html[r.start..r.end]);
                 break;
@@ -372,7 +410,11 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
         errdefer a.free(text);
         const code = try normalize(a, s.code.items);
         errdefer a.free(code);
-        const frag = if (s.fragment.items.len > 0) try a.dupe(u8, s.fragment.items) else try slugify(a, h);
+        // Only a rendered `id` is a fragment. A slug of an id-less heading
+        // (typically a layout `<h1>{{title}}</h1>`) names no anchor in the
+        // page, so the result link was dead and the publication check
+        // reported SEARCH_CONTENT_MISMATCH; an empty fragment links the page.
+        const frag = try a.dupe(u8, s.fragment.items);
         final[si] = .{ .level = s.level, .heading = h, .fragment = frag, .text = text, .code = code };
     }
     return .{ .path = try a.dupe(u8, path), .title = title.?, .sections = final };
@@ -801,6 +843,43 @@ test "compiler tag list and strict parent chrome are excluded (#1007)" {
     try std.testing.expect(std.mem.indexOf(u8, hay, "Guides Label") == null);
 }
 
+test "compiler relations, backlinks, and strict slot chrome are excluded" {
+    // Shapes are the exact emitter output: `<section>` relations/backlinks
+    // outside Strict, `<div class=...>` slot wrappers under HTML 4.01 Strict
+    // (which cannot carry `data-boris-search-exclude`).
+    const html =
+        \\<main data-boris-search-root>
+        \\<div class="site-nav">
+        \\<ul><li class="site-nav__trunk"><a href="index.html">NavTrunk</a></li></ul></div>
+        \\<div class="breadcrumb">
+        \\<ol><li><a href="index.html">CrumbHome</a></li></ol></div>
+        \\<div class="page-toc">
+        \\<ul><li class="page-toc__l2"><a href="#a">TocEntry</a></li></ul></div>
+        \\<h1 id="body">Body</h1><p>Searchable prose.</p>
+        \\<div class="page-children">
+        \\<ul><li><a href="c.html">ChildLink</a></li></ul></div>
+        \\<section class="semantic-relations" aria-label="Semantic relations">
+        \\<ul><li data-relation-kind="cites" class="semantic-relation--cites"><a href="r.html">RelatedTitle</a></li></ul></section>
+        \\<section class="semantic-backlinks" aria-label="Backlinks">
+        \\<ul><li class="semantic-relation--cites"><a href="b.html">BacklinkTitle</a></li></ul></section>
+        \\<div class="semantic-relations"><ul><li><a href="r.html">StrictRelated</a></li></ul></div>
+        \\<div class="semantic-backlinks"><ul><li><a href="b.html">StrictBacklink</a></li></ul></div>
+        \\<section class="notes"><p>Authored section stays.</p></section>
+        \\<div class="toc"><p>Authored div stays.</p></div>
+        \\</main>
+    ;
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Searchable prose") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Authored section stays") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Authored div stays") != null);
+    inline for (.{ "NavTrunk", "CrumbHome", "TocEntry", "ChildLink", "RelatedTitle", "BacklinkTitle", "StrictRelated", "StrictBacklink" }) |noise| {
+        try std.testing.expect(std.mem.indexOf(u8, hay, noise) == null);
+    }
+}
+
 test "title fallback and heading fragments decode entities" {
     const html = "<html><head><title>Foo &amp; Bar</title></head>" ++
         "<main data-boris-search-root><h2 id=\"a&#38;b\">Later</h2><p>body</p></main></html>";
@@ -808,6 +887,40 @@ test "title fallback and heading fragments decode entities" {
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expectEqualStrings("Foo & Bar", d.title);
     try std.testing.expectEqualStrings("a&b", d.sections[0].fragment);
+}
+
+test "id-less headings get an empty fragment, never a fabricated slug" {
+    // A layout `<h1>{{title}}</h1>` has no id. Its slug resolved to nothing
+    // on the page, which the rendered-search publication check reports as
+    // SEARCH_CONTENT_MISMATCH. Every non-empty fragment must be a real id.
+    const html = "<!doctype html><main data-boris-search-root>" ++
+        "<h1 class=\"layout-title\">Field Notes Archive</h1><p>Intro.</p>" ++
+        "<h2 id=\"kept\">Kept id</h2><p>a</p><h3>Raw heading</h3><p>b</p></main>";
+    const d = try indexHtml(std.testing.allocator, "archive.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Field Notes Archive", d.title);
+    try std.testing.expectEqual(@as(usize, 3), d.sections.len);
+    try std.testing.expectEqualStrings("Field Notes Archive", d.sections[0].heading);
+    try std.testing.expectEqualStrings("", d.sections[0].fragment);
+    try std.testing.expectEqualStrings("kept", d.sections[1].fragment);
+    try std.testing.expectEqualStrings("", d.sections[2].fragment);
+}
+
+test "title element fallback is reached past a leading doctype" {
+    // Every rendered Boris page starts with `<!doctype html>`; the fallback
+    // scan used to stop there and fall through to the path.
+    const html = "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Home Page &amp; Co</title></head>" ++
+        "<body><main data-boris-search-root><p>Just a paragraph.</p></main></body></html>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Home Page & Co", d.title);
+}
+
+test "title falls back to path when no heading or title element exists" {
+    const html = "<!doctype html><html><body><main data-boris-search-root><p>Body.</p></main></body></html>";
+    const d = try indexHtml(std.testing.allocator, "guides/a.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("guides/a.html", d.title);
 }
 
 // #881: the data-boris-search-title extraction marker is contract behavior
@@ -830,6 +943,59 @@ test "last marked heading wins and unmarked h2 does not override earlier title" 
     const d = try indexHtml(std.testing.allocator, "index.html", html, true);
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expectEqualStrings("Last Mark", d.title);
+}
+
+test "marked heading inside an excluded region names the document only" {
+    // Theme layouts render `<h1>{{title}}</h1>` inside main and exclude it
+    // to avoid duplicating the authored h1. The marker still supplies the
+    // document title, but the heading adds no section, heading, or text.
+    const html = "<!doctype html><html><head><title>Static Theme Name</title></head><body>" ++
+        "<main data-boris-search-root>" ++
+        "<header data-boris-search-exclude><h1 class=\"t\" data-boris-search-title=\"layout\"><a href=\"#\">Layout &amp; Title</a></h1><p>LayoutKicker</p></header>" ++
+        "<p>Body prose.</p><h2 id=\"sub\">Sub</h2><p>more</p></main></body></html>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Layout & Title", d.title);
+    try std.testing.expectEqual(@as(usize, 2), d.sections.len);
+    try std.testing.expectEqualStrings("Body prose.", d.sections[0].text);
+    try std.testing.expectEqualStrings("Sub", d.sections[1].heading);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Layout") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "LayoutKicker") == null);
+}
+
+test "self-excluded marked heading names the document; unmarked excluded h1 does not" {
+    const marked = "<title>Static</title><main data-boris-search-root>" ++
+        "<h1 data-boris-search-exclude data-boris-search-title=\"layout\">Page Title</h1>" ++
+        "<p>Body.</p></main>";
+    const d = try indexHtml(std.testing.allocator, "a.html", marked, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Page Title", d.title);
+    try std.testing.expectEqual(@as(usize, 1), d.sections.len);
+    try std.testing.expectEqual(@as(u8, 0), d.sections[0].level);
+
+    const unmarked = "<title>Static</title><main data-boris-search-root>" ++
+        "<h1 data-boris-search-exclude>Page Title</h1><p>Body.</p></main>";
+    const u = try indexHtml(std.testing.allocator, "a.html", unmarked, true);
+    defer freeDocument(std.testing.allocator, u);
+    try std.testing.expectEqualStrings("Static", u.title);
+}
+
+test "excluded marked layout heading and later marked authored heading: last wins" {
+    const html = "<main data-boris-search-root>" ++
+        "<h1 data-boris-search-exclude data-boris-search-title=\"layout\">Layout</h1>" ++
+        "<h1>Authored h1</h1><p>a</p><h2 data-boris-search-title=\"x\">Authored Mark</h2></main>";
+    const d = try indexHtml(std.testing.allocator, "a.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Authored Mark", d.title);
+
+    const layout_only = "<main data-boris-search-root>" ++
+        "<h1 data-boris-search-exclude data-boris-search-title=\"layout\">Layout</h1>" ++
+        "<h1>Authored h1</h1><p>a</p></main>";
+    const l = try indexHtml(std.testing.allocator, "a.html", layout_only, true);
+    defer freeDocument(std.testing.allocator, l);
+    try std.testing.expectEqualStrings("Layout", l.title);
 }
 
 test "without marked heading first h1 beats title element" {

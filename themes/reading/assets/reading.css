@@ -5,7 +5,8 @@
   --paper: Canvas;
   --muted: color-mix(in srgb, CanvasText 58%, Canvas);
   --line: color-mix(in srgb, CanvasText 16%, transparent);
-  --measure: 42rem;
+  --wash: color-mix(in srgb, CanvasText 5%, Canvas);
+  --measure: 40rem;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   line-height: 1.65;
 }
@@ -13,7 +14,10 @@
 html { background: var(--paper); color: var(--ink); }
 * { box-sizing: border-box; }
 body { margin: 0 auto; max-width: 76rem; padding: 1rem 1.25rem 3rem; }
-a { color: inherit; text-underline-offset: 0.16em; }
+a { color: inherit; text-decoration-thickness: 0.06em; text-underline-offset: 0.16em; }
+a:visited { text-decoration-color: var(--muted); }
+a:hover { text-decoration-thickness: 0.14em; text-decoration-color: currentColor; }
+a:active { background: var(--wash); }
 :focus-visible { outline: 3px solid color-mix(in srgb, CanvasText 55%, transparent); outline-offset: 3px; }
 .skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 5; padding: 0.4rem 0.65rem; background: var(--ink); color: var(--paper); text-decoration: none; }
 .skip-link:focus { top: 1rem; }
@@ -21,9 +25,9 @@ a { color: inherit; text-underline-offset: 0.16em; }
 .site-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; margin-bottom: 1.5rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--line); }
 .brand { margin: 0; font-weight: 750; letter-spacing: -0.03em; }
 .breadcrumb ol { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 0.88rem; }
-.breadcrumb li + li::before { content: "/"; margin-right: 0.3rem; opacity: 0.5; }
+.breadcrumb li + li::before { content: "/"; content: "/" / ""; margin-right: 0.3rem; opacity: 0.5; }
 
-.shell { display: grid; gap: 1.25rem; }
+.shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
 @media (min-width: 52rem) {
   .shell { grid-template-columns: 13rem minmax(0, 1fr) 11rem; align-items: start; }
   .rail { position: sticky; top: 1rem; }
@@ -34,19 +38,67 @@ a { color: inherit; text-underline-offset: 0.16em; }
 .site-nav a, .page-toc a { display: inline-block; padding: 0.15rem 0.25rem; color: inherit; text-decoration: none; }
 .site-nav a:hover, .page-toc a:hover, .site-nav .is-current > a { text-decoration: underline; }
 .site-nav .is-current > a { font-weight: 750; }
+.page-toc__l2 { padding-inline-start: 0.6rem; }
+.page-toc__l3 { padding-inline-start: 1.2rem; }
 
 main { min-width: 0; max-width: var(--measure); }
-.page-metadata { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0 0 1.2rem; color: var(--muted); font-size: 0.8rem; }
+.page-metadata { display: flex; flex-wrap: wrap; gap: 0.25rem 1.1rem; margin: 0 0 1.4rem; color: var(--muted); font-size: 0.8rem; }
+.page-metadata div { display: flex; gap: 0.35rem; }
 .page-metadata dt { font-weight: 750; }
 .page-metadata dd { margin: 0; }
+
+.prose { font-size: 1.0625rem; }
 .prose > :first-child { margin-top: 0; }
-.prose h1, .prose h2, .prose h3 { line-height: 1.25; letter-spacing: -0.02em; }
-.prose pre { overflow-x: auto; padding: 0.85rem; border: 1px solid var(--line); }
-.prose :not(pre) > code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
-.prose table { display: block; overflow-x: auto; border-collapse: collapse; }
-.prose th, .prose td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); text-align: start; }
-.admonition { margin: 1.2rem 0; padding: 0.75rem 0.9rem; border-inline-start: 0.25rem solid var(--ink); background: color-mix(in srgb, CanvasText 5%, Canvas); }
-.page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; }
+.prose h1, .prose h2, .prose h3, .prose h4 { line-height: 1.25; letter-spacing: -0.02em; }
+.prose h1 { margin: 0 0 1.1rem; font-size: 2.1rem; }
+.prose h2 { margin: 2.4rem 0 0.7rem; font-size: 1.45rem; }
+.prose h3 { margin: 1.9rem 0 0.5rem; font-size: 1.15rem; }
+.prose h4 { margin: 1.6rem 0 0.4rem; font-size: 1rem; letter-spacing: 0; }
+.prose p, .prose ul, .prose ol, .prose dl, .prose blockquote, .prose pre, .prose table, .prose figure { margin: 0 0 1.1rem; }
+.prose ul, .prose ol { padding-inline-start: 1.4rem; }
+.prose li + li { margin-top: 0.3rem; }
+.prose li > ul, .prose li > ol { margin: 0.3rem 0 0; }
+.prose li::marker { color: var(--muted); }
+.prose dt { font-weight: 700; }
+.prose dd { margin: 0.1rem 0 0.6rem; padding-inline-start: 1.4rem; }
+.prose blockquote { padding-inline-start: 1.1rem; border-inline-start: 2px solid var(--ink); }
+.prose blockquote > :last-child { margin-bottom: 0; }
+.prose hr { width: 30%; height: 0; margin: 2.2rem auto; border: 0; border-top: 1px solid var(--line); }
+.prose pre { overflow-x: auto; padding: 0.85rem; border: 1px solid var(--line); line-height: 1.5; }
+.prose code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+.prose :not(pre) > code { padding: 0.05em 0.25em; background: var(--wash); }
+.prose table { width: 100%; border-collapse: collapse; font-size: 0.94rem; font-variant-numeric: tabular-nums; }
+.prose th, .prose td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top; }
+.prose th { border-bottom-color: var(--ink); font-weight: 700; }
+.prose [align="center"] { text-align: center; }
+.prose [align="right"] { text-align: end; }
+.prose img { display: block; max-width: 100%; height: auto; }
+.prose figure > p { margin: 0; }
+.prose figcaption { margin-top: 0.45rem; color: var(--muted); font-size: 0.88rem; }
+.prose sup, .prose sub { line-height: 0; }
+.prose .footnote-ref a { padding: 0 0.1em; text-decoration: none; }
+.prose .footnotes { margin: 0 0 1.1rem; padding-top: 0.6rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.88rem; }
+.prose .footnotes ol { margin: 0; }
+.prose .footnotes li p { margin: 0; }
+.prose .footnote-backref { text-decoration: none; }
+.admonition { margin: 1.4rem 0; padding: 0.75rem 0.9rem; border-inline-start: 0.25rem solid var(--ink); background: var(--wash); }
+.admonition--note, .admonition--info { border-inline-start-width: 1px; }
+.admonition--danger { border: 2px solid var(--ink); border-inline-start-width: 0.5rem; }
+.prose .admonition__title { margin: 0 0 0.25rem; font-size: 0.85rem; font-weight: 750; }
+.admonition--warning .admonition__title, .admonition--danger .admonition__title { font-weight: 850; }
+.prose .admonition__body > :last-child { margin-bottom: 0; }
+.prose .details { margin: 1.4rem 0; border-block: 1px solid var(--line); }
+.details summary { cursor: pointer; padding: 0.55rem 0; font-weight: 700; }
+.details summary::marker { color: var(--muted); }
+.details__body { padding: 0 0 0.6rem; }
+.prose .details__body > :last-child { margin-bottom: 0; }
+.graph-links:empty { display: none; }
+.page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; padding-top: 0.75rem; border-top: 1px solid var(--line); font-size: 0.92rem; }
+.page-children::before, .semantic-relations::before, .semantic-backlinks::before { content: attr(aria-label); display: block; color: var(--muted); font-size: 0.8rem; font-weight: 750; }
+.page-children ul { margin-top: 0.4rem; }
+.page-children li + li { margin-top: 0.25rem; }
+.semantic-relations ul, .semantic-backlinks ul { margin: 0.4rem 0 0; padding-inline-start: 1.1rem; }
+.semantic-relations li::after, .semantic-backlinks li::after { content: " · " attr(data-relation-kind); color: var(--muted); font-size: 0.8rem; }
 .site-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
 
 /* CJK: taller measure, no italic-as-emphasis. System faces only. */
@@ -67,14 +119,20 @@ main { min-width: 0; max-width: var(--measure); }
 }
 :lang(ja) em, :lang(zh) em, :lang(ko) em,
 :lang(ja) i, :lang(zh) i, :lang(ko) i { font-style: normal; font-weight: 650; }
+:lang(ja) :is(h1, h2, h3, h4, .brand), :lang(zh) :is(h1, h2, h3, h4, .brand), :lang(ko) :is(h1, h2, h3, h4, .brand) { letter-spacing: 0; }
 .specimen { margin: 1.5rem 0; padding: 1rem 1.1rem; border: 1px solid var(--line); }
 .specimen p { margin: 0.65rem 0 0; }
 .specimen p:first-child { margin-top: 0; }
 
+@media (max-width: 52rem) {
+  .prose table { display: block; overflow-x: auto; }
+}
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
 @media print {
   .skip-link, .rail { display: none; }
   .shell { display: block; }
+  main { max-width: none; }
+  .prose pre { white-space: pre-wrap; }
 }

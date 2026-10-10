@@ -4,22 +4,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>{{title}} · Field Notes Archive</title>
+  <title>{{title}} · Archive</title>
   <link rel="stylesheet" href="{{asset-url assets/archive.css}}">
+  {{head}}
 </head>
-<body>
+<body data-status="{{page-status}}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="entry-site-header" role="banner">
     <div class="entry-shell">
-      <p class="eyebrow">Field Notes Archive</p>
+      <p class="eyebrow">Archive</p>
       {{breadcrumb}}
     </div>
   </header>
   <div class="entry-layout entry-shell">
-    <main id="main-content" tabindex="-1">
-    {{metadata}}
+    <main id="main-content" tabindex="-1" data-boris-search-root>
+    {{metadata}}{{tags}}
     <article class="entry-copy">{{content}}</article>
-    <section class="entry-children" aria-labelledby="entry-children-heading">
+    {{parent}}
+    <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+    <section class="entry-children" aria-labelledby="entry-children-heading" data-boris-search-exclude>
       <p class="module-label" id="entry-children-heading">More entries</p>
       {{children}}
     </section>

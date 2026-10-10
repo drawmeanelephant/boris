@@ -1,21 +1,71 @@
 //! `boris init`: materialize a deterministic starter site and prove it compiles.
 //!
 //! `boris init [DIR] [--type NAME]` writes a fixed starter tree selected by
-//! `--type` (default `docs`, byte-identical to the historical starter):
+//! `--type` (default `docs`):
 //!
 //! - `docs`     — Markdown documentation tree: trunk/satellite graph, wiki
-//!   links, a semantic relation, a starter theme with a wired browser
-//!   search client, and both publication profiles.
+//!   links, a semantic relation, the catalog `boris` theme (whose layout
+//!   ships the browser search client), and both publication profiles.
+//!   Until #1063 it embedded a private two-file starter theme from
+//!   `src/init_templates/`. That theme had no `{{relations}}`,
+//!   `{{backlinks}}`, `{{children}}`, or `{{metadata}}`, so the starter's
+//!   own index promised a semantic relation its theme could not show, and
+//!   it drifted from every catalog `boris` fix (slot adoption, the a11y
+//!   floor, the #1049 visual pass, the search-title marker). `docs` now
+//!   embeds `themes/boris` like every sibling embeds its theme. The cost:
+//!   it no longer writes the historical starter bytes.
 //! - `garden`  — a flat-ish digital garden: dense `[[wiki-links]]`,
 //!   semantic relations, `{{include}}` composition from `content/includes/`,
 //!   and a registered `<Aside>` component, under the shipped `ledger` theme.
 //! - `cookbook` — a `.cook` Cooklang recipe box (ingredients, cookware,
 //!   timers, sub-recipe references, `servings`) under `cards`, whose
-//!   profile declares `input_format: cook`.
+//!   profile declares `input_format: cook`; `layout_rules` send `id:index`
+//!   to `home.html`, whose `{{children}}` deck shows each recipe as a card.
 //! - `blog`    — dated posts on a parent chain (`index` → `posts` → dated
 //!   entries with `published_at` + `summary`) under the `cozy` theme.
 //! - `textile` — `.textile` pages through the native adapter under `press`,
 //!   whose profile declares `input_format: textile`.
+//! - `landing` — a single-Trunk page composed from `{{include}}` section
+//!   fragments, plus one satellite, under `service`; the profile's
+//!   `layout_rules` send `id:index` to the theme's `home.html`.
+//! - `wiki`    — a three-level reference tree (`index` → section hubs →
+//!   leaf entries) with cross-entry wiki links under `reference`;
+//!   `layout_rules` send `id:index` to `home.html` and `glob:wiki/*` hubs
+//!   to `section.html`, so `{{breadcrumb}}` and `{{toc}}` do real work.
+//! - `link-in-bio` — the smallest honest site: one trunk page holding a
+//!   personal link list, under `minimal`.
+//! - `changelog` — release notes (`index` → `changes` hub → dated entries
+//!   with `published_at` + `summary`) under `journal`; one entry is
+//!   `status: draft`, the unreleased section that renders unadvertised.
+//!   `layout_rules` send `id:changes` to `archive.html`, whose
+//!   `{{children}}` listing names the published releases.
+//! - `resume`  — a single-page CV with `tags` for `{{metadata}}` and one
+//!   "now" satellite under `corporate`, whose print stylesheet is the PDF.
+//! - `newsletter` — a weekly paper (`index` → `issues` hub → dated issues)
+//!   under `press`; `layout_rules` route the masthead, archive, and issues
+//!   to press's named layouts, and the profile's target enables `head` and
+//!   declares `rss` plus `sitemap`, so the first build ships `feed.xml`
+//!   with autodiscovery links in every issue's head.
+//! - `portfolio` — a studio front (`index`, an `about` satellite, three
+//!   dated `projects/` satellites) under `showcase`; `layout_rules` send
+//!   `id:index` to `home.html`, whose `{{children}}` lists the work, and
+//!   every other page uses `main.html`.
+//! - `archive` — a long-lived archive under `archive`: four tagged
+//!   entries joined by `relates_to` / `supersedes` relations (so entries
+//!   render `{{relations}}` and `{{backlinks}}`), one `status: archived`
+//!   record, and a hand-kept `topics` index by tag; `layout_rules` send
+//!   `id:index` to `archive.html`.
+//! - `dashboard` — a project-status board under `engineering`: the trunk
+//!   board table and three `projects/` satellites, one per `status:` value
+//!   (`published` = active, `draft` = proposed, `archived` = retired, the
+//!   mapping documented on the board), with `depends_on` / `supersedes`
+//!   relations and status-history tables; `layout_rules` send `id:index`
+//!   to `home.html`.
+//! - `photo-gallery` — a trunk front page and two `photos/` album
+//!   satellites under `gallery`, each page carrying small PNG plates in its
+//!   own `{stem}.assets/` folder inside `<figure>` captions; `layout_rules`
+//!   send `id:index` to `home.html`, whose `{{children}}` is the album grid.
+//!   The images are content, so they embed from `src/init_templates/`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -44,12 +94,11 @@ const Io = std.Io;
 
 const ExitCode = diagnostic.ExitCode;
 
-/// Starter archetypes accepted by `--type`. `docs` is the default and
-/// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile };
+/// Starter archetypes accepted by `--type`. `docs` is the default.
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard, @"photo-gallery" };
 
-/// Comptime-joined `docs, garden, cookbook, blog, textile` for diagnostics
-/// and help text — the table below is the single source of truth.
+/// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
+/// text — the table below is the single source of truth.
 pub const archetype_names: []const u8 = blk: {
     var names: []const u8 = "";
     for (@typeInfo(Archetype).@"enum".field_names, 0..) |name, i| {
@@ -58,10 +107,7 @@ pub const archetype_names: []const u8 = blk: {
     break :blk names;
 };
 
-const starter_layout = @embedFile("init_templates/layouts/main.html");
-const starter_css = @embedFile("init_templates/assets/css/boris.css");
-
-// --- docs (default; the historical starter, unchanged) ----------------------
+// --- docs (default) ---------------------------------------------------------
 
 const index_md =
     \\---
@@ -90,10 +136,15 @@ const index_md =
     \\  index.md                    trunk page (this one)
     \\  guides/getting-started.md   satellite, parent: index
     \\  guides/publishing.md        satellite, parent: index
-    \\themes/boris/                 starter theme (closed layout slots, search UI)
+    \\themes/boris/                 the catalog boris theme (graph slots, search UI)
     \\boris.json                    publication profile (GitHub Pages)
     \\standard-site.json            Atmosphere profile (edit the fake DID/URL)
     \\```
+    \\
+    \\The theme renders the graph, not just the prose: tags in the page
+    \\header, this page's satellites under "In this section", and the
+    \\relation at the foot of [[guides/publishing]] ("Related") and of
+    \\[[guides/getting-started]] ("Linked from").
     \\
     \\Search is wired up: the compiler publishes
     \\`dist/_boris/search/search-index.json` and this theme ships the
@@ -186,7 +237,9 @@ const publishing_md =
     \\retains a separate evidence artifact. Atmosphere publication uses
     \\`standard-site.json`: replace the obviously-fake DID and URL
     \\before `standard-site publish`. This starter page is related to
-    \\[[guides/getting-started]] so the semantic graph has an edge to inspect.
+    \\[[guides/getting-started]] so the semantic graph has an edge to inspect:
+    \\the theme lists it below this page under "Related", and Getting
+    \\Started lists this page under "Linked from".
     \\
 ;
 
@@ -389,6 +442,10 @@ const cookbook_index_cook =
     \\-- a plain `boris --profile boris.json` build (or --cooklang on the
     \\-- CLI) runs the native adapter; there is no per-site switch in the
     \\-- compiler. Lines like this one are comments and never render.
+    \\--
+    \\-- The profile's layout_rules render this page through the cards
+    \\-- theme's home.html: every recipe declares parent: index, so the
+    \\-- "In this collection" deck under the menu lists each one as a card.
     \\
     \\Tonight's menu: @./mains/carbonara{1} finished with
     \\@./sauces/pepper-oil{1%tbsp}.
@@ -479,7 +536,15 @@ const cookbook_profile =
     \\  "input_format": "cook",
     \\  "site": { "title": "Recipe Box" },
     \\  "targets": [
-    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/cards" }
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/cards",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/cards/layouts/home.html" }
+    \\      ]
+    \\    }
     \\  ]
     \\}
     \\
@@ -695,6 +760,1245 @@ const textile_profile =
     \\
 ;
 
+// --- landing ----------------------------------------------------------------
+
+const landing_index_md =
+    \\---
+    \\title: Fieldstone Cycle Repair
+    \\tags: [home]
+    \\---
+    \\
+    \\# Fieldstone Cycle Repair
+    \\
+    \\Honest repairs for everyday bikes, done the same week. Bring it in, get a
+    \\ticket, ride it home tuned.
+    \\
+    \\**Next step:** read [[about]] to see how this one-page site is put
+    \\together, then replace this prose with your own pitch.
+    \\
+    \\{{include includes/services.md}}
+    \\
+    \\{{include includes/faq.md}}
+    \\
+    \\{{include includes/visit.md}}
+    \\
+;
+
+const landing_about_md =
+    \\---
+    \\title: About
+    \\parent: index
+    \\tags: [about]
+    \\---
+    \\
+    \\# About
+    \\
+    \\A landing site is a legitimate Boris graph: one trunk page, [[index]],
+    \\and only as many satellites as the story needs. This page is the one
+    \\satellite, so the navigation and breadcrumb have something to show.
+    \\
+    \\## How this starter is wired
+    \\
+    \\- `content/index.md` is the long page. Its sections come from
+    \\  `content/includes/*.md` through `{{include}}` directives, so each
+    \\  section stays a small file you can edit on its own.
+    \\- `boris.json` declares one `layout_rules` entry that sends `id:index`
+    \\  to `themes/service/layouts/home.html`. Every other page, including
+    \\  this one, falls back to the theme's `main.html`.
+    \\
+;
+
+const landing_services_md =
+    \\## What we do
+    \\
+    \\- **Tune-ups** — brakes, gears, and bearings, back the same week.
+    \\- **Wheel builds** — hand-laced and trued on the stand.
+    \\- **Fittings** — saddle, bar, and cleat set-up for long days out.
+    \\
+;
+
+const landing_faq_md =
+    \\## Questions
+    \\
+    \\### Do I need an appointment?
+    \\
+    \\No. Drop in during opening hours; bigger jobs get a ticket and a date.
+    \\
+    \\### How is this page built?
+    \\
+    \\From fragments. Each section of the front page is a file under
+    \\`content/includes/`, spliced into [[index]] by an `{{include}}`
+    \\directive. Fragments never compile as pages of their own.
+    \\
+;
+
+const landing_visit_md =
+    \\## Visit
+    \\
+    \\Open Tuesday to Saturday, 9:00–17:30. The story behind the shop is on
+    \\the [[about]] page.
+    \\
+;
+
+const landing_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Fieldstone Cycle Repair" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/service",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/service/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- wiki -------------------------------------------------------------------
+
+const wiki_index_md =
+    \\---
+    \\title: Workshop Wiki
+    \\tags: [wiki]
+    \\---
+    \\
+    \\# Workshop Wiki
+    \\
+    \\A reference wiki three levels deep: this trunk page, two section hubs,
+    \\and leaf entries under each hub. Every entry's breadcrumb walks the whole
+    \\chain, and every `[[link]]` between entries is a validated graph edge.
+    \\
+    \\## Sections
+    \\
+    \\- [[wiki/tools]] — what is on the bench.
+    \\- [[wiki/techniques]] — what you do with it.
+    \\
+    \\## Start anywhere
+    \\
+    \\[[wiki/techniques/sharpening]] is the entry most others point at.
+    \\
+;
+
+const wiki_tools_md =
+    \\---
+    \\title: Tools
+    \\parent: index
+    \\tags: [wiki, tools]
+    \\---
+    \\
+    \\# Tools
+    \\
+    \\A hub page: it declares `parent: index`, and every tool entry declares
+    \\`parent: wiki/tools`. The profile sends hubs to the theme's
+    \\`section.html` layout, whose `{{children}}` slot lists the entries
+    \\without a hand-kept index.
+    \\
+    \\- [[wiki/tools/chisels]] — paring and chopping.
+    \\- [[wiki/tools/hand-planes]] — flattening and smoothing.
+    \\
+;
+
+const wiki_techniques_md =
+    \\---
+    \\title: Techniques
+    \\parent: index
+    \\tags: [wiki, techniques]
+    \\---
+    \\
+    \\# Techniques
+    \\
+    \\The second hub. Entries here link sideways into [[wiki/tools]], so the
+    \\graph is a web across sections, not just a tree.
+    \\
+    \\- [[wiki/techniques/sharpening]] — the skill every tool depends on.
+    \\- [[wiki/techniques/dovetails]] — the joint everyone wants to cut.
+    \\
+;
+
+const wiki_chisels_md =
+    \\---
+    \\title: Chisels
+    \\parent: wiki/tools
+    \\tags: [tools]
+    \\---
+    \\
+    \\# Chisels
+    \\
+    \\A bench chisel pares; a mortise chisel levers. Both only work sharp —
+    \\see [[wiki/techniques/sharpening]].
+    \\
+    \\## Bench chisels
+    \\
+    \\Bevel-edged, 6–25 mm, for paring to a line and for cleaning out the
+    \\waste in [[wiki/techniques/dovetails]].
+    \\
+    \\## Mortise chisels
+    \\
+    \\Thick and square-sided, struck with a mallet, levered against the
+    \\mortise walls.
+    \\
+    \\## Care
+    \\
+    \\Keep the backs flat and the edges covered in the tool roll.
+    \\
+;
+
+const wiki_hand_planes_md =
+    \\---
+    \\title: Hand Planes
+    \\parent: wiki/tools
+    \\tags: [tools]
+    \\---
+    \\
+    \\# Hand Planes
+    \\
+    \\A plane is a chisel held at a fixed angle in a body. The iron is sharpened
+    \\exactly like a chisel: [[wiki/techniques/sharpening]].
+    \\
+    \\## Jack plane
+    \\
+    \\The first plane: removes stock fast and flattens rough boards.
+    \\
+    \\## Smoothing plane
+    \\
+    \\Takes the last gossamer shavings before finish.
+    \\
+    \\## Setting the iron
+    \\
+    \\Advance the iron until it just bites, then take test shavings on scrap.
+    \\
+;
+
+const wiki_sharpening_md =
+    \\---
+    \\title: Sharpening
+    \\parent: wiki/techniques
+    \\tags: [techniques]
+    \\relations: [relates_to=wiki/tools/chisels]
+    \\---
+    \\
+    \\# Sharpening
+    \\
+    \\Every edge tool in [[wiki/tools]] dulls. Sharpening is three steps, and
+    \\the same for [[wiki/tools/chisels]] and [[wiki/tools/hand-planes]].
+    \\
+    \\## Grind
+    \\
+    \\Restore the primary bevel on a coarse stone only when the edge is chipped.
+    \\
+    \\## Hone
+    \\
+    \\Raise a burr with a fine stone at the secondary bevel angle.
+    \\
+    \\## Strop
+    \\
+    \\Remove the burr on leather. The `relations:` frontmatter on this page
+    \\records a typed `relates_to` edge to [[wiki/tools/chisels]] as well.
+    \\
+;
+
+const wiki_dovetails_md =
+    \\---
+    \\title: Dovetails
+    \\parent: wiki/techniques
+    \\tags: [techniques, joinery]
+    \\---
+    \\
+    \\# Dovetails
+    \\
+    \\The interlocking corner joint. Saw the tails, mark the pins from them,
+    \\then pare to the line with sharp [[wiki/tools/chisels]].
+    \\
+    \\## Layout
+    \\
+    \\Mark the baseline with a gauge and the slopes with a bevel.
+    \\
+    \\## Sawing
+    \\
+    \\Saw on the waste side of every line.
+    \\
+    \\## Fitting
+    \\
+    \\Pare, test, and pare again. A dull edge crushes fibres, so revisit
+    \\[[wiki/techniques/sharpening]] before the final fit.
+    \\
+;
+
+const wiki_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Workshop Wiki" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/reference",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/reference/layouts/home.html" },
+    \\        { "selector": "glob:wiki/*", "layout": "themes/reference/layouts/section.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- link-in-bio ------------------------------------------------------------
+
+const link_in_bio_index_md =
+    \\---
+    \\title: Robin Vale
+    \\tags: [links]
+    \\---
+    \\
+    \\# Robin Vale
+    \\
+    \\Letterpress printer and occasional bookbinder. This whole site is one
+    \\page: the smallest graph Boris builds, still parsed, validated, and
+    \\published through the same profile as any larger site.
+    \\
+    \\## Elsewhere
+    \\
+    \\- [Studio journal](https://example.com/journal)
+    \\- [Print shop](https://example.com/shop)
+    \\- [Newsletter](https://example.com/newsletter)
+    \\- [Email](mailto:robin@example.com)
+    \\
+    \\Replace these links with yours. Add a second page only when you need one.
+    \\
+;
+
+const link_in_bio_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Robin Vale" },
+    \\  "targets": [
+    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/minimal" }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- changelog --------------------------------------------------------------
+
+const changelog_index_md =
+    \\---
+    \\title: Tidepool Release Notes
+    \\tags: [home]
+    \\---
+    \\
+    \\# Tidepool Release Notes
+    \\
+    \\Release notes for Tidepool, a small command-line tide-table tool. Every
+    \\release is a dated page under [[changes]]; the newest shipped release is
+    \\[[changes/2026-09-28-v0-2-0]].
+    \\
+;
+
+const changelog_changes_md =
+    \\---
+    \\title: Changes
+    \\parent: index
+    \\tags: [changes]
+    \\---
+    \\
+    \\# Changes
+    \\
+    \\Every release is a satellite of this hub (`parent: changes`). The
+    \\profile's `layout_rules` render this page through the journal theme's
+    \\`archive.html`, whose entry listing is `{{children}}`: each published
+    \\release, in id order, so the date-prefixed ids sort oldest first.
+    \\
+    \\The entry marked `status: draft` is the unreleased section: it renders
+    \\at its normal route, but stays out of that listing, the search index,
+    \\feeds, and the sitemap until you change it to `status: published`.
+    \\Until then, this hand-written link reaches it: [[changes/unreleased]].
+    \\
+;
+
+const changelog_unreleased_md =
+    \\---
+    \\title: Unreleased
+    \\parent: changes
+    \\status: draft
+    \\published_at: 2026-10-10T00:00:00Z
+    \\summary: Work merged since v0.2.0 that has not shipped yet.
+    \\tags: [release]
+    \\---
+    \\
+    \\# Unreleased
+    \\
+    \\## Added
+    \\
+    \\- `tidepool export --ics` writes a calendar of the week's high tides.
+    \\
+    \\## Changed
+    \\
+    \\- Station names match case-insensitively.
+    \\
+    \\When this ships, set the real `published_at`, rename the file to its
+    \\version, and drop `status: draft` (or set `status: published`).
+    \\
+;
+
+const changelog_v0_2_0_md =
+    \\---
+    \\title: v0.2.0
+    \\parent: changes
+    \\published_at: 2026-09-28T12:00:00Z
+    \\summary: Station search, metric heights by default, and a faster parser.
+    \\tags: [release]
+    \\---
+    \\
+    \\# v0.2.0
+    \\
+    \\## Added
+    \\
+    \\- `tidepool search NAME` finds stations by name.
+    \\
+    \\## Changed
+    \\
+    \\- Heights print in metres by default; `--feet` restores the old unit.
+    \\
+    \\## Fixed
+    \\
+    \\- Daylight-saving transitions no longer drop a tide.
+    \\
+    \\Previous release: [[changes/2026-08-17-v0-1-0]].
+    \\
+;
+
+const changelog_v0_1_0_md =
+    \\---
+    \\title: v0.1.0
+    \\parent: changes
+    \\published_at: 2026-08-17T12:00:00Z
+    \\summary: First public release — today's tides for one station.
+    \\tags: [release]
+    \\---
+    \\
+    \\# v0.1.0
+    \\
+    \\## Added
+    \\
+    \\- `tidepool today STATION` prints the day's highs and lows.
+    \\- A bundled station list for the home coast.
+    \\
+    \\Next release: [[changes/2026-09-28-v0-2-0]].
+    \\
+;
+
+const changelog_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Tidepool Release Notes" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/journal",
+    \\      "layout_rules": [
+    \\        { "selector": "id:changes", "layout": "themes/journal/layouts/archive.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- resume -----------------------------------------------------------------
+
+const resume_index_md =
+    \\---
+    \\title: Ada Brennan
+    \\tags: [production-editing, typesetting, publishing-systems]
+    \\published_at: 2026-10-01T09:00:00Z
+    \\summary: Production editor and publishing-systems engineer.
+    \\---
+    \\
+    \\# Ada Brennan
+    \\
+    \\Production editor and publishing-systems engineer. This page is the
+    \\whole CV: print it, and the theme's print stylesheet turns the site into
+    \\the PDF.
+    \\
+    \\## Summary
+    \\
+    \\Ten years taking manuscripts to print and to the web from one source.
+    \\Comfortable in the copy room and in the build pipeline.
+    \\
+    \\## Experience
+    \\
+    \\### Lead production editor — Harrow & Finch, 2021–present
+    \\
+    \\- Moved a 40-title backlist to a single-source Markdown workflow.
+    \\- Cut proof turnaround from nine days to four.
+    \\
+    \\### Production editor — Lantern Quarterly, 2016–2021
+    \\
+    \\- Ran the quarterly print schedule and the web edition.
+    \\- Wrote the house style guide still in use today.
+    \\
+    \\## Projects
+    \\
+    \\- **Open specimen book** — a typeface specimen built from plain text.
+    \\- **Proof tracker** — a small tool for routing page proofs.
+    \\
+    \\## Skills
+    \\
+    \\Copy-editing, typesetting, accessibility review, static publishing.
+    \\
+    \\## Contact
+    \\
+    \\- Email: ada@example.com
+    \\- What I am working on right now: [[now]].
+    \\
+;
+
+const resume_now_md =
+    \\---
+    \\title: Now
+    \\parent: index
+    \\tags: [now]
+    \\published_at: 2026-10-05T09:00:00Z
+    \\summary: What I am working on this season.
+    \\---
+    \\
+    \\# Now
+    \\
+    \\- Typesetting a poetry collection for spring.
+    \\- Reading about variable fonts in long-form print.
+    \\- Open to contract production work from November.
+    \\
+    \\Back to the [[index]] CV.
+    \\
+;
+
+const resume_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Ada Brennan" },
+    \\  "targets": [
+    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/corporate" }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- newsletter -------------------------------------------------------------
+
+const newsletter_index_md =
+    \\---
+    \\title: The Saturday Sheet
+    \\tags: [home]
+    \\---
+    \\
+    \\# The Saturday Sheet
+    \\
+    \\A weekly paper of small-press news, one issue every Saturday. Each issue
+    \\is a dated page under [[issues]]; this week's is
+    \\[[issues/2026-10-03-the-paper-mill]].
+    \\
+    \\Every build publishes `feed.xml` and `sitemap.xml` from the profile.
+    \\The feed rides on the target's enabled `head`: every page's head links
+    \\the feed so feed readers can discover it, and every press layout
+    \\carries the `{{head}}` slot that makes that possible.
+    \\
+;
+
+const newsletter_issues_md =
+    \\---
+    \\title: Back Issues
+    \\parent: index
+    \\tags: [issues]
+    \\---
+    \\
+    \\# Back Issues
+    \\
+    \\Every issue is a satellite of this page, newest first. An issue needs a
+    \\`published_at` date and a one-line `summary`; the date orders feeds, and
+    \\the summary becomes the feed item description.
+    \\
+    \\- [[issues/2026-10-03-the-paper-mill]]
+    \\- [[issues/2026-09-26-type-on-the-shelf]]
+    \\- [[issues/2026-09-19-first-edition]]
+    \\
+;
+
+const newsletter_issue_1_md =
+    \\---
+    \\title: "№ 1: First Edition"
+    \\parent: issues
+    \\published_at: 2026-09-19T08:00:00Z
+    \\summary: Why a weekly paper, and what each issue will carry.
+    \\tags: [editorial]
+    \\---
+    \\
+    \\# № 1: First Edition
+    \\
+    \\Welcome to the first sheet. Each Saturday: one lead story, three short
+    \\notes, and a reading list. Next week: [[issues/2026-09-26-type-on-the-shelf]].
+    \\
+;
+
+const newsletter_issue_2_md =
+    \\---
+    \\title: "№ 2: Type on the Shelf"
+    \\parent: issues
+    \\published_at: 2026-09-26T08:00:00Z
+    \\summary: A visit to a print shop that still sets metal type.
+    \\tags: [type, visits]
+    \\---
+    \\
+    \\# № 2: Type on the Shelf
+    \\
+    \\## Lead
+    \\
+    \\Two cases of twelve-point Caslon and a proofing press in a back room.
+    \\
+    \\## Notes
+    \\
+    \\- A typefoundry reopens its casting room.
+    \\- The county library adds a letterpress club.
+    \\
+    \\Previous: [[issues/2026-09-19-first-edition]].
+    \\
+;
+
+const newsletter_issue_3_md =
+    \\---
+    \\title: "№ 3: The Paper Mill"
+    \\parent: issues
+    \\published_at: 2026-10-03T08:00:00Z
+    \\summary: Where the paper comes from, and a follow-up on last week's print shop.
+    \\tags: [paper, visits]
+    \\relations: [relates_to=issues/2026-09-26-type-on-the-shelf]
+    \\---
+    \\
+    \\# № 3: The Paper Mill
+    \\
+    \\## Lead
+    \\
+    \\A family mill that still makes cotton rag paper by the vat.
+    \\
+    \\## Follow-up
+    \\
+    \\The print shop from [[issues/2026-09-26-type-on-the-shelf]] buys its
+    \\stock here. This issue also declares a typed `relates_to` relation to
+    \\that one in its frontmatter.
+    \\
+    \\## Reading list
+    \\
+    \\- Back issues: [[issues]].
+    \\
+;
+
+const newsletter_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": {
+    \\    "title": "The Saturday Sheet",
+    \\    "url": "https://saturday-sheet.example.com/",
+    \\    "description": "A weekly paper of small-press news."
+    \\  },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/press",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/press/layouts/home.html" },
+    \\        { "selector": "id:issues", "layout": "themes/press/layouts/archive.html" },
+    \\        { "selector": "glob:issues/*", "layout": "themes/press/layouts/blog.html" }
+    \\      ],
+    \\      "head": { "enabled": true, "base_url": "https://saturday-sheet.example.com/" },
+    \\      "rss": { "path": "feed.xml" },
+    \\      "sitemap": { "path": "sitemap.xml" }
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- portfolio --------------------------------------------------------------
+
+const portfolio_index_md =
+    \\---
+    \\title: Mara Lindqvist Studio
+    \\tags: [home]
+    \\---
+    \\
+    \\# Mara Lindqvist Studio
+    \\
+    \\Wayfinding, print, and type for public places.
+    \\
+    \\Each project under `content/projects/` is a satellite of this page
+    \\(`parent: index`) with a `published_at` date and a one-line `summary`.
+    \\The showcase home layout's `{{children}}` slot lists this page's direct
+    \\satellites under "Explore", so a new project file joins that list on
+    \\the next build without an edit here.
+    \\
+;
+
+const portfolio_about_md =
+    \\---
+    \\title: About
+    \\parent: index
+    \\tags: [about]
+    \\---
+    \\
+    \\# About
+    \\
+    \\A two-person studio working with towns, museums, and small publishers.
+    \\
+    \\## How this starter is wired
+    \\
+    \\`boris.json` declares a `layout_rules` entry that sends `id:index` to
+    \\`themes/showcase/layouts/home.html`. Every other page, including this
+    \\one and each project, falls back to the theme's `main.html`. Layout
+    \\choice is build configuration in the profile, never page frontmatter.
+    \\
+    \\Back to the [[index]].
+    \\
+;
+
+const portfolio_harbor_signage_md =
+    \\---
+    \\title: Harbor Signage
+    \\parent: index
+    \\published_at: 2026-06-12T09:00:00Z
+    \\summary: A wayfinding system for a working harbor front.
+    \\tags: [wayfinding]
+    \\---
+    \\
+    \\# Harbor Signage
+    \\
+    \\Forty signs, two languages, one typeface tuned for salt and glare.
+    \\
+    \\## Brief
+    \\
+    \\Make the harbor walkable for visitors without slowing the people who
+    \\work there.
+    \\
+    \\## Outcome
+    \\
+    \\Installed in spring; the same grid later set the
+    \\[[projects/field-almanac]] pages.
+    \\
+;
+
+const portfolio_field_almanac_md =
+    \\---
+    \\title: Field Almanac
+    \\parent: index
+    \\published_at: 2026-08-03T09:00:00Z
+    \\summary: A pocket almanac for a regional nature trust.
+    \\tags: [print, editorial]
+    \\relations: [relates_to=projects/harbor-signage]
+    \\---
+    \\
+    \\# Field Almanac
+    \\
+    \\A 96-page pocket book of tides, moon phases, and walking routes.
+    \\
+    \\## Approach
+    \\
+    \\The layout grid comes from [[projects/harbor-signage]]; the `relations:`
+    \\frontmatter records that lineage as a typed `relates_to` edge.
+    \\
+;
+
+const portfolio_specimen_book_md =
+    \\---
+    \\title: Specimen Book
+    \\parent: index
+    \\published_at: 2026-09-22T09:00:00Z
+    \\summary: A type specimen for the studio's harbor typeface.
+    \\tags: [type]
+    \\---
+    \\
+    \\# Specimen Book
+    \\
+    \\Every weight of the harbor face, set at reading and display sizes.
+    \\
+    \\Back to the [[index]].
+    \\
+;
+
+const portfolio_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Mara Lindqvist Studio" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/showcase",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/showcase/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- archive ----------------------------------------------------------------
+
+const archive_index_md =
+    \\---
+    \\title: Harbor Street Archive
+    \\---
+    \\
+    \\A long-lived archive of small records from one street by the harbor:
+    \\timetables, photographs, and notices, filed so a later reader can follow
+    \\what replaced what.
+    \\
+    \\## How the taxonomy works
+    \\
+    \\- `tags:` file an entry under one or more subjects. Boris generates no
+    \\  tag pages, so [[topics]] is a hand-kept index by tag.
+    \\- `relations:` record typed edges between entries: `relates_to` for "see
+    \\  also" and `supersedes` when a newer record replaces an older one.
+    \\- `{{backlinks}}` is derived evidence: each entry lists the entries
+    \\  whose relations point at it, so an old record shows what replaced it.
+    \\- `status: archived` marks a record that is kept but no longer current.
+    \\
+    \\Every entry is a satellite of this page; the layout's `{{children}}`
+    \\slot lists them.
+    \\
+;
+
+const archive_topics_md =
+    \\---
+    \\title: Topics
+    \\parent: index
+    \\tags: [index]
+    \\---
+    \\
+    \\# Topics
+    \\
+    \\An index by tag, kept by hand. Boris validates every link here, but it
+    \\never generates this page: when you tag a new entry, add it below.
+    \\
+    \\## harbor
+    \\
+    \\- [[entries/2020-harbor-lights]]
+    \\- [[entries/2023-pier-closing]]
+    \\
+    \\## transit
+    \\
+    \\- [[entries/2019-ferry-timetable]]
+    \\- [[entries/2021-ferry-timetable]]
+    \\- [[entries/2023-pier-closing]]
+    \\
+    \\## paper
+    \\
+    \\- [[entries/2019-ferry-timetable]]
+    \\- [[entries/2021-ferry-timetable]]
+    \\
+    \\## photographs
+    \\
+    \\- [[entries/2020-harbor-lights]]
+    \\
+;
+
+const archive_ferry_2019_md =
+    \\---
+    \\title: Ferry timetable, 2019
+    \\parent: index
+    \\status: archived
+    \\tags: [transit, paper]
+    \\---
+    \\
+    \\# Ferry timetable, 2019
+    \\
+    \\**Filed March 2019 · folded card, two sides**
+    \\
+    \\Hourly sailings from seven until seven, with a late boat on Fridays.
+    \\Kept as a record: it is `status: archived`, and its backlinks name the
+    \\timetable that replaced it.
+    \\
+;
+
+const archive_harbor_lights_md =
+    \\---
+    \\title: Harbor lights
+    \\parent: index
+    \\tags: [harbor, photographs]
+    \\relations: [relates_to=entries/2019-ferry-timetable]
+    \\---
+    \\
+    \\# Harbor lights
+    \\
+    \\**Filed November 2020 · six prints**
+    \\
+    \\The last ferry crossing at dusk, photographed from the pier steps. The
+    \\sailing times on the back come from the 2019 timetable.
+    \\
+;
+
+const archive_ferry_2021_md =
+    \\---
+    \\title: Ferry timetable, 2021
+    \\parent: index
+    \\tags: [transit, paper]
+    \\relations: [supersedes=entries/2019-ferry-timetable]
+    \\---
+    \\
+    \\# Ferry timetable, 2021
+    \\
+    \\**Filed April 2021 · single sheet**
+    \\
+    \\Sailings every ninety minutes; the Friday late boat is gone. This sheet
+    \\`supersedes` the 2019 card, which keeps its place in the archive.
+    \\
+;
+
+const archive_pier_closing_md =
+    \\---
+    \\title: Pier closing notice
+    \\parent: index
+    \\tags: [harbor, transit]
+    \\relations: [relates_to=entries/2020-harbor-lights, relates_to=entries/2021-ferry-timetable]
+    \\---
+    \\
+    \\# Pier closing notice
+    \\
+    \\**Filed June 2023 · notice, one page**
+    \\
+    \\The old pier closes for repair; ferries move to the east landing. The
+    \\notice relates to the 2021 timetable it amends and to the photographs of
+    \\the pier as it was.
+    \\
+;
+
+const archive_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Harbor Street Archive" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/archive",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/archive/layouts/archive.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- dashboard --------------------------------------------------------------
+
+const dashboard_index_md =
+    \\---
+    \\title: Harbor Systems Status Board
+    \\---
+    \\
+    \\One page per project, each a satellite of this board. A project's
+    \\`status:` frontmatter is its state: the theme shows it as a label under
+    \\the page title, and Boris uses the same field to decide what it
+    \\advertises.
+    \\
+    \\## Projects
+    \\
+    \\| Project | `status:` | State | Depends on |
+    \\|---|---|---|---|
+    \\| [[projects/tide-gauge-network]] | `published` | Active | — |
+    \\| [[projects/harbor-sensor-pilot]] | `draft` | Proposed | Tide gauge network |
+    \\| [[projects/telemetry-relay]] | `archived` | Retired | — |
+    \\
+    \\## Status vocabulary
+    \\
+    \\Boris has exactly three status values. This board maps them to project
+    \\states:
+    \\
+    \\| `status:` | Project state | What Boris does with the page |
+    \\|---|---|---|
+    \\| `published` | Active: running and supported | Renders and advertises it (search, sitemap, feeds, nav) |
+    \\| `draft` | Proposed: not yet approved | Renders it at its route but does not advertise it |
+    \\| `archived` | Retired: kept for the record | Renders and advertises it like `published`; the label says archived |
+    \\
+    \\There is no "blocked" or "at risk" value. Put that in the project's
+    \\status-history table, not in `status:`.
+    \\
+;
+
+const dashboard_tide_gauge_md =
+    \\---
+    \\title: Tide gauge network
+    \\parent: index
+    \\status: published
+    \\summary: Six harbor tide gauges reporting every five minutes.
+    \\tags: [sensors, operations]
+    \\relations: [supersedes=projects/telemetry-relay]
+    \\---
+    \\
+    \\Six gauges along the harbor wall, each reporting water level every five
+    \\minutes over the cellular uplink that replaced the [[projects/telemetry-relay]].
+    \\
+    \\## Status history
+    \\
+    \\| Date | `status:` | Note |
+    \\|---|---|---|
+    \\| 2025-03-02 | `draft` | Proposed with two pilot gauges |
+    \\| 2025-09-15 | `published` | All six gauges live |
+    \\| 2026-06-01 | `published` | Cellular uplink replaces the radio relay |
+    \\
+    \\## Service
+    \\
+    \\| Gauge | Location | Uptime (90 days) |
+    \\|---|---|---|
+    \\| G1 | North mole | 99.8% |
+    \\| G2 | Ferry slip | 99.5% |
+    \\| G3 | East landing | 98.9% |
+    \\
+;
+
+const dashboard_sensor_pilot_md =
+    \\---
+    \\title: Harbor sensor pilot
+    \\parent: index
+    \\status: draft
+    \\summary: A proposed water-quality pilot on two existing gauges.
+    \\tags: [sensors, proposal]
+    \\relations: [depends_on=projects/tide-gauge-network]
+    \\---
+    \\
+    \\A proposal to add temperature and turbidity sensors to gauges G1 and G2
+    \\of the [[projects/tide-gauge-network]]. Until it is approved the page is
+    \\`status: draft`: it renders here but stays out of search and the sitemap.
+    \\
+    \\## Status history
+    \\
+    \\| Date | `status:` | Note |
+    \\|---|---|---|
+    \\| 2026-09-20 | `draft` | Proposal written; waiting on the harbor board |
+    \\
+    \\To approve it, change `status: draft` to `status: published`.
+    \\
+;
+
+const dashboard_telemetry_relay_md =
+    \\---
+    \\title: Telemetry relay
+    \\parent: index
+    \\status: archived
+    \\summary: The retired radio relay that carried gauge data until 2026.
+    \\tags: [operations]
+    \\---
+    \\
+    \\A VHF radio relay on the harbor office roof that carried gauge readings
+    \\from 2019 until the cellular uplink replaced it. The page is
+    \\`status: archived`: it is still published, and its backlinks name the
+    \\project that superseded it.
+    \\
+    \\## Status history
+    \\
+    \\| Date | `status:` | Note |
+    \\|---|---|---|
+    \\| 2019-04-11 | `published` | Relay commissioned |
+    \\| 2026-06-01 | `archived` | Retired; replaced by the cellular uplink |
+    \\
+;
+
+const dashboard_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Harbor Systems Status Board" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/engineering",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/engineering/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
+// --- photo-gallery ----------------------------------------------------------
+
+// Starter images are content, not theme assets, so they live with the init
+// templates under src/ and embed by relative path. They are byte-identical
+// copies of five examples/gallery-site plates (locally generated flat-colour
+// PNGs; provenance and SHA-256 in examples/gallery-site/README.md).
+const photo_gallery_tidewater_png = @embedFile("init_templates/photo-gallery/content/index.assets/tidewater.png");
+const photo_gallery_dawn_png = @embedFile("init_templates/photo-gallery/content/photos/coast.assets/dawn.png");
+const photo_gallery_dusk_png = @embedFile("init_templates/photo-gallery/content/photos/coast.assets/dusk.png");
+const photo_gallery_ridge_png = @embedFile("init_templates/photo-gallery/content/photos/hills.assets/ridge.png");
+const photo_gallery_pines_png = @embedFile("init_templates/photo-gallery/content/photos/hills.assets/pines.png");
+
+const photo_gallery_index_md =
+    \\---
+    \\title: Two Walks
+    \\tags: [gallery]
+    \\summary: Two small albums of page-local images.
+    \\---
+    \\
+    \\# Two Walks
+    \\
+    \\A coast walk and a hill walk, two plates each. Every page keeps its
+    \\images in a sibling `{stem}.assets/` folder: this page's cover lives in
+    \\`content/index.assets/`, and each album's plates live beside the album.
+    \\
+    \\<figure>
+    \\
+    \\![A posterized seascape at evening: banded sky fading from navy to coral above dark water, with a pale sun low on the right](index.assets/tidewater.png)
+    \\
+    \\<figcaption><strong>Tidewater.</strong> Cover plate, 1200 × 560 PNG.</figcaption>
+    \\</figure>
+    \\
+    \\The album grid below comes from the layout's `{{children}}` slot. Boris
+    \\copies each image byte for byte and rewrites its Markdown URL to a
+    \\page-relative path. It never resizes, crops, or makes thumbnails, so
+    \\scale and compress images before you add them.
+    \\
+;
+
+const photo_gallery_coast_md =
+    \\---
+    \\title: Coast
+    \\parent: index
+    \\tags: [coast, album]
+    \\summary: One horizon at two times of day.
+    \\relations: [relates_to=photos/hills]
+    \\---
+    \\
+    \\# Coast
+    \\
+    \\One horizon, twelve hours apart. A `gallery-grid` block sets the figures
+    \\side by side on a wide screen and stacks them on a narrow one.
+    \\
+    \\<div class="gallery-grid">
+    \\
+    \\<figure>
+    \\
+    \\![Dawn: lavender-to-peach banded sky over slate water, a small pale sun low on the left with a striped reflection](coast.assets/dawn.png)
+    \\
+    \\<figcaption><strong>Dawn.</strong> Cold light, low sun.</figcaption>
+    \\</figure>
+    \\
+    \\<figure>
+    \\
+    \\![Dusk: plum-to-orange banded sky, a large amber sun touching the horizon above a long striped reflection](coast.assets/dusk.png)
+    \\
+    \\<figcaption><strong>Dusk.</strong> The sun sits on the water line.</figcaption>
+    \\</figure>
+    \\
+    \\</div>
+    \\
+    \\Next walk: [[photos/hills]].
+    \\
+;
+
+const photo_gallery_hills_md =
+    \\---
+    \\title: Hills
+    \\parent: index
+    \\tags: [hills, album]
+    \\summary: Layered ridges and one portrait plate.
+    \\---
+    \\
+    \\# Hills
+    \\
+    \\Inland, the ridges stack up. One plate is portrait, so the grid copes
+    \\with uneven heights.
+    \\
+    \\<div class="gallery-grid">
+    \\
+    \\<figure>
+    \\
+    \\![Ridge: four layered ridgelines in blue-grey to dark green under a banded sky](hills.assets/ridge.png)
+    \\
+    \\<figcaption><strong>Ridge.</strong> Four layers, nearest darkest.</figcaption>
+    \\</figure>
+    \\
+    \\<figure>
+    \\
+    \\![Pines: three stepped dark-green pine silhouettes on an olive ground under a pale sky, portrait format](hills.assets/pines.png)
+    \\
+    \\<figcaption><strong>Pines.</strong> Portrait, 720 × 960.</figcaption>
+    \\</figure>
+    \\
+    \\</div>
+    \\
+    \\## Adding a plate
+    \\
+    \\Put the file in `content/photos/hills.assets/`, then reference it from
+    \\this page with an ordinary Markdown image inside a `<figure>`. Keep the
+    \\blank lines around the image so it stays Markdown, which is what lets
+    \\Boris check and rewrite its URL. A missing file fails the build with
+    \\`EASSET`.
+    \\
+;
+
+const photo_gallery_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Two Walks" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/gallery",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/gallery/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -723,8 +2027,11 @@ const docs_files = [_]FileToWrite{
     .{ .path = "content/index.md", .data = index_md },
     .{ .path = "content/guides/getting-started.md", .data = getting_started_md },
     .{ .path = "content/guides/publishing.md", .data = publishing_md },
-    .{ .path = "themes/boris/layouts/main.html", .data = starter_layout },
-    .{ .path = "themes/boris/assets/css/boris.css", .data = starter_css },
+    .{ .path = "themes/boris/layouts/main.html", .data = archetype_themes.boris_layout_main },
+    .{ .path = "themes/boris/footer.html", .data = archetype_themes.boris_footer },
+    .{ .path = "themes/boris/assets/css/boris.css", .data = archetype_themes.boris_css },
+    .{ .path = "themes/boris/README.md", .data = archetype_themes.boris_readme },
+    .{ .path = "themes/boris/ACCESSIBILITY.md", .data = archetype_themes.boris_accessibility },
     .{ .path = "boris.json", .data = starter_profile },
     .{ .path = "standard-site.json", .data = standard_site_profile },
 };
@@ -751,9 +2058,11 @@ const cookbook_files = [_]FileToWrite{
     .{ .path = "content/mains/pancakes.cook", .data = cookbook_pancakes_cook },
     .{ .path = "content/sauces/pepper-oil.cook", .data = cookbook_pepper_oil_cook },
     .{ .path = "themes/cards/layouts/main.html", .data = archetype_themes.cards_layout_main },
+    .{ .path = "themes/cards/layouts/home.html", .data = archetype_themes.cards_layout_home },
     .{ .path = "themes/cards/footer.html", .data = archetype_themes.cards_footer },
     .{ .path = "themes/cards/assets/css/cards.css", .data = archetype_themes.cards_css },
     .{ .path = "themes/cards/README.md", .data = archetype_themes.cards_readme },
+    .{ .path = "themes/cards/ACCESSIBILITY.md", .data = archetype_themes.cards_accessibility },
     .{ .path = "boris.json", .data = cookbook_profile },
 };
 
@@ -790,6 +2099,164 @@ const textile_files = [_]FileToWrite{
     .{ .path = "boris.json", .data = textile_profile },
 };
 
+const landing_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = landing_index_md },
+    .{ .path = "content/about.md", .data = landing_about_md },
+    .{ .path = "content/includes/services.md", .data = landing_services_md },
+    .{ .path = "content/includes/faq.md", .data = landing_faq_md },
+    .{ .path = "content/includes/visit.md", .data = landing_visit_md },
+    .{ .path = "themes/service/layouts/main.html", .data = archetype_themes.service_layout_main },
+    .{ .path = "themes/service/layouts/home.html", .data = archetype_themes.service_layout_home },
+    .{ .path = "themes/service/layouts/section.html", .data = archetype_themes.service_layout_section },
+    .{ .path = "themes/service/footer.html", .data = archetype_themes.service_footer },
+    .{ .path = "themes/service/assets/css/service.css", .data = archetype_themes.service_css },
+    .{ .path = "themes/service/README.md", .data = archetype_themes.service_readme },
+    .{ .path = "themes/service/ACCESSIBILITY.md", .data = archetype_themes.service_accessibility },
+    .{ .path = "boris.json", .data = landing_profile },
+};
+
+const wiki_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = wiki_index_md },
+    .{ .path = "content/wiki/tools.md", .data = wiki_tools_md },
+    .{ .path = "content/wiki/techniques.md", .data = wiki_techniques_md },
+    .{ .path = "content/wiki/tools/chisels.md", .data = wiki_chisels_md },
+    .{ .path = "content/wiki/tools/hand-planes.md", .data = wiki_hand_planes_md },
+    .{ .path = "content/wiki/techniques/sharpening.md", .data = wiki_sharpening_md },
+    .{ .path = "content/wiki/techniques/dovetails.md", .data = wiki_dovetails_md },
+    .{ .path = "themes/reference/layouts/main.html", .data = archetype_themes.reference_layout_main },
+    .{ .path = "themes/reference/layouts/home.html", .data = archetype_themes.reference_layout_home },
+    .{ .path = "themes/reference/layouts/section.html", .data = archetype_themes.reference_layout_section },
+    .{ .path = "themes/reference/footer.html", .data = archetype_themes.reference_footer },
+    .{ .path = "themes/reference/assets/css/reference.css", .data = archetype_themes.reference_css },
+    .{ .path = "themes/reference/assets/img/mark.svg", .data = archetype_themes.reference_mark_svg },
+    .{ .path = "themes/reference/README.md", .data = archetype_themes.reference_readme },
+    .{ .path = "themes/reference/ACCESSIBILITY.md", .data = archetype_themes.reference_accessibility },
+    .{ .path = "boris.json", .data = wiki_profile },
+};
+
+const link_in_bio_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = link_in_bio_index_md },
+    .{ .path = "themes/minimal/layouts/main.html", .data = archetype_themes.minimal_layout_main },
+    .{ .path = "themes/minimal/footer.html", .data = archetype_themes.minimal_footer },
+    .{ .path = "themes/minimal/assets/minimal.css", .data = archetype_themes.minimal_css },
+    .{ .path = "themes/minimal/README.md", .data = archetype_themes.minimal_readme },
+    .{ .path = "themes/minimal/ACCESSIBILITY.md", .data = archetype_themes.minimal_accessibility },
+    .{ .path = "boris.json", .data = link_in_bio_profile },
+};
+
+const changelog_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = changelog_index_md },
+    .{ .path = "content/changes.md", .data = changelog_changes_md },
+    .{ .path = "content/changes/unreleased.md", .data = changelog_unreleased_md },
+    .{ .path = "content/changes/2026-09-28-v0-2-0.md", .data = changelog_v0_2_0_md },
+    .{ .path = "content/changes/2026-08-17-v0-1-0.md", .data = changelog_v0_1_0_md },
+    .{ .path = "themes/journal/layouts/main.html", .data = archetype_themes.journal_layout_main },
+    .{ .path = "themes/journal/layouts/archive.html", .data = archetype_themes.journal_layout_archive },
+    .{ .path = "themes/journal/footer.html", .data = archetype_themes.journal_footer },
+    .{ .path = "themes/journal/assets/journal.css", .data = archetype_themes.journal_css },
+    .{ .path = "themes/journal/README.md", .data = archetype_themes.journal_readme },
+    .{ .path = "themes/journal/ACCESSIBILITY.md", .data = archetype_themes.journal_accessibility },
+    .{ .path = "boris.json", .data = changelog_profile },
+};
+
+const resume_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = resume_index_md },
+    .{ .path = "content/now.md", .data = resume_now_md },
+    .{ .path = "themes/corporate/layouts/main.html", .data = archetype_themes.corporate_layout_main },
+    .{ .path = "themes/corporate/footer.html", .data = archetype_themes.corporate_footer },
+    .{ .path = "themes/corporate/assets/corporate.css", .data = archetype_themes.corporate_css },
+    .{ .path = "themes/corporate/README.md", .data = archetype_themes.corporate_readme },
+    .{ .path = "themes/corporate/ACCESSIBILITY.md", .data = archetype_themes.corporate_accessibility },
+    .{ .path = "boris.json", .data = resume_profile },
+};
+
+const newsletter_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = newsletter_index_md },
+    .{ .path = "content/issues.md", .data = newsletter_issues_md },
+    .{ .path = "content/issues/2026-09-19-first-edition.md", .data = newsletter_issue_1_md },
+    .{ .path = "content/issues/2026-09-26-type-on-the-shelf.md", .data = newsletter_issue_2_md },
+    .{ .path = "content/issues/2026-10-03-the-paper-mill.md", .data = newsletter_issue_3_md },
+    .{ .path = "themes/press/layouts/main.html", .data = archetype_themes.press_layout_main },
+    .{ .path = "themes/press/layouts/home.html", .data = archetype_themes.press_layout_home },
+    .{ .path = "themes/press/layouts/section.html", .data = archetype_themes.press_layout_section },
+    .{ .path = "themes/press/layouts/blog.html", .data = archetype_themes.press_layout_blog },
+    .{ .path = "themes/press/layouts/archive.html", .data = archetype_themes.press_layout_archive },
+    .{ .path = "themes/press/footer.html", .data = archetype_themes.press_footer },
+    .{ .path = "themes/press/assets/css/press.css", .data = archetype_themes.press_css },
+    .{ .path = "themes/press/assets/img/press-mark.svg", .data = archetype_themes.press_mark_svg },
+    .{ .path = "themes/press/README.md", .data = archetype_themes.press_readme },
+    .{ .path = "themes/press/ACCESSIBILITY.md", .data = archetype_themes.press_accessibility },
+    .{ .path = "themes/press/MIGRATION.md", .data = archetype_themes.press_migration },
+    .{ .path = "boris.json", .data = newsletter_profile },
+};
+
+const portfolio_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = portfolio_index_md },
+    .{ .path = "content/about.md", .data = portfolio_about_md },
+    .{ .path = "content/projects/harbor-signage.md", .data = portfolio_harbor_signage_md },
+    .{ .path = "content/projects/field-almanac.md", .data = portfolio_field_almanac_md },
+    .{ .path = "content/projects/specimen-book.md", .data = portfolio_specimen_book_md },
+    .{ .path = "themes/showcase/layouts/main.html", .data = archetype_themes.showcase_layout_main },
+    .{ .path = "themes/showcase/layouts/home.html", .data = archetype_themes.showcase_layout_home },
+    .{ .path = "themes/showcase/layouts/section.html", .data = archetype_themes.showcase_layout_section },
+    .{ .path = "themes/showcase/layouts/blog.html", .data = archetype_themes.showcase_layout_blog },
+    .{ .path = "themes/showcase/footer.html", .data = archetype_themes.showcase_footer },
+    .{ .path = "themes/showcase/assets/css/showcase.css", .data = archetype_themes.showcase_css },
+    .{ .path = "themes/showcase/assets/img/mark.svg", .data = archetype_themes.showcase_mark_svg },
+    .{ .path = "themes/showcase/README.md", .data = archetype_themes.showcase_readme },
+    .{ .path = "themes/showcase/ACCESSIBILITY.md", .data = archetype_themes.showcase_accessibility },
+    .{ .path = "boris.json", .data = portfolio_profile },
+};
+
+const archive_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = archive_index_md },
+    .{ .path = "content/topics.md", .data = archive_topics_md },
+    .{ .path = "content/entries/2019-ferry-timetable.md", .data = archive_ferry_2019_md },
+    .{ .path = "content/entries/2020-harbor-lights.md", .data = archive_harbor_lights_md },
+    .{ .path = "content/entries/2021-ferry-timetable.md", .data = archive_ferry_2021_md },
+    .{ .path = "content/entries/2023-pier-closing.md", .data = archive_pier_closing_md },
+    .{ .path = "themes/archive/layouts/main.html", .data = archetype_themes.archive_layout_main },
+    .{ .path = "themes/archive/layouts/archive.html", .data = archetype_themes.archive_layout_archive },
+    .{ .path = "themes/archive/footer.html", .data = archetype_themes.archive_footer },
+    .{ .path = "themes/archive/assets/archive.css", .data = archetype_themes.archive_css },
+    .{ .path = "themes/archive/README.md", .data = archetype_themes.archive_readme },
+    .{ .path = "themes/archive/ACCESSIBILITY.md", .data = archetype_themes.archive_accessibility },
+    .{ .path = "boris.json", .data = archive_profile },
+};
+
+const dashboard_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = dashboard_index_md },
+    .{ .path = "content/projects/tide-gauge-network.md", .data = dashboard_tide_gauge_md },
+    .{ .path = "content/projects/harbor-sensor-pilot.md", .data = dashboard_sensor_pilot_md },
+    .{ .path = "content/projects/telemetry-relay.md", .data = dashboard_telemetry_relay_md },
+    .{ .path = "themes/engineering/layouts/main.html", .data = archetype_themes.engineering_layout_main },
+    .{ .path = "themes/engineering/layouts/home.html", .data = archetype_themes.engineering_layout_home },
+    .{ .path = "themes/engineering/layouts/section.html", .data = archetype_themes.engineering_layout_section },
+    .{ .path = "themes/engineering/footer.html", .data = archetype_themes.engineering_footer },
+    .{ .path = "themes/engineering/assets/css/engineering.css", .data = archetype_themes.engineering_css },
+    .{ .path = "themes/engineering/README.md", .data = archetype_themes.engineering_readme },
+    .{ .path = "themes/engineering/ACCESSIBILITY.md", .data = archetype_themes.engineering_accessibility },
+    .{ .path = "boris.json", .data = dashboard_profile },
+};
+
+const photo_gallery_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = photo_gallery_index_md },
+    .{ .path = "content/index.assets/tidewater.png", .data = photo_gallery_tidewater_png },
+    .{ .path = "content/photos/coast.md", .data = photo_gallery_coast_md },
+    .{ .path = "content/photos/coast.assets/dawn.png", .data = photo_gallery_dawn_png },
+    .{ .path = "content/photos/coast.assets/dusk.png", .data = photo_gallery_dusk_png },
+    .{ .path = "content/photos/hills.md", .data = photo_gallery_hills_md },
+    .{ .path = "content/photos/hills.assets/ridge.png", .data = photo_gallery_ridge_png },
+    .{ .path = "content/photos/hills.assets/pines.png", .data = photo_gallery_pines_png },
+    .{ .path = "themes/gallery/layouts/main.html", .data = archetype_themes.gallery_layout_main },
+    .{ .path = "themes/gallery/layouts/home.html", .data = archetype_themes.gallery_layout_home },
+    .{ .path = "themes/gallery/footer.html", .data = archetype_themes.gallery_footer },
+    .{ .path = "themes/gallery/assets/css/gallery.css", .data = archetype_themes.gallery_css },
+    .{ .path = "themes/gallery/README.md", .data = archetype_themes.gallery_readme },
+    .{ .path = "themes/gallery/ACCESSIBILITY.md", .data = archetype_themes.gallery_accessibility },
+    .{ .path = "boris.json", .data = photo_gallery_profile },
+};
+
 const docs_spec = ArchetypeSpec{
     .layout_path = "themes/boris/layouts/main.html",
     .files = &docs_files,
@@ -797,7 +2264,7 @@ const docs_spec = ArchetypeSpec{
     \\  content/index.md                  trunk page
     \\  content/guides/getting-started.md satellite page
     \\  content/guides/publishing.md      satellite page with a relation
-    \\  themes/boris/                     starter theme (closed layout slots, search UI)
+    \\  themes/boris/                     the catalog "boris" theme: relations, backlinks, search UI
     \\  boris.json                        publication profile (GitHub Pages)
     \\  standard-site.json                Atmosphere profile (replace the fake DID/URL)
     ,
@@ -812,6 +2279,7 @@ const docs_spec = ArchetypeSpec{
     ,
     .conventions =
     \\  search works out of the box: the theme ships the client for dist/_boris/search/search-index.json
+    \\  themes/boris/ is your copy: its layout's brand line and footer.html still say "Boris"
     \\  shared fragments live under content/includes/ and never compile as pages
     \\  page images live in <stem>.assets/ beside the page that owns them
     ,
@@ -847,14 +2315,14 @@ const cookbook_spec = ArchetypeSpec{
     .layout_path = "themes/cards/layouts/main.html",
     .files = &cookbook_files,
     .tree_report =
-    \\  content/index.cook                trunk page (prose plus recipe references)
+    \\  content/index.cook                trunk page (prose plus recipe references; home layout)
     \\  content/mains/                    two recipe satellites
     \\  content/sauces/pepper-oil.cook    sub-recipe used as an ingredient
     \\  themes/cards/                     shipped "cards" theme — soft recipe cards
-    \\  boris.json                        profile (input_format: cook, theme: cards)
+    \\  boris.json                        profile (input_format: cook, theme: cards, layout_rules id:index → home)
     ,
     .next_steps =
-    \\  boris --profile boris.json                                     build the recipe box
+    \\  boris --profile boris.json                                     build the recipe box (index shows a recipe deck)
     \\  boris recipe-scale --cooklang --id mains/carbonara --servings 4   scaled view (never rewrites source)
     \\  boris check --cooklang --input content                          graph-health report
     \\  boris watch --profile boris.json                                rebuild on change
@@ -863,6 +2331,7 @@ const cookbook_spec = ArchetypeSpec{
     \\  @name{amount%unit} is an ingredient, #name{} cookware, ~{n%unit} a timer
     \\  @./sauces/pepper-oil{1%tbsp} references another page as a validated graph edge
     \\  servings in frontmatter feeds `recipe-scale --servings`; = and == are section headings
+    \\  parent: index puts a recipe in the home deck; layout_rules match .cook pages by id like any other
     ,
 };
 
@@ -911,6 +2380,231 @@ const textile_spec = ArchetypeSpec{
     ,
 };
 
+const landing_spec = ArchetypeSpec{
+    .layout_path = "themes/service/layouts/main.html",
+    .files = &landing_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the whole landing page
+    \\  content/about.md                  the one satellite page
+    \\  content/includes/                 section fragments spliced by {{include}} (never pages)
+    \\  themes/service/                   shipped "service" theme — public-service information
+    \\  boris.json                        profile (theme: service, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the site (index renders through home.html)
+    \\  boris check                           graph-health report
+    \\  boris plan --profile boris.json       inspect the normalized layout rules
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  one trunk page is a complete site; add satellites only when the story needs them
+    \\  {{include includes/NAME.md}} splices a section fragment; links inside it count as edges
+    \\  layout_rules in boris.json pick named layouts (id:, glob:, role:); frontmatter never does
+    ,
+};
+
+const wiki_spec = ArchetypeSpec{
+    .layout_path = "themes/reference/layouts/main.html",
+    .files = &wiki_files,
+    .tree_report =
+    \\  content/index.md                  trunk page
+    \\  content/wiki/tools.md             section hub (parent: index)
+    \\  content/wiki/techniques.md        section hub (parent: index)
+    \\  content/wiki/<hub>/               four leaf entries, two per hub
+    \\  themes/reference/                 shipped "reference" theme — calm documentation
+    \\  boris.json                        profile (theme: reference, layout_rules for index and hubs)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json                 build the wiki (index → home, hubs → section)
+    \\  boris check                                graph-health report — try breaking a link
+    \\  boris impact wiki/techniques/sharpening    what depends on the most-linked entry
+    \\  boris watch --profile boris.json           rebuild on change
+    ,
+    .conventions =
+    \\  parent: is the chain — an entry's breadcrumb walks index → hub → entry
+    \\  glob:wiki/* matches exactly two segments, so hubs get section.html and entries keep main.html
+    \\  two globs with the same literal-segment count would tie; ties are usage errors, not order
+    ,
+};
+
+const link_in_bio_spec = ArchetypeSpec{
+    .layout_path = "themes/minimal/layouts/main.html",
+    .files = &link_in_bio_files,
+    .tree_report =
+    \\  content/index.md                  the only page — a trunk with your links
+    \\  themes/minimal/                   shipped "minimal" theme — same shell, no search
+    \\  boris.json                        profile (input_format: markdown, theme: minimal)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the one-page site
+    \\  boris check                           graph-health report (still runs on one page)
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  a single trunk page is a valid site; graph, validation, and profile still apply
+    \\  external links are plain Markdown links; [[wiki-links]] are for pages in this site
+    ,
+};
+
+const changelog_spec = ArchetypeSpec{
+    .layout_path = "themes/journal/layouts/main.html",
+    .files = &changelog_files,
+    .tree_report =
+    \\  content/index.md                  trunk page
+    \\  content/changes.md                satellite hub; its archive layout lists the releases
+    \\  content/changes/                  two dated releases plus an unreleased status: draft entry
+    \\  themes/journal/                   shipped "journal" theme — phosphor terminal diary
+    \\  boris.json                        profile (theme: journal, layout_rules id:changes → archive)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the release notes (the draft renders, unadvertised)
+    \\  boris plan --profile boris.json       inspect the normalized layout rules
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  each release is a satellite of changes with published_at + summary
+    \\  the hub's {{children}} listing is id order: date-prefixed ids sort oldest first
+    \\  status: draft renders at its route but stays out of search, RSS, sitemap, nav, and children
+    \\  ship a release: set its real published_at and drop status: draft
+    ,
+};
+
+const resume_spec = ArchetypeSpec{
+    .layout_path = "themes/corporate/layouts/main.html",
+    .files = &resume_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the whole CV
+    \\  content/now.md                    one "what I'm doing now" satellite
+    \\  themes/corporate/                 shipped "corporate" theme — dense product-docs chrome
+    \\  boris.json                        profile (input_format: markdown, theme: corporate)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the CV, then print dist/index.html to PDF
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  {{metadata}} renders the page's status and tags; edit tags: to change the CV keywords
+    \\  summary: and published_at: feed RSS and enabled head metadata, not the page body
+    \\  the theme's @media print hides the header, navigation, and contents rail for paper
+    ,
+};
+
+const newsletter_spec = ArchetypeSpec{
+    .layout_path = "themes/press/layouts/main.html",
+    .files = &newsletter_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the masthead
+    \\  content/issues.md                 back-issue hub (archive layout)
+    \\  content/issues/                   three dated issues (published_at + summary; blog layout)
+    \\  themes/press/                     shipped "press" theme — editorial paper
+    \\  boris.json                        profile (theme: press, layout_rules, head + rss + sitemap)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the paper, dist/feed.xml, and dist/sitemap.xml
+    \\  boris plan --profile boris.json       inspect layout rules and the feed and sitemap declarations
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  an issue is a satellite of issues with published_at + summary; the date orders feeds
+    \\  rss needs site.url, title, description, and an enabled head whose base_url equals site.url
+    \\  status: draft issues stay out of the feed and sitemap; replace example.com before publishing
+    ,
+};
+
+const portfolio_spec = ArchetypeSpec{
+    .layout_path = "themes/showcase/layouts/main.html",
+    .files = &portfolio_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the studio front (home layout lists the work)
+    \\  content/about.md                  satellite page
+    \\  content/projects/                 three project satellites (published_at + summary)
+    \\  themes/showcase/                  shipped "showcase" theme — soft docs + blog shell
+    \\  boris.json                        profile (theme: showcase, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the portfolio (index renders through home.html)
+    \\  boris plan --profile boris.json       inspect the normalized layout rules
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  a project is a satellite of index with published_at + summary; add one per piece of work
+    \\  layout_rules pick named layouts by id:, glob:, or role:; every other page uses main.html
+    \\  {{children}} lists a page's direct satellites; the home page's project list is never hand-kept
+    ,
+};
+
+const archive_spec = ArchetypeSpec{
+    .layout_path = "themes/archive/layouts/main.html",
+    .files = &archive_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the archive index (archive layout)
+    \\  content/topics.md                 hand-kept index by tag (Boris generates no tag pages)
+    \\  content/entries/                  four tagged entries joined by relates_to / supersedes
+    \\  themes/archive/                   shipped "archive" theme — ordered field-notes index
+    \\  boris.json                        profile (theme: archive, layout_rules id:index → archive)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json                  build the archive (entries show relations and backlinks)
+    \\  boris graph                                 render the relation web as Mermaid
+    \\  boris impact entries/2019-ferry-timetable   what depends on the oldest record
+    \\  boris check                                 graph-health report
+    \\  boris watch --profile boris.json            rebuild on change
+    ,
+    .conventions =
+    \\  tags: files an entry under subjects; keep topics.md in step by hand
+    \\  relations: [relates_to=ID, supersedes=ID] are typed, validated edges; backlinks derive from them
+    \\  status: archived keeps a record rendered and published but marks it no longer current
+    ,
+};
+
+const dashboard_spec = ArchetypeSpec{
+    .layout_path = "themes/engineering/layouts/main.html",
+    .files = &dashboard_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the status board and the status vocabulary
+    \\  content/projects/                 three projects, one per status (published, draft, archived)
+    \\  themes/engineering/               shipped "engineering" theme — dense boxes and status labels
+    \\  boris.json                        profile (theme: engineering, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json                build the board (each project shows its status label)
+    \\  boris impact projects/tide-gauge-network  what depends on the active project
+    \\  boris check                               graph-health report
+    \\  boris watch --profile boris.json          rebuild on change
+    ,
+    .conventions =
+    \\  status: is the project state: published = active, draft = proposed, archived = retired
+    \\  drafts render at their route but stay out of search, sitemap, feeds, and nav
+    \\  relations: [depends_on=ID, supersedes=ID] cross-reference projects; backlinks derive from them
+    ,
+};
+
+const photo_gallery_spec = ArchetypeSpec{
+    .layout_path = "themes/gallery/layouts/main.html",
+    .files = &photo_gallery_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the gallery front (home layout, album grid)
+    \\  content/index.assets/             the front page's cover image
+    \\  content/photos/                   two album satellites, each with its own <album>.assets/ images
+    \\  themes/gallery/                   shipped "gallery" theme — gallery wall, mats, and labels
+    \\  boris.json                        profile (theme: gallery, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the gallery (images copy beside their pages)
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  a page owns the images in its sibling <stem>.assets/ folder; reference them as ![alt](<stem>.assets/file)
+    \\  Boris copies and rewrites image URLs page-relative; it never resizes, so scale images first
+    \\  wrap a Markdown image in <figure> with blank lines to caption it; raw <img src> is not checked
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -918,6 +2612,16 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .cookbook => &cookbook_spec,
         .blog => &blog_spec,
         .textile => &textile_spec,
+        .landing => &landing_spec,
+        .wiki => &wiki_spec,
+        .@"link-in-bio" => &link_in_bio_spec,
+        .changelog => &changelog_spec,
+        .@"resume" => &resume_spec,
+        .newsletter => &newsletter_spec,
+        .portfolio => &portfolio_spec,
+        .archive => &archive_spec,
+        .dashboard => &dashboard_spec,
+        .@"photo-gallery" => &photo_gallery_spec,
     };
 }
 
@@ -1114,7 +2818,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive, dashboard, photo-gallery", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -1130,22 +2834,20 @@ test "archetype names cover the CLI surface" {
     }
 }
 
-test "starter layout marks the search extraction root" {
-    const marker = "<main class=\"site-body\" data-boris-search-root>";
-    var count: usize = 0;
-    var idx: usize = 0;
-    while (std.mem.indexOfPos(u8, starter_layout, idx, marker)) |at| {
-        count += 1;
-        idx = at + marker.len;
-    }
-    try std.testing.expectEqual(@as(usize, 1), count);
+test "docs starter layout marks the search extraction root" {
+    const layout = archetype_themes.boris_layout_main;
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, layout, "data-boris-search-root"));
+    try std.testing.expect(std.mem.indexOf(u8, layout, "<main id=\"main-content\" tabindex=\"-1\" data-boris-search-root>") != null);
 }
 
-test "starter layout carries the search client seams" {
+test "docs starter layout carries the search client seams and graph slots" {
     // These strings are the browser/compiler seam from the rendered-search
-    // contract and the hooks the embedded client queries. If the starter and
-    // the repo theme's search UI ever drift apart, this test names what went
-    // missing instead of leaving a starter site with silent search.
+    // contract and the hooks the embedded client queries. The docs starter
+    // advertises search ("Press `/` on any page") and a visible relation, so
+    // if the catalog `boris` layout ever drops either, this test names what
+    // went missing instead of shipping a starter whose prose lies.
+    const starter_layout = archetype_themes.boris_layout_main;
+    const starter_css = archetype_themes.boris_css;
     const layout_markers = [_][]const u8{
         "data-boris-search-ui",
         "data-boris-search-form",
@@ -1156,6 +2858,11 @@ test "starter layout carries the search client seams" {
         // The Standard.site contract requires the init reference layout to
         // include the closed {{head}} slot.
         "{{head}}",
+        "event.key === \"/\"",
+        "{{metadata}}",
+        "{{children}}",
+        "{{relations}}",
+        "{{backlinks}}",
     };
     for (layout_markers) |marker| {
         try std.testing.expect(std.mem.indexOf(u8, starter_layout, marker) != null);
@@ -1169,8 +2876,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive", "themes/engineering", "themes/gallery" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -1195,6 +2902,300 @@ test "each archetype profile declares the format and theme its spec uses" {
         }));
         try std.testing.expectEqual(declared, spec.input_format);
     }
+}
+
+fn writesFile(spec: *const ArchetypeSpec, path: []const u8) bool {
+    for (spec.files) |f| {
+        if (std.mem.eql(u8, f.path, path)) return true;
+    }
+    return false;
+}
+
+test "every profile layout rule and include directive names a written file" {
+    // A `layout_rules` layout or `{{include}}` fragment the starter does not
+    // write would only fail at `boris --profile boris.json`, after init has
+    // already claimed success (the probe compiles with the fallback layout).
+    inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
+        const spec = specFor(@fromBackingInt(@intCast(value)));
+        for (spec.files) |f| {
+            if (std.mem.eql(u8, f.path, "boris.json")) {
+                const needle = "\"layout\": \"";
+                var at: usize = 0;
+                while (std.mem.indexOfPos(u8, f.data, at, needle)) |start| {
+                    const path_start = start + needle.len;
+                    const path_end = std.mem.indexOfScalarPos(u8, f.data, path_start, '"').?;
+                    try std.testing.expect(writesFile(spec, f.data[path_start..path_end]));
+                    at = path_end;
+                }
+            }
+            if (std.mem.startsWith(u8, f.path, "content/")) {
+                const needle = "{{include ";
+                var at: usize = 0;
+                while (std.mem.indexOfPos(u8, f.data, at, needle)) |start| {
+                    const path_start = start + needle.len;
+                    const path_end = std.mem.indexOfPos(u8, f.data, path_start, "}}").?;
+                    var buf: [256]u8 = undefined;
+                    const written = try std.fmt.bufPrint(&buf, "content/{s}", .{f.data[path_start..path_end]});
+                    try std.testing.expect(writesFile(spec, written));
+                    at = path_end;
+                }
+            }
+        }
+    }
+}
+
+test "starter theme docs only link to files the starter writes" {
+    // Theme READMEs link to their siblings (ACCESSIBILITY.md, MIGRATION.md);
+    // a starter that embeds the README but not the sibling ships a dead link.
+    // Links leaving the theme (`../`), absolute URLs, anchors, and examples
+    // inside fenced code are out of scope.
+    inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
+        const spec = specFor(@fromBackingInt(@intCast(value)));
+        for (spec.files) |f| {
+            if (!std.mem.startsWith(u8, f.path, "themes/") or !std.mem.endsWith(u8, f.path, ".md")) continue;
+            const dir = std.fs.path.dirname(f.path).?;
+            var fenced = false;
+            var lines = std.mem.splitScalar(u8, f.data, '\n');
+            while (lines.next()) |line| {
+                if (std.mem.startsWith(u8, std.mem.trimStart(u8, line, " "), "```")) fenced = !fenced;
+                if (fenced) continue;
+                var at: usize = 0;
+                while (std.mem.indexOfPos(u8, line, at, "](")) |start| {
+                    const target_start = start + 2;
+                    const target_end = std.mem.indexOfAnyPos(u8, line, target_start, ")#") orelse line.len;
+                    const target = line[target_start..target_end];
+                    at = target_end;
+                    if (target.len == 0 or std.mem.startsWith(u8, target, "../") or
+                        std.mem.indexOf(u8, target, "://") != null or std.mem.startsWith(u8, target, "mailto:")) continue;
+                    var buf: [256]u8 = undefined;
+                    const written = try std.fmt.bufPrint(&buf, "{s}/{s}", .{ dir, target });
+                    if (!writesFile(spec, written)) {
+                        std.debug.print("{s} links to unwritten {s}\n", .{ f.path, written });
+                        return error.TestUnexpectedResult;
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "landing is one trunk page composed from include fragments" {
+    var pages: usize = 0;
+    var trunks: usize = 0;
+    for (landing_spec.files) |f| {
+        if (std.mem.startsWith(u8, f.path, "content/") and !std.mem.startsWith(u8, f.path, "content/includes/")) {
+            pages += 1;
+            if (std.mem.indexOf(u8, f.data, "\nparent: ") == null) trunks += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), pages);
+    try std.testing.expectEqual(@as(usize, 1), trunks);
+    try std.testing.expectEqual(@as(usize, 3), std.mem.count(u8, landing_index_md, "{{include includes/"));
+    try std.testing.expect(std.mem.indexOf(u8, landing_profile, "\"selector\": \"id:index\", \"layout\": \"themes/service/layouts/home.html\"") != null);
+}
+
+test "wiki entries sit three levels deep under their hub" {
+    var entries: usize = 0;
+    for (wiki_spec.files) |f| {
+        const prefix = "content/wiki/";
+        if (!std.mem.startsWith(u8, f.path, prefix)) continue;
+        const rest = f.path[prefix.len..];
+        if (std.mem.indexOfScalar(u8, rest, '/')) |slash| {
+            // content/wiki/<hub>/<entry>.md declares `parent: wiki/<hub>`.
+            var buf: [64]u8 = undefined;
+            const want = try std.fmt.bufPrint(&buf, "\nparent: wiki/{s}\n", .{rest[0..slash]});
+            try std.testing.expect(std.mem.indexOf(u8, f.data, want) != null);
+            try std.testing.expect(std.mem.indexOf(u8, f.data, "\n## ") != null);
+            entries += 1;
+        } else {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 4), entries);
+    // One glob rule only: a second glob with the same literal-segment count
+    // would be a selector tie (templating-and-themes.md §4.2).
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, wiki_profile, "\"glob:"));
+    try std.testing.expect(std.mem.indexOf(u8, wiki_sharpening_md, "relations: [relates_to=wiki/tools/chisels]") != null);
+}
+
+test "link-in-bio is exactly one trunk page" {
+    var pages: usize = 0;
+    for (link_in_bio_spec.files) |f| {
+        if (std.mem.startsWith(u8, f.path, "content/")) pages += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), pages);
+    try std.testing.expect(std.mem.indexOf(u8, link_in_bio_index_md, "\nparent:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, link_in_bio_index_md, "\ntags: [links]\n") != null);
+}
+
+test "changelog entries are dated and exactly one is a draft" {
+    var entries: usize = 0;
+    var drafts: usize = 0;
+    for (changelog_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/changes/")) continue;
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: changes\n") != null);
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\npublished_at: 2026-") != null);
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\nsummary: ") != null);
+        if (std.mem.indexOf(u8, f.data, "\nstatus: draft\n") != null) drafts += 1;
+        entries += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), entries);
+    try std.testing.expectEqual(@as(usize, 1), drafts);
+    try std.testing.expect(std.mem.indexOf(u8, changelog_unreleased_md, "\nstatus: draft\n") != null);
+    // Drafts leave {{children}}, so the hub links the draft by hand.
+    try std.testing.expect(std.mem.indexOf(u8, changelog_changes_md, "[[changes/unreleased]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, changelog_profile, "\"selector\": \"id:changes\", \"layout\": \"themes/journal/layouts/archive.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.journal_layout_archive, "{{children}}") != null);
+}
+
+test "resume is one CV page with metadata-bearing frontmatter and a print stylesheet" {
+    for ([_][]const u8{ "\ntags: [", "\npublished_at: 2026-", "\nsummary: " }) |key| {
+        try std.testing.expect(std.mem.indexOf(u8, resume_index_md, key) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, resume_now_md, "\nparent: index\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.corporate_layout_main, "{{metadata}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.corporate_css, "@media print") != null);
+}
+
+test "newsletter issues are dated and the profile declares an rss feed riding an enabled head" {
+    var issues: usize = 0;
+    for (newsletter_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/issues/")) continue;
+        for ([_][]const u8{ "\nparent: issues\n", "\npublished_at: 2026-", "\nsummary: " }) |key| {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, key) != null);
+        }
+        issues += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), issues);
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"url\": \"https://") != null);
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"sitemap\": { \"path\": \"sitemap.xml\" }") != null);
+    // The single-target RSS rider (head-metadata.md) needs an enabled head
+    // whose base equals site.url, and exactly one {{head}} in every layout a
+    // page can select.
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"rss\": { \"path\": \"feed.xml\" }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"head\": { \"enabled\": true, \"base_url\": \"https://saturday-sheet.example.com/\" }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"url\": \"https://saturday-sheet.example.com/\"") != null);
+    for ([_][]const u8{ archetype_themes.press_layout_main, archetype_themes.press_layout_home, archetype_themes.press_layout_archive, archetype_themes.press_layout_blog, archetype_themes.press_layout_section }) |layout| {
+        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, layout, "{{head}}"));
+    }
+}
+
+test "portfolio projects are dated satellites of index and one carries a relation" {
+    var projects: usize = 0;
+    var related: usize = 0;
+    for (portfolio_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/projects/")) continue;
+        for ([_][]const u8{ "\nparent: index\n", "\npublished_at: 2026-", "\nsummary: " }) |key| {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, key) != null);
+        }
+        if (std.mem.indexOf(u8, f.data, "\nrelations: [") != null) related += 1;
+        projects += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), projects);
+    try std.testing.expectEqual(@as(usize, 1), related);
+    try std.testing.expect(std.mem.indexOf(u8, portfolio_profile, "\"selector\": \"id:index\", \"layout\": \"themes/showcase/layouts/home.html\"") != null);
+    // The home layout lists the work; the index keeps no hand-written copy.
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.showcase_layout_home, "{{children}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, portfolio_index_md, "[[projects/") == null);
+}
+
+test "archive entries share tags and relations give every entry backlinks or relations" {
+    var entries: usize = 0;
+    var supersedes: usize = 0;
+    var archived: usize = 0;
+    for (archive_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/entries/")) continue;
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\ntags: [") != null);
+        if (std.mem.indexOf(u8, f.data, "supersedes=") != null) supersedes += 1;
+        if (std.mem.indexOf(u8, f.data, "\nstatus: archived\n") != null) archived += 1;
+        // Every entry is a relation source or target, so {{relations}} or
+        // {{backlinks}} has real content on every entry page.
+        const stem = f.path["content/".len .. f.path.len - ".md".len];
+        var targeted = false;
+        for (archive_spec.files) |g| {
+            if (!std.mem.startsWith(u8, g.path, "content/entries/")) continue;
+            var buf: [96]u8 = undefined;
+            if (std.mem.indexOf(u8, g.data, try std.fmt.bufPrint(&buf, "={s}", .{stem})) != null) targeted = true;
+        }
+        try std.testing.expect(targeted or std.mem.indexOf(u8, f.data, "\nrelations: [") != null);
+        entries += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 4), entries);
+    try std.testing.expectEqual(@as(usize, 1), supersedes);
+    try std.testing.expectEqual(@as(usize, 1), archived);
+    try std.testing.expect(std.mem.indexOf(u8, archive_profile, "\"selector\": \"id:index\", \"layout\": \"themes/archive/layouts/archive.html\"") != null);
+    for ([_][]const u8{ archetype_themes.archive_layout_main, archetype_themes.archive_layout_archive }) |layout| {
+        try std.testing.expect(std.mem.indexOf(u8, layout, "{{relations}}{{backlinks}}") != null);
+    }
+}
+
+test "dashboard has one project per status value and documents the mapping" {
+    var seen = [_]bool{ false, false, false };
+    const values = [_][]const u8{ "published", "draft", "archived" };
+    for (dashboard_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/projects/")) continue;
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+        try std.testing.expect(std.mem.indexOf(u8, f.data, "## Status history") != null);
+        for (values, 0..) |v, i| {
+            var buf: [32]u8 = undefined;
+            if (std.mem.indexOf(u8, f.data, try std.fmt.bufPrint(&buf, "\nstatus: {s}\n", .{v})) != null) seen[i] = true;
+        }
+    }
+    for (seen) |s| try std.testing.expect(s);
+    // The board names every value and the project state it stands for.
+    for ([_][]const u8{ "| `published` | Active", "| `draft` | Proposed", "| `archived` | Retired" }) |row| {
+        try std.testing.expect(std.mem.indexOf(u8, dashboard_index_md, row) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, dashboard_profile, "\"selector\": \"id:index\", \"layout\": \"themes/engineering/layouts/home.html\"") != null);
+    // Status is legible only because every engineering layout carries it.
+    for ([_][]const u8{ archetype_themes.engineering_layout_main, archetype_themes.engineering_layout_home }) |layout| {
+        try std.testing.expect(std.mem.indexOf(u8, layout, "data-status=\"{{page-status}}\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, layout, "{{metadata}}") != null);
+    }
+}
+
+test "photo-gallery albums embed images from their own assets folders" {
+    var albums: usize = 0;
+    var images: usize = 0;
+    for (photo_gallery_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/") or !std.mem.endsWith(u8, f.path, ".md")) continue;
+        const stem_path = f.path[0 .. f.path.len - ".md".len];
+        const stem = std.fs.path.basename(stem_path);
+        if (std.mem.startsWith(u8, f.path, "content/photos/")) {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+            albums += 1;
+        }
+        // Every Markdown image names this page's own `{stem}.assets/` file,
+        // and the starter writes that file.
+        var at: usize = 0;
+        var page_images: usize = 0;
+        while (std.mem.indexOfPos(u8, f.data, at, "![")) |start| {
+            const dest_start = std.mem.indexOfPos(u8, f.data, start, "](").? + 2;
+            const dest_end = std.mem.indexOfScalarPos(u8, f.data, dest_start, ')').?;
+            at = dest_end;
+            const dest = f.data[dest_start..dest_end];
+            var want: [64]u8 = undefined;
+            try std.testing.expect(std.mem.startsWith(u8, dest, try std.fmt.bufPrint(&want, "{s}.assets/", .{stem})));
+            var buf: [128]u8 = undefined;
+            try std.testing.expect(writesFile(&photo_gallery_spec, try std.fmt.bufPrint(&buf, "{s}/{s}", .{ std.fs.path.dirname(f.path).?, dest })));
+            page_images += 1;
+        }
+        try std.testing.expect(page_images >= 1);
+        images += page_images;
+    }
+    try std.testing.expectEqual(@as(usize, 2), albums);
+    try std.testing.expectEqual(@as(usize, 5), images);
+    // Images stay small: the starter is embedded in the binary.
+    var bytes: usize = 0;
+    for (photo_gallery_spec.files) |f| {
+        if (std.mem.endsWith(u8, f.path, ".png")) {
+            try std.testing.expect(std.mem.startsWith(u8, f.data, "\x89PNG\r\n\x1a\n"));
+            bytes += f.data.len;
+        }
+    }
+    try std.testing.expect(bytes < 32 * 1024);
+    try std.testing.expect(std.mem.indexOf(u8, photo_gallery_profile, "\"selector\": \"id:index\", \"layout\": \"themes/gallery/layouts/home.html\"") != null);
 }
 
 test "garden demonstrates include composition, components, and dense links" {
@@ -1227,6 +3228,14 @@ test "cookbook exercises the Cooklang constructs and names recipe-scale" {
     try std.testing.expect(std.mem.indexOf(u8, cookbook_carbonara_cook, "servings: 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, cookbook_carbonara_cook, "@./sauces/pepper-oil{1%tbsp}") != null);
     try std.testing.expect(std.mem.indexOf(u8, cookbook_index_cook, "recipe-scale") != null);
+    // Every recipe is a direct satellite of index, so the home deck lists it.
+    for (cookbook_spec.files) |f| {
+        if (std.mem.startsWith(u8, f.path, "content/") and !std.mem.eql(u8, f.path, "content/index.cook")) {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+        }
+    }
+    try std.testing.expect(std.mem.indexOf(u8, cookbook_profile, "\"selector\": \"id:index\", \"layout\": \"themes/cards/layouts/home.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.cards_layout_home, "{{children}}") != null);
 }
 
 test "blog posts carry the dated-post frontmatter pair" {
@@ -1293,7 +3302,8 @@ test "materialized starter compiles and the probe cleans up after itself" {
     try std.testing.expect(skip == .skipped);
 
     // One real compile to lock the rendered seams: the search index artifact
-    // exists and a rendered page carries the search UI from the starter theme.
+    // exists, a rendered page carries the search UI from the starter theme,
+    // and the starter's one relation is visible on both of its ends.
     const content_root = try std.fmt.allocPrint(gpa, "{s}/content", .{root});
     defer gpa.free(content_root);
     const layout_path = try std.fmt.allocPrint(gpa, "{s}/themes/boris/layouts/main.html", .{root});
@@ -1318,6 +3328,22 @@ test "materialized starter compiles and the probe cleans up after itself" {
     defer gpa.free(index_html);
     try std.testing.expect(std.mem.indexOf(u8, index_html, "data-boris-search-ui") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_html, "_boris/search/search-index.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "<nav class=\"page-children\"") != null);
+    const ends = [_][2][]const u8{
+        .{ "guides/publishing.html", "<section class=\"semantic-relations\"" },
+        .{ "guides/getting-started.html", "<section class=\"semantic-backlinks\"" },
+    };
+    for (ends) |end| {
+        const html = blk: {
+            var file = try dist_dir.openFile(io, end[0], .{});
+            defer file.close(io);
+            var reader = file.reader(io, &.{});
+            break :blk try reader.interface.allocRemaining(gpa, .unlimited);
+        };
+        defer gpa.free(html);
+        const at = std.mem.indexOf(u8, html, end[1]) orelse return error.TestUnexpectedResult;
+        try std.testing.expect(std.mem.indexOfPos(u8, html, at, "data-relation-kind=\"relates_to\"") != null);
+    }
 }
 
 test "every archetype materializes and compiles through its declared adapter" {
@@ -1342,7 +3368,8 @@ test "every archetype materializes and compiles through its declared adapter" {
         var content_pages: usize = 0;
         for (spec.files) |file| {
             if (std.mem.startsWith(u8, file.path, "content/") and
-                !std.mem.startsWith(u8, file.path, "content/includes/"))
+                !std.mem.startsWith(u8, file.path, "content/includes/") and
+                std.mem.indexOf(u8, file.path, ".assets/") == null)
             {
                 content_pages += 1;
             }

@@ -13,23 +13,22 @@
       <div class="container header-inner">
         <p class="eyebrow">HTML-first documentation</p>
         <p class="site-name">Semantic</p>
-        <div class="site-nav" aria-label="Site navigation">{{nav}}</div>
+        <div class="site-nav">{{nav}}</div>
       </div>
     </header>
-    <main id="main-content" class="container page-grid" data-boris-search-root>
+    <main id="main-content" tabindex="-1" class="container page-grid" data-boris-search-root>
       <article class="reading-column">
-        <div class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</div>
+        <div class="breadcrumb">{{breadcrumb}}</div>
         <header class="article-header">
-          <h1>{{title}}</h1>
+          <h1 data-boris-search-exclude data-boris-search-title="layout">{{title}}</h1>
           {{metadata}}
         </header>
         <div class="prose">{{content}}</div>
-        <section class="children-panel" aria-labelledby="children-heading">
+        <section class="children-panel" aria-labelledby="children-heading" data-boris-search-exclude>
           <h2 id="children-heading">In this section</h2>
           {{children}}
         </section>
-        {{relations}}
-        {{backlinks}}
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
       </article>
       <aside class="toc-rail" aria-label="On this page" data-boris-search-exclude>
         <p class="rail-label">On this page</p>

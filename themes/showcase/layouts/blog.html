@@ -4,33 +4,35 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>{{title}} · Blog · Boris Showcase</title>
+  <title>{{title}} · Blog · Showcase</title>
   <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
   <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+  {{head}}
 </head>
-<body data-layout="blog">
+<body data-layout="blog" data-status="{{page-status}}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="navbar navbar--blog">
     <div class="navbar__brand">
       <img class="navbar__mark" src="{{asset-url assets/img/mark.svg}}" width="28" height="28" alt="">
-      <span class="navbar__title">Boris Showcase</span>
+      <span class="navbar__title">Showcase</span>
       <span class="badge badge--secondary">blog</span>
     </div>
     {{breadcrumb}}
   </header>
-  <main id="main-content" class="blog-shell" tabindex="-1">
+  <main id="main-content" class="blog-shell" tabindex="-1" data-boris-search-root>
     <article class="card blog-post">
-      {{metadata}}
+      {{metadata}}{{tags}}
       {{toc}}
       <div class="prose prose--blog">
         {{content}}
       </div>
-      <section class="children-panel" aria-labelledby="blog-children-heading">
+      <section class="children-panel" aria-labelledby="blog-children-heading" data-boris-search-exclude>
         <p class="sidebar__label" id="blog-children-heading">More posts</p>
         {{children}}
       </section>
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
     </article>
-    <aside class="card blog-rail">
+    <aside class="card blog-rail" aria-label="All pages" data-boris-search-exclude>
       <p class="sidebar__label">All pages</p>
       {{nav}}
     </aside>

@@ -1956,6 +1956,35 @@ test "search comparison reports missing malformed stale missing and changed docu
     try std.testing.expectEqual(@as(usize, 1), countCode(reversed, .SEARCH_CONTENT_MISMATCH));
 }
 
+test "producer output for an id-less layout heading passes the fragment check" {
+    // A layout `<h1>{{title}}</h1>` carries no id. The producer used to store
+    // a slug for it, which this check correctly reported as an unresolved
+    // fragment; the producer now stores an empty fragment, so they agree.
+    const gpa = std.testing.allocator;
+    const pages = [_]PageInput{.{
+        .path = "archive.html",
+        .html = "<!doctype html><main data-boris-search-root><h1>Field Notes Archive</h1><p>Intro.</p>" ++
+            "<h2 id=\"kept\">Kept</h2><p>Body.</p></main>",
+    }};
+    const expected = [_][]const u8{"archive.html"};
+    const document = try search_index.indexHtml(gpa, "archive.html", pages[0].html, false);
+    defer search_index.freeDocument(gpa, document);
+    const documents = [_]search_index.Document{document};
+    const search_bytes = try search_index.writeJson(gpa, &documents);
+    defer gpa.free(search_bytes);
+    var report = try analyzeTarget(gpa, .{
+        .target_name = "public",
+        .pages = &pages,
+        .expected_page_paths = &expected,
+        .intended_route_paths = &expected,
+        .search_page_paths = &expected,
+        .search = .{ .selected = search_bytes },
+    });
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 0), countCode(report, .SEARCH_CONTENT_MISMATCH));
+    try std.testing.expectEqual(CoverageStatus.checked, report.coverage[1].status);
+}
+
 test "filesystem inspection is no-follow and leaves target bytes unchanged" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

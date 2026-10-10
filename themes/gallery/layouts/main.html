@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en" data-layout="main" data-theme="gallery">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Gallery</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/gallery.css}}">
+  {{head}}
+</head>
+<body class="g-body g-room" data-layout="main" data-status="{{page-status}}">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="g-header" role="banner">
+    <div class="g-header__inner">
+      <p class="g-wordmark">Gallery</p>
+      <div class="g-trail" data-boris-search-exclude>{{breadcrumb}}</div>
+    </div>
+  </header>
+
+  <main id="main-content" class="g-main" tabindex="-1" data-boris-search-root>
+    <article class="g-work">
+      {{tags}}
+      <div class="prose">
+        {{content}}
+      </div>
+    </article>
+
+    <section class="g-label" aria-label="About this page" data-boris-search-exclude>
+      {{parent}}
+      {{metadata}}
+    </section>
+
+    <section class="g-wall" aria-labelledby="g-wall-heading" data-boris-search-exclude>
+      <h2 class="g-wall__heading" id="g-wall-heading">In this room</h2>
+      {{children}}
+    </section>
+
+    <section class="g-graph" aria-label="Related pages" data-boris-search-exclude>
+      {{relations}}
+      {{backlinks}}
+    </section>
+  </main>
+
+  <footer class="g-footer" role="contentinfo">
+    <details class="g-index">
+      <summary>Site index</summary>
+      {{nav}}
+    </details>
+    {{footer}}
+  </footer>
+</body>
+</html>

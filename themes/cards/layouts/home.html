@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-theme="cards" data-layout="home">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Cards</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/cards.css}}">
+  {{head}}
+</head>
+<body class="cards-home">
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="topbar">
+    <p class="brand" aria-label="Cards">
+      <span class="brand__mark" aria-hidden="true">K</span>
+      <span>Cards</span>
+    </p>
+    {{breadcrumb}}
+  </header>
+  <div class="shell shell--home">
+    <aside class="rail rail--nav">
+      <p class="eyebrow">Browse</p>
+      {{nav}}
+    </aside>
+    <main id="content" class="home-main" tabindex="-1" data-boris-search-root>
+      <div class="article-card home-intro">
+        {{metadata}}
+        <article class="prose">{{content}}</article>
+        <section class="home-toc" aria-label="On this page" data-boris-search-exclude>
+          <p class="eyebrow">On this page</p>
+          {{toc}}
+        </section>
+      </div>
+      <section class="home-deck" aria-labelledby="home-deck-heading" data-boris-search-exclude>
+        <h2 id="home-deck-heading" class="eyebrow">In this collection</h2>
+        {{children}}
+      </section>
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+    </main>
+  </div>
+  <footer class="footer">{{footer}}</footer>
+</body>
+</html>

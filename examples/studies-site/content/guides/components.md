@@ -3,6 +3,7 @@ title: Components
 parent: guides
 status: published
 tags: [guides, components]
+relations: [relates_to=reference/slots-and-rules]
 ---
 
 # Components
@@ -13,8 +14,8 @@ page-local image from the sibling `.assets/` tree.
 
 ## Aside callouts
 
-Asides stay in document order. They are not graph nodes and not standalone
-pages.
+Asides stay in document order.[^order] They are not graph nodes and not
+standalone pages.
 
 <Aside kind="tip">
 
@@ -75,3 +76,6 @@ output and rewrites the Markdown image destination to a page-relative URL.
 | `.site-nav`, `.page-toc`, `.page-children` | layout slots |
 
 Style those classes in theme CSS. Do not invent a second template language.
+
+[^order]: Oliver renders each Aside where it appears in the source, so a
+    theme styles it inline with the prose rather than in a side rail.

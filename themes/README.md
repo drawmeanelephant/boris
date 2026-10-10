@@ -17,32 +17,39 @@ themes/<name>/
 
 ## Catalog
 
-| Theme | Voice | Select it with |
-|---|---|---|
-| [`boris`](boris/) | Default product chrome. A little strange on purpose. | `--theme themes/boris` (also the product default) |
-| [`reference`](reference/) | Calm accessibility-forward documentation | `--theme themes/reference` |
-| [`press`](press/) | Editorial paper, crimson masthead, serif reading | `--theme themes/press` |
-| [`showcase`](showcase/) | Soft docs + blog shell | `--theme themes/showcase` |
-| [`archive`](archive/) | Ordered long-lived field notes | `--theme themes/archive` |
-| [`field-notes`](field-notes/) | Restrained blue notes | `--theme themes/field-notes` |
-| [`compact`](compact/) | Small-type documentation | `--theme themes/compact` |
-| [`cards`](cards/) | Soft cards and quiet docs | `--theme themes/cards` |
-| [`cozy`](cozy/) | Mid-2000s personal blog | `--theme themes/cozy` |
-| [`journal`](journal/) | Phosphor terminal diary | `--theme themes/journal` |
-| [`ledger`](ledger/) | Dense early-web nodes | `--theme themes/ledger` |
-| [`reading`](reading/) | Typesetting for non-US-docs English | `--theme themes/reading` |
-| [`semantic`](semantic/) | HTML-first, class-light docs | `--theme themes/semantic` |
-| [`columns`](columns/) | Boxed CSS-only docs | `--theme themes/columns` |
-| [`service`](service/) | Public-service information | `--theme themes/service` |
-| [`engineering`](engineering/) | Dense engineering docs | `--theme themes/engineering` |
-| [`civic`](civic/) | Public-information shell | `--theme themes/civic` |
-| [`tokens`](tokens/) | Fluid custom properties | `--theme themes/tokens` |
-| [`corporate`](corporate/) | Dense product-docs chrome | `--theme themes/corporate` |
-| [`minimal`](minimal/) | Same shell, no search | `--theme themes/minimal` |
-| [`lab`](lab/) | Dark-first lab terminal, three color modes | `--theme themes/lab` |
-| [`html4-strict`](html4-strict/) | Opt-in legacy HTML 4.01 Strict compatibility | `--theme themes/html4-strict --target-profile default=html4-strict` |
+| Theme | Voice | Layouts | Select it with |
+|---|---|---|---|
+| [`boris`](boris/) | Default product chrome: orange accent, sticky rail, slightly-too-large type. A little strange on purpose. | `main` (single shape by design) | `--theme themes/boris` (also the product default) |
+| [`reference`](reference/) | Calm accessibility-forward documentation | `main`, `home`, `section` | `--theme themes/reference` |
+| [`press`](press/) | Editorial paper, crimson masthead, serif reading | `main`, `home`, `section`, `blog`, `archive` | `--theme themes/press` |
+| [`showcase`](showcase/) | Soft docs + blog shell: cards, pill badges, kind-tinted callouts | `main`, `home`, `section`, `blog` | `--theme themes/showcase` |
+| [`archive`](archive/) | Ordered long-lived field notes: paper slips, ledger rules, numbered plates | `main`, `archive` | `--theme themes/archive` |
+| [`field-notes`](field-notes/) | Restrained blue notes | `main`, `home`, `section` | `--theme themes/field-notes` |
+| [`compact`](compact/) | Small-type documentation | `main`, `home` | `--theme themes/compact` |
+| [`cards`](cards/) | Soft cards and quiet docs | `main`, `home` | `--theme themes/cards` |
+| [`cozy`](cozy/) | Mid-2000s personal blog | `main` (single shape by design) | `--theme themes/cozy` |
+| [`journal`](journal/) | Phosphor terminal diary | `main`, `archive` | `--theme themes/journal` |
+| [`ledger`](ledger/) | Dense early-web nodes | `main` (single shape by design) | `--theme themes/ledger` |
+| [`reading`](reading/) | Ink-only typesetting for text that is not US-docs English | `main` (single shape by design) | `--theme themes/reading` |
+| [`semantic`](semantic/) | HTML-first, class-light docs | `main`, `home`, `section` | `--theme themes/semantic` |
+| [`columns`](columns/) | Boxed CSS-only docs | `main`, `home`, `section` | `--theme themes/columns` |
+| [`service`](service/) | Public-service information | `main`, `home`, `section` | `--theme themes/service` |
+| [`engineering`](engineering/) | Dense engineering docs | `main`, `home`, `section` | `--theme themes/engineering` |
+| [`civic`](civic/) | Public-information shell: banner, gold rule, tinted alerts | `main`, `home`, `section` | `--theme themes/civic` |
+| [`tokens`](tokens/) | Fluid custom properties: every size, step, and kind colour is a token | `main`, `home`, `section` | `--theme themes/tokens` |
+| [`corporate`](corporate/) | Dense product-docs chrome | `main` (single shape by design; `@media print` is the CV shape) | `--theme themes/corporate` |
+| [`minimal`](minimal/) | Corporate's shell, flat and square, no search | `main` (single shape by design) | `--theme themes/minimal` |
+| [`lab`](lab/) | Dark-first lab terminal, three color modes, prints on paper from any mode | `main`, `print` | `--theme themes/lab` |
+| [`gallery`](gallery/) | Image-first wall, album grid, museum-label captions | `main`, `home` | `--theme themes/gallery` (`id:index` → `layouts/home.html`) |
+| [`html4-strict`](html4-strict/) | Opt-in legacy HTML 4.01 Strict compatibility | `main` (single shape by design) | `--theme themes/html4-strict --target-profile default=html4-strict` |
 
-Sample sites that build these themes live under `examples/<name>-site/`.
+Named layouts are selected with `--layout-rule` or a profile's
+`layout_rules`, never from frontmatter. Each theme README gives the exact
+rules and, for a single-layout theme, why it declines more shapes.
+
+Every theme has a buildable specimen. The table in
+[`examples/README.md`](../examples/README.md#specimen-for-every-theme)
+maps each one to its sample site or shared corpus.
 
 ## First-class bar
 

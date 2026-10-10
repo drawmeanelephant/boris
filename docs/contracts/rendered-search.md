@@ -58,7 +58,7 @@ Each section requires all of these fields:
 |---|---|---|
 | `level` | integer | `0` for content before the first heading, otherwise heading level `1`–`6` |
 | `heading` | string | Normalized rendered heading text; empty for level zero |
-| `fragment` | string | Rendered heading `id`, or the producer's generated slug |
+| `fragment` | string | Rendered heading `id`; empty for level zero and for a heading without an `id` |
 | `text` | string | Normalized searchable prose, excluding code |
 | `code` | string | Normalized searchable code text |
 
@@ -109,12 +109,31 @@ are treated as layout chrome and skipped. Navigation, footer,
 executable/non-visible elements, and regions marked
 `data-boris-search-exclude`, `data-boris-search-ignore`, or `data-boris-noindex`
 are never indexed. Nested markup inside an excluded region does not re-enter
-the index. The compiler-emitted `<dl class="page-metadata">` block and the
-`{{tags}}` `<ul class="page-tags">` list are also excluded as layout chrome,
-including on HTML 4.01 Strict layouts that cannot use the
-`data-boris-search-exclude` attribute; the Strict `{{parent}}` shape
-(`<div class="page-parent">`) is excluded the same way, while the default
-`<nav class="page-parent">` is already navigation chrome.
+the index. Compiler-emitted layout-slot chrome is also excluded by its exact
+element name and class, so it stays out of the index on HTML 4.01 Strict
+layouts that cannot use the `data-boris-search-exclude` attribute:
+
+| Slot | Element and class excluded |
+|---|---|
+| `{{metadata}}` | `<dl class="page-metadata">` |
+| `{{tags}}` | `<ul class="page-tags">` |
+| `{{relations}}` | `<section class="semantic-relations">`; Strict `<div class="semantic-relations">` |
+| `{{backlinks}}` | `<section class="semantic-backlinks">`; Strict `<div class="semantic-backlinks">` |
+| `{{nav}}` | Strict `<div class="site-nav">` |
+| `{{breadcrumb}}` | Strict `<div class="breadcrumb">` |
+| `{{toc}}` | Strict `<div class="page-toc">` |
+| `{{children}}` | Strict `<div class="page-children">` |
+| `{{parent}}` | Strict `<div class="page-parent">` |
+
+The non-Strict `{{nav}}`, `{{breadcrumb}}`, `{{toc}}`, `{{children}}`, and
+`{{parent}}` shapes are `<nav>` elements and are already navigation chrome.
+Matching is by element name plus one whitespace-separated class token, so an
+authored element with the same name and class is treated as the same chrome,
+while a different token (`page-toc__l2`, or an authored
+`<section class="notes">`) is not matched.
+Theme-authored chrome such as a skip link, sidebar, or layout heading is not
+compiler-owned; themes exclude it with `data-boris-search-exclude` (or keep it
+outside the extraction root).
 
 Rendered entities (`amp`, `lt`, `gt`, `quot`, `apos`, `nbsp`, and numeric
 character references) are decoded before title, heading, fragment, text, or
@@ -134,15 +153,33 @@ any `h1`–`h6` carrying a `data-boris-search-title` attribute with a value
 (the value itself is ignored; a bare valueless attribute is not recognized)
 sets the `title` to that heading's normalized text when the heading closes,
 and the last marked heading in document order wins; otherwise the first
-`h1`'s text, then the `<title>` element, then the canonical `path`.
+`h1`'s text, then the first `<title>` element in the document (the scan
+skips a leading `<!doctype>` and any other non-tag `<`), then the canonical
+`path`.
 Sections, headings, and fragments are unaffected; only the `title` field
 changes.
+
+A marked heading inside the extraction root names the document even when it
+sits in an excluded region (or carries an exclusion marker itself), so a
+layout can render `<h1 data-boris-search-exclude
+data-boris-search-title="layout">{{title}}</h1>` to supply the title without
+duplicating the authored `h1` in the index. Such a heading still contributes
+no section, `heading`, `fragment`, or `text`. An *unmarked* `h1` in an
+excluded region is not a title source. The producer never reads frontmatter:
+the title stays a function of the rendered HTML bytes alone, so the
+compiler, the standalone CLI, and the publication check agree.
 
 Sections retain document order. Text before the first heading is level zero;
 each `h1`–`h6` begins the next section. An explicit heading `id` is copied as
 `fragment` after the same entity decode, so the fragment matches the live DOM
-id; absent ids use the current ASCII slug behavior (lowercase ASCII
-alphanumerics separated by single dashes). Documents are sorted by canonical
+id. A heading without an `id` (a layout `<h1>{{title}}</h1>`, raw HTML) has
+an empty `fragment`: the producer never fabricates an anchor the page does
+not carry, so every non-empty `fragment` resolves to a rendered id, which the
+`rendered-search` publication check enforces. Consumers already treat an
+empty `fragment` as a link to the page itself (as for level zero). Before
+this rule, id-less headings stored a generated ASCII slug that named no
+anchor; the change keeps the v1 shape and field type, so `schema_version`
+stays `1`. Documents are sorted by canonical
 `path` using bytewise ordering. The producer emits documents and sections in
 that order and emits the fixed v1 keys in a stable order.
 

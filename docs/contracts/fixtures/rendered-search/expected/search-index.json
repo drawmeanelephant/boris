@@ -13,23 +13,44 @@
       "path": "guides/install.html",
       "title": "Install Boris",
       "sections": [
-        {"level": 1, "heading": "Install Boris", "fragment": "install-boris", "text": "Install on macOS.", "code": ""},
+        {"level": 1, "heading": "Install Boris", "fragment": "", "text": "Install on macOS.", "code": ""},
         {"level": 2, "heading": "Linux & CI", "fragment": "linux", "text": "", "code": "zig build test"}
+      ]
+    },
+    {
+      "path": "guides/layout-title.html",
+      "title": "Layout supplied title",
+      "sections": [
+        {"level": 0, "heading": "", "fragment": "", "text": "Body without an authored heading.", "code": ""}
       ]
     },
     {
       "path": "guides/reference/paths.html",
       "title": "Paths",
       "sections": [
-        {"level": 1, "heading": "Paths", "fragment": "paths", "text": "Output-relative paths stay stable.", "code": ""}
+        {"level": 1, "heading": "Paths", "fragment": "", "text": "Output-relative paths stay stable.", "code": ""}
+      ]
+    },
+    {
+      "path": "guides/relations.html",
+      "title": "Relations",
+      "sections": [
+        {"level": 1, "heading": "Relations", "fragment": "relations", "text": "Authored prose only.", "code": ""}
+      ]
+    },
+    {
+      "path": "guides/title-element.html",
+      "title": "Title element fallback",
+      "sections": [
+        {"level": 0, "heading": "", "fragment": "", "text": "No heading on this page.", "code": ""}
       ]
     },
     {
       "path": "guides/title-override.html",
       "title": "Override title from h2",
       "sections": [
-        {"level": 1, "heading": "Plain heading title", "fragment": "plain-heading-title", "text": "Body under the plain h1.", "code": ""},
-        {"level": 2, "heading": "Override title from h2", "fragment": "override-title-from-h2", "text": "Body under the marked h2.", "code": ""}
+        {"level": 1, "heading": "Plain heading title", "fragment": "", "text": "Body under the plain h1.", "code": ""},
+        {"level": 2, "heading": "Override title from h2", "fragment": "", "text": "Body under the marked h2.", "code": ""}
       ]
     },
     {
@@ -37,7 +58,7 @@
       "title": "Home & Start",
       "sections": [
         {"level": 1, "heading": "Home & Start", "fragment": "home", "text": "Root prose.", "code": ""},
-        {"level": 2, "heading": "Quick start", "fragment": "quick-start", "text": "Run .", "code": "boris"}
+        {"level": 2, "heading": "Quick start", "fragment": "", "text": "Run .", "code": "boris"}
       ]
     }
   ]

@@ -21,14 +21,15 @@
   </header>
   <main id="main-content" class="home-frame" tabindex="-1" data-boris-search-root>
     <div class="home-intro">
-      <p class="home-kicker">A Boris field-notes theme</p>
-      {{metadata}}
+      <p class="home-kicker" data-boris-search-exclude>Overview</p>
+      <div class="note-meta" data-boris-search-exclude><p class="note-status note-status--{{page-status}}">{{page-status}}</p>{{parent}}{{tags}}</div>
     </div>
     <div class="home-body">
       <article class="prose prose--home">
         {{content}}
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
       </article>
-      <aside class="home-map" aria-label="Site map">
+      <aside class="home-map" aria-label="Site map" data-boris-search-exclude>
         <p class="rail__eyebrow">The map</p>
         {{nav}}
       </aside>
