@@ -14,9 +14,17 @@ What Reading guarantees, checked against the built output and
 - `:lang(ja)`, `:lang(zh)`, and `:lang(ko)` raise line-height, use strict
   line breaking, and replace italic emphasis with weight, so emphasis stays
   visible in scripts without true italics.
-- The theme adds no visible English labels of its own; relations and
-  backlinks reuse the compiler's `aria-label` as their heading.
-- Tables and code blocks scroll horizontally instead of shrinking.
+- The theme adds no visible English labels of its own; children, relations,
+  and backlinks reuse the compiler's `aria-label` as their heading. CJK
+  headings drop the negative Latin tracking.
+- Link states stay in ink: visited links keep their text colour and mute
+  only the underline (to 58% `CanvasText`), hover thickens it, and the
+  current nav page is bold and underlined with `aria-current="page"`.
+  Aside kinds are told apart by their word and by rule weight (hairline for
+  note and info, a heavy edge for tip and warning, a full frame for
+  danger), never by hue, so forced-colors mode keeps the distinction.
+- Tables fill the measure on wide screens and scroll horizontally below
+  52rem instead of shrinking; code blocks always scroll.
 - `prefers-reduced-motion: reduce` disables animations and transitions.
 - `@media print` drops the skip link and rails, widens the measure, and wraps
   code blocks.

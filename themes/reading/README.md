@@ -30,10 +30,11 @@ declined too.
 
 ## Slot coverage
 
-`{{relations}}` and `{{backlinks}}` sit under the article. Their visible
-heading is the compiler's own `aria-label` (via `attr()`), so the theme adds
-no English chrome of its own to a page that may not be in English. Both emit
-nothing on a page without semantic relations.
+`{{children}}`, `{{relations}}`, and `{{backlinks}}` sit under the article.
+Their visible heading is the compiler's own `aria-label` (via `attr()`), so
+the theme adds no English chrome of its own to a page that may not be in
+English. Each emits nothing on a page without children or semantic
+relations.
 
 Intentionally absent:
 
