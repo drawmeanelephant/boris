@@ -47,6 +47,10 @@ main { min-width: 0; max-width: var(--measure); }
 .prose th, .prose td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); text-align: start; }
 .admonition { margin: 1.2rem 0; padding: 0.75rem 0.9rem; border-inline-start: 0.25rem solid var(--ink); background: color-mix(in srgb, CanvasText 5%, Canvas); }
 .page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; }
+.semantic-relations, .semantic-backlinks { padding-top: 0.75rem; border-top: 1px solid var(--line); font-size: 0.92rem; }
+.semantic-relations::before, .semantic-backlinks::before { content: attr(aria-label); display: block; color: var(--muted); font-size: 0.8rem; font-weight: 750; }
+.semantic-relations ul, .semantic-backlinks ul { margin: 0.4rem 0 0; padding-inline-start: 1.1rem; }
+.semantic-relations li::after, .semantic-backlinks li::after { content: " · " attr(data-relation-kind); color: var(--muted); font-size: 0.8rem; }
 .site-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
 
 /* CJK: taller measure, no italic-as-emphasis. System faces only. */
@@ -77,4 +81,6 @@ main { min-width: 0; max-width: var(--measure); }
 @media print {
   .skip-link, .rail { display: none; }
   .shell { display: block; }
+  main { max-width: none; }
+  .prose pre { white-space: pre-wrap; }
 }

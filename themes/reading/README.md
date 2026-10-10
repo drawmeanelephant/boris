@@ -10,6 +10,7 @@ and refuse italic-as-emphasis. Mark those passages in the content with a
 - Layouts: `main.html`
 - Assets: `assets/reading.css`
 - Sample site: [`examples/reading-site/`](../../examples/reading-site/)
+- Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
 
 ```bash
 ./zig-out/bin/boris \
@@ -18,3 +19,18 @@ and refuse italic-as-emphasis. Mark those passages in the content with a
   --html-dir test-output/reading \
   --quiet
 ```
+
+## Slot coverage
+
+`{{relations}}` and `{{backlinks}}` sit under the article. Their visible
+heading is the compiler's own `aria-label` (via `attr()`), so the theme adds
+no English chrome of its own to a page that may not be in English. Both emit
+nothing on a page without semantic relations.
+
+Intentionally absent:
+
+- `{{tags}}` — `{{metadata}}` already prints Tags above the article. A chip
+  list would repeat it.
+- `{{parent}}` — `{{breadcrumb}}` in the header already links the parent.
+- `{{page-status}}` — a reading theme stays out of the way. Status is
+  already text in `{{metadata}}`; no draft badge is added.
