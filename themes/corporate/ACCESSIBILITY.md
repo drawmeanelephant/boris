@@ -16,14 +16,18 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
   the fixed header.
 - **Contrast.** Body text `#191c1e` on `#f8f9fb`; secondary text `#434654`
   8.89:1; links `#003d9b` 9.31:1; outline-grey labels `#737685` 4.51:1 on
-  white.
+  white. Aside titles use the kind colour on a 6% kind tint: note/info
+  `#003d9b` 8.83:1, tip `#1b6b3a` 5.99:1, warning `#8a4b00` 6.22:1, danger
+  `#b3261e` 5.93:1; Aside body text is above 15:1. Code blocks are
+  `#f8f9fb` on `#1e2122` (15.38:1).
 - **Links are visible.** The base reset removes link colour and underline;
   links inside page content and relations are restored to the primary colour
   with an underline.
 - **Search.** The inline consumer shows a result count in the live status;
-  the results list is now displayed whenever it has entries (it was
-  permanently `display: none`). Without JavaScript a `<noscript>` note
-  points to the menu.
+  the results list is displayed whenever it has entries. While the input is
+  empty the status is clipped visually but stays in the accessibility tree,
+  so it no longer overlaps the placeholder and is still announced. Without
+  JavaScript a `<noscript>` note points to the menu.
 - **Motion.** `prefers-reduced-motion: reduce` removes every animation and
   transition, including the card lift.
 - **Print.** A clean single-column document (see the README): chrome is
