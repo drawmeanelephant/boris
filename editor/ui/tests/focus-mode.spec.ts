@@ -428,6 +428,10 @@ test('paragraph dimming veils the surface and follows the caret paragraph', asyn
   // The veil announces itself in the accessible name of the surface.
   await expect(editor).toHaveAccessibleName(/paragraph focus dimming on/);
 
+  // Typing moved focus into the editor, which light-dismissed the panel —
+  // reopen it to reach the radios again.
+  await focus.locator('details.focus-type summary').nth(1).click();
+
   // Turning it off clears the veil and the mask.
   await focus.getByRole('radio', { name: 'Paragraph dimming off' }).check();
   await expect(shell).toHaveCSS('--zen-underlay', '0');
@@ -718,4 +722,43 @@ test('a press outside an open chrome panel closes it', async ({ page }) => {
   await expect(typography).toHaveJSProperty('open', true);
   await focus.getByRole('heading', { name: 'Focus', level: 2 }).click();
   await expect(typography).toHaveJSProperty('open', false);
+});
+
+// #1076: the light dismiss is keyboard-complete — focus leaving the panel
+// closes it behind the moving focus instead of leaving it over the surface.
+test('Tab out of an open chrome panel closes it and lands on the next control', async ({ page }) => {
+  await installApi(page);
+  await openFileAndEnterFocus(page);
+  const focus = page.getByRole('dialog', { name: 'Focus writing mode' });
+  const typography = focus.locator('details.focus-type:not(.focus-aids)');
+  const aids = focus.locator('details.focus-aids');
+  const summary = typography.locator('summary');
+
+  await summary.focus();
+  await page.keyboard.press('Enter');
+  await expect(typography).toHaveJSProperty('open', true);
+
+  // Native radio-group tab order: each Tab lands on the group's checked
+  // radio, and the panel stays open while focus is inside it.
+  for (const name of ['M', 'Medium', 'Serif']) {
+    await page.keyboard.press('Tab');
+    await expect(focus.getByRole('radio', { name, exact: true })).toBeFocused();
+    await expect(typography).toHaveJSProperty('open', true);
+  }
+
+  // One more Tab leaves the disclosure: the panel closes and focus keeps
+  // moving to the Writing aids summary — it is not pulled back into the
+  // panel it just left.
+  await page.keyboard.press('Tab');
+  await expect(typography).toHaveJSProperty('open', false);
+  await expect(aids.locator('summary')).toBeFocused();
+
+  // Shift+Tab before the summary dismisses it the same way, landing on the
+  // previous control (the layout group's checked radio).
+  await summary.focus();
+  await page.keyboard.press('Enter');
+  await expect(typography).toHaveJSProperty('open', true);
+  await page.keyboard.press('Shift+Tab');
+  await expect(typography).toHaveJSProperty('open', false);
+  await expect(focus.getByRole('radio', { name: 'Write', exact: true })).toBeFocused();
 });
