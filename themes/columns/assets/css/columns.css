@@ -59,12 +59,12 @@ a:hover { color: var(--bulma-ink); }
 .prose th { background: var(--bulma-bg); font-size: 0.85rem; font-weight: 800; }
 .prose [align="center"] { text-align: center; }
 .prose [align="right"] { text-align: right; }
-.menu ul, .children-box ul { margin: 0.55rem 0 0; padding-left: 0; list-style: none; }
-.menu a { font-weight: 500; text-decoration: none; }
-.menu a:hover { text-decoration: underline; }
+.sidebar ul, .children-box ul { margin: 0.55rem 0 0; padding-left: 0; list-style: none; }
+.sidebar a { font-weight: 500; text-decoration: none; }
+.sidebar a:hover { text-decoration: underline; }
 .children-box a { display: block; padding: 0.55rem 0.8rem; border: 1px solid var(--bulma-line); border-radius: 0.45rem; text-decoration: none; }
 .children-box a:hover { border-color: var(--bulma-primary); background: color-mix(in srgb, var(--bulma-primary) 8%, var(--bulma-surface)); color: var(--bulma-ink); }
-.menu li, .children-box li { margin-block: 0.4rem; }
+.sidebar li, .children-box li { margin-block: 0.4rem; }
 .sidebar { align-self: start; display: grid; gap: 1rem; position: sticky; top: 1.2rem; }
 .children-box { margin-top: 1.3rem; }
 .title { margin-top: 0; }
@@ -96,7 +96,9 @@ details summary:hover { color: var(--bulma-primary-dark); }
 /* First-class constructs */
 .page-toc ul, .page-children ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
 .children-box .page-children ul { padding-left: 0; }
-.menu { font-size: 0.92rem; }
+.sidebar { font-size: 0.92rem; }
+.sidebar .page-toc ul, .sidebar .page-children ul { padding-left: 0; }
+.article-box .graph-links { margin-top: 2rem; box-shadow: none; }
 .page-toc__l2 { padding-inline-start: 0.7rem; }
 .page-toc__l3 { padding-inline-start: 1.3rem; }
 .prose :not(pre) > code { padding: 0.08em 0.32em; background: color-mix(in srgb, var(--bulma-primary) 14%, var(--bulma-surface)); border-radius: 0.25rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
