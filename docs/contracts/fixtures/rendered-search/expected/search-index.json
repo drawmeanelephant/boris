@@ -18,6 +18,13 @@
       ]
     },
     {
+      "path": "guides/layout-title.html",
+      "title": "Layout supplied title",
+      "sections": [
+        {"level": 0, "heading": "", "fragment": "", "text": "Body without an authored heading.", "code": ""}
+      ]
+    },
+    {
       "path": "guides/reference/paths.html",
       "title": "Paths",
       "sections": [

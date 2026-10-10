@@ -1,5 +1,7 @@
 ## Fixed
 
 - [Rendered search](/docs/contracts/rendered-search.md) now reaches the
-  `<title>` fallback on doctype-led pages, so a page without a heading is
-  titled from its `<title>` instead of its output path (#1045, #1047, #1048).
+  `<title>` fallback on doctype-led pages, and a search-excluded layout heading
+  marked `data-boris-search-title` still supplies the document title without
+  adding a section, so pages without an authored heading are no longer titled
+  by their output path (#1045, #1047, #1048).

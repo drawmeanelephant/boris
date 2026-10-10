@@ -140,6 +140,16 @@ skips a leading `<!doctype>` and any other non-tag `<`), then the canonical
 Sections, headings, and fragments are unaffected; only the `title` field
 changes.
 
+A marked heading inside the extraction root names the document even when it
+sits in an excluded region (or carries an exclusion marker itself), so a
+layout can render `<h1 data-boris-search-exclude
+data-boris-search-title="layout">{{title}}</h1>` to supply the title without
+duplicating the authored `h1` in the index. Such a heading still contributes
+no section, `heading`, `fragment`, or `text`. An *unmarked* `h1` in an
+excluded region is not a title source. The producer never reads frontmatter:
+the title stays a function of the rendered HTML bytes alone, so the
+compiler, the standalone CLI, and the publication check agree.
+
 Sections retain document order. Text before the first heading is level zero;
 each `h1`–`h6` begins the next section. An explicit heading `id` is copied as
 `fragment` after the same entity decode, so the fragment matches the live DOM

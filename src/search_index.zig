@@ -119,6 +119,10 @@ fn isHidden(txt: []const u8) bool {
         std.mem.eql(u8, attrValue(txt, "aria-hidden") orelse "", "true");
 }
 
+fn isHeadingName(n: []const u8) bool {
+    return n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6';
+}
+
 fn opensElement(tag: Tag) bool {
     return !tag.closing and !tag.self_closing and !html_scan.isVoidElement(tag.name);
 }
@@ -256,6 +260,12 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
     }
     try sections.append(a, .{});
     var title: ?[]u8 = null;
+    // A `data-boris-search-title` heading inside an excluded region still
+    // names the document; it contributes no section. `title_capture` is the
+    // exclusion depth of that heading while its text is being collected.
+    var title_capture: ?usize = null;
+    var title_text: std.ArrayList(u8) = .empty;
+    defer title_text.deinit(a);
     var heading: bool = false;
     var heading_marked = false;
     var code_depth: usize = 0;
@@ -265,7 +275,9 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
     while (i < root.end) {
         if (html[i] != '<') {
             const end = std.mem.indexOfScalarPos(u8, html, i, '<') orelse root.end;
-            if (excluded == 0) {
+            if (excluded > 0) {
+                if (title_capture != null) try appendDecoded(&title_text, a, html[i..end]);
+            } else {
                 if (heading) try appendDecoded(&sections.items[sections.items.len - 1].heading, a, html[i..end]) else if (code_depth > 0) try appendDecoded(&sections.items[sections.items.len - 1].code, a, html[i..end]) else try appendDecoded(&sections.items[sections.items.len - 1].prose, a, html[i..end]);
             }
             i = end;
@@ -292,8 +304,15 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
             if (excluded_name or excluded > 0) {
                 if (opensElement(tag)) excluded += 1;
             }
-            if (excluded == 0) {
-                if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6') {
+            if (excluded > 0) {
+                if (title_capture == null and opensElement(tag) and isHeadingName(n) and
+                    attrValue(txt, "data-boris-search-title") != null)
+                {
+                    title_capture = excluded;
+                    title_text.clearRetainingCapacity();
+                }
+            } else {
+                if (isHeadingName(n)) {
                     try sections.append(a, .{ .level = n[1] - '0' });
                     heading = true;
                     heading_marked = attrValue(txt, "data-boris-search-title") != null;
@@ -310,7 +329,15 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
                 }
                 if (isBlock(n) or isBreak(n)) try sections.items[sections.items.len - 1].prose.append(a, ' ');
             }
-        } else if (excluded > 0) excluded -= 1 else if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6' and heading) {
+        } else if (excluded > 0) {
+            if (title_capture == excluded and isHeadingName(n)) {
+                const marked_title = try normalize(a, title_text.items);
+                if (title) |old| a.free(old);
+                title = marked_title;
+                title_capture = null;
+            }
+            excluded -= 1;
+        } else if (isHeadingName(n) and heading) {
             heading = false;
             const heading_title = try normalize(a, sections.items[sections.items.len - 1].heading.items);
             if (heading_marked or (level == 1 and title == null)) {
@@ -853,6 +880,59 @@ test "last marked heading wins and unmarked h2 does not override earlier title" 
     const d = try indexHtml(std.testing.allocator, "index.html", html, true);
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expectEqualStrings("Last Mark", d.title);
+}
+
+test "marked heading inside an excluded region names the document only" {
+    // Theme layouts render `<h1>{{title}}</h1>` inside main and exclude it
+    // to avoid duplicating the authored h1. The marker still supplies the
+    // document title, but the heading adds no section, heading, or text.
+    const html = "<!doctype html><html><head><title>Static Theme Name</title></head><body>" ++
+        "<main data-boris-search-root>" ++
+        "<header data-boris-search-exclude><h1 class=\"t\" data-boris-search-title=\"layout\"><a href=\"#\">Layout &amp; Title</a></h1><p>LayoutKicker</p></header>" ++
+        "<p>Body prose.</p><h2 id=\"sub\">Sub</h2><p>more</p></main></body></html>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Layout & Title", d.title);
+    try std.testing.expectEqual(@as(usize, 2), d.sections.len);
+    try std.testing.expectEqualStrings("Body prose.", d.sections[0].text);
+    try std.testing.expectEqualStrings("Sub", d.sections[1].heading);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Layout") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "LayoutKicker") == null);
+}
+
+test "self-excluded marked heading names the document; unmarked excluded h1 does not" {
+    const marked = "<title>Static</title><main data-boris-search-root>" ++
+        "<h1 data-boris-search-exclude data-boris-search-title=\"layout\">Page Title</h1>" ++
+        "<p>Body.</p></main>";
+    const d = try indexHtml(std.testing.allocator, "a.html", marked, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Page Title", d.title);
+    try std.testing.expectEqual(@as(usize, 1), d.sections.len);
+    try std.testing.expectEqual(@as(u8, 0), d.sections[0].level);
+
+    const unmarked = "<title>Static</title><main data-boris-search-root>" ++
+        "<h1 data-boris-search-exclude>Page Title</h1><p>Body.</p></main>";
+    const u = try indexHtml(std.testing.allocator, "a.html", unmarked, true);
+    defer freeDocument(std.testing.allocator, u);
+    try std.testing.expectEqualStrings("Static", u.title);
+}
+
+test "excluded marked layout heading and later marked authored heading: last wins" {
+    const html = "<main data-boris-search-root>" ++
+        "<h1 data-boris-search-exclude data-boris-search-title=\"layout\">Layout</h1>" ++
+        "<h1>Authored h1</h1><p>a</p><h2 data-boris-search-title=\"x\">Authored Mark</h2></main>";
+    const d = try indexHtml(std.testing.allocator, "a.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Authored Mark", d.title);
+
+    const layout_only = "<main data-boris-search-root>" ++
+        "<h1 data-boris-search-exclude data-boris-search-title=\"layout\">Layout</h1>" ++
+        "<h1>Authored h1</h1><p>a</p></main>";
+    const l = try indexHtml(std.testing.allocator, "a.html", layout_only, true);
+    defer freeDocument(std.testing.allocator, l);
+    try std.testing.expectEqualStrings("Layout", l.title);
 }
 
 test "without marked heading first h1 beats title element" {
