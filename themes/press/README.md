@@ -23,3 +23,13 @@ port or an official adapter.
   --html-dir test-output/press \
   --quiet
 ```
+
+## Slot coverage
+
+| Slot | Decision |
+|---|---|
+| `{{head}}` | Every layout, directly inside `<head>`. |
+| `{{relations}}` / `{{backlinks}}` | Every layout, after the article, as a ruled "See also" / "Cited by" pair. The wrapper is `data-boris-search-exclude` so linked titles are not indexed as this page's text. Pages with no relations emit nothing. |
+| `{{page-status}}` | Every layout, as `<body data-status="…">`. Draft and archived pages stamp the Status entry of the metadata box like a proof mark; published pages stay plain. |
+| `{{tags}}` | `blog` only, as a "Filed under" line under the metadata box; the duplicate Tags entry in the box is hidden. Other layouts keep tags inside `{{metadata}}` because notebook and section pages are not tag-browsed. |
+| `{{parent}}` | Intentionally absent. Every layout except `home` renders `{{breadcrumb}}`, which already links the parent; `home` serves the `index` trunk, where the slot is always empty. |

@@ -113,8 +113,18 @@ a:hover {
 }
 
 :focus-visible {
-  outline: 3px solid var(--txp-gold);
+  outline: 3px solid var(--txp-crimson);
   outline-offset: 3px;
+}
+
+.txp-header :focus-visible {
+  outline-color: var(--txp-gold);
+}
+
+@media (prefers-color-scheme: dark) {
+  .txp-header :focus-visible {
+    outline-color: var(--txp-paper);
+  }
 }
 
 ::selection {
@@ -493,6 +503,59 @@ a:hover {
   margin: 0;
 }
 
+[data-status="draft"] .page-metadata > div:first-child,
+[data-status="archived"] .page-metadata > div:first-child {
+  padding: 0 0.45rem;
+  border: 2px solid currentColor;
+  color: var(--txp-crimson);
+  font-weight: 700;
+  transform: rotate(-1.5deg);
+}
+
+[data-status="archived"] .page-metadata > div:first-child {
+  color: var(--txp-info);
+}
+
+[data-status="draft"] .page-metadata > div:first-child dt,
+[data-status="archived"] .page-metadata > div:first-child dt {
+  color: inherit;
+}
+
+.page-metadata:has(+ .page-tags) {
+  margin-bottom: 0.6rem;
+}
+
+body:has(.page-tags) .page-metadata > div:last-child,
+body:has(.page-tags) .page-metadata:has(> div:only-child) {
+  display: none;
+}
+
+.page-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 1.6rem;
+  padding: 0;
+  list-style: none;
+  font: 0.68rem/1.4 var(--txp-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.page-tags::before {
+  content: "Filed under";
+  content: "Filed under" / "";
+  color: var(--txp-muted);
+}
+
+.page-tags li {
+  padding: 0.12rem 0.5rem;
+  border: 1px solid var(--txp-rule-strong);
+  background: var(--txp-gold-soft);
+  color: var(--txp-ink-soft);
+}
+
 .txp-article-content {
   max-width: var(--txp-measure);
   margin-inline: auto;
@@ -788,6 +851,89 @@ a:hover {
   color: var(--txp-gold);
 }
 
+.graph-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem 1.6rem;
+  margin-top: 1.4rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--txp-rule);
+}
+
+.graph-links:empty {
+  display: none;
+}
+
+.semantic-relations::before,
+.semantic-backlinks::before {
+  display: block;
+  margin: 0 0 0.65rem;
+  color: var(--txp-muted);
+  font: 700 0.67rem/1.35 var(--txp-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.semantic-relations::before {
+  content: "See also";
+  content: "See also" / "";
+}
+
+.semantic-backlinks::before {
+  content: "Cited by";
+  content: "Cited by" / "";
+}
+
+.semantic-relations ul,
+.semantic-backlinks ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 2px solid var(--txp-ink);
+}
+
+.semantic-relations li,
+.semantic-backlinks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.6rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--txp-rule);
+  font-family: var(--txp-serif);
+  font-size: 1.02rem;
+}
+
+.semantic-relations li::before,
+.semantic-backlinks li::before {
+  color: var(--txp-crimson);
+  font: 0.64rem/1.4 var(--txp-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.semantic-backlinks li::before {
+  order: 1;
+}
+
+[data-relation-kind]::before { content: attr(data-relation-kind); }
+[data-relation-kind="relates_to"]::before { content: "relates to"; }
+[data-relation-kind="depends_on"]::before { content: "depends on"; }
+[data-relation-kind="implements"]::before { content: "implements"; }
+[data-relation-kind="supersedes"]::before { content: "supersedes"; }
+
+.semantic-relations a,
+.semantic-backlinks a {
+  color: var(--txp-ink);
+  text-decoration-color: var(--txp-rule-strong);
+}
+
+.semantic-relations a:hover,
+.semantic-backlinks a:hover {
+  color: var(--txp-crimson);
+  text-decoration-color: currentColor;
+}
+
 .page-toc {
   font-family: var(--txp-sans);
   font-size: 0.85rem;
@@ -996,12 +1142,29 @@ a:hover {
     color-scheme: light;
     --txp-page-bg: #fff;
     --txp-paper: #fff;
+    --txp-paper-soft: #fff;
+    --txp-paper-deep: #f2f2f2;
     --txp-ink: #000;
+    --txp-ink-soft: #222;
+    --txp-muted: #444;
     --txp-rule: #aaa;
+    --txp-rule-strong: #777;
+    --txp-crimson: #8c2323;
+    --txp-crimson-dark: #681717;
+    --txp-crimson-soft: #fff;
+    --txp-gold-soft: #fff;
+    --txp-info: #2e6174;
+    --txp-info-soft: #fff;
+    --txp-code: #f2f2f2;
+    --txp-code-ink: #000;
   }
 
   body {
     background: #fff;
+  }
+
+  .skip-link {
+    display: none;
   }
 
   .txp-header {

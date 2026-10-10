@@ -7,8 +7,9 @@
   <title>{{title}} · Boris / Press</title>
   <link rel="stylesheet" href="{{asset-url assets/css/press.css}}">
   <link rel="icon" href="{{asset-url assets/img/press-mark.svg}}" type="image/svg+xml">
+  {{head}}
 </head>
-<body class="txp-body txp-home" data-layout="home">
+<body class="txp-body txp-home" data-layout="home" data-status="{{page-status}}">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="txp-header txp-header--home" role="banner">
     <div class="txp-container txp-header-inner">
@@ -28,15 +29,16 @@
 
   <main id="main-content" class="txp-container txp-home-main" tabindex="-1" data-boris-search-root>
     <div class="txp-home-grid">
-      <section class="txp-paper txp-home-reading" aria-labelledby="home-heading">
+      <section class="txp-paper txp-home-reading" aria-label="Lead article">
         {{metadata}}
         <article class="txp-article">
           <div class="txp-article-content">
             {{content}}
           </div>
         </article>
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
       </section>
-      <aside class="txp-sidebar txp-home-sidebar" aria-label="On this page">
+      <aside class="txp-sidebar txp-home-sidebar" aria-label="On this page" data-boris-search-exclude>
         <section class="txp-widget txp-widget--toc">
           <p class="txp-widget-title">On this page</p>
           {{toc}}
@@ -47,7 +49,7 @@
         </section>
       </aside>
     </div>
-    <section class="txp-paper txp-children-panel" aria-labelledby="home-children-heading">
+    <section class="txp-paper txp-children-panel" aria-labelledby="home-children-heading" data-boris-search-exclude>
       <div class="txp-section-heading">
         <p class="txp-overline" id="home-children-heading">The notebook</p>
         <span class="txp-section-rule" aria-hidden="true"></span>
