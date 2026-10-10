@@ -89,7 +89,7 @@
      the browser walk both check that every step is a whole multiple of it. */
   --scale-space-base: 0.25rem;
   --scale-radius: --radius-sm --radius-md --radius-lg --radius-pill;
-  --scale-layer: --layer-focus-mirror --layer-focus-editor --layer-focus-zen --layer-nav --layer-skip-link --layer-overlay;
+  --scale-layer: --layer-focus-mirror --layer-focus-editor --layer-focus-zen --layer-focus-popover --layer-nav --layer-skip-link --layer-overlay;
 
   /* --- spacing scale (0.25rem base) --- */
   --space-1: 0.25rem;
@@ -110,13 +110,15 @@
   /* --- stacking layers ---
      One ladder for the whole editor. The first three order elements *inside*
      the focus editor's own stacking context — the measuring mirror, the text
-     above it, and the dimming veil over both; the last three are global
-     chrome: the sticky section nav, the skip link, and the full-viewport
-     focus overlay. `z-index` in styles.css must name one of these, because a
-     bare number is how two layers silently swap places. */
+     above it, and the dimming veil over both; the fourth lifts the Focus
+     chrome's Typography and Writing aids panels over all three; the last
+     three are global chrome: the sticky section nav, the skip link, and the
+     full-viewport focus overlay. `z-index` in styles.css must name one of
+     these, because a bare number is how two layers silently swap places. */
   --layer-focus-mirror: 0;
   --layer-focus-editor: 1;
   --layer-focus-zen: 2;
+  --layer-focus-popover: 3;
   --layer-nav: 5;
   --layer-skip-link: 10;
   --layer-overlay: 50;
