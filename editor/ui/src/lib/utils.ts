@@ -311,13 +311,17 @@ export function stateTone(state: 'idle' | 'running' | 'success' | 'failed' | 'st
   }
 }
 
-// `stale` covers two host facts: output from an earlier build at startup
-// (no exit code) and a failed rebuild that kept the last valid tree (non-zero
-// exit code). Only the second is a failure, so only it reads as one.
-export function previewTone(state: { phase: PreviewState['phase']; exit_code: number | null } | null): Tone {
+// `stale` covers two host facts, named by `stale_reason`: output from an
+// earlier build at startup and a failed rebuild that kept the last valid tree.
+// Only the second is a failure, so only it reads as one. A host without the
+// field leaves the exit code to tell them apart (null → earlier build).
+export function previewTone(state: Pick<PreviewState, 'phase' | 'exit_code' | 'stale_reason'> | null): Tone {
   if (!state) return 'neutral';
-  if (state.phase === 'stale' && state.exit_code !== null && state.exit_code !== 0) return 'danger';
-  return stateTone(state.phase);
+  if (state.phase !== 'stale') return stateTone(state.phase);
+  const failed = state.stale_reason === undefined
+    ? state.exit_code !== null && state.exit_code !== 0
+    : state.stale_reason === 'failed_rebuild';
+  return failed ? 'danger' : 'warn';
 }
 
 export function severityTone(severity: Problem['severity'] | undefined): Tone {

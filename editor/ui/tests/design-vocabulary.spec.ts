@@ -159,27 +159,41 @@ test.describe('tones restate host facts', () => {
     await expect(page.locator('.problem-group', { hasText: 'WORPHAN' })).toHaveAttribute('data-tone', 'warn');
   });
 
-  test('a startup stale preview is a warning; a stale preview after a failed rebuild is a failure', async ({ page }) => {
-    await installApi(page, {
-      preview: {
-        phase: 'stale', generation: 0, exit_code: null, used_stderr_fallback: false,
-        message: 'Showing existing preview output from an earlier build; rebuild to refresh.', preview_url: 'https://preview.invalid/?token=test'
-      }
-    });
+  // `stale_reason` (#1068) names which stale fact the host means; an older
+  // host without it leaves the shell to read `exit_code`. Both must agree.
+  const startupStale: Json = {
+    phase: 'stale', generation: 0, exit_code: null, used_stderr_fallback: false,
+    message: 'Showing existing preview output from an earlier build; rebuild to refresh.', preview_url: 'https://preview.invalid/?token=test'
+  };
+  const failedStale: Json = {
+    phase: 'stale', generation: 0, exit_code: 1, used_stderr_fallback: true,
+    message: 'error: EFRONTMATTER: index.md:1:1: invalid field; last valid output is stale.', preview_url: 'https://preview.invalid/?token=test'
+  };
+
+  async function expectWarnThenFailure(page: Page, startup: Json, rebuilt: Json) {
+    await installApi(page, { preview: startup });
     const state = page.locator('.preview-state');
     await expect(state).toContainText('stale:');
     await expect(state).toHaveAttribute('data-tone', 'warn');
 
-    await page.route('**/api/preview/rebuild', route => route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        phase: 'stale', generation: 0, exit_code: 1, used_stderr_fallback: true,
-        message: 'error: EFRONTMATTER: index.md:1:1: invalid field; last valid output is stale.', preview_url: 'https://preview.invalid/?token=test'
-      })
-    }));
+    await page.route('**/api/preview/rebuild', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify(rebuilt) }));
     await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
     await expect(state).toContainText('last valid output is stale');
     await expect(state).toHaveAttribute('data-tone', 'danger');
+  }
+
+  for (const host of [
+    { name: 'host names stale_reason', startup: { stale_reason: 'earlier_build' }, failed: { stale_reason: 'failed_rebuild' } },
+    { name: 'older host without stale_reason', startup: {}, failed: {} }
+  ]) {
+    test(`a startup stale preview is a warning; a stale preview after a failed rebuild is a failure (${host.name})`, async ({ page }) => {
+      await expectWarnThenFailure(page, { ...startupStale, ...host.startup }, { ...failedStale, ...host.failed });
+    });
+  }
+
+  test('stale_reason outranks exit_code: a timed-out rebuild with no exit code is still a failure', async ({ page }) => {
+    const timedOut = { ...failedStale, exit_code: null, used_stderr_fallback: false, message: 'Boris preview build timed out; last valid output is stale.' };
+    await expectWarnThenFailure(page, { ...startupStale, stale_reason: 'earlier_build' }, { ...timedOut, stale_reason: 'failed_rebuild' });
   });
 });
 

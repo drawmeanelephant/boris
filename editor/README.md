@@ -445,11 +445,13 @@ and its preview origin terminates with the editor process.
 The UI reports idle, running, success, failed, and stale distinctly. If an
 existing `dist/index.html` is present at startup, it remains `stale` and the
 banner says that the output is from an earlier build; use **Rebuild preview**
-to refresh it. That startup `stale` reads as a warning; a `stale` that the host
-returns with a non-zero exit code (a failed rebuild that kept the last valid
-tree) reads as a failure, because it is one. Boris's staged output commit
-preserves the last valid `dist/` tree after a failed rebuild; the iframe
-generation advances only on success.
+to refresh it. The host names which `stale` it means in `stale_reason`: that
+startup `earlier_build` reads as a warning, and a `failed_rebuild` (a rebuild
+that failed, timed out, or could not run, and kept the last valid tree) reads
+as a failure, because it is one. Against an older host without the field, the
+shell falls back to the exit code: none reads as a warning, non-zero as a
+failure. Boris's staged output commit preserves the last valid `dist/` tree
+after a failed rebuild; the iframe generation advances only on success.
 While #421 remains open, failures show bounded Boris stderr and identify that
 fallback. Embedded preview content is sandboxed; a named link opens the exact
 site origin in a new tab for full behavior.
