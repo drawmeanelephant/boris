@@ -42,7 +42,7 @@ pub const Manager = struct {
         return result;
     }
 
-    pub fn rebuild(self: *Manager, allocator: std.mem.Allocator, io: Io) !void {
+    pub fn rebuild(self: *Manager, allocator: std.mem.Allocator, io: Io) void {
         self.phase = .running;
         self.stale_reason = null;
         self.exit_code = null;
@@ -74,10 +74,17 @@ pub const Manager = struct {
         defer allocator.free(execution.stderr);
         self.exit_code = exitCode(execution.term);
         if (self.exit_code == 0) {
-            if (!hasIndex(io, self.project_root)) return error.PreviewOutputMissing;
-            self.phase = .success;
-            self.generation += 1;
-            self.setMessage("Preview is current from a successful Boris incremental build.");
+            if (hasIndex(io, self.project_root)) {
+                self.phase = .success;
+                self.generation += 1;
+                self.setMessage("Preview is current from a successful Boris incremental build.");
+            } else {
+                // A zero exit with no committed dist/index.html is a failed
+                // rebuild, not an in-flight one: land on a terminal phase so
+                // /api/preview/state never sticks on "running".
+                self.phase = .failed;
+                self.setMessage("Boris reported a successful build but did not produce dist/index.html.");
+            }
         } else {
             self.phase = if (hasIndex(io, self.project_root)) .stale else .failed;
             self.stale_reason = if (self.phase == .stale) .failed_rebuild else null;
@@ -316,12 +323,12 @@ test "stale_reason names the earlier build at startup and the failed rebuild aft
     try std.testing.expectEqual(@as(?StaleReason, .earlier_build), manager.stale_reason);
     try std.testing.expectEqual(@as(?u8, null), manager.exit_code);
 
-    try manager.rebuild(allocator, io);
+    manager.rebuild(allocator, io);
     try std.testing.expectEqual(Phase.stale, manager.phase);
     try std.testing.expectEqual(@as(?StaleReason, .failed_rebuild), manager.stale_reason);
 
     try temp.dir.deleteTree(io, "dist");
-    try manager.rebuild(allocator, io);
+    manager.rebuild(allocator, io);
     try std.testing.expectEqual(Phase.failed, manager.phase);
     try std.testing.expectEqual(@as(?StaleReason, null), manager.stale_reason);
 }
