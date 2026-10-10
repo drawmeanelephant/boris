@@ -12,6 +12,19 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 - **Palette.** One dark palette (`color-scheme: dark`). White `#fff` on
   black is 21:1; the signal green `#00ff00` is 14.43:1 on the `#0a0a0a`
   panel; quiet text `#999` is 6.95:1. Verify again if the theme is recoloured.
+- **Accent kinds.** Aside kinds keep their bracketed word (`[NOTE]`,
+  `[WARNING]`…) and add a hue on the `#0a0a0a` panel: cyan `#00e5ff`
+  12.87:1 (tip), amber `#ffb000` 10.81:1 (warning), red `#ff6b6b` 7.13:1
+  (danger, which also gets a full red border). Visited links are a dimmer
+  green `#7bc67b` (10.21:1 on black) with a dashed underline, so the state
+  is not colour alone.
+- **Headings.** The `system.log` banner is a paragraph, not a heading: the
+  entry's own `h1` is the page's only top-level heading. Content headings
+  show their Markdown level (`##`, `###`) as decorative text with empty
+  alternative text.
+- **Breadcrumb.** An inline `pwd:` trail; the `pwd:` prefix and `/`
+  separators are decorative (empty alternative text), and the current page
+  keeps `aria-current="page"`.
 - **Focus.** `:focus-visible` draws a 2px signal-green outline with a 3px
   offset; focused links also switch to inverse video (black on green), so
   focus never relies on the outline alone.
