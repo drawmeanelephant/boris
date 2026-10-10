@@ -42,14 +42,14 @@
   });
 </script>
 
-<section id="project" class="project-pane" tabindex="-1" aria-labelledby="project-heading">
+<section id="project" class="pane project-pane" tabindex="-1" aria-labelledby="project-heading">
   <div class="pane-heading">
     <div>
       <h2 id="project-heading">Project</h2>
       <p>{connection.project}</p>
       <p>{connection.compiler}</p>
     </div>
-    <div class="file-actions" aria-label="File actions">
+    <div class="file-actions toolbar" aria-label="File actions">
       <button type="button" disabled={dirty()} onclick={onCreate}>Create file</button>
       <button type="button" disabled={!buffer.activePath || dirty()} onclick={onRename}>Rename file</button>
       <button type="button" class="danger" disabled={!buffer.activePath || dirty()} onclick={onDelete}>Delete file</button>
@@ -65,10 +65,14 @@
     </div>
   {/if}
   <nav class="file-tree" aria-label="Project files">
-    {#if project.files.length === 0}
-      <p>No author-owned project files found.</p>
+    {#if !connection.loaded && connection.phase === 'connecting'}
+      <p class="empty-state is-loading">Loading project files…</p>
+    {:else if !connection.loaded}
+      <p class="notice" data-tone="danger">Project files could not be loaded. {connection.status}</p>
+    {:else if project.files.length === 0}
+      <p class="empty-state">No author-owned project files found.</p>
     {:else if visibleFiles().length === 0}
-      <p>No project files match the filter.</p>
+      <p class="empty-state">No project files match the filter.</p>
     {:else}
       {#snippet treeLevel(nodes: ProjectTreeNode[])}
         <ul>
@@ -88,6 +92,7 @@
                   type="button"
                   class="file-tree-dir"
                   aria-expanded={!collapsed}
+                  title={node.path}
                   onclick={() => toggleDir(node.path)}
                 >{node.name}/</button
                 >

@@ -20,26 +20,30 @@
 </script>
 
 {#if themeLayoutOpen}
-  <section class="theme-pane" aria-labelledby="theme-heading">
+  <section class="subpane theme-pane" aria-labelledby="theme-heading">
     <div class="pane-heading">
       <div>
         <h3 id="theme-heading">Theme layout</h3>
         <p>Closed slots come from Boris <code>completion.json</code>. The buffer scan is presentation only.</p>
       </div>
     </div>
-    <p class="fallback-notice">Layout winners appear as <code>ILAYOUTSELECTED</code> after Build HTML or Validate. Fallback winners appear when the target has layout rules.</p>
+    <p class="notice">Layout winners appear as <code>ILAYOUTSELECTED</code> after Build HTML or Validate. Fallback winners appear when the target has layout rules.</p>
     {#if closedLayoutSlots().length === 0}
-      <p>Build diagnostics to load the closed layout-slot vocabulary.</p>
+      <p class="empty-state">Build diagnostics to load the closed layout-slot vocabulary.</p>
     {:else}
       <h4>Slots in this layout</h4>
-      <ul class="graph-links">
-        {#each layoutSlotsInBuffer as slot (slot)}
-          <li>Present: <code>{'{{' + slot + '}}'}</code></li>
-        {/each}
-      </ul>
+      {#if layoutSlotsInBuffer.length === 0}
+        <p class="empty-state">None of the closed slots appear in this file yet.</p>
+      {:else}
+        <ul class="graph-links row-list">
+          {#each layoutSlotsInBuffer as slot (slot)}
+            <li>Present: <code>{'{{' + slot + '}}'}</code></li>
+          {/each}
+        </ul>
+      {/if}
       {#if layoutSlotsMissing.length > 0}
         <h4>Closed slots not in this file</h4>
-        <ul class="graph-links">
+        <ul class="graph-links row-list">
           {#each layoutSlotsMissing as slot (slot)}
             <li>Absent: <code>{'{{' + slot + '}}'}</code></li>
           {/each}
@@ -48,19 +52,19 @@
     {/if}
     {#if themeAssets().length > 0}
       <h4>Theme assets</h4>
-      <ul class="graph-links">
+      <ul class="graph-links row-list">
         {#each themeAssets() as asset (asset.path)}
-          <li><button type="button" onclick={() => onOpenFile(asset.path)}>Open {asset.path}</button></li>
+          <li><button type="button" class="row-button" onclick={() => onOpenFile(asset.path)}>Open {asset.path}</button></li>
         {/each}
       </ul>
     {/if}
     {#if layoutSelections().length > 0}
       <h4>Layout selection from the last HTML report</h4>
-      <ul class="graph-links">
+      <ul class="graph-links row-list">
         {#each layoutSelections() as problem}
           <li>
             {#if problem.source_path}
-              <button type="button" onclick={() => onNavigate(problem)}>
+              <button type="button" class="row-button" onclick={() => onNavigate(problem)}>
                 {problemLocationLabel(problem)}: {problem.message}
               </button>
             {:else}

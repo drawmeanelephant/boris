@@ -16,6 +16,7 @@ import type {
   GraphNode,
   JsonSchemaProperty,
   PaletteItem,
+  PreviewState,
   Problem,
   ProblemGroup,
   RecipeQuantity,
@@ -287,6 +288,42 @@ export function completionSuggestions(
     }));
   const needle = query.trim().toLocaleLowerCase();
   return values.filter((item) => !needle || item.value.toLocaleLowerCase().startsWith(needle)).slice(0, 50);
+}
+
+// --- status tones (#1044) ---
+// One mapping from host-reported state to the shared badge/notice tones. A
+// tone only restates the state name the host sent; it never adds a verdict.
+
+export type Tone = 'neutral' | 'busy' | 'ok' | 'warn' | 'danger';
+
+export function stateTone(state: 'idle' | 'running' | 'success' | 'failed' | 'stale' | undefined): Tone {
+  switch (state) {
+    case 'running':
+      return 'busy';
+    case 'success':
+      return 'ok';
+    case 'failed':
+      return 'danger';
+    case 'stale':
+      return 'warn';
+    default:
+      return 'neutral';
+  }
+}
+
+// `stale` covers two host facts: output from an earlier build at startup
+// (no exit code) and a failed rebuild that kept the last valid tree (non-zero
+// exit code). Only the second is a failure, so only it reads as one.
+export function previewTone(state: { phase: PreviewState['phase']; exit_code: number | null } | null): Tone {
+  if (!state) return 'neutral';
+  if (state.phase === 'stale' && state.exit_code !== null && state.exit_code !== 0) return 'danger';
+  return stateTone(state.phase);
+}
+
+export function severityTone(severity: Problem['severity'] | undefined): Tone {
+  if (severity === 'error') return 'danger';
+  if (severity === 'warning') return 'warn';
+  return 'neutral';
 }
 
 // --- validation helpers (honest state naming #654) ---

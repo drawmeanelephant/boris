@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade } from 'svelte/transition';
-  import { prefersReducedMotion } from 'svelte/motion';
+  import { motionMs } from '../lib/motion';
+  import { stateTone } from '../lib/utils';
   import { buffer, dirty, editSource, undo, redo } from '../lib/state/buffer.svelte';
   import {
     focusMode,
@@ -293,7 +294,7 @@
   role="dialog"
   aria-modal="true"
   aria-label="Focus writing mode"
-  transition:fade={{ duration: prefersReducedMotion.current ? 0 : 150 }}
+  transition:fade={{ duration: motionMs('fast') }}
 >
   <header class="focus-chrome">
     <div class="focus-title">
@@ -307,7 +308,7 @@
       <label><input type="radio" name="focus-layout" value="preview" checked={focusMode.layout === 'preview'} onchange={() => setFocusLayout('preview')} /> Preview</label>
     </fieldset>
     <details class="focus-type">
-      <summary>Typography</summary>
+      <summary class="chrome-button">Typography</summary>
       <div class="focus-type-grid">
         <fieldset class="focus-type-group">
           <legend>Text size</legend>
@@ -330,7 +331,7 @@
       </div>
     </details>
     <details class="focus-type focus-aids">
-      <summary>Writing aids</summary>
+      <summary class="chrome-button">Writing aids</summary>
       <div class="focus-type-grid focus-aids-grid">
         <fieldset class="focus-type-group">
           <legend>Typewriter scrolling</legend>
@@ -344,25 +345,28 @@
         </fieldset>
       </div>
     </details>
-    <div class="focus-actions">
-      <button type="button" disabled={buffer.undoStack.length === 0 || buffer.readOnly} onclick={undo}>Undo</button>
-      <button type="button" disabled={buffer.redoStack.length === 0 || buffer.readOnly} onclick={redo}>Redo</button>
-      <button type="button" class="primary" disabled={!dirty() || buffer.readOnly || buffer.saveInFlight} onclick={onSave}>Save file</button>
+    <div class="focus-actions toolbar">
+      <button type="button" class="chrome-button" disabled={buffer.undoStack.length === 0 || buffer.readOnly} onclick={undo}>Undo</button>
+      <button type="button" class="chrome-button" disabled={buffer.redoStack.length === 0 || buffer.readOnly} onclick={redo}>Redo</button>
+      <button type="button" class="chrome-button primary" disabled={!dirty() || buffer.readOnly || buffer.saveInFlight} onclick={onSave}>Save file</button>
       <button
         type="button"
+        class="chrome-button"
         disabled={preview.data?.phase === 'running'}
         onclick={onRebuild}
         title="Rebuild the compiled Boris preview (live in the workspace Preview pane)"
       >Rebuild preview</button>
-      <button type="button" onclick={onExit} aria-keyshortcuts="Escape" title="Exit focus mode (Esc)">Exit focus</button>
+      <button type="button" class="chrome-button" onclick={onExit} aria-keyshortcuts="Escape" title="Exit focus mode (Esc)">Exit focus</button>
     </div>
   </header>
 
   <div class="focus-surface" data-layout={focusMode.layout} data-size={focusType.size} data-measure={focusType.measure} data-face={focusType.face}>
     {#if !hasBuffer}
-      <div class="focus-reading" aria-label="Focus mode empty state" tabindex="-1">
-        <h3>No file is open</h3>
-        <p>Choose a file from Project files (Esc returns to the workspace) and re-enter focus mode to write.</p>
+      <div class="focus-reading focus-empty" aria-label="Focus mode empty state" tabindex="-1">
+        <div class="empty-state">
+          <h3>No file is open</h3>
+          <p>Choose a file from Project files (Esc returns to the workspace) and re-enter focus mode to write.</p>
+        </div>
       </div>
     {:else}
     {#if showEditor()}
@@ -400,8 +404,8 @@
   <footer class="focus-status">
     <span class="focus-words">{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>
     <span class="focus-caret">Line {buffer.cursor.line}, column {buffer.cursor.column}</span>
-    <span class:warning={dirty() || buffer.readOnly}>{buffer.readOnly ? 'Read-only file' : dirty() ? 'Unsaved changes' : 'Saved on disk'}</span>
-    <span class="focus-live">Boris preview build status: {preview.data?.phase ?? 'idle'}</span>
+    <span class="buffer-state badge" data-tone={buffer.readOnly ? 'neutral' : dirty() ? 'warn' : 'ok'}>{buffer.readOnly ? 'Read-only file' : dirty() ? 'Unsaved changes' : 'Saved on disk'}</span>
+    <span class="focus-live">Boris preview build status: <span class="badge" data-tone={stateTone(preview.data?.phase)}>{preview.data?.phase ?? 'idle'}</span></span>
     <p role="status" aria-label="Editing status" aria-live="polite" class="focus-editor-status">{buffer.editorStatus}</p>
   </footer>
 </div>

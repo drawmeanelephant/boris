@@ -2,6 +2,7 @@
   import type { Problem, GraphNode } from '../lib/types';
   import { buffer, dirty, editSource, undo, redo, trackCursor } from '../lib/state/buffer.svelte';
   import { density } from '../lib/state/density.svelte';
+  import { connection } from '../lib/state/connection.svelte';
   import { activeProblems, staleProblems } from '../lib/state/problems.svelte';
   import { problemLocationLabel } from '../lib/utils';
   import AuthoringTools from './AuthoringTools.svelte';
@@ -331,22 +332,22 @@
   });
 </script>
 
-<section id="source" class="source-pane" tabindex="-1" aria-labelledby="source-heading">
+<section id="source" class="pane source-pane" tabindex="-1" aria-labelledby="source-heading">
   <div class="pane-heading">
     <div>
       <h2 id="source-heading">Source</h2>
       <p class="path">{buffer.activePath || 'No file selected'}</p>
     </div>
-    <div class="source-actions" aria-label="Editing actions">
+    <div class="source-actions toolbar" aria-label="Editing actions">
       <button
         type="button"
-        class="quiet"
+        class="ghost"
         bind:this={focusEntry}
         onclick={() => onEnterFocus(focusEntry ?? null)}
         title="Expand to a full-screen writing surface (Esc returns)"
       >Focus</button>
-      <button type="button" class="quiet" disabled={buffer.undoStack.length === 0 || buffer.readOnly} onclick={undo}>Undo</button>
-      <button type="button" class="quiet" disabled={buffer.redoStack.length === 0 || buffer.readOnly} onclick={redo}>Redo</button>
+      <button type="button" class="ghost" disabled={buffer.undoStack.length === 0 || buffer.readOnly} onclick={undo}>Undo</button>
+      <button type="button" class="ghost" disabled={buffer.redoStack.length === 0 || buffer.readOnly} onclick={redo}>Redo</button>
       <button type="button" class="primary" disabled={!dirty() || buffer.readOnly || buffer.saveInFlight} onclick={onSave}>Save file</button>
     </div>
   </div>
@@ -394,23 +395,37 @@
     </div>
     <div class="source-status-line">
       <span class="source-caret" aria-label="Caret position">Line {buffer.cursor.line}, column {buffer.cursor.column}</span>
-      <span class:warning={dirty() || buffer.readOnly} class="buffer-state">
+      <span class="buffer-state badge" data-tone={buffer.readOnly ? 'neutral' : dirty() ? 'warn' : 'ok'}>
         {buffer.readOnly ? 'Read-only file' : dirty() ? 'Unsaved changes' : 'Saved on disk'}
       </span>
     </div>
-    <AuthoringTools collapsed={density.mode === 'author'} />
+  {:else if !connection.loaded && connection.phase === 'connecting'}
+    <p class="empty-state is-loading">Loading the project…</p>
+  {:else if !connection.loaded}
+    <p class="notice" data-tone="danger">No file can be opened until the editor host connects. {connection.status}</p>
   {:else}
-    <p>Choose a file from Project files. Generated output and editor state are intentionally excluded.</p>
+    <p class="empty-state">Choose a file from Project files. Generated output and editor state are intentionally excluded.</p>
   {/if}
-  {#if density.mode === 'review'}
-    <GraphPane
-      onOpenPath={onOpenFile}
-      onOpenNode={onOpenGraphNode}
-      onImpact={onImpact}
-      onExport={onExportGraph}
-    />
-  {/if}
+  <p class="editing-status" role="status" aria-label="Editing status" aria-live="polite">{buffer.editorStatus}</p>
   {#if buffer.activePath}
+    {#if activeProblems().length > 0}
+      <aside class="subpane inline-problems" aria-label="Problems in {buffer.activePath}">
+        <h3>Problems in this file</h3>
+        <ul class="row-list">
+          {#each activeProblems() as problem}
+            <li>
+              <button type="button" class="row-button" onclick={() => onNavigate(problem)}>
+                Go to {problemLocationLabel(problem)}: {problem.code ?? 'Unstructured Boris output'}
+              </button>
+              {#if staleProblems().has(problem)}
+                <p class="notice" data-tone="warn">Possibly stale — the open buffer changed this region since the report.</p>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      </aside>
+    {/if}
+    <AuthoringTools collapsed={density.mode === 'author'} />
     <RecipePane
       onScale={onScale}
       onReset={onReset}
@@ -420,26 +435,14 @@
       onOpenFile={onOpenFile}
       onNavigate={onNavigate}
     />
-    {#if activeProblems().length > 0}
-      <aside class="inline-problems" aria-label="Problems in {buffer.activePath}">
-        <h3>Problems in this file</h3>
-        <ul>
-          {#each activeProblems() as problem}
-            <li>
-              <button type="button" onclick={() => onNavigate(problem)}>
-                Go to {problemLocationLabel(problem)}: {problem.code ?? 'Unstructured Boris output'}
-              </button>
-              {#if staleProblems().has(problem)}
-                <p class="warning-text">Possibly stale — the open buffer changed this region since the report.</p>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      </aside>
-    {/if}
   {/if}
-  <p role="status" aria-label="Editing status" aria-live="polite">{buffer.editorStatus}</p>
   {#if density.mode === 'review'}
+    <GraphPane
+      onOpenPath={onOpenFile}
+      onOpenNode={onOpenGraphNode}
+      onImpact={onImpact}
+      onExport={onExportGraph}
+    />
     <PublicationPane onRunPlan={onRunPlan} onVerifyProof={onVerifyProof} />
   {/if}
 </section>

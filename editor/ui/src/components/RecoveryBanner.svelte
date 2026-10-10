@@ -23,7 +23,7 @@
         <li>
           <span>{snapshot.path}</span>
           <button type="button" onclick={() => onRestore(snapshot)}>Restore {snapshot.path}</button>
-          <button type="button" onclick={() => onDiscard(snapshot.path)}>Discard recovery for {snapshot.path}</button>
+          <button type="button" class="danger" onclick={() => onDiscard(snapshot.path)}>Discard recovery for {snapshot.path}</button>
         </li>
       {/each}
     </ul>

@@ -15,6 +15,9 @@ import { graph, activeNode } from './graph.svelte';
 export const problems = $state({
   result: null as CommandResult | null,
   status: 'No Boris command has run yet.',
+  // True when the host refused or failed the last command request itself (not
+  // a Boris exit code), so the status line can carry the error tone.
+  runError: false,
   running: false,
   // Which allowlisted command is in flight, so the action hierarchy can put
   // its busy affordance on the button that was actually pressed (#991).
@@ -182,5 +185,6 @@ export async function refreshValidate() {
   });
   if (!result.response.ok) return;
   problems.result = result.data as CommandResult;
+  problems.runError = false;
   problems.status = `Validation updated from the daemon: ${failureLabel(problems.result.failure_class, problems.result.exit_code)}. (${elapsedLabel(started)})`;
 }

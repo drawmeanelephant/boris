@@ -9,6 +9,18 @@
   // writing surface. Review mode renders the same content expanded.
   let { collapsed = false }: { collapsed?: boolean } = $props();
 
+  // Frontmatter keys and status values come from the embedded schema; every
+  // other category needs a Boris completion index, so an empty list says why
+  // using the host-reported completion status rather than a guess.
+  const SCHEMA_KINDS: CompletionKind[] = ['frontmatter_key', 'status'];
+  const emptyReason = $derived(
+    SCHEMA_KINDS.includes(authoring.completionKind) || authoring.payload?.completion
+      ? `No ${authoring.completionKind.replaceAll('_', ' ')} suggestions match.`
+      : authoring.payload?.completion_status === 'unsupported'
+        ? 'completion.json is stale or unsupported. Build diagnostics to replace it.'
+        : 'This category comes from completion.json. Build diagnostics to create it.'
+  );
+
   // The completion combobox owns its keyboard behavior: Esc closes the list,
   // the arrows move the active suggestion, Enter inserts it. Focus and input
   // always reopen the list after an Esc close.
@@ -39,7 +51,7 @@
       <h3 id="authoring-heading">Boris authoring hints</h3>
       <p>{authoring.status}</p>
     </div>
-    <button type="button" onclick={refreshAuthoring}>Refresh Boris suggestions</button>
+    <button type="button" class="ghost" onclick={refreshAuthoring}>Refresh Boris suggestions</button>
   </div>
   <div class="completion-controls">
     <div>
@@ -102,9 +114,11 @@
         </li>
       {/each}
     </ul>
+  {:else if authoring.completionOpen && authoring.payload}
+    <p class="empty-state">{emptyReason}</p>
   {/if}
   {#if authoring.payload}
-    <details>
+    <details class="disclosure">
       <summary>Frontmatter field bounds from Boris schema</summary>
       <dl>
         {#each Object.entries(authoring.payload.frontmatter_schema.properties) as [field, property]}
@@ -117,14 +131,14 @@
 {/snippet}
 
 {#if collapsed}
-  <details class="authoring-tools authoring-collapse">
+  <details class="subpane authoring-tools authoring-collapse">
     <summary>Boris authoring hints</summary>
     <div class="authoring-collapse-body">
       {@render tools()}
     </div>
   </details>
 {:else}
-  <aside class="authoring-tools" aria-labelledby="authoring-heading">
+  <aside class="subpane authoring-tools" aria-labelledby="authoring-heading">
     {@render tools()}
   </aside>
 {/if}

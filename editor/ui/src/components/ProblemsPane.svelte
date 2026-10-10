@@ -1,12 +1,14 @@
 <script lang="ts">
   import { fade } from 'svelte/transition';
-  import { prefersReducedMotion } from 'svelte/motion';
+  import { motionMs } from '../lib/motion';
   import type { CommandMode, Problem } from '../lib/types';
   import {
     failureLabel,
     problemLocationLabel,
     packetCopyLabel,
     packetCopyKey,
+    severityTone,
+    stateTone,
     validationStatusLabel,
     validationCycleLabel
   } from '../lib/utils';
@@ -29,31 +31,39 @@
   function running(mode: CommandMode): boolean {
     return problems.running && problems.runningMode === mode;
   }
+
+  const validationLabel = $derived(validationStatusLabel(problems.validateState));
 </script>
 
-<section id="problems" class="problems-pane" tabindex="-1" aria-labelledby="problems-heading">
+<section id="problems" class="pane problems-pane" tabindex="-1" aria-labelledby="problems-heading">
   <div class="pane-heading">
     <div>
       <h2 id="problems-heading">Problems</h2>
       <p>Every result below comes from the Boris CLI or one of its published artifacts.</p>
     </div>
     {#if problems.result}
-      <p class:failure={problems.result.failure_class !== 'success'} class="command-result">
+      <p class="command-result badge" data-tone={problems.result.failure_class === 'success' ? 'ok' : 'danger'}>
         {failureLabel(problems.result.failure_class, problems.result.exit_code)}
       </p>
     {/if}
   </div>
   {#if connection.validateDaemon}
     <div class="validation-state-line">
-      <p class="validation-state" role="status" aria-label="Validation state" aria-live="polite">{validationStatusLabel(problems.validateState)}</p>
+      <p class="validation-state" class:status-text={validationLabel !== ''} data-tone={stateTone(problems.validateState?.state)} role="status" aria-label="Validation state" aria-live="polite">{validationLabel}</p>
       <span class="validation-meta" aria-label="Validation cycle and report age">{validationCycleLabel(problems.validateState)}</span>
     </div>
   {/if}
-  {#if problemsNotice().text}
-    <p class="problems-notice" role="status" aria-label="Problems notice" aria-live="polite">{problemsNotice().text}</p>
+  {#if !connection.loaded}
+    {#if connection.phase === 'connecting'}
+      <p class="empty-state is-loading">Connecting to the local host…</p>
+    {:else}
+      <p class="notice" data-tone="danger">Diagnostics are unavailable until the editor host connects. {connection.status}</p>
+    {/if}
+  {:else if problemsNotice().text}
+    <p class="problems-notice notice" data-tone={problemsNotice().clean ? 'ok' : 'neutral'} role="status" aria-label="Problems notice" aria-live="polite">{problemsNotice().text}</p>
   {/if}
   {#if dirty() && ((problems.result?.problems.length ?? 0) > 0 || problemsNotice().clean)}
-    <p class="warning-text">Problems reflect saved files; the open buffer has unsaved changes.</p>
+    <p class="notice" data-tone="warn">Problems reflect saved files; the open buffer has unsaved changes.</p>
   {/if}
   <div class="command-bar" aria-label="Boris commands" aria-busy={problems.running}>
     <!-- Primary vs secondary action hierarchy (#991): the commands an author
@@ -84,12 +94,14 @@
     <ActionGroup label="Analysis" tone="secondary">
       <button
         type="button"
+        class="ghost"
         class:is-running={running('check')}
         aria-busy={running('check')}
         disabled={problems.running}
         onclick={() => onRunCommand('check')}>Check graph</button>
       <button
         type="button"
+        class="ghost"
         class:is-running={running('proof_verify')}
         aria-busy={running('proof_verify')}
         disabled={problems.running}
@@ -98,10 +110,11 @@
   </div>
   <div class="impact-command">
     <label for="impact-id">Impact entity or source endpoint</label>
-    <div>
+    <div class="field-row">
       <input id="impact-id" value={problems.impactId} disabled={problems.running} oninput={(e) => (problems.impactId = (e.currentTarget as HTMLInputElement).value)} />
       <button
         type="button"
+        class="ghost"
         class:is-running={running('impact')}
         aria-busy={running('impact')}
         disabled={problems.running}
@@ -109,25 +122,25 @@
     </div>
   </div>
   {#if dirty()}
-    <p class="warning-text">Boris commands read repository files from disk. Choose Save &amp; run or Discard &amp; run to resolve the unsaved buffer.</p>
+    <p class="notice" data-tone="warn">Boris commands read repository files from disk. Choose Save &amp; run or Discard &amp; run to resolve the unsaved buffer.</p>
   {/if}
-  <p role="status" aria-label="Boris command status" aria-live="polite">{problems.status}</p>
+  <p class="command-status" class:notice={problems.runError} data-tone={problems.runError ? 'danger' : undefined} role="status" aria-label="Boris command status" aria-live="polite">{problems.status}</p>
   {#if problems.result?.used_stderr_fallback}
-    <p class="fallback-notice">Machine-readable diagnostics were unavailable for this command. Boris stderr was used; reported source positions are labeled best-effort.</p>
+    <p class="notice" data-tone="warn">Machine-readable diagnostics were unavailable for this command. Boris stderr was used; reported source positions are labeled best-effort.</p>
   {/if}
   {#if problems.result && problems.result.problems.length === 0 && !problemsNotice().text}
-    <p>No Boris diagnostics were reported by the last command.</p>
+    <p class="empty-state">No Boris diagnostics were reported by the last command.</p>
   {/if}
   <div class="problem-groups" aria-label="Boris diagnostic groups">
     {#each problemGroups() as group, groupIndex (group.key)}
-      <section class="problem-group" aria-labelledby="problem-group-{groupIndex}" in:fade={{ duration: prefersReducedMotion.current ? 0 : 150 }}>
+      <section class="problem-group" data-tone={severityTone(group.problems[0]?.severity)} aria-labelledby="problem-group-{groupIndex}" in:fade={{ duration: motionMs('fast') }}>
         <h3 id="problem-group-{groupIndex}">{group.label}</h3>
         <ul>
           {#each group.problems as problem}
             <li class="problem-card">
               <p>{problem.message}</p>
               {#if staleProblems().has(problem)}
-                <p class="warning-text">Possibly stale — the open buffer changed this region since the report.</p>
+                <p class="notice" data-tone="warn">Possibly stale — the open buffer changed this region since the report.</p>
               {/if}
               {#if problem.remediation}<p><strong>Remediation:</strong> {problem.remediation}</p>{/if}
               <p class="confidence">
@@ -139,7 +152,7 @@
                       : 'Best-effort source position')
                     : 'No source position reported'}
               </p>
-              <div class="problem-actions">
+              <div class="problem-actions toolbar">
                 {#if problem.source_path}
                   <button type="button" onclick={() => onNavigate(problem)}>Go to {problemLocationLabel(problem)}</button>
                 {/if}
@@ -152,13 +165,13 @@
     {/each}
   </div>
   {#if problems.result?.proof_report}
-    <section class="analysis-results" aria-labelledby="proof-report-heading">
+    <section class="subpane analysis-results" aria-labelledby="proof-report-heading">
       <h3 id="proof-report-heading">Proof verify report</h3>
       <ReportBlock summary="proof verify report" report={problems.result.proof_report} />
     </section>
   {/if}
     {#if problems.result && problems.result.findings.length > 0}
-      <section class="analysis-results" aria-labelledby="analysis-findings-heading">
+      <section class="subpane analysis-results" aria-labelledby="analysis-findings-heading">
         <h3 id="analysis-findings-heading">Analysis findings</h3>
         <ul>
           {#each problems.result.findings as finding}
@@ -173,7 +186,7 @@
       </section>
     {/if}
     {#if problems.result?.mode === 'impact' && problems.result.impact.length > 0}
-      <section class="analysis-results" aria-labelledby="impact-results-heading">
+      <section class="subpane analysis-results" aria-labelledby="impact-results-heading">
         <h3 id="impact-results-heading">Impact results</h3>
         <ul>
           {#each problems.result.impact as endpoint}

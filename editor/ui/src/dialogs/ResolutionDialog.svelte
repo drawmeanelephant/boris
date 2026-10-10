@@ -22,7 +22,7 @@
 <dialog bind:this={dialog} onkeydown={onKeydown} onclose={onClose} aria-labelledby="resolution-heading">
   <h2 id="resolution-heading">Unsaved changes in {buffer.activePath}</h2>
   <p>{resolutionPrompt()}</p>
-  <div class="dialog-actions">
+  <div class="dialog-actions toolbar">
     <button type="button" aria-keyshortcuts="Escape" onclick={onCancel}>Cancel<kbd aria-hidden="true">Esc</kbd></button>
     <button type="button" aria-keyshortcuts="Alt+D" onclick={onDiscard}>Discard &amp; {resolutionVerb()}<kbd aria-hidden="true">Alt+D</kbd></button>
     <button type="button" class="primary" aria-keyshortcuts="Alt+S" onclick={onSave}>Save &amp; {resolutionVerb()}<kbd aria-hidden="true">Alt+S</kbd></button>

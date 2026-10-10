@@ -3,6 +3,8 @@
   import { buffer } from '../lib/state/buffer.svelte';
   import { graph, activeNode, parentNode, graphChildren, graphSiblings, graphOutgoing, graphBacklinks, graphRelations, bufferWikiLinks, setGraphExportFormat, copyGraphDocument, downloadGraphDocument } from '../lib/state/graph.svelte';
   import { problems } from '../lib/state/problems.svelte';
+  import { connection } from '../lib/state/connection.svelte';
+  import type { Tone } from '../lib/utils';
   import GraphMap from './GraphMap.svelte';
 
   let {
@@ -28,6 +30,14 @@
   const wikiLinks = $derived(bufferWikiLinks());
   const mapDocument = $derived(graph.payload?.graph ?? null);
   const exportReady = $derived(graph.payload?.graph_status === 'ready');
+  // A ready graph needs no callout; every other artifact state is designed.
+  const statusTone = $derived<Tone | undefined>(
+    !graph.payload
+      ? connection.phase === 'connecting' ? 'busy' : 'danger'
+      : graph.payload.graph_status === 'unsupported' ? 'warn'
+        : graph.payload.graph_status === 'build_required' ? 'neutral'
+          : undefined
+  );
 
   function nodeForIdLocal(id: string): GraphNode | null {
     if (!graph.payload?.graph) return null;
@@ -35,13 +45,13 @@
   }
 </script>
 
-<section id="graph" class="graph-pane" tabindex="-1" aria-labelledby="graph-heading">
+<section id="graph" class="subpane graph-pane" tabindex="-1" aria-labelledby="graph-heading">
   <div class="pane-heading">
     <div>
       <h3 id="graph-heading">Graph</h3>
       <p>Read-only view of Boris <code>graph.json</code> and <code>completion.json</code>.</p>
     </div>
-    <div class="graph-export" aria-label="Graph export">
+    <div class="graph-export toolbar" aria-label="Graph export">
       <label for="graph-export-format">Export format</label>
       <select
         id="graph-export-format"
@@ -55,12 +65,12 @@
       <button type="button" disabled={problems.running || !exportReady} onclick={onExport}>Export graph</button>
     </div>
   </div>
-  <p role="status" aria-label="Graph status" aria-live="polite">{graph.status}</p>
+  <p class="pane-status" class:notice={statusTone !== undefined} data-tone={statusTone} role="status" aria-label="Graph status" aria-live="polite">{graph.status}</p>
   {#if graph.document}
     <div class="graph-export-document">
       <label for="graph-export-document">Exported {graph.exportFormat === 'dot' ? 'Graphviz DOT' : 'Mermaid'}</label>
       <textarea id="graph-export-document" readonly value={graph.document}></textarea>
-      <div class="graph-actions">
+      <div class="graph-actions toolbar">
         <button type="button" onclick={() => void copyGraphDocument()}>{graph.copied ? 'Copied!' : 'Copy export'}</button>
         <button type="button" onclick={downloadGraphDocument}>Download export</button>
       </div>
@@ -71,7 +81,7 @@
   {/if}
   {#if node}
     <p class="graph-current">{node.id}{node.title ? ` · ${node.title}` : ''} · {node.role}{node.status ? ` · ${node.status}` : ''}</p>
-    <div class="graph-actions" aria-label="Graph navigation">
+    <div class="graph-actions toolbar" aria-label="Graph navigation">
       {#if parent}
         <button type="button" onclick={() => onOpenNode(parent)}>Go to parent {parent.id}</button>
       {/if}
@@ -79,43 +89,43 @@
     </div>
     {#if children.length > 0}
       <h4>Children</h4>
-      <ul class="graph-links">
+      <ul class="graph-links row-list">
         {#each children as link (link.path)}
-          <li><button type="button" onclick={() => onOpenPath(link.path)}>Go to child {link.label}</button></li>
+          <li><button type="button" class="row-button" onclick={() => onOpenPath(link.path)}>Go to child {link.label}</button></li>
         {/each}
       </ul>
     {/if}
     {#if siblings.length > 0}
       <h4>Siblings</h4>
-      <ul class="graph-links">
+      <ul class="graph-links row-list">
         {#each siblings as link (link.path)}
-          <li><button type="button" onclick={() => onOpenPath(link.path)}>Go to sibling {link.label}</button></li>
+          <li><button type="button" class="row-button" onclick={() => onOpenPath(link.path)}>Go to sibling {link.label}</button></li>
         {/each}
       </ul>
     {/if}
     {#if outgoing.length > 0}
       <h4>Outgoing references and includes</h4>
-      <ul class="graph-links">
+      <ul class="graph-links row-list">
         {#each outgoing as link (`${link.kind}:${link.path}`)}
-          <li><button type="button" onclick={() => onOpenPath(link.path)}>Go to {link.label}</button></li>
+          <li><button type="button" class="row-button" onclick={() => onOpenPath(link.path)}>Go to {link.label}</button></li>
         {/each}
       </ul>
     {/if}
     {#if backlinks.length > 0}
       <h4>Backlinks</h4>
-      <ul class="graph-links">
+      <ul class="graph-links row-list">
         {#each backlinks as link (`back:${link.kind}:${link.path}`)}
-          <li><button type="button" onclick={() => onOpenPath(link.path)}>Go to backlink {link.label}</button></li>
+          <li><button type="button" class="row-button" onclick={() => onOpenPath(link.path)}>Go to backlink {link.label}</button></li>
         {/each}
       </ul>
     {/if}
     {#if relations.length > 0}
       <h4>Relations from completion.json</h4>
-      <ul class="graph-links">
+      <ul class="graph-links row-list">
         {#each relations as relation (`${relation.kind}:${relation.target}`)}
           <li>
             {#if nodeForIdLocal(relation.target)}
-              <button type="button" onclick={() => onOpenNode(nodeForIdLocal(relation.target))}>
+              <button type="button" class="row-button" onclick={() => onOpenNode(nodeForIdLocal(relation.target))}>
                 Go to {relation.kind} {relation.target}
               </button>
             {:else}
@@ -127,11 +137,11 @@
     {/if}
     {#if wikiLinks.length > 0}
       <h4>Wiki links in this buffer</h4>
-      <ul class="graph-links">
+      <ul class="graph-links row-list">
         {#each wikiLinks as link (link.id)}
           <li>
             {#if link.node}
-              <button type="button" onclick={() => onOpenNode(link.node)}>Go to wiki link {link.id}</button>
+              <button type="button" class="row-button" onclick={() => onOpenNode(link.node)}>Go to wiki link {link.id}</button>
             {:else}
               <span>Unresolved wiki link {link.id}</span>
             {/if}
@@ -141,9 +151,9 @@
     {/if}
   {:else if graph.payload?.graph}
     {#if buffer.activePath}
-      <p>This file is not a page in the Boris graph.</p>
+      <p class="empty-state">This file is not a page in the Boris graph.</p>
     {:else}
-      <p>Select a node to open a page, or pick a file from Project files.</p>
+      <p class="empty-state">Select a node to open a page, or pick a file from Project files.</p>
     {/if}
   {/if}
 </section>

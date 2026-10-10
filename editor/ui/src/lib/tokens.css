@@ -61,7 +61,7 @@
   --color-backdrop: rgba(16, 37, 29, 0.78);
   /* Focus writing aids: the paragraph-dimming veil. */
   --focus-zen-underlay: rgba(28, 47, 38, 0.55);
-  --kbd-on-accent-bg: #eaf3ee;
+  --kbd-on-accent-bg: #0d3a2b;
   --header-chip-border: rgba(249, 255, 248, 0.45);
   --header-chip-bg: transparent;
   --header-chip-bg-hover: rgba(249, 255, 248, 0.14);
@@ -162,6 +162,8 @@
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --motion-slow: 260ms;
+  --motion-spin: 800ms;   /* one turn of the in-button busy ring */
+  --motion-pulse: 1500ms; /* the section-arrival attention pulse */
   --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
 
   /* --- component-facing aliases --- */
