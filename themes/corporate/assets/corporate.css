@@ -558,10 +558,29 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
 .skip-link:focus { top: 1rem; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+[id] { scroll-margin-top: calc(var(--header-height) + var(--spacing-md)); }
+.site-search__results:not(:empty) { display: block; }
 .page-metadata { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0 0 1.2rem; color: var(--color-on-surface-variant); font-size: 0.82rem; }
 .page-metadata dt { font-weight: 700; }
 .page-metadata dd { margin: 0; }
 .page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; }
+.boris-content a, .graph-links a { color: var(--color-primary); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.16em; }
+.boris-content a:hover, .graph-links a:hover { text-decoration-thickness: 2px; }
+.graph-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: var(--spacing-md); margin-top: var(--spacing-xl); }
+.graph-links:empty { display: none; }
+.graph-links .semantic-relations, .graph-links .semantic-backlinks { margin: 0; padding: var(--spacing-md) var(--spacing-lg); border: 1px solid var(--color-outline-variant); border-radius: var(--radius-lg); background-color: var(--color-surface-container-lowest); }
+.semantic-relations::before, .semantic-backlinks::before { display: block; margin-bottom: var(--spacing-sm); color: var(--color-primary); font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
+.semantic-relations::before { content: "Related articles"; content: "Related articles" / ""; }
+.semantic-backlinks::before { content: "Referenced by"; content: "Referenced by" / ""; }
+.semantic-relations ul, .semantic-backlinks ul { list-style: none; display: flex; flex-direction: column; gap: var(--spacing-sm); }
+.semantic-relations li, .semantic-backlinks li { display: flex; flex-direction: column; font-size: 14px; font-weight: 600; }
+.semantic-relations li::before, .semantic-backlinks li::before { color: var(--color-on-surface-variant); font-size: 12px; font-weight: 400; }
+.semantic-backlinks li::before { order: 1; }
+[data-relation-kind]::before { content: attr(data-relation-kind); }
+[data-relation-kind="relates_to"]::before { content: "relates to"; }
+[data-relation-kind="depends_on"]::before { content: "depends on"; }
+[data-relation-kind="implements"]::before { content: "implements"; }
+[data-relation-kind="supersedes"]::before { content: "supersedes"; }
 .page-toc ul { margin: 0; padding-left: 1rem; }
 .page-toc__l2 { padding-inline-start: 0.6rem; }
 .page-toc__l3 { padding-inline-start: 1.1rem; }
@@ -573,4 +592,23 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
 .details { margin: 1.2rem 0; }
 .site-footer { padding: 1rem var(--spacing-lg); border-top: 1px solid var(--color-outline-variant); color: var(--color-on-surface-variant); font-size: 0.85rem; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-@media print { .skip-link, .header, .sidebar, .toc-sidebar, .search-container { display: none; } .main-wrapper { display: block; margin: 0; } }
+@media print {
+    @page { margin: 1.6cm 1.8cm; }
+    .skip-link, .header, .sidebar, .toc-sidebar, .search-container, .site-footer,
+    .breadcrumb, .page-metadata, .page-children, .graph-links { display: none !important; }
+    .app-container { display: block; min-height: 0; }
+    .main-wrapper { display: block; margin: 0; max-width: none; }
+    .content-area { max-width: none; padding: 0; }
+    body { background: #fff; color: #000; font-size: 11pt; line-height: 1.45; }
+    h1 { font-size: 22pt; margin-bottom: 6pt; }
+    h2 { font-size: 13pt; margin-top: 14pt; margin-bottom: 6pt; padding-bottom: 2pt; border-bottom-color: #000; }
+    h3 { font-size: 11.5pt; margin-top: 8pt; margin-bottom: 2pt; }
+    h1, h2, h3 { color: #000; break-after: avoid; page-break-after: avoid; }
+    p, li, blockquote, pre, table, .admonition { break-inside: avoid; page-break-inside: avoid; }
+    p { margin-bottom: 6pt; }
+    .boris-content ul, .boris-content ol { margin: 0 0 6pt; padding-left: 1.3em; }
+    .boris-content a { color: #000; }
+    .boris-content a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 9pt; word-break: break-all; }
+    .code-block, pre { background: #fff; color: #000; border: 1px solid #999; box-shadow: none; white-space: pre-wrap; }
+    .admonition { background: #fff; }
+}
