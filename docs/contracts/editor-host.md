@@ -708,7 +708,7 @@ used_stderr_fallback, message, preview_url, watch_active, stale_reason}`, and a
 | `idle` | No `dist/index.html` exists yet — nothing to frame |
 | `running` | A rebuild is in flight |
 | `success` | The rebuild succeeded; `generation` advanced |
-| `failed` | The rebuild failed and no valid output exists |
+| `failed` | The rebuild failed and no valid output exists — including a Boris process that exited `0` without producing `dist/index.html` (`exit_code` stays `0`, `stale_reason` stays `null`, `message` names the missing output) |
 | `stale` | Output exists from an earlier build, a failed rebuild, or a `dist/` tree that was already on disk when the editor started; `stale_reason` names which |
 
 If `dist/index.html` is present when the host process starts, the first
@@ -731,9 +731,18 @@ is also `null`.
 `generation` advances **only** on success, so the shell can reload the iframe
 exactly once per successful build. On failure `message` is the last
 `error:`/`warning:` line of Boris's stderr with any private project path
-removed, and `used_stderr_fallback` says the failure is being reported from
-stderr. `preview_url` is the tokened `http://127.0.0.1:<preview port>/` URL the
-shell must frame (see §3.4 for the CSP form).
+removed — or, when Boris exited `0` without producing `dist/index.html`, a
+message naming the missing output — and `used_stderr_fallback` says the
+failure is being reported from stderr. `preview_url` is the tokened
+`http://127.0.0.1:<preview port>/` URL the shell must frame (see §3.4 for the
+CSP form).
+
+`POST /api/preview/rebuild` always lands on a terminal phase in its `200`
+state payload: a rebuild that cannot produce output reports `failed` or
+`stale` rather than an API error, so `running` is only ever observed between
+a request's start and its response — a non-`200` response means the rebuild
+was refused (`watch_daemon_active`) or the request itself failed, never that
+the host is still building.
 
 **Open reconciliation.** The compiler's own dev server and this origin now
 overlap on serve-and-reload. They differ in posture: the preview origin
