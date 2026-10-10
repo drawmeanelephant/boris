@@ -25,6 +25,13 @@
       ]
     },
     {
+      "path": "guides/title-element.html",
+      "title": "Title element fallback",
+      "sections": [
+        {"level": 0, "heading": "", "fragment": "", "text": "No heading on this page.", "code": ""}
+      ]
+    },
+    {
       "path": "guides/title-override.html",
       "title": "Override title from h2",
       "sections": [

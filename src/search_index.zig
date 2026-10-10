@@ -330,7 +330,13 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
         var ti: usize = 0;
         while (ti < html.len) {
             const s = std.mem.indexOfScalarPos(u8, html, ti, '<') orelse break;
-            const t = tagAt(html, s) orelse break;
+            // `<!doctype html>` (and any other `<` that is not a tag) must be
+            // skipped, not end the scan, or the fallback never reaches
+            // `<title>` on a real rendered page.
+            const t = tagAt(html, s) orelse {
+                ti = s + 1;
+                continue;
+            };
             if (!t.closing and std.ascii.eqlIgnoreCase(t.name, "title")) if (matchingRange(html, s, "title")) |r| {
                 title = try decodeNormalize(a, html[r.start..r.end]);
                 break;
@@ -808,6 +814,23 @@ test "title fallback and heading fragments decode entities" {
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expectEqualStrings("Foo & Bar", d.title);
     try std.testing.expectEqualStrings("a&b", d.sections[0].fragment);
+}
+
+test "title element fallback is reached past a leading doctype" {
+    // Every rendered Boris page starts with `<!doctype html>`; the fallback
+    // scan used to stop there and fall through to the path.
+    const html = "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Home Page &amp; Co</title></head>" ++
+        "<body><main data-boris-search-root><p>Just a paragraph.</p></main></body></html>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("Home Page & Co", d.title);
+}
+
+test "title falls back to path when no heading or title element exists" {
+    const html = "<!doctype html><html><body><main data-boris-search-root><p>Body.</p></main></body></html>";
+    const d = try indexHtml(std.testing.allocator, "guides/a.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("guides/a.html", d.title);
 }
 
 // #881: the data-boris-search-title extraction marker is contract behavior

@@ -134,7 +134,9 @@ any `h1`–`h6` carrying a `data-boris-search-title` attribute with a value
 (the value itself is ignored; a bare valueless attribute is not recognized)
 sets the `title` to that heading's normalized text when the heading closes,
 and the last marked heading in document order wins; otherwise the first
-`h1`'s text, then the `<title>` element, then the canonical `path`.
+`h1`'s text, then the first `<title>` element in the document (the scan
+skips a leading `<!doctype>` and any other non-tag `<`), then the canonical
+`path`.
 Sections, headings, and fragments are unaffected; only the `title` field
 changes.
 

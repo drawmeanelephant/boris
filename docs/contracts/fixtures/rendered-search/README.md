@@ -12,6 +12,7 @@ compiler metadata exclusion alongside searchable definition-list boundaries.
 |---|---|---|
 | `site/` + `expected/search-index.json` | Nested-site golden | Exact byte-for-byte v1 output |
 | `site/guides/title-override.html` | Marked `h2` overrides `h1` as document `title` (#881) | Golden `title` = marked heading text |
+| `site/guides/title-element.html` | No heading: doctype-led page falls back to `<title>` | Golden `title` = `<title>` text, not the path |
 | `site/guides/definition-list.html` | Compiler metadata is chrome; authored `<dl>` remains searchable | Metadata is absent and `dt`/`dd` values are separated |
 | `malformed/pages-file.txt` | `.` / `..` page-list components | Reject with `InvalidPath`; publish no replacement |
 | `malformed/missing-root.html` | Required marker absent | Reject with `MissingSearchRoot` when marker mode is enabled |
