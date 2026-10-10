@@ -607,7 +607,8 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
     p, li, blockquote, pre, table, .admonition { break-inside: avoid; page-break-inside: avoid; }
     p { margin-bottom: 6pt; }
     .boris-content ul, .boris-content ol { margin: 0 0 6pt; padding-left: 1.3em; }
-    .boris-content a { color: #000; }
+    html, .app-container, .main-wrapper, .content-area { background: #fff; }
+    .boris-content a { color: #000; text-decoration: underline; }
     .boris-content a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 9pt; word-break: break-all; }
     .code-block, pre { background: #fff; color: #000; border: 1px solid #999; box-shadow: none; white-space: pre-wrap; }
     .admonition { background: #fff; }
