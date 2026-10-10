@@ -79,7 +79,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       <button type="button" disabled={problems.running} onclick={onScale}>Scale recipe</button>
       <button type="button" disabled={scaleView === null} onclick={onReset}>Reset scale</button>
     </div>
-    <h4>Ingredients</h4>
+    <h4 class="group-label">Ingredients</h4>
     <table class="recipe-table">
       <thead><tr><th>Name</th><th>Quantity</th><th>Preparation</th><th>Recipe reference</th></tr></thead>
       <tbody>
@@ -103,7 +103,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
         {/each}
       </tbody>
     </table>
-    <h4>Cookware</h4>
+    <h4 class="group-label">Cookware</h4>
     <table class="recipe-table">
       <thead><tr><th>Name</th><th>Quantity</th></tr></thead>
       <tbody>
@@ -112,7 +112,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
         {/each}
       </tbody>
     </table>
-    <h4>Timers</h4>
+    <h4 class="group-label">Timers</h4>
     <table class="recipe-table">
       <thead><tr><th>Name</th><th>Quantity</th></tr></thead>
       <tbody>

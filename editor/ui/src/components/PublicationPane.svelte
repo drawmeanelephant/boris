@@ -61,7 +61,7 @@
   {/if}
   {#if publication.lastPlan}
     {@const plan = publication.lastPlan}
-    <h4>Normalized plan</h4>
+    <h3 class="group-label">Normalized plan</h3>
     <p>This JSON is a static declaration. Success here means only that Boris validated the profile. It is not proof, evidence, or a deployed site.</p>
     <dl>
       <div><dt>Input</dt><dd>{plan.input} · {plan.input_format}</dd></div>
@@ -76,7 +76,7 @@
       {/if}
     </dl>
     {#if plan.targets.length > 0}
-      <h4>Targets</h4>
+      <h3 class="group-label">Targets</h3>
       <ul class="graph-links row-list">
         {#each plan.targets as target (target.name)}
           <li>{target.name} → {target.output}{target.public ? ' · public' : ''}{target.theme ? ` · ${target.theme}` : ''}{target.layout ? ` · ${target.layout}` : ''}</li>
@@ -93,7 +93,7 @@
   {/if}
   {#if payload?.proof}
     {@const proof = payload.proof}
-    <h4>Local evidence</h4>
+    <h3 class="group-label">Local evidence</h3>
     <p>The Proof Pack at <code>{proof.path}</code> is target-local presentation of committed artifacts, checks, and claims. It does not verify a deployed site.</p>
     <dl>
       <div><dt>Target</dt><dd>{proof.target}</dd></div>
@@ -105,7 +105,7 @@
     <p class="empty-state">No local Proof Pack at <code>dist/_boris/proof/proof-pack.json</code> yet. Build HTML to produce evidence; that still is not a deploy.</p>
   {/if}
   {#if publication.lastProofReport}
-    <h4>Proof verify report</h4>
+    <h3 class="group-label">Proof verify report</h3>
     <p>This is the contracted <code>boris proof verify</code> stderr. Exit class is in Problems; the editor does not invent pass or fail.</p>
     <ReportBlock summary="proof verify report" report={publication.lastProofReport} />
   {/if}
