@@ -31,7 +31,7 @@
     {#if closedLayoutSlots().length === 0}
       <p class="empty-state">Build diagnostics to load the closed layout-slot vocabulary.</p>
     {:else}
-      <h4>Slots in this layout</h4>
+      <h4 class="group-label">Slots in this layout</h4>
       {#if layoutSlotsInBuffer.length === 0}
         <p class="empty-state">None of the closed slots appear in this file yet.</p>
       {:else}
@@ -42,7 +42,7 @@
         </ul>
       {/if}
       {#if layoutSlotsMissing.length > 0}
-        <h4>Closed slots not in this file</h4>
+        <h4 class="group-label">Closed slots not in this file</h4>
         <ul class="graph-links row-list">
           {#each layoutSlotsMissing as slot (slot)}
             <li>Absent: <code>{'{{' + slot + '}}'}</code></li>
@@ -51,7 +51,7 @@
       {/if}
     {/if}
     {#if themeAssets().length > 0}
-      <h4>Theme assets</h4>
+      <h4 class="group-label">Theme assets</h4>
       <ul class="graph-links row-list">
         {#each themeAssets() as asset (asset.path)}
           <li><button type="button" class="row-button" onclick={() => onOpenFile(asset.path)}>Open {asset.path}</button></li>
@@ -59,7 +59,7 @@
       </ul>
     {/if}
     {#if layoutSelections().length > 0}
-      <h4>Layout selection from the last HTML report</h4>
+      <h4 class="group-label">Layout selection from the last HTML report</h4>
       <ul class="graph-links row-list">
         {#each layoutSelections() as problem}
           <li>

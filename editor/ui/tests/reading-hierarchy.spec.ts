@@ -48,7 +48,20 @@ const PROBLEM = {
   packet: '{"code":"EFRONTMATTER"}'
 };
 
-async function installApi(page: Page, mode: 'author' | 'review' = 'review') {
+type InstallOptions = {
+  /** Buffer content returned by /api/files/open for any path. */
+  content?: string;
+  /** /api/graph body; defaults to build_required with no document. */
+  graph?: Record<string, unknown>;
+  /** /api/authoring body; defaults to a schema with no completion index. */
+  authoring?: Record<string, unknown>;
+  /** /api/publication body; defaults to one profile and no Proof Pack. */
+  publication?: Record<string, unknown>;
+  /** /api/commands/run bodies keyed by request mode; other modes validate. */
+  commands?: Record<string, Record<string, unknown>>;
+};
+
+async function installApi(page: Page, mode: 'author' | 'review' = 'review', options: InstallOptions = {}) {
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ status: 'ok', editor_id: 'boris-editor/0.1.0', project: { content: true, default_layout: true, publication_profile: true, input_mode: 'markdown' } })
@@ -68,33 +81,39 @@ async function installApi(page: Page, mode: 'author' | 'review' = 'review') {
       contentType: 'application/json',
       body: JSON.stringify({
         status: 'opened', path,
-        content: '---\nid: index\ntitle: Home\nparent: null\nstatus: published\n---\n\n# Home\n\nBody.\n',
+        content: options.content ?? '---\nid: index\ntitle: Home\nparent: null\nstatus: published\n---\n\n# Home\n\nBody.\n',
         fingerprint: 'a'.repeat(64), read_only: false
       })
     });
   });
-  await page.route('**/api/commands/run', route => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify({
-      mode: 'validate', exit_code: 1, failure_class: 'content', compiler_id: 'boris/0.8.2',
-      report_version: 'html-build-report-0.2.0', used_stderr_fallback: false,
-      problems: [PROBLEM], findings: [], impact: []
-    })
-  }));
+  await page.route('**/api/commands/run', async route => {
+    const { mode: commandMode } = route.request().postDataJSON() as { mode: string };
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(options.commands?.[commandMode] ?? {
+        mode: 'validate', exit_code: 1, failure_class: 'content', compiler_id: 'boris/0.8.2',
+        report_version: 'html-build-report-0.2.0', used_stderr_fallback: false,
+        problems: [PROBLEM], findings: [], impact: []
+      })
+    });
+  });
   await page.route('**/api/validate-state', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ supported: true, state: 'failed', cycle: 3, failure_class: 'content', problems_count: 1, report_age_ms: 1200 })
   }));
   await page.route('**/api/authoring', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({
+    body: JSON.stringify(options.authoring ?? {
       frontmatter_schema: { title: 'Boris frontmatter grammar (schema v1)', properties: { id: { type: 'string' }, title: { type: 'string' } } },
       completion: null, completion_status: 'build_required'
     })
   }));
-  await page.route('**/api/graph', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ graph: null, graph_status: 'build_required' }) }));
+  await page.route('**/api/graph', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(options.graph ?? { graph: null, graph_status: 'build_required' })
+  }));
   await page.route('**/api/publication', route => route.fulfill({
-    contentType: 'application/json', body: JSON.stringify({ profiles: [{ path: 'boris.json' }], proof: null })
+    contentType: 'application/json', body: JSON.stringify(options.publication ?? { profiles: [{ path: 'boris.json' }], proof: null })
   }));
   await page.route('**/api/preview/state', route => route.fulfill({
     contentType: 'application/json',
@@ -247,6 +266,126 @@ for (const mode of ['author', 'review'] as const) {
     expect(collisions, `two levels render at one size in ${mode} density: ${JSON.stringify(collisions)}`).toEqual([]);
   });
 }
+
+// #1077: a pane's heading outline must never skip a level — a screen
+// reader's heading walk reads h2 → h3 → h4 in order, so a group label
+// directly under a pane title is an h3 (`.group-label` keeps the label look
+// at either level, so no new size enters the type chain) while one inside a
+// sub-pane stays h4. The fixtures below mount every group label in the
+// Graph and Publication panes; without them the walk would pass vacuously
+// on labels that never rendered.
+const OUTLINE_GRAPH = {
+  graph_status: 'ready',
+  graph: {
+    schemaVersion: '0.2.0', frozen: true,
+    nodes: [
+      { index: 0, id: 'index', sourcePath: 'index.md', role: 'trunk', parent: null, parentIndex: null, title: 'Home', status: 'published', tags: [], bodyOffset: 20 },
+      { index: 1, id: 'guides/intro', sourcePath: 'guides/intro.md', role: 'trunk', parent: null, parentIndex: null, title: 'Introduction', status: 'published', tags: [], bodyOffset: 20 },
+      { index: 2, id: 'index/notes', sourcePath: 'index/notes.md', role: 'satellite', parent: 'index', parentIndex: 0, title: 'Notes', status: 'draft', tags: [], bodyOffset: 20 }
+    ],
+    edges: [
+      { from: { type: 'page', value: 'index' }, to: { type: 'page', value: 'guides/intro' }, kind: 'reference' },
+      { from: { type: 'page', value: 'guides/intro' }, to: { type: 'page', value: 'index' }, kind: 'reference' },
+      { from: { type: 'page', value: 'index/notes' }, to: { type: 'page', value: 'index' }, kind: 'parent' }
+    ],
+    reverseIndex: [
+      { target: { type: 'page', value: 'index' }, incomingEdges: [1, 2] }
+    ],
+    nav: [
+      { index: 0, id: 'index', breadcrumb: [0], children: [2], siblings: [1] },
+      { index: 1, id: 'guides/intro', breadcrumb: [1], children: [], siblings: [0] },
+      { index: 2, id: 'index/notes', breadcrumb: [0, 2], children: [], siblings: [] }
+    ]
+  }
+};
+
+const OUTLINE_AUTHORING = {
+  frontmatter_schema: { title: 'Boris frontmatter grammar (schema v1)', properties: { id: { type: 'string' }, title: { type: 'string' } } },
+  completion: {
+    format: 'boris-completion-index', schema_version: 1, compiler_id: 'boris/0.8.2', frozen: true,
+    entities: [
+      { id: 'index', title: 'Home', parent: null, role: 'trunk', status: 'published', tags: [], relations: [{ kind: 'relates_to', target: 'guides/intro' }] }
+    ],
+    relation_kinds: ['relates_to'], parent_targets: [], layout_slots: []
+  },
+  completion_status: 'ready'
+};
+
+const OUTLINE_PUBLICATION = {
+  profiles: [{ path: 'boris.json' }],
+  proof: {
+    path: 'dist/_boris/proof/proof-pack.json',
+    html_path: 'dist/_boris/proof/index.html',
+    target: 'public', schema_version: '1', overall_presentation_status: 'verified',
+    artifacts_total: 2, checks_total: 3, findings_total: 0, claims_total: 3
+  }
+};
+
+const OUTLINE_COMMANDS = {
+  plan: {
+    mode: 'plan', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.2',
+    report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
+    publication_plan: {
+      format: 'boris-publication-plan', schema_version: 1,
+      input: 'content', input_format: 'markdown',
+      site: { url: 'https://owner.github.io/boris', title: 'Boris', description: null },
+      publication: { target: 'github-pages', base_url: 'https://owner.github.io/boris', origin: 'https://owner.github.io', base_path: '/boris', site_kind: 'project-site' },
+      targets: [{ name: 'public', output: 'dist', public: true, theme: 'themes/boris', layout: null }],
+      editions: { ir: null, rag: null, context: null }
+    }
+  },
+  proof_verify: {
+    mode: 'proof_verify', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.2',
+    report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
+    proof_report: 'boris proof verify: dist/_boris/proof/checks.json\n  checks: 3/3 passed\nverdict: pass\n'
+  }
+};
+
+test('no Review pane skips a heading level in its outline (#1077)', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installApi(page, 'review', {
+    content: '---\nid: index\ntitle: Home\nparent: null\nstatus: published\n---\n\n# Home\n\nSee [[guides/intro]].\n',
+    graph: OUTLINE_GRAPH,
+    authoring: OUTLINE_AUTHORING,
+    publication: OUTLINE_PUBLICATION,
+    commands: OUTLINE_COMMANDS
+  });
+  await openHome(page);
+
+  // The walk is only honest if the labels actually mount: the Graph labels
+  // need an active node with a link in every bucket, and the Publication
+  // labels need a Proof Pack, a plan, and a verify report.
+  const graph = page.locator('#graph');
+  for (const label of ['Children', 'Siblings', 'Outgoing references and includes', 'Backlinks', 'Relations from completion.json', 'Wiki links in this buffer']) {
+    await expect(graph.getByRole('heading', { name: label, exact: true, level: 3 })).toBeVisible();
+  }
+  const publication = page.locator('#publication');
+  await publication.getByRole('button', { name: 'Run publication plan', exact: true }).click();
+  await expect(publication.getByRole('heading', { name: 'Normalized plan', exact: true, level: 3 })).toBeVisible();
+  await publication.getByRole('button', { name: 'Verify proof', exact: true }).click();
+  for (const label of ['Targets', 'Local evidence', 'Proof verify report']) {
+    await expect(publication.getByRole('heading', { name: label, exact: true, level: 3 })).toBeVisible();
+  }
+
+  // The first heading in each pane is its h2 title; every heading after it
+  // may deepen at most one level, so an h2 → h4 gap can never come back.
+  const skips = await page.evaluate(() => {
+    const findings: string[] = [];
+    for (const pane of Array.from(document.querySelectorAll('section.pane'))) {
+      const levels = Array.from(pane.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+        .map((heading) => Number.parseInt(heading.tagName.slice(1), 10));
+      for (let i = 0; i < levels.length; i += 1) {
+        if (i === 0 && levels[i] !== 2) {
+          findings.push(`#${pane.id}: first heading is h${levels[i]}, expected the h2 pane title`);
+        } else if (i > 0 && levels[i] > levels[i - 1] + 1) {
+          findings.push(`#${pane.id}: h${levels[i - 1]} is followed by h${levels[i]}, a skipped level`);
+        }
+      }
+    }
+    return findings;
+  });
+  expect(skips).toEqual([]);
+});
 
 test('the Problems result chip wraps instead of squeezing the lede', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });

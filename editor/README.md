@@ -760,12 +760,15 @@ labels.
 - **Reading rhythm.** `:root` sets `--leading-normal` (1.55) so prose gets a
   real line-height by default; headings take `--leading-tight` and controls
   opt in explicitly. `--measure-prose` caps a lede's line length.
-- **Heading roles.** `h1`–`h3` are app/pane/sub-pane titles. `h4` is
-  deliberately not a fourth size: it is a group label inside a pane or
-  sub-pane (`Children`, `Backlinks`, `Ingredients`, `Targets`), so it renders
-  as a small-caps label instead of competing with the body copy it introduces.
-  Authored Markdown rendered by Focus mode's reading surface resets that
-  treatment — it is document content, not UI.
+- **Heading roles.** `h1`–`h3` are app/pane/sub-pane titles. The group-label
+  role (`.group-label`) is deliberately not a fourth size: it names a set
+  inside a pane or sub-pane (`Children`, `Backlinks`, `Ingredients`,
+  `Targets`), so it renders as a small-caps label instead of competing with
+  the body copy it introduces. Its element follows the outline — `h3`
+  directly under a pane title (Graph, Publication), `h4` under a sub-pane
+  title (Recipe, Theme) — so no heading level is ever skipped. Authored
+  Markdown rendered by Focus mode's reading surface resets that treatment —
+  it is document content, not UI.
 - **One pane header row (`.pane-heading`).** Every pane and sub-pane header is
   the same flex row: a title, an optional one-line lede, and an optional action
   cluster. The text block declares a flex basis and the row wraps, so a wide
