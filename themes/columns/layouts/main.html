@@ -12,15 +12,15 @@
     <header class="navbar">
       <div class="container navbar-inner">
         <div><p class="brand-kicker">Boxed documentation</p><p class="brand">Columns</p></div>
-        <div class="navbar-menu" aria-label="Site navigation">{{nav}}</div>
+        <div class="navbar-menu">{{nav}}</div>
       </div>
     </header>
     <main id="main-content" tabindex="-1" class="section container" data-boris-search-root>
       <div class="columns is-variable is-6">
         <article class="column is-8">
-          <nav class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</nav>
+          <div class="breadcrumb">{{breadcrumb}}</div>
           <div class="box article-box">
-            <header class="content-header"><h1 data-boris-search-exclude>{{title}}</h1>{{metadata}}</header>
+            <header class="content-header"><h1 data-boris-search-exclude data-boris-search-title="layout">{{title}}</h1>{{metadata}}</header>
             <div class="content prose">{{content}}</div>
           </div>
           <section class="box children-box" aria-labelledby="children-heading" data-boris-search-exclude>

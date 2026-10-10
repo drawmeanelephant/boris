@@ -12,7 +12,7 @@
     <header class="hero is-primary">
       <div class="container hero-body">
         <p class="brand-kicker">Boxed documentation</p><p class="brand">Columns</p>
-        <div class="navbar-menu" aria-label="Site navigation">{{nav}}</div>
+        <div class="navbar-menu">{{nav}}</div>
       </div>
     </header>
     <main id="main-content" tabindex="-1" class="section container" data-boris-search-root>
@@ -20,7 +20,7 @@
         <article class="column is-8">
           <div class="box article-box article-box--home">
             <p class="tag is-primary is-light" data-boris-search-exclude>A flexible starting point</p>
-            <header class="content-header"><h1 data-boris-search-exclude>{{title}}</h1>{{metadata}}</header>
+            <header class="content-header"><h1 data-boris-search-exclude data-boris-search-title="layout">{{title}}</h1>{{metadata}}</header>
             <div class="content prose">{{content}}
         <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div></div>
           </div>
