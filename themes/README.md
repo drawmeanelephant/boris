@@ -36,7 +36,7 @@ themes/<name>/
 | [`service`](service/) | Public-service information | `main`, `home`, `section` | `--theme themes/service` |
 | [`engineering`](engineering/) | Dense engineering docs | `main`, `home`, `section` | `--theme themes/engineering` |
 | [`civic`](civic/) | Public-information shell: banner, gold rule, tinted alerts | `main`, `home`, `section` | `--theme themes/civic` |
-| [`tokens`](tokens/) | Fluid custom properties | `main`, `home`, `section` | `--theme themes/tokens` |
+| [`tokens`](tokens/) | Fluid custom properties: every size, step, and kind colour is a token | `main`, `home`, `section` | `--theme themes/tokens` |
 | [`corporate`](corporate/) | Dense product-docs chrome | `main` (single shape by design; `@media print` is the CV shape) | `--theme themes/corporate` |
 | [`minimal`](minimal/) | Same shell, no search | `main` (single shape by design) | `--theme themes/minimal` |
 | [`lab`](lab/) | Dark-first lab terminal, three color modes | `main`, `print` | `--theme themes/lab` |
