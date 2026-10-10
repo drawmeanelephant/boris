@@ -179,8 +179,10 @@ main:focus {
 
 body[data-status="draft"] .g-main::before {
   content: "Draft";
-  display: inline-block;
+  display: block;
+  inline-size: fit-content;
   margin-block-end: 1rem;
+  margin-inline-start: max(0px, (100% - var(--g-text)) / 2);
   padding: 0.15rem 0.55rem;
   border: 1px solid var(--g-warning);
   color: var(--g-warning);
@@ -237,6 +239,15 @@ body[data-status="draft"] .g-main::before {
   margin-block: 2rem 0.5rem;
   font-size: 1.1rem;
   font-weight: 650;
+}
+
+.prose h4 {
+  margin-block: 1.75rem 0.4rem;
+  color: var(--g-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .prose p,
@@ -577,10 +588,15 @@ body[data-status="draft"] .g-main::before {
 .site-nav .is-current > a {
   color: var(--g-ink);
   font-weight: 700;
+  text-decoration: none;
+}
+
+.site-nav .is-current > a::before {
+  content: "\2192\00a0" / "";
 }
 
 .g-footer__line {
-  margin: 0;
+  margin-block: 0;
   padding-block: 0.75rem 1.5rem;
 }
 
@@ -660,6 +676,18 @@ body[data-status="draft"] .g-main::before {
   border-block-end: 1px solid var(--g-rule);
   text-align: start;
   vertical-align: top;
+}
+
+.prose :is(th, td)[align="center"] {
+  text-align: center;
+}
+
+.prose :is(th, td)[align="right"] {
+  text-align: end;
+}
+
+.prose td {
+  font-variant-numeric: tabular-nums;
 }
 
 .prose thead th {
