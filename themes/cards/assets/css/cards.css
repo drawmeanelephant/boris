@@ -73,9 +73,15 @@ a:hover { text-decoration-thickness: 0.15em; }
 .prose table { display: block; overflow-x: auto; width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 0.55rem; }.prose th, .prose td { padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--line); text-align: left; }.prose th { background: var(--surface-muted); }.prose tr:last-child td { border-bottom: 0; }
 .admonition { margin: 1.25rem 0; padding: 0.8rem 1rem; border: 1px solid var(--line); border-left: 0.3rem solid var(--primary); border-radius: 0.55rem; background: var(--surface-muted); }.admonition--warning { border-left-color: var(--focus); }.admonition__title { margin: 0 0 0.3rem; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .children-card { margin-top: 2rem; padding: 1rem; border: 1px solid var(--line); border-radius: 0.65rem; background: var(--surface-muted); }.children-card h2 { margin: 0 0 0.6rem; font-size: 1rem; }.page-children li + li { margin-top: 0.35rem; }
+.semantic-relations, .semantic-backlinks { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: 0.65rem; background: var(--surface-muted); }
+.semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 0.6rem; font-size: 1rem; font-weight: 750; }
+.semantic-relations::before { content: "Related"; }.semantic-backlinks::before { content: "Linked from"; }
+.semantic-relations ul, .semantic-backlinks ul { padding: 0; margin: 0; list-style: none; }.semantic-relations li + li, .semantic-backlinks li + li { margin-top: 0.35rem; }
+.semantic-relations li::before, .semantic-backlinks li::after { content: attr(data-relation-kind); display: inline-block; padding: 0 0.45rem; border-radius: 999px; background: var(--primary-soft); color: var(--text); font-size: 0.72rem; font-weight: 700; }
+.semantic-relations li::before { margin-right: 0.45rem; }.semantic-backlinks li::after { margin-left: 0.45rem; }
 .footer { padding-bottom: 2rem; color: var(--muted); font-size: 0.9rem; }.footer__inner { border-top: 1px solid var(--line); padding-top: 1rem; }
 
 @media (max-width: 56rem) { .shell { grid-template-columns: 11.5rem minmax(0, 1fr); }.rail--toc { grid-column: 2; position: static; padding: 0.8rem; background: var(--surface-muted); border-radius: 0.55rem; } }
 @media (max-width: 42rem) { .topbar { align-items: flex-start; flex-direction: column; padding-block: 1rem; }.shell { grid-template-columns: 1fr; gap: 0.8rem; }.rail--nav, .rail--toc { position: static; grid-column: auto; padding: 0.8rem; background: var(--surface-muted); border-radius: 0.55rem; }.site-nav ul { display: flex; flex-wrap: wrap; gap: 0.15rem; }.site-nav ul ul { display: none; }.article-card { padding: 1.15rem; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { animation: none !important; transition: none !important; } }
-@media print { .skip-link, .rail { display: none; } .shell { display: block; } }
+@media print { .skip-link, .rail { display: none; } .shell { display: block; } .article-card { border: 0; box-shadow: none; padding: 0; } .prose pre { white-space: pre-wrap; } }
