@@ -19,6 +19,7 @@ second theme attic.
 | [`journal-site`](journal-site/) | [`themes/journal`](../themes/journal/) | Terminal diary |
 | [`ledger-site`](ledger-site/) | [`themes/ledger`](../themes/ledger/) | Dense node pages |
 | [`reading-site`](reading-site/) | [`themes/reading`](../themes/reading/) | `:lang` typesetting specimens |
+| [`gallery-site`](gallery-site/) | [`themes/gallery`](../themes/gallery/) | Album grid, figures/captions, page-local `{stem}.assets/` images at three depths |
 | [`studies-site`](studies-site/) | `semantic` / `columns` / `service` / `engineering` / `civic` / `tokens` / `corporate` / `minimal` | One corpus; swap `--theme` |
 
 Each site README has the exact `boris` invocation. Keep generated trees under
