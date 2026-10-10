@@ -1,7 +1,9 @@
 # Minimal
 
-The same three-column shell as Corporate, without search. Navigation is
-the no-JavaScript path. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
+The same three-column shell as Corporate, without search, and flatter:
+square corners, no tints, cards, or shadows. Asides are a coloured rule on
+one flat panel; tables, children, and relations are ruled lists.
+Navigation is the no-JavaScript path. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `main.html`
 - Specimen: [`examples/studies-site/`](../../examples/studies-site/)
