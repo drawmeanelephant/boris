@@ -20,9 +20,18 @@ What Cards guarantees, checked against the built output and
   relations/backlinks wrapper are `data-boris-search-exclude`; compiler
   metadata stays out of the rendered-search index.
 
-Known limitation: below 42rem the navigation shows top-level entries only
-(nested lists are hidden by CSS). Breadcrumbs and the "In this section" card
-still reach child pages.
+- Visited links shift to violet (`#5a48b8`, 6.88:1 on the card, 6.11:1 on
+  the muted surface; `#c4b5fd`, 8.81:1 on the dark card). The current page
+  in the nav has a tinted pill and bold weight as well as
+  `aria-current="page"`.
+- Aside kinds keep their uppercase word and add a coloured edge and title:
+  tip `#1f7a4d` (4.74:1 on its tint), info `#315fd4` (4.81:1), warning
+  `#b54708` (4.99:1), danger `#b42318` (5.75:1, plus a full red border); in
+  dark mode the titles measure 5.56–9.44:1 on the muted surface.
+- Below 42rem the navigation keeps the whole tree: top-level entries stack,
+  and each entry's children wrap as an indented row under it, so nested
+  pages stay reachable from the nav itself. The "In this section" card hides
+  when a page has no children.
 
 This is a theme-level pass. It does not replace a manual screen-reader,
 keyboard, zoom, or contrast review of a rendered site.
