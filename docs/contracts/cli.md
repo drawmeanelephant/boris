@@ -180,6 +180,15 @@ catalog themes that fit each one.
   and `summary`) plus one "now" satellite, under `corporate`. `{{metadata}}`
   renders the page's status and tags; the theme's `@media print` rules
   are the PDF path.
+- `newsletter` — a weekly paper under `press`: trunk `index` → `issues`
+  hub → three dated issues (`published_at` + `summary`, one `relates_to`
+  edge). Its profile's `layout_rules` send `id:index` to `home.html`,
+  `id:issues` to `archive.html`, and `glob:issues/*` to `blog.html`. It
+  declares `site.url` and a target `sitemap`, so the build emits
+  `dist/sitemap.xml`. It declares no `rss`: the profile RSS rider needs
+  an enabled `head` and `{{head}}` in every selected layout
+  ([head metadata](head-metadata.md#bounded-rss-rider-and-execution-boundary)),
+  and the press layouts do not carry it yet.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

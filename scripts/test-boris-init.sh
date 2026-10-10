@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -241,6 +241,20 @@ grep -q '<dd>production-editing, typesetting, publishing-systems</dd>' "$R/dist/
 [[ -f "$R/dist/now.html" ]] || fail "resume now satellite did not render"
 grep -q '@media print' "$R/dist/assets/corporate.css" || fail "resume theme ships no print stylesheet"
 pass "resume: tags in metadata, now satellite, print stylesheet published"
+
+note "newsletter: press named layouts, a profile-declared sitemap, and feed-ready issues"
+N="$OUT/arch-newsletter"
+grep -q 'txp-home' "$N/dist/index.html" || fail "newsletter index does not use the press home layout"
+grep -q 'txp-archive-body' "$N/dist/issues.html" || fail "newsletter issues hub does not use the press archive layout"
+grep -q 'txp-blog-body' "$N/dist/issues/2026-10-03-the-paper-mill.html" \
+    || fail "newsletter issue does not use the press blog layout"
+grep -q '<loc>https://saturday-sheet.example.com/issues/2026-09-19-first-edition.html</loc>' "$N/dist/sitemap.xml" \
+    || fail "newsletter profile build did not emit the sitemap"
+(cd "$N" && "$ROOT/zig-out/bin/boris" --rss --input content --site-url https://saturday-sheet.example.com/ \
+    --rss-title "The Saturday Sheet" --rss-description "A weekly paper" --rss-path feed/rss.xml --quiet) \
+    >/dev/null 2>"$OUT/newsletter-rss.stderr" || fail "newsletter RSS export failed: $(head -3 "$OUT/newsletter-rss.stderr")"
+[[ "$(grep -c '<item>' "$N/feed/rss.xml")" == 3 ]] || fail "newsletter issues are not all feed-eligible"
+pass "newsletter: home/archive/blog layouts, dist/sitemap.xml, three feed-eligible issues"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done

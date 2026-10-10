@@ -30,6 +30,10 @@
 //!   `status: draft`, the unreleased section that renders unadvertised.
 //! - `resume`  — a single-page CV with `tags` for `{{metadata}}` and one
 //!   "now" satellite under `corporate`, whose print stylesheet is the PDF.
+//! - `newsletter` — a weekly paper (`index` → `issues` hub → dated issues)
+//!   under `press`; `layout_rules` route the masthead, archive, and issues
+//!   to press's named layouts, and the profile declares `site.url` plus a
+//!   target `sitemap`. Profile `rss` waits on `{{head}}` in press layouts.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -60,7 +64,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume" };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -1247,6 +1251,143 @@ const resume_profile =
     \\
 ;
 
+// --- newsletter -------------------------------------------------------------
+
+const newsletter_index_md =
+    \\---
+    \\title: The Saturday Sheet
+    \\tags: [home]
+    \\---
+    \\
+    \\# The Saturday Sheet
+    \\
+    \\A weekly paper of small-press news, one issue every Saturday. Each issue
+    \\is a dated page under [[issues]]; this week's is
+    \\[[issues/2026-10-03-the-paper-mill]].
+    \\
+    \\The profile publishes `sitemap.xml` with every build, using the
+    \\`site.url` it declares. A profile `rss` feed also needs an enabled `head`
+    \\and layouts that carry the `{{head}}` slot; this theme's layouts do not
+    \\carry it yet, so the starter does not declare one.
+    \\
+;
+
+const newsletter_issues_md =
+    \\---
+    \\title: Back Issues
+    \\parent: index
+    \\tags: [issues]
+    \\---
+    \\
+    \\# Back Issues
+    \\
+    \\Every issue is a satellite of this page, newest first. An issue needs a
+    \\`published_at` date and a one-line `summary`; the date orders feeds, and
+    \\the summary becomes the feed item description.
+    \\
+    \\- [[issues/2026-10-03-the-paper-mill]]
+    \\- [[issues/2026-09-26-type-on-the-shelf]]
+    \\- [[issues/2026-09-19-first-edition]]
+    \\
+;
+
+const newsletter_issue_1_md =
+    \\---
+    \\title: "№ 1: First Edition"
+    \\parent: issues
+    \\published_at: 2026-09-19T08:00:00Z
+    \\summary: Why a weekly paper, and what each issue will carry.
+    \\tags: [editorial]
+    \\---
+    \\
+    \\# № 1: First Edition
+    \\
+    \\Welcome to the first sheet. Each Saturday: one lead story, three short
+    \\notes, and a reading list. Next week: [[issues/2026-09-26-type-on-the-shelf]].
+    \\
+;
+
+const newsletter_issue_2_md =
+    \\---
+    \\title: "№ 2: Type on the Shelf"
+    \\parent: issues
+    \\published_at: 2026-09-26T08:00:00Z
+    \\summary: A visit to a print shop that still sets metal type.
+    \\tags: [type, visits]
+    \\---
+    \\
+    \\# № 2: Type on the Shelf
+    \\
+    \\## Lead
+    \\
+    \\Two cases of twelve-point Caslon and a proofing press in a back room.
+    \\
+    \\## Notes
+    \\
+    \\- A typefoundry reopens its casting room.
+    \\- The county library adds a letterpress club.
+    \\
+    \\Previous: [[issues/2026-09-19-first-edition]].
+    \\
+;
+
+const newsletter_issue_3_md =
+    \\---
+    \\title: "№ 3: The Paper Mill"
+    \\parent: issues
+    \\published_at: 2026-10-03T08:00:00Z
+    \\summary: Where the paper comes from, and a follow-up on last week's print shop.
+    \\tags: [paper, visits]
+    \\relations: [relates_to=issues/2026-09-26-type-on-the-shelf]
+    \\---
+    \\
+    \\# № 3: The Paper Mill
+    \\
+    \\## Lead
+    \\
+    \\A family mill that still makes cotton rag paper by the vat.
+    \\
+    \\## Follow-up
+    \\
+    \\The print shop from [[issues/2026-09-26-type-on-the-shelf]] buys its
+    \\stock here. This issue also declares a typed `relates_to` relation to
+    \\that one in its frontmatter.
+    \\
+    \\## Reading list
+    \\
+    \\- Back issues: [[issues]].
+    \\
+;
+
+const newsletter_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": {
+    \\    "title": "The Saturday Sheet",
+    \\    "url": "https://saturday-sheet.example.com/",
+    \\    "description": "A weekly paper of small-press news."
+    \\  },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/press",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/press/layouts/home.html" },
+    \\        { "selector": "id:issues", "layout": "themes/press/layouts/archive.html" },
+    \\        { "selector": "glob:issues/*", "layout": "themes/press/layouts/blog.html" }
+    \\      ],
+    \\      "sitemap": { "path": "sitemap.xml" }
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -1406,6 +1547,26 @@ const resume_files = [_]FileToWrite{
     .{ .path = "themes/corporate/assets/corporate.css", .data = archetype_themes.corporate_css },
     .{ .path = "themes/corporate/README.md", .data = archetype_themes.corporate_readme },
     .{ .path = "boris.json", .data = resume_profile },
+};
+
+const newsletter_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = newsletter_index_md },
+    .{ .path = "content/issues.md", .data = newsletter_issues_md },
+    .{ .path = "content/issues/2026-09-19-first-edition.md", .data = newsletter_issue_1_md },
+    .{ .path = "content/issues/2026-09-26-type-on-the-shelf.md", .data = newsletter_issue_2_md },
+    .{ .path = "content/issues/2026-10-03-the-paper-mill.md", .data = newsletter_issue_3_md },
+    .{ .path = "themes/press/layouts/main.html", .data = archetype_themes.press_layout_main },
+    .{ .path = "themes/press/layouts/home.html", .data = archetype_themes.press_layout_home },
+    .{ .path = "themes/press/layouts/section.html", .data = archetype_themes.press_layout_section },
+    .{ .path = "themes/press/layouts/blog.html", .data = archetype_themes.press_layout_blog },
+    .{ .path = "themes/press/layouts/archive.html", .data = archetype_themes.press_layout_archive },
+    .{ .path = "themes/press/footer.html", .data = archetype_themes.press_footer },
+    .{ .path = "themes/press/assets/css/press.css", .data = archetype_themes.press_css },
+    .{ .path = "themes/press/assets/img/press-mark.svg", .data = archetype_themes.press_mark_svg },
+    .{ .path = "themes/press/README.md", .data = archetype_themes.press_readme },
+    .{ .path = "themes/press/ACCESSIBILITY.md", .data = archetype_themes.press_accessibility },
+    .{ .path = "themes/press/MIGRATION.md", .data = archetype_themes.press_migration },
+    .{ .path = "boris.json", .data = newsletter_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -1638,6 +1799,29 @@ const resume_spec = ArchetypeSpec{
     ,
 };
 
+const newsletter_spec = ArchetypeSpec{
+    .layout_path = "themes/press/layouts/main.html",
+    .files = &newsletter_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the masthead
+    \\  content/issues.md                 back-issue hub (archive layout)
+    \\  content/issues/                   three dated issues (published_at + summary; blog layout)
+    \\  themes/press/                     shipped "press" theme — editorial paper
+    \\  boris.json                        profile (theme: press, layout_rules, site.url + sitemap)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the paper and dist/sitemap.xml
+    \\  boris plan --profile boris.json       inspect layout rules and the sitemap declaration
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  an issue is a satellite of issues with published_at + summary; the date orders feeds
+    \\  the target's sitemap needs site.url; replace the example.com URL before publishing
+    \\  profile rss also needs an enabled head and {{head}} in every layout (press lacks it today)
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -1650,6 +1834,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .@"link-in-bio" => &link_in_bio_spec,
         .changelog => &changelog_spec,
         .@"resume" => &resume_spec,
+        .newsletter => &newsletter_spec,
     };
 }
 
@@ -1846,7 +2031,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -1901,8 +2086,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -2041,6 +2226,25 @@ test "resume is one CV page with metadata-bearing frontmatter and a print styles
     try std.testing.expect(std.mem.indexOf(u8, resume_now_md, "\nparent: index\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, archetype_themes.corporate_layout_main, "{{metadata}}") != null);
     try std.testing.expect(std.mem.indexOf(u8, archetype_themes.corporate_css, "@media print") != null);
+}
+
+test "newsletter issues are dated and the profile declares a sitemap with its site url" {
+    var issues: usize = 0;
+    for (newsletter_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/issues/")) continue;
+        for ([_][]const u8{ "\nparent: issues\n", "\npublished_at: 2026-", "\nsummary: " }) |key| {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, key) != null);
+        }
+        issues += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), issues);
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"url\": \"https://") != null);
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"sitemap\": { \"path\": \"sitemap.xml\" }") != null);
+    // Profile RSS needs an enabled head and {{head}} in every selected layout
+    // (head-metadata.md); press has none yet, so the starter must not
+    // declare a feed it cannot build.
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.press_layout_main, "{{head}}") != null or
+        std.mem.indexOf(u8, newsletter_profile, "\"rss\"") == null);
 }
 
 test "garden demonstrates include composition, components, and dense links" {

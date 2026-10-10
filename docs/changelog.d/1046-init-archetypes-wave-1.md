@@ -28,3 +28,11 @@
   tags rendered by `{{metadata}}`, one "now" satellite, and the theme's
   print stylesheet as the PDF path
   ([#1058](https://github.com/drawmeanelephant/boris/issues/1058)).
+- `boris init --type newsletter` writes a weekly paper under `press`
+  whose `layout_rules` route the masthead, back-issue archive, and dated
+  issues to press's `home`, `archive`, and `blog` layouts. Its profile
+  declares `site.url` and a target `sitemap`, so the first build emits
+  `dist/sitemap.xml`. Profile `rss` is not declared yet because press
+  layouts lack the `{{head}}` slot the RSS rider requires
+  ([#1060](https://github.com/drawmeanelephant/boris/issues/1060),
+  [head metadata](/docs/contracts/head-metadata.md#bounded-rss-rider-and-execution-boundary)).

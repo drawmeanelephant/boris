@@ -95,6 +95,9 @@ and [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), not to
   ([head metadata](contracts/head-metadata.md#bounded-rss-rider-and-execution-boundary)).
   The `newsletter` starter therefore declares `sitemap` only, and RSS
   waits for `{{head}}` on press `home`, `archive`, `blog`, and `main`.
+  When the starter profile gains `head` (`enabled`, `base_url`) and `rss`,
+  the build fails with `EHEAD` under press. The same profile pointed at
+  `journal` builds a three-item `feed.xml` and its autodiscovery link.
 - **`showcase/layouts/home.html` has no `{{children}}`.** The `portfolio`
   index lists its projects with hand-written wiki links until the slot
   lands.

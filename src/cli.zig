@@ -3030,6 +3030,8 @@ pub fn printInitUsage() void {
         \\            status: draft unreleased entry kept out of search and feeds
         \\  resume    single-page CV with tags for {{{{metadata}}}} plus a "now" page;
         \\            print the page for the PDF
+        \\  newsletter  weekly paper of dated issues on press's named layouts;
+        \\            profile declares site.url and a sitemap
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.
