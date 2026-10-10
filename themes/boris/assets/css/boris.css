@@ -33,6 +33,8 @@ body {
   scrollbar-width: thin;
 }
 
+:focus-visible { outline: 3px solid var(--accent-ink); outline-offset: 3px; }
+
 .skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 20; padding: 0.45rem 0.7rem; border-radius: 0.4rem; background: var(--accent); color: Canvas; font-weight: 800; text-decoration: none; }
 .skip-link:focus { top: 1rem; outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 3px; }
 
@@ -135,6 +137,12 @@ main > h1 + p, main > p:first-of-type:not(.eyebrow) { font-size: 1.15rem; color:
 .page-metadata dd { margin: 0; }
 .page-children, .semantic-relations, .semantic-backlinks { margin: 2rem 0 0; padding: 0.85rem 1rem; border: 1px solid var(--line); border-radius: 0.5rem; background: color-mix(in srgb, var(--accent) 5%, Canvas); }
 .page-children ul, .semantic-relations ul, .semantic-backlinks ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
+.semantic-relations::before, .semantic-backlinks::before { display: block; color: var(--accent-ink); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.semantic-relations::before { content: "Related"; }
+.semantic-backlinks::before { content: "Linked from"; }
+.semantic-relations li::before, .semantic-backlinks li::after { content: attr(data-relation-kind); color: var(--muted); font-size: 0.72rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.semantic-relations li::before { margin-right: 0.45rem; }
+.semantic-backlinks li::after { margin-left: 0.45rem; }
 .site-footer { max-width: var(--reading-width); padding: 1rem 0; color: var(--muted); font-size: 0.8rem; }
 
 @media (min-width: 48rem) {
@@ -182,7 +190,9 @@ main > h1 + p, main > p:first-of-type:not(.eyebrow) { font-size: 1.15rem; color:
 
 @media print {
   .skip-link, .site-search, .site-menu { display: none; }
-  body { display: block; max-width: none; }
-  main { box-shadow: none; }
+  body { display: block; max-width: none; background: none; }
+  .site-sidebar { position: static; max-height: none; overflow: visible; border: 0; box-shadow: none; }
+  main { max-width: none; padding: 0; border: 0; box-shadow: none; }
+  main pre { white-space: pre-wrap; }
 }
 
