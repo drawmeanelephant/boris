@@ -13,3 +13,11 @@
   [HTML 4.01 Strict profile](/docs/contracts/html4-strict.md),
   [#1047](https://github.com/drawmeanelephant/boris/issues/1047),
   [#1048](https://github.com/drawmeanelephant/boris/issues/1048).
+- Eleven of those themes (all but html4-strict) keep layout text out of the
+  rendered-search index. Relations and backlinks sit in a `graph-links`
+  wrapper marked `data-boris-search-exclude`, as in the other ten themes.
+  Children panels, kickers, sidebar headings, and layout title `h1`s are
+  excluded too. A page's search entry now holds only its authored text.
+  html4-strict cannot carry the attribute, so its README documents that its
+  index includes navigation and relation link text. Link:
+  [rendered-search contract](/docs/contracts/rendered-search.md).
