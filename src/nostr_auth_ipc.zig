@@ -141,10 +141,25 @@ fn testWriteFrame(peer: *Channel, bytes: []const u8) void {
     for (bytes) |byte| peer.writeExact(&.{byte}, deadline) catch return;
 }
 
-fn testDripFrame(peer: *Channel) void {
-    for ([_]u8{ 0, 0, 0, 10, '{', '}', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ' }) |byte| {
+const DripState = struct {
+    sent: std.atomic.Value(usize) = .init(0),
+    done: std.atomic.Value(bool) = .init(false),
+};
+
+fn testDripFrame(peer: *Channel, state: *DripState) void {
+    // One byte every 20ms for a frame that can never finish inside the
+    // outer test budget: a correct frame deadline fires ~25ms after the
+    // first byte, while a wrongly renewed (or missing) deadline lets the
+    // writer feed hundreds more bytes. Counting landed bytes separates
+    // the two outcomes without a wall-clock assertion.
+    var header: [4]u8 = undefined;
+    std.mem.writeInt(u32, &header, @intCast(auth.max_frame), .big);
+    var next: usize = 0;
+    while (!state.done.load(.acquire)) : (next += 1) {
+        const byte: u8 = if (next < 4) header[next] else ' ';
         peer.writeExact(&.{byte}, auth.Deadline.after(peer.io, 1000)) catch return;
-        std.Io.sleep(peer.io, .fromMilliseconds(10), .awake) catch return;
+        _ = state.sent.fetchAdd(1, .acq_rel);
+        std.Io.sleep(peer.io, .fromMilliseconds(20), .awake) catch return;
     }
 }
 
@@ -179,12 +194,20 @@ test "auth IPC partial header cannot renew complete-frame deadline" {
     var channel = try Channel.init(std.testing.io, pipes.fds[0], pipes.fds[3]);
     channel.frame_timeout_ms = 25;
     var peer = try Channel.init(std.testing.io, pipes.fds[2], pipes.fds[1]);
-    const thread = try std.Thread.spawn(.{}, testDripFrame, .{&peer});
-    defer thread.join();
-    const start = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds;
-    try std.testing.expectError(error.Timeout, channel.read(std.testing.allocator, auth.Deadline.after(std.testing.io, 1000)));
-    const elapsed = std.Io.Timestamp.now(std.testing.io, .awake).nanoseconds - start;
-    try std.testing.expect(elapsed < 100 * std.time.ns_per_ms);
+    var drip: DripState = .{};
+    const thread = try std.Thread.spawn(.{}, testDripFrame, .{ &peer, &drip });
+    defer {
+        drip.done.store(true, .release);
+        thread.join();
+    }
+    // Bytes arrive every 20ms — faster than the 25ms frame deadline, so a
+    // deadline that wrongly renewed on each byte (or fell back to the outer
+    // wait) would let ~500 bytes land before the 10s outer deadline fires.
+    // The correct path returns after ~5 bytes; the gap between the two
+    // outcomes leaves ~4s of scheduler jitter that cannot flip the count.
+    try std.testing.expectError(error.Timeout, channel.read(std.testing.allocator, auth.Deadline.after(std.testing.io, 10_000)));
+    drip.done.store(true, .release);
+    try std.testing.expect(drip.sent.load(.acquire) < 200);
 }
 
 test "auth IPC rejects ordinary files and same endpoint before handshake" {
