@@ -45,6 +45,33 @@ a:hover { color: var(--ink); }
 .page-metadata div { display: flex; gap: .3rem; }
 .page-metadata dt { font-weight: 700; }
 .page-metadata dd { margin: 0; }
+[data-status="draft"] .page-metadata > div:first-child,
+[data-status="archived"] .page-metadata > div:first-child { padding: 0 .4rem; border: 1px solid currentColor; }
+[data-status="draft"] .page-metadata > div:first-child { color: var(--accent); }
+[data-status="archived"] .page-metadata > div:first-child { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+body:has(.page-tags) .page-metadata > div:last-child,
+body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
+.page-metadata:has(+ .page-tags) { margin-bottom: .35rem; }
+.page-tags { display: flex; flex-wrap: wrap; gap: .2rem .6rem; margin: 0 0 1rem; padding: 0; list-style: none; color: var(--accent); font: .72rem ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
+.page-tags li::before { content: "#"; color: var(--muted); }
+.page-parent { margin: 0 0 2rem; font: .78rem var(--sans); letter-spacing: .04em; text-transform: uppercase; }
+.page-parent::before { content: "↩ Filed in "; content: "↩ Filed in " / "Filed in "; color: var(--muted); }
+.page-parent a { color: var(--accent); }
+.graph-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1.25rem 2rem; margin: 0 0 2rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.graph-links:empty { display: none; }
+.semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 .65rem; color: var(--accent); font: .7rem var(--sans); letter-spacing: .1em; text-transform: uppercase; }
+.semantic-relations::before { content: "Cross-references"; content: "Cross-references" / ""; }
+.semantic-backlinks::before { content: "Referenced in"; content: "Referenced in" / ""; }
+.semantic-relations ul, .semantic-backlinks ul { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.semantic-relations li, .semantic-backlinks li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: .75rem; align-items: baseline; padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.semantic-relations li::before, .semantic-backlinks li::before { color: var(--muted); font: .68rem ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; text-transform: uppercase; }
+[data-relation-kind]::before { content: attr(data-relation-kind); }
+[data-relation-kind="relates_to"]::before { content: "relates to"; }
+[data-relation-kind="depends_on"]::before { content: "depends on"; }
+[data-relation-kind="implements"]::before { content: "implements"; }
+[data-relation-kind="supersedes"]::before { content: "supersedes"; }
+.semantic-relations a, .semantic-backlinks a { color: var(--ink); font-size: 1.05rem; }
+.semantic-relations a:hover, .semantic-backlinks a:hover { color: var(--accent); }
 .entry-children { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .entry-children .page-children li { margin: .35rem 0; }
 .entry-children .page-children a { color: var(--ink); }
@@ -83,4 +110,27 @@ a:hover { color: var(--ink); }
   .archive-sidebar, .entry-sidebar { position: static; }
   .page-children ul { grid-template-columns: 1fr; }
   .page-children li, .page-children li:first-child { min-height: 6.5rem; border-right: 0; border-left: 0; border-bottom: 1px solid var(--line); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+@media print {
+  :root { --paper: #fff; --ink: #000; --muted: #444; --line: #999; --accent: #7a2f1a; }
+  body { background: #fff; }
+  .skip-link, .archive-sidebar, .entry-sidebar, .archive-footer { display: none; }
+  .archive-layout, .entry-layout { display: block; padding: 0; }
+  .archive-shell, .entry-shell { width: auto; }
+  .masthead { padding: 0 0 1.5rem; }
+  .masthead h1 { font-size: 3rem; }
+  .entry-copy { padding: 1.5rem 0; font-size: 12pt; }
+  .entry-copy h1 { font-size: 2.4rem; }
+  .page-children ul { display: block; }
+  .page-children li, .page-children li:first-child { min-height: 0; border: 0; }
+  .page-children a { display: inline; padding: 0; font-size: 1rem; text-decoration: underline; }
+  .page-children a::before { content: none; }
+  .archive-index, .archive-note { padding-bottom: 1.5rem; }
+  a { color: inherit; }
 }

@@ -1,7 +1,7 @@
 # Archive
 
 Ordered long-lived field notes. Direct children are the index; entry pages
-use the fallback layout.
+use the fallback layout. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `archive.html` (`id:archive`), `main.html`
 - Assets: `assets/archive.css`. System Palatino/Georgia serif.
@@ -15,3 +15,20 @@ use the fallback layout.
   --html-dir test-output/archive \
   --quiet
 ```
+
+## Slot coverage
+
+| Slot | Decision |
+|---|---|
+| `{{head}}` | Both layouts, directly inside `<head>`. |
+| `{{relations}}` / `{{backlinks}}` | Both layouts, after the note, as an index-card "Cross-references" / "Referenced in" table with the kind in the left column. The wrapper is `data-boris-search-exclude`. Pages with no relations emit nothing. |
+| `{{tags}}` | Both layouts, as a monospace `#tag` line under the metadata strip; the duplicate Tags entry in the strip is hidden. An archive is browsed by tag, so the list earns its place. |
+| `{{page-status}}` | Both layouts, as `<body data-status="…">`. Draft entries outline the Status entry in the accent colour; archived entries print it reversed (paper on ink) like a sealed record. |
+| `{{parent}}` | `main.html` only, as a "↩ Filed in …" return link after the note, so a reader who finishes an entry lands back on its index. Omitted from `archive.html`, which serves the `archive` index itself. |
+
+## Search
+
+No search UI ships. Each `main` carries `data-boris-search-root`. The index
+masthead, section label, children list, and relations wrapper carry
+`data-boris-search-exclude`, so the rendered search index stays limited to
+note prose.
