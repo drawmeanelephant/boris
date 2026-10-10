@@ -10,8 +10,10 @@ Dark-first lab-terminal documentation theme with three persisted color modes
 - Search uses the first-party inline rendered-search consumer with the
   documented `data-boris-search-*` hooks; no `<script src>`, no vendored
   JavaScript.
-- `layouts/print.html` is an optional named print shape (light-on-paper);
-  select it with a `--layout-rule` when wanted.
+- `layouts/print.html` is an optional named print shape (light-on-paper, on
+  screen and in print); select it with a `--layout-rule` when wanted.
+  `@media print` on `main.html` prints the same paper palette from any of
+  the three modes.
 - No motion is emitted; a `prefers-reduced-motion` guard still pins scroll
   behavior, transitions, and animations off so later edits cannot add motion
   for users who asked for none. Visible `:focus-visible`, a skip link, and a
