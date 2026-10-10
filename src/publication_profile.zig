@@ -922,13 +922,16 @@ fn parsePublication(allocator: std.mem.Allocator, value: std.json.Value) Error!P
         const base_path = try string(try required(obj, "base_path"));
         const did = try string(try required(obj, "did"));
         if (did.len == 0 or !standard_site.validDid(did)) return error.InvalidPublication;
-        const location = standard_site.parseLocation(allocator, base_url, origin, base_path) catch |err| {
-            if (err == error.OutOfMemory) return error.OutOfMemory;
-            return error.InvalidPublication;
-        };
-        var config: standard_site.TargetConfig = .{
-            .location = location,
-            .did = try dup(allocator, did),
+        var config: standard_site.TargetConfig = blk: {
+            var location = standard_site.parseLocation(allocator, base_url, origin, base_path) catch |err| {
+                if (err == error.OutOfMemory) return error.OutOfMemory;
+                return error.InvalidPublication;
+            };
+            errdefer location.deinit(allocator);
+            break :blk .{
+                .location = location,
+                .did = try dup(allocator, did),
+            };
         };
         errdefer config.deinit(allocator);
         if (field(obj, "pds")) |v| {
@@ -1103,7 +1106,15 @@ fn parseRules(allocator: std.mem.Allocator, value: std.json.Value) Error![]layou
         try only(obj, &.{ "selector", "layout" });
         const selector = try string(try required(obj, "selector"));
         const parsed = layout_select.parseSelector(selector) catch return error.InvalidLayout;
-        rules[initialized] = .{ .kind = parsed.kind, .value = try dup(allocator, parsed.value), .layout_path = try dup(allocator, try checkedPath(try required(obj, "layout"))) };
+        rules[initialized] = blk: {
+            const value_owned = try dup(allocator, parsed.value);
+            errdefer allocator.free(value_owned);
+            break :blk .{
+                .kind = parsed.kind,
+                .value = value_owned,
+                .layout_path = try dup(allocator, try checkedPath(try required(obj, "layout"))),
+            };
+        };
         initialized += 1;
         locusRestore(mark);
     }
@@ -1201,15 +1212,17 @@ fn parseContext(allocator: std.mem.Allocator, value: std.json.Value) Error!Conte
 pub fn applyOverrides(allocator: std.mem.Allocator, plan: *PublicationPlan, overrides: ProfileOverrides) Error!void {
     if (overrides.input) |v| {
         const path = try checkedPathValue(v);
+        const owned = try dup(allocator, path);
         allocator.free(plan.input);
-        plan.input = try dup(allocator, path);
+        plan.input = owned;
     }
     if (overrides.input_format) |v| plan.input_format = v;
     if (overrides.html_output) |v| {
         if (plan.targets.len != 1) return error.AmbiguousHtmlOverride;
         const path = try checkedPathValue(v);
+        const owned = try dup(allocator, path);
         allocator.free(plan.targets[0].output);
-        plan.targets[0].output = try dup(allocator, path);
+        plan.targets[0].output = owned;
     }
 }
 fn checkedPathValue(v: []const u8) Error![]const u8 {
@@ -1797,6 +1810,58 @@ test "a disabled nostr section needs no identity, selection, or relays (#894)" {
     try std.testing.expectError(error.InvalidNostr, parseNostrProfile(
         "{\"enabled\":false,\"pubkey\":\"abc\",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
     ));
+}
+
+/// Sweep `parseBytes` under a FailingAllocator: `fail_index` climbs until the
+/// first fully successful parse. Every induced failure must be a plain
+/// OutOfMemory — a system error, never a usage-class rejection like
+/// InvalidPublication — and the backing testing allocator reports any leak or
+/// double free the defect leaves behind (#1043 review).
+fn sweepParseAllocations(source: []const u8, overrides: ProfileOverrides) !void {
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        // Retain the exact allocator value so a successful request is deinited
+        // through the same wrapper that constructed it.
+        const allocator = failing.allocator();
+        var request = parseBytes(allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, overrides) catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            continue;
+        };
+        request.deinit(allocator);
+        return;
+    }
+}
+
+test "standard-site publication parse stays OOM-clean at every allocation index (#1043)" {
+    // Covers the normalized location and the DID duplication: an induced
+    // failure in `parseLocation` used to surface as InvalidLocation (a usage
+    // error) instead of OutOfMemory, and a failed `did` copy stranded the
+    // already-normalized location before `config.deinit` was registered.
+    const source =
+        \\{"format":"boris-publication-profile","schema_version":1,"site":{"url":"https://docs.example.com/"},"publication":{"target":"standard-site","base_url":"https://docs.example.com/","origin":"https://docs.example.com/","base_path":"","did":"did:plc:ewvi7nxzyoun6zhxrhs64oiz","pds":"https://pds.example.com","name":"Boris Docs","include":["guides/*"]},"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}]}
+    ;
+    try sweepParseAllocations(source, .{});
+}
+
+test "profile string overrides stay memory-safe under induced OutOfMemory (#1043)" {
+    // An override frees the replaced string only after its successor exists;
+    // freeing first used to leave a dangling pointer the plan errdefer then
+    // freed a second time.
+    const source =
+        \\{"format":"boris-publication-profile","schema_version":1,"targets":[{"name":"a","output":"dist","layout":"layouts/main.html"}]}
+    ;
+    try sweepParseAllocations(source, .{ .input = "other" });
+    try sweepParseAllocations(source, .{ .html_output = "preview" });
+}
+
+test "layout_rules parse stays leak-free at every allocation index (#1043)" {
+    // The selector copy must be guarded until the complete rule joins the
+    // initialized prefix; a failed layout-path copy used to strand it.
+    const source =
+        \\{"format":"boris-publication-profile","schema_version":1,"targets":[{"name":"a","output":"d","layout":"layouts/main.html","layout_rules":[{"selector":"id:a","layout":"layouts/a.html"}]}]}
+    ;
+    try sweepParseAllocations(source, .{});
 }
 
 test "an enabled nostr surface requires a publication location" {

@@ -8,3 +8,10 @@
   byte-array strings (`title: [116,105,116]`) now fail with a diagnostic that
   names the field, per the
   [head metadata contract](/docs/contracts/head-metadata.md).
+- Allocation failures deeper in the profile parse keep their OutOfMemory
+  identity and memory safety: Standard.site location normalization no longer
+  degrades OOM to `InvalidLocation`/`InvalidPublication`, the `input` /
+  `html_output` string overrides no longer free the replaced value before its
+  successor exists (a double free on allocation failure), and partially built
+  `standard-site` publication configs and `layout_rules` entries release their
+  intermediate strings instead of leaking them.
