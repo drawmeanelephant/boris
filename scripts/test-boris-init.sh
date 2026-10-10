@@ -249,7 +249,7 @@ grep -q '<dd>production-editing, typesetting, publishing-systems</dd>' "$R/dist/
 grep -q '@media print' "$R/dist/assets/corporate.css" || fail "resume theme ships no print stylesheet"
 pass "resume: tags in metadata, now satellite, print stylesheet published"
 
-note "newsletter: press named layouts, a profile-declared sitemap, and feed-ready issues"
+note "newsletter: press named layouts, a profile-declared feed with autodiscovery, and a sitemap"
 N="$OUT/arch-newsletter"
 grep -q 'txp-home' "$N/dist/index.html" || fail "newsletter index does not use the press home layout"
 grep -q 'txp-archive-body' "$N/dist/issues.html" || fail "newsletter issues hub does not use the press archive layout"
@@ -257,11 +257,28 @@ grep -q 'txp-blog-body' "$N/dist/issues/2026-10-03-the-paper-mill.html" \
     || fail "newsletter issue does not use the press blog layout"
 grep -q '<loc>https://saturday-sheet.example.com/issues/2026-09-19-first-edition.html</loc>' "$N/dist/sitemap.xml" \
     || fail "newsletter profile build did not emit the sitemap"
-(cd "$N" && "$ROOT/zig-out/bin/boris" --rss --input content --site-url https://saturday-sheet.example.com/ \
-    --rss-title "The Saturday Sheet" --rss-description "A weekly paper" --rss-path feed/rss.xml --quiet) \
-    >/dev/null 2>"$OUT/newsletter-rss.stderr" || fail "newsletter RSS export failed: $(head -3 "$OUT/newsletter-rss.stderr")"
-[[ "$(grep -c '<item>' "$N/feed/rss.xml")" == 3 ]] || fail "newsletter issues are not all feed-eligible"
-pass "newsletter: home/archive/blog layouts, dist/sitemap.xml, three feed-eligible issues"
+[[ -f "$N/dist/feed.xml" ]] || fail "newsletter profile build did not emit dist/feed.xml"
+[[ "$(grep -c '<item>' "$N/dist/feed.xml")" == 3 ]] || fail "newsletter feed does not carry all three issues"
+autodiscovery='<link rel="alternate" type="application/rss+xml" href="https://saturday-sheet.example.com/feed.xml">'
+for page in index issues issues/2026-09-19-first-edition; do
+    sed -n '/<head>/,/<\/head>/p' "$N/dist/$page.html" | grep -qF "$autodiscovery" \
+        || fail "newsletter $page head has no feed autodiscovery link"
+done
+# Drafting an issue is the documented way to hold it back: it leaves the feed
+# and sitemap, and its own head advertises nothing.
+cp -R "$N" "$OUT/newsletter-draft"
+ND="$OUT/newsletter-draft"
+rm -rf "$ND/dist"
+printf '%s\n' '---' 'title: Held Back' 'parent: issues' 'published_at: 2026-10-10T08:00:00Z' \
+    'summary: Not ready yet.' 'status: draft' '---' '' '# Held Back' > "$ND/content/issues/2026-10-10-held-back.md"
+(cd "$ND" && "$ROOT/zig-out/bin/boris" --profile boris.json --quiet) >/dev/null 2>"$OUT/newsletter-draft.stderr" \
+    || fail "newsletter build with a draft issue failed: $(head -3 "$OUT/newsletter-draft.stderr")"
+[[ -f "$ND/dist/issues/2026-10-10-held-back.html" ]] || fail "newsletter draft issue did not render"
+[[ "$(grep -c '<item>' "$ND/dist/feed.xml")" == 3 ]] || fail "newsletter draft issue changed the feed item count"
+grep -q 'held-back' "$ND/dist/feed.xml" "$ND/dist/sitemap.xml" && fail "newsletter draft issue leaked into the feed or sitemap"
+grep -q 'application/rss+xml' "$ND/dist/issues/2026-10-10-held-back.html" && fail "newsletter draft head advertises the feed"
+rm -rf "$ND"
+pass "newsletter: home/archive/blog layouts, dist/feed.xml with three items + head autodiscovery, sitemap; drafts held back"
 
 note "portfolio: index on the showcase home layout, satellites on main"
 P="$OUT/arch-portfolio/dist"

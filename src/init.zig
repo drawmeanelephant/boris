@@ -32,8 +32,9 @@
 //!   "now" satellite under `corporate`, whose print stylesheet is the PDF.
 //! - `newsletter` — a weekly paper (`index` → `issues` hub → dated issues)
 //!   under `press`; `layout_rules` route the masthead, archive, and issues
-//!   to press's named layouts, and the profile declares `site.url` plus a
-//!   target `sitemap`. Profile `rss` waits on `{{head}}` in press layouts.
+//!   to press's named layouts, and the profile's target enables `head` and
+//!   declares `rss` plus `sitemap`, so the first build ships `feed.xml`
+//!   with autodiscovery links in every issue's head.
 //! - `portfolio` — a studio front (`index`, an `about` satellite, three
 //!   dated `projects/` satellites) under `showcase`; `layout_rules` send
 //!   `id:index` to `home.html` and every other page uses `main.html`.
@@ -1268,10 +1269,10 @@ const newsletter_index_md =
     \\is a dated page under [[issues]]; this week's is
     \\[[issues/2026-10-03-the-paper-mill]].
     \\
-    \\The profile publishes `sitemap.xml` with every build, using the
-    \\`site.url` it declares. A profile `rss` feed also needs an enabled `head`
-    \\and layouts that carry the `{{head}}` slot; this theme's layouts do not
-    \\carry it yet, so the starter does not declare one.
+    \\Every build publishes `feed.xml` and `sitemap.xml` from the profile.
+    \\The feed rides on the target's enabled `head`: every page's head links
+    \\the feed so feed readers can discover it, and every press layout
+    \\carries the `{{head}}` slot that makes that possible.
     \\
 ;
 
@@ -1384,6 +1385,8 @@ const newsletter_profile =
     \\        { "selector": "id:issues", "layout": "themes/press/layouts/archive.html" },
     \\        { "selector": "glob:issues/*", "layout": "themes/press/layouts/blog.html" }
     \\      ],
+    \\      "head": { "enabled": true, "base_url": "https://saturday-sheet.example.com/" },
+    \\      "rss": { "path": "feed.xml" },
     \\      "sitemap": { "path": "sitemap.xml" }
     \\    }
     \\  ]
@@ -1966,18 +1969,18 @@ const newsletter_spec = ArchetypeSpec{
     \\  content/issues.md                 back-issue hub (archive layout)
     \\  content/issues/                   three dated issues (published_at + summary; blog layout)
     \\  themes/press/                     shipped "press" theme — editorial paper
-    \\  boris.json                        profile (theme: press, layout_rules, site.url + sitemap)
+    \\  boris.json                        profile (theme: press, layout_rules, head + rss + sitemap)
     ,
     .next_steps =
-    \\  boris --profile boris.json            build the paper and dist/sitemap.xml
-    \\  boris plan --profile boris.json       inspect layout rules and the sitemap declaration
+    \\  boris --profile boris.json            build the paper, dist/feed.xml, and dist/sitemap.xml
+    \\  boris plan --profile boris.json       inspect layout rules and the feed and sitemap declarations
     \\  boris check                           graph-health report
     \\  boris watch --profile boris.json      rebuild on change
     ,
     .conventions =
     \\  an issue is a satellite of issues with published_at + summary; the date orders feeds
-    \\  the target's sitemap needs site.url; replace the example.com URL before publishing
-    \\  profile rss also needs an enabled head and {{head}} in every layout (press lacks it today)
+    \\  rss needs site.url, title, description, and an enabled head whose base_url equals site.url
+    \\  status: draft issues stay out of the feed and sitemap; replace example.com before publishing
     ,
 };
 
@@ -2446,7 +2449,7 @@ test "resume is one CV page with metadata-bearing frontmatter and a print styles
     try std.testing.expect(std.mem.indexOf(u8, archetype_themes.corporate_css, "@media print") != null);
 }
 
-test "newsletter issues are dated and the profile declares a sitemap with its site url" {
+test "newsletter issues are dated and the profile declares an rss feed riding an enabled head" {
     var issues: usize = 0;
     for (newsletter_spec.files) |f| {
         if (!std.mem.startsWith(u8, f.path, "content/issues/")) continue;
@@ -2458,11 +2461,15 @@ test "newsletter issues are dated and the profile declares a sitemap with its si
     try std.testing.expectEqual(@as(usize, 3), issues);
     try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"url\": \"https://") != null);
     try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"sitemap\": { \"path\": \"sitemap.xml\" }") != null);
-    // Profile RSS needs an enabled head and {{head}} in every selected layout
-    // (head-metadata.md); press has none yet, so the starter must not
-    // declare a feed it cannot build.
-    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.press_layout_main, "{{head}}") != null or
-        std.mem.indexOf(u8, newsletter_profile, "\"rss\"") == null);
+    // The single-target RSS rider (head-metadata.md) needs an enabled head
+    // whose base equals site.url, and exactly one {{head}} in every layout a
+    // page can select.
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"rss\": { \"path\": \"feed.xml\" }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"head\": { \"enabled\": true, \"base_url\": \"https://saturday-sheet.example.com/\" }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, newsletter_profile, "\"url\": \"https://saturday-sheet.example.com/\"") != null);
+    for ([_][]const u8{ archetype_themes.press_layout_main, archetype_themes.press_layout_home, archetype_themes.press_layout_archive, archetype_themes.press_layout_blog, archetype_themes.press_layout_section }) |layout| {
+        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, layout, "{{head}}"));
+    }
 }
 
 test "portfolio projects are dated satellites of index and one carries a relation" {

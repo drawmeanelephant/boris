@@ -3031,7 +3031,7 @@ pub fn printInitUsage() void {
         \\  resume    single-page CV with tags for {{{{metadata}}}} plus a "now" page;
         \\            print the page for the PDF
         \\  newsletter  weekly paper of dated issues on press's named layouts;
-        \\            profile declares site.url and a sitemap
+        \\            profile enables head and declares rss (feed.xml) + sitemap
         \\  portfolio studio front plus dated project satellites; layout_rules
         \\            send index to showcase's home.html
         \\

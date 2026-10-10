@@ -183,12 +183,13 @@ catalog themes that fit each one.
 - `newsletter` — a weekly paper under `press`: trunk `index` → `issues`
   hub → three dated issues (`published_at` + `summary`, one `relates_to`
   edge). Its profile's `layout_rules` send `id:index` to `home.html`,
-  `id:issues` to `archive.html`, and `glob:issues/*` to `blog.html`. It
-  declares `site.url` and a target `sitemap`, so the build emits
-  `dist/sitemap.xml`. It declares no `rss`: the profile RSS rider needs
-  an enabled `head` and `{{head}}` in every selected layout
-  ([head metadata](head-metadata.md#bounded-rss-rider-and-execution-boundary)),
-  and the press layouts do not carry it yet.
+  `id:issues` to `archive.html`, and `glob:issues/*` to `blog.html`. Its
+  single target enables `head` (with `base_url` equal to `site.url`) and
+  declares `rss` and `sitemap`, so the first profile build emits
+  `dist/feed.xml` (the three issues) and `dist/sitemap.xml`, and every
+  non-draft page head carries the feed's autodiscovery link through the
+  [single-target RSS rider](head-metadata.md#bounded-rss-rider-and-execution-boundary).
+  A `status: draft` issue renders but stays out of the feed and sitemap.
 - `portfolio` — a studio site under `showcase`: trunk `index`, an `about`
   satellite, and three `projects/` satellites with `published_at` +
   `summary` (one `relates_to` edge). Its profile's `layout_rules` send

@@ -31,7 +31,7 @@ behavior are normative in
 | link-in-bio | `link-in-bio` ([#1057](https://github.com/drawmeanelephant/boris/issues/1057)) | a one-page site | `minimal` | `cards` | — |
 | resume | `resume` ([#1058](https://github.com/drawmeanelephant/boris/issues/1058)) | `{{metadata}}` / tags, print stylesheet | `corporate` | `compact`, `minimal` | Print yields a clean single column, with leftovers. See [Theme gaps](#theme-gaps) and [#1048](https://github.com/drawmeanelephant/boris/issues/1048). |
 | archive | later ([#1059](https://github.com/drawmeanelephant/boris/issues/1059)) | `tags` + `relations` taxonomy, `{{backlinks}}` | `archive` | `ledger`, `field-notes` | Slot adoption on `archive` (`{{relations}}`, `{{backlinks}}`) is pending in [#1047](https://github.com/drawmeanelephant/boris/issues/1047). |
-| newsletter | `newsletter` ([#1060](https://github.com/drawmeanelephant/boris/issues/1060)) | `published_at` issues, profile `rss` / `sitemap` | `press` (home, archive, blog) | `journal`, `cozy` | `press` layouts have no `{{head}}`, so a profile `rss` declaration fails with `EHEAD`. See [Theme gaps](#theme-gaps). |
+| newsletter | `newsletter` ([#1060](https://github.com/drawmeanelephant/boris/issues/1060)) | `published_at` issues, profile `rss` / `sitemap` | `press` (home, archive, blog) | `journal`, `cozy` | — (resolved: press layouts carry `{{head}}`, so the starter's profile ships `rss` on an enabled `head`) |
 | photo-gallery | later ([#1061](https://github.com/drawmeanelephant/boris/issues/1061)) | `{stem}.assets/` content-local images | `gallery` (new) | `showcase` (partial), `cards` | No image-first theme yet. The `gallery` theme is [#1052](https://github.com/drawmeanelephant/boris/issues/1052) and in progress. |
 | dashboard | later ([#1062](https://github.com/drawmeanelephant/boris/issues/1062)) | `status:` field, dense tables / relations | `engineering` | `ledger`, `corporate` | The `{{page-status}}` slot adoption on `engineering` is pending in [#1047](https://github.com/drawmeanelephant/boris/issues/1047). |
 
@@ -90,14 +90,12 @@ theme slot work ([#1047](https://github.com/drawmeanelephant/boris/issues/1047)
 and [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), not to
 `init`.
 
-- **`press` has no `{{head}}`.** The profile RSS rider requires an enabled
-  `head` and exactly one `{{head}}` in every selected layout
+- ~~**`press` has no `{{head}}`.**~~ Resolved: all five press layouts now
+  carry `{{head}}`, so the `newsletter` starter's profile enables `head`
+  and declares `rss`
   ([head metadata](contracts/head-metadata.md#bounded-rss-rider-and-execution-boundary)).
-  The `newsletter` starter therefore declares `sitemap` only, and RSS
-  waits for `{{head}}` on press `home`, `archive`, `blog`, and `main`.
-  When the starter profile gains `head` (`enabled`, `base_url`) and `rss`,
-  the build fails with `EHEAD` under press. The same profile pointed at
-  `journal` builds a three-item `feed.xml` and its autodiscovery link.
+  Its first build writes a three-item `dist/feed.xml` and an autodiscovery
+  link in every non-draft head.
 - **`showcase/layouts/home.html` has no `{{children}}`.** The `portfolio`
   index lists its projects with hand-written wiki links until the slot
   lands.
