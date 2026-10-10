@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive dashboard)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive dashboard photo-gallery)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -331,6 +331,28 @@ grep -q 'data-relation-kind="depends_on"' "$D/projects/tide-gauge-network.html" 
     || fail "dashboard active project has no depends_on backlink"
 grep -q 'harbor-sensor-pilot' "$D/_boris/search/search-index.json" && fail "dashboard draft project leaked into search"
 pass "dashboard: home layout board; published/draft/archived labels on project pages; drafts unadvertised"
+
+note "photo-gallery: every page's images resolve page-relative to byte-identical copies"
+G="$OUT/arch-photo-gallery"
+grep -q 'data-layout="home"' "$G/dist/index.html" || fail "photo-gallery index does not use the gallery home layout"
+for album in coast hills; do
+    grep -q "href=\"photos/$album.html\"" "$G/dist/index.html" || fail "photo-gallery album grid does not link $album"
+done
+images=0
+for page in index photos/coast photos/hills; do
+    srcs="$(grep -o '<img src="[^"]*"' "$G/dist/$page.html" | sed 's/^<img src="//; s/"$//')"
+    [[ -n "$srcs" ]] || fail "photo-gallery $page renders no images"
+    dir="$(dirname "$page")"
+    stem="$(basename "$page")"
+    while read -r src; do
+        [[ "$src" == "$stem.assets/"* ]] || fail "photo-gallery $page image $src is not page-relative to its own assets"
+        cmp -s "$G/dist/$dir/$src" "$G/content/$dir/$src" || fail "photo-gallery $page image $src did not publish beside the page"
+        images=$((images + 1))
+    done <<<"$srcs"
+done
+[[ "$images" == 5 ]] || fail "photo-gallery rendered $images images, expected 5"
+grep -q '<figcaption><strong>Dawn.</strong>' "$G/dist/photos/coast.html" || fail "photo-gallery figure caption did not render"
+pass "photo-gallery: home grid; 5 images at depths 0 and 1 resolve page-relative and publish byte-identical"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 for t in "${ARCHETYPES[@]:1}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done

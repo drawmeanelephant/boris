@@ -49,6 +49,11 @@
 //!   mapping documented on the board), with `depends_on` / `supersedes`
 //!   relations and status-history tables; `layout_rules` send `id:index`
 //!   to `home.html`.
+//! - `photo-gallery` — a trunk front page and two `photos/` album
+//!   satellites under `gallery`, each page carrying small PNG plates in its
+//!   own `{stem}.assets/` folder inside `<figure>` captions; `layout_rules`
+//!   send `id:index` to `home.html`, whose `{{children}}` is the album grid.
+//!   The images are content, so they embed from `src/init_templates/`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -79,7 +84,7 @@ const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default and
 /// writes the same bytes `init` has always written.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard, @"photo-gallery" };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -1826,6 +1831,144 @@ const dashboard_profile =
     \\
 ;
 
+// --- photo-gallery ----------------------------------------------------------
+
+// Starter images are content, not theme assets, so they live with the init
+// templates under src/ and embed by relative path. They are byte-identical
+// copies of five examples/gallery-site plates (locally generated flat-colour
+// PNGs; provenance and SHA-256 in examples/gallery-site/README.md).
+const photo_gallery_tidewater_png = @embedFile("init_templates/photo-gallery/content/index.assets/tidewater.png");
+const photo_gallery_dawn_png = @embedFile("init_templates/photo-gallery/content/photos/coast.assets/dawn.png");
+const photo_gallery_dusk_png = @embedFile("init_templates/photo-gallery/content/photos/coast.assets/dusk.png");
+const photo_gallery_ridge_png = @embedFile("init_templates/photo-gallery/content/photos/hills.assets/ridge.png");
+const photo_gallery_pines_png = @embedFile("init_templates/photo-gallery/content/photos/hills.assets/pines.png");
+
+const photo_gallery_index_md =
+    \\---
+    \\title: Two Walks
+    \\tags: [gallery]
+    \\summary: Two small albums of page-local images.
+    \\---
+    \\
+    \\# Two Walks
+    \\
+    \\A coast walk and a hill walk, two plates each. Every page keeps its
+    \\images in a sibling `{stem}.assets/` folder: this page's cover lives in
+    \\`content/index.assets/`, and each album's plates live beside the album.
+    \\
+    \\<figure>
+    \\
+    \\![A posterized seascape at evening: banded sky fading from navy to coral above dark water, with a pale sun low on the right](index.assets/tidewater.png)
+    \\
+    \\<figcaption><strong>Tidewater.</strong> Cover plate, 1200 × 560 PNG.</figcaption>
+    \\</figure>
+    \\
+    \\The album grid below comes from the layout's `{{children}}` slot. Boris
+    \\copies each image byte for byte and rewrites its Markdown URL to a
+    \\page-relative path. It never resizes, crops, or makes thumbnails, so
+    \\scale and compress images before you add them.
+    \\
+;
+
+const photo_gallery_coast_md =
+    \\---
+    \\title: Coast
+    \\parent: index
+    \\tags: [coast, album]
+    \\summary: One horizon at two times of day.
+    \\relations: [relates_to=photos/hills]
+    \\---
+    \\
+    \\# Coast
+    \\
+    \\One horizon, twelve hours apart. A `gallery-grid` block sets the figures
+    \\side by side on a wide screen and stacks them on a narrow one.
+    \\
+    \\<div class="gallery-grid">
+    \\
+    \\<figure>
+    \\
+    \\![Dawn: lavender-to-peach banded sky over slate water, a small pale sun low on the left with a striped reflection](coast.assets/dawn.png)
+    \\
+    \\<figcaption><strong>Dawn.</strong> Cold light, low sun.</figcaption>
+    \\</figure>
+    \\
+    \\<figure>
+    \\
+    \\![Dusk: plum-to-orange banded sky, a large amber sun touching the horizon above a long striped reflection](coast.assets/dusk.png)
+    \\
+    \\<figcaption><strong>Dusk.</strong> The sun sits on the water line.</figcaption>
+    \\</figure>
+    \\
+    \\</div>
+    \\
+    \\Next walk: [[photos/hills]].
+    \\
+;
+
+const photo_gallery_hills_md =
+    \\---
+    \\title: Hills
+    \\parent: index
+    \\tags: [hills, album]
+    \\summary: Layered ridges and one portrait plate.
+    \\---
+    \\
+    \\# Hills
+    \\
+    \\Inland, the ridges stack up. One plate is portrait, so the grid copes
+    \\with uneven heights.
+    \\
+    \\<div class="gallery-grid">
+    \\
+    \\<figure>
+    \\
+    \\![Ridge: four layered ridgelines in blue-grey to dark green under a banded sky](hills.assets/ridge.png)
+    \\
+    \\<figcaption><strong>Ridge.</strong> Four layers, nearest darkest.</figcaption>
+    \\</figure>
+    \\
+    \\<figure>
+    \\
+    \\![Pines: three stepped dark-green pine silhouettes on an olive ground under a pale sky, portrait format](hills.assets/pines.png)
+    \\
+    \\<figcaption><strong>Pines.</strong> Portrait, 720 × 960.</figcaption>
+    \\</figure>
+    \\
+    \\</div>
+    \\
+    \\## Adding a plate
+    \\
+    \\Put the file in `content/photos/hills.assets/`, then reference it from
+    \\this page with an ordinary Markdown image inside a `<figure>`. Keep the
+    \\blank lines around the image so it stays Markdown, which is what lets
+    \\Boris check and rewrite its URL. A missing file fails the build with
+    \\`EASSET`.
+    \\
+;
+
+const photo_gallery_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Two Walks" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/gallery",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/gallery/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -2059,6 +2202,24 @@ const dashboard_files = [_]FileToWrite{
     .{ .path = "themes/engineering/README.md", .data = archetype_themes.engineering_readme },
     .{ .path = "themes/engineering/ACCESSIBILITY.md", .data = archetype_themes.engineering_accessibility },
     .{ .path = "boris.json", .data = dashboard_profile },
+};
+
+const photo_gallery_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = photo_gallery_index_md },
+    .{ .path = "content/index.assets/tidewater.png", .data = photo_gallery_tidewater_png },
+    .{ .path = "content/photos/coast.md", .data = photo_gallery_coast_md },
+    .{ .path = "content/photos/coast.assets/dawn.png", .data = photo_gallery_dawn_png },
+    .{ .path = "content/photos/coast.assets/dusk.png", .data = photo_gallery_dusk_png },
+    .{ .path = "content/photos/hills.md", .data = photo_gallery_hills_md },
+    .{ .path = "content/photos/hills.assets/ridge.png", .data = photo_gallery_ridge_png },
+    .{ .path = "content/photos/hills.assets/pines.png", .data = photo_gallery_pines_png },
+    .{ .path = "themes/gallery/layouts/main.html", .data = archetype_themes.gallery_layout_main },
+    .{ .path = "themes/gallery/layouts/home.html", .data = archetype_themes.gallery_layout_home },
+    .{ .path = "themes/gallery/footer.html", .data = archetype_themes.gallery_footer },
+    .{ .path = "themes/gallery/assets/css/gallery.css", .data = archetype_themes.gallery_css },
+    .{ .path = "themes/gallery/README.md", .data = archetype_themes.gallery_readme },
+    .{ .path = "themes/gallery/ACCESSIBILITY.md", .data = archetype_themes.gallery_accessibility },
+    .{ .path = "boris.json", .data = photo_gallery_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -2383,6 +2544,28 @@ const dashboard_spec = ArchetypeSpec{
     ,
 };
 
+const photo_gallery_spec = ArchetypeSpec{
+    .layout_path = "themes/gallery/layouts/main.html",
+    .files = &photo_gallery_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — the gallery front (home layout, album grid)
+    \\  content/index.assets/             the front page's cover image
+    \\  content/photos/                   two album satellites, each with its own <album>.assets/ images
+    \\  themes/gallery/                   shipped "gallery" theme — gallery wall, mats, and labels
+    \\  boris.json                        profile (theme: gallery, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the gallery (images copy beside their pages)
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  a page owns the images in its sibling <stem>.assets/ folder; reference them as ![alt](<stem>.assets/file)
+    \\  Boris copies and rewrites image URLs page-relative; it never resizes, so scale images first
+    \\  wrap a Markdown image in <figure> with blank lines to caption it; raw <img src> is not checked
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -2399,6 +2582,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .portfolio => &portfolio_spec,
         .archive => &archive_spec,
         .dashboard => &dashboard_spec,
+        .@"photo-gallery" => &photo_gallery_spec,
     };
 }
 
@@ -2595,7 +2779,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive, dashboard", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive, dashboard, photo-gallery", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -2650,8 +2834,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive", "themes/engineering" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive", "themes/engineering", "themes/gallery" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";
@@ -2922,6 +3106,49 @@ test "dashboard has one project per status value and documents the mapping" {
     }
 }
 
+test "photo-gallery albums embed images from their own assets folders" {
+    var albums: usize = 0;
+    var images: usize = 0;
+    for (photo_gallery_spec.files) |f| {
+        if (!std.mem.startsWith(u8, f.path, "content/") or !std.mem.endsWith(u8, f.path, ".md")) continue;
+        const stem_path = f.path[0 .. f.path.len - ".md".len];
+        const stem = std.fs.path.basename(stem_path);
+        if (std.mem.startsWith(u8, f.path, "content/photos/")) {
+            try std.testing.expect(std.mem.indexOf(u8, f.data, "\nparent: index\n") != null);
+            albums += 1;
+        }
+        // Every Markdown image names this page's own `{stem}.assets/` file,
+        // and the starter writes that file.
+        var at: usize = 0;
+        var page_images: usize = 0;
+        while (std.mem.indexOfPos(u8, f.data, at, "![")) |start| {
+            const dest_start = std.mem.indexOfPos(u8, f.data, start, "](").? + 2;
+            const dest_end = std.mem.indexOfScalarPos(u8, f.data, dest_start, ')').?;
+            at = dest_end;
+            const dest = f.data[dest_start..dest_end];
+            var want: [64]u8 = undefined;
+            try std.testing.expect(std.mem.startsWith(u8, dest, try std.fmt.bufPrint(&want, "{s}.assets/", .{stem})));
+            var buf: [128]u8 = undefined;
+            try std.testing.expect(writesFile(&photo_gallery_spec, try std.fmt.bufPrint(&buf, "{s}/{s}", .{ std.fs.path.dirname(f.path).?, dest })));
+            page_images += 1;
+        }
+        try std.testing.expect(page_images >= 1);
+        images += page_images;
+    }
+    try std.testing.expectEqual(@as(usize, 2), albums);
+    try std.testing.expectEqual(@as(usize, 5), images);
+    // Images stay small: the starter is embedded in the binary.
+    var bytes: usize = 0;
+    for (photo_gallery_spec.files) |f| {
+        if (std.mem.endsWith(u8, f.path, ".png")) {
+            try std.testing.expect(std.mem.startsWith(u8, f.data, "\x89PNG\r\n\x1a\n"));
+            bytes += f.data.len;
+        }
+    }
+    try std.testing.expect(bytes < 32 * 1024);
+    try std.testing.expect(std.mem.indexOf(u8, photo_gallery_profile, "\"selector\": \"id:index\", \"layout\": \"themes/gallery/layouts/home.html\"") != null);
+}
+
 test "garden demonstrates include composition, components, and dense links" {
     // The seams a cold-start agent cannot guess: `{{include}}`, `<Aside>`,
     // and wiki links. If a template edit drops one, this test names it.
@@ -3067,7 +3294,8 @@ test "every archetype materializes and compiles through its declared adapter" {
         var content_pages: usize = 0;
         for (spec.files) |file| {
             if (std.mem.startsWith(u8, file.path, "content/") and
-                !std.mem.startsWith(u8, file.path, "content/includes/"))
+                !std.mem.startsWith(u8, file.path, "content/includes/") and
+                std.mem.indexOf(u8, file.path, ".assets/") == null)
             {
                 content_pages += 1;
             }

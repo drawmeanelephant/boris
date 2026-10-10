@@ -98,3 +98,10 @@ pub const engineering_footer = @embedFile("engineering/footer.html");
 pub const engineering_css = @embedFile("engineering/assets/css/engineering.css");
 pub const engineering_readme = @embedFile("engineering/README.md");
 pub const engineering_accessibility = @embedFile("engineering/ACCESSIBILITY.md");
+
+pub const gallery_layout_main = @embedFile("gallery/layouts/main.html");
+pub const gallery_layout_home = @embedFile("gallery/layouts/home.html");
+pub const gallery_footer = @embedFile("gallery/footer.html");
+pub const gallery_css = @embedFile("gallery/assets/css/gallery.css");
+pub const gallery_readme = @embedFile("gallery/README.md");
+pub const gallery_accessibility = @embedFile("gallery/ACCESSIBILITY.md");

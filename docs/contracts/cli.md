@@ -211,6 +211,15 @@ catalog themes that fit each one.
   `<body data-status="{{page-status}}">`); the draft project renders but
   is not advertised. Its profile's `layout_rules` send `id:index` to
   `themes/engineering/layouts/home.html`.
+- `photo-gallery` — an image gallery under `gallery`: trunk `index` with a
+  cover image and two `photos/` album satellites with two images each.
+  Every page keeps its PNG plates in its own sibling `{stem}.assets/`
+  folder ([content-local assets](content-local-assets.md)) and captions
+  them with raw `<figure>` around a Markdown image, so each image URL is
+  rewritten page-relative at every depth and published byte-identical
+  beside its page. Boris does no resizing or thumbnailing. Its profile's
+  `layout_rules` send `id:index` to `themes/gallery/layouts/home.html`,
+  whose `{{children}}` is the album grid.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

@@ -14,6 +14,13 @@
   documented on the board, `depends_on` / `supersedes` relations, and
   status-history tables. `layout_rules` send `id:index` to `home.html`
   ([#1062](https://github.com/drawmeanelephant/boris/issues/1062)).
+- `boris init --type photo-gallery` writes an image gallery under the new
+  `gallery` theme: a cover page and two albums, each page carrying small
+  self-made PNG plates in its own `{stem}.assets/` folder inside
+  `<figure>` captions, with `layout_rules` sending `id:index` to the
+  album-grid `home.html`
+  ([#1061](https://github.com/drawmeanelephant/boris/issues/1061),
+  [content-local assets](/docs/contracts/content-local-assets.md)).
 - The `boris init --type newsletter` profile now enables `head` and
   declares `rss`, so the first build writes a three-item `dist/feed.xml`
   and an autodiscovery link in every non-draft page head; a `status:

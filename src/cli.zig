@@ -3038,6 +3038,8 @@ pub fn printInitUsage() void {
         \\            rendered with relations and backlinks; a hand-kept topics index
         \\  dashboard project-status board: one project per status: value
         \\            (published/draft/archived), shown as a visible status label
+        \\  photo-gallery  two image albums; each page keeps its PNG plates in
+        \\            its own {{stem}}.assets/ folder, captioned with <figure>
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.
