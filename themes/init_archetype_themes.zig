@@ -19,6 +19,7 @@ pub const cards_layout_main = @embedFile("cards/layouts/main.html");
 pub const cards_footer = @embedFile("cards/footer.html");
 pub const cards_css = @embedFile("cards/assets/css/cards.css");
 pub const cards_readme = @embedFile("cards/README.md");
+pub const cards_accessibility = @embedFile("cards/ACCESSIBILITY.md");
 
 pub const cozy_layout_main = @embedFile("cozy/layouts/main.html");
 pub const cozy_footer = @embedFile("cozy/footer.html");
@@ -44,6 +45,7 @@ pub const service_layout_section = @embedFile("service/layouts/section.html");
 pub const service_footer = @embedFile("service/footer.html");
 pub const service_css = @embedFile("service/assets/css/service.css");
 pub const service_readme = @embedFile("service/README.md");
+pub const service_accessibility = @embedFile("service/ACCESSIBILITY.md");
 
 pub const reference_layout_main = @embedFile("reference/layouts/main.html");
 pub const reference_layout_home = @embedFile("reference/layouts/home.html");
@@ -52,11 +54,13 @@ pub const reference_footer = @embedFile("reference/footer.html");
 pub const reference_css = @embedFile("reference/assets/css/reference.css");
 pub const reference_mark_svg = @embedFile("reference/assets/img/mark.svg");
 pub const reference_readme = @embedFile("reference/README.md");
+pub const reference_accessibility = @embedFile("reference/ACCESSIBILITY.md");
 
 pub const minimal_layout_main = @embedFile("minimal/layouts/main.html");
 pub const minimal_footer = @embedFile("minimal/footer.html");
 pub const minimal_css = @embedFile("minimal/assets/minimal.css");
 pub const minimal_readme = @embedFile("minimal/README.md");
+pub const minimal_accessibility = @embedFile("minimal/ACCESSIBILITY.md");
 
 pub const journal_layout_main = @embedFile("journal/layouts/main.html");
 pub const journal_footer = @embedFile("journal/footer.html");
@@ -68,6 +72,7 @@ pub const corporate_layout_main = @embedFile("corporate/layouts/main.html");
 pub const corporate_footer = @embedFile("corporate/footer.html");
 pub const corporate_css = @embedFile("corporate/assets/corporate.css");
 pub const corporate_readme = @embedFile("corporate/README.md");
+pub const corporate_accessibility = @embedFile("corporate/ACCESSIBILITY.md");
 
 pub const showcase_layout_main = @embedFile("showcase/layouts/main.html");
 pub const showcase_layout_home = @embedFile("showcase/layouts/home.html");
@@ -77,3 +82,4 @@ pub const showcase_footer = @embedFile("showcase/footer.html");
 pub const showcase_css = @embedFile("showcase/assets/css/showcase.css");
 pub const showcase_mark_svg = @embedFile("showcase/assets/img/mark.svg");
 pub const showcase_readme = @embedFile("showcase/README.md");
+pub const showcase_accessibility = @embedFile("showcase/ACCESSIBILITY.md");

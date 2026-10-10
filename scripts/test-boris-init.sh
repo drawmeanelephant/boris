@@ -155,8 +155,15 @@ for t in "${ARCHETYPES[@]:1}"; do
         >"$OUT/arch-$t-build.stdout" 2>"$OUT/arch-$t-build.stderr" \
         || fail "archetype $t does not build through its own profile: $(head -3 "$OUT/arch-$t-build.stderr")"
     [[ -f "$OUT/arch-$t/dist/index.html" ]] || fail "archetype $t profile build wrote no index.html"
+    # A starter's theme is the catalog theme's whole file set, byte for byte:
+    # a missing sibling (ACCESSIBILITY.md, an asset) is a dead README link.
+    for th in "$OUT/arch-$t/themes/"*/; do
+        name="$(basename "$th")"
+        diff -r -x .DS_Store "$ROOT/themes/$name" "$th" >"$OUT/arch-$t-theme-$name.diff" 2>&1 \
+            || fail "archetype $t theme $name differs from themes/$name: $(head -3 "$OUT/arch-$t-theme-$name.diff")"
+    done
 done
-pass "${ARCHETYPE_LIST#docs, }: init + byte-identical rerun + refusal + profile-build"
+pass "${ARCHETYPE_LIST#docs, }: init + byte-identical rerun + refusal + profile-build + full theme file set"
 
 note "archetype surfaces are honest"
 grep -q '"input_format": "cook"' "$OUT/arch-cookbook/boris.json" \

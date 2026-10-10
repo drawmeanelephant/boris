@@ -1583,6 +1583,7 @@ const cookbook_files = [_]FileToWrite{
     .{ .path = "themes/cards/footer.html", .data = archetype_themes.cards_footer },
     .{ .path = "themes/cards/assets/css/cards.css", .data = archetype_themes.cards_css },
     .{ .path = "themes/cards/README.md", .data = archetype_themes.cards_readme },
+    .{ .path = "themes/cards/ACCESSIBILITY.md", .data = archetype_themes.cards_accessibility },
     .{ .path = "boris.json", .data = cookbook_profile },
 };
 
@@ -1631,6 +1632,7 @@ const landing_files = [_]FileToWrite{
     .{ .path = "themes/service/footer.html", .data = archetype_themes.service_footer },
     .{ .path = "themes/service/assets/css/service.css", .data = archetype_themes.service_css },
     .{ .path = "themes/service/README.md", .data = archetype_themes.service_readme },
+    .{ .path = "themes/service/ACCESSIBILITY.md", .data = archetype_themes.service_accessibility },
     .{ .path = "boris.json", .data = landing_profile },
 };
 
@@ -1649,6 +1651,7 @@ const wiki_files = [_]FileToWrite{
     .{ .path = "themes/reference/assets/css/reference.css", .data = archetype_themes.reference_css },
     .{ .path = "themes/reference/assets/img/mark.svg", .data = archetype_themes.reference_mark_svg },
     .{ .path = "themes/reference/README.md", .data = archetype_themes.reference_readme },
+    .{ .path = "themes/reference/ACCESSIBILITY.md", .data = archetype_themes.reference_accessibility },
     .{ .path = "boris.json", .data = wiki_profile },
 };
 
@@ -1658,6 +1661,7 @@ const link_in_bio_files = [_]FileToWrite{
     .{ .path = "themes/minimal/footer.html", .data = archetype_themes.minimal_footer },
     .{ .path = "themes/minimal/assets/minimal.css", .data = archetype_themes.minimal_css },
     .{ .path = "themes/minimal/README.md", .data = archetype_themes.minimal_readme },
+    .{ .path = "themes/minimal/ACCESSIBILITY.md", .data = archetype_themes.minimal_accessibility },
     .{ .path = "boris.json", .data = link_in_bio_profile },
 };
 
@@ -1682,6 +1686,7 @@ const resume_files = [_]FileToWrite{
     .{ .path = "themes/corporate/footer.html", .data = archetype_themes.corporate_footer },
     .{ .path = "themes/corporate/assets/corporate.css", .data = archetype_themes.corporate_css },
     .{ .path = "themes/corporate/README.md", .data = archetype_themes.corporate_readme },
+    .{ .path = "themes/corporate/ACCESSIBILITY.md", .data = archetype_themes.corporate_accessibility },
     .{ .path = "boris.json", .data = resume_profile },
 };
 
@@ -1719,6 +1724,7 @@ const portfolio_files = [_]FileToWrite{
     .{ .path = "themes/showcase/assets/css/showcase.css", .data = archetype_themes.showcase_css },
     .{ .path = "themes/showcase/assets/img/mark.svg", .data = archetype_themes.showcase_mark_svg },
     .{ .path = "themes/showcase/README.md", .data = archetype_themes.showcase_readme },
+    .{ .path = "themes/showcase/ACCESSIBILITY.md", .data = archetype_themes.showcase_accessibility },
     .{ .path = "boris.json", .data = portfolio_profile },
 };
 
@@ -2325,6 +2331,41 @@ test "every profile layout rule and include directive names a written file" {
                     const written = try std.fmt.bufPrint(&buf, "content/{s}", .{f.data[path_start..path_end]});
                     try std.testing.expect(writesFile(spec, written));
                     at = path_end;
+                }
+            }
+        }
+    }
+}
+
+test "starter theme docs only link to files the starter writes" {
+    // Theme READMEs link to their siblings (ACCESSIBILITY.md, MIGRATION.md);
+    // a starter that embeds the README but not the sibling ships a dead link.
+    // Links leaving the theme (`../`), absolute URLs, anchors, and examples
+    // inside fenced code are out of scope.
+    inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
+        const spec = specFor(@fromBackingInt(@intCast(value)));
+        for (spec.files) |f| {
+            if (!std.mem.startsWith(u8, f.path, "themes/") or !std.mem.endsWith(u8, f.path, ".md")) continue;
+            const dir = std.fs.path.dirname(f.path).?;
+            var fenced = false;
+            var lines = std.mem.splitScalar(u8, f.data, '\n');
+            while (lines.next()) |line| {
+                if (std.mem.startsWith(u8, std.mem.trimStart(u8, line, " "), "```")) fenced = !fenced;
+                if (fenced) continue;
+                var at: usize = 0;
+                while (std.mem.indexOfPos(u8, line, at, "](")) |start| {
+                    const target_start = start + 2;
+                    const target_end = std.mem.indexOfAnyPos(u8, line, target_start, ")#") orelse line.len;
+                    const target = line[target_start..target_end];
+                    at = target_end;
+                    if (target.len == 0 or std.mem.startsWith(u8, target, "../") or
+                        std.mem.indexOf(u8, target, "://") != null or std.mem.startsWith(u8, target, "mailto:")) continue;
+                    var buf: [256]u8 = undefined;
+                    const written = try std.fmt.bufPrint(&buf, "{s}/{s}", .{ dir, target });
+                    if (!writesFile(spec, written)) {
+                        std.debug.print("{s} links to unwritten {s}\n", .{ f.path, written });
+                        return error.TestUnexpectedResult;
+                    }
                 }
             }
         }
