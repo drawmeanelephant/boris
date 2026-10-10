@@ -18,12 +18,11 @@
     </header>
     <main id="main-content" tabindex="-1" class="container home-grid" data-boris-search-root>
       <article class="hero-card">
-        <p class="eyebrow">A semantic starting point</p>
-        <h1>{{title}}</h1>
+        <p class="eyebrow" data-boris-search-exclude>A semantic starting point</p>
+        <h1 data-boris-search-exclude>{{title}}</h1>
         {{metadata}}
         <div class="prose">{{content}}
-        {{relations}}
-        {{backlinks}}</div>
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div></div>
       </article>
       <aside class="home-rail" aria-label="Explore this site" data-boris-search-exclude>
         <div class="rail-card">

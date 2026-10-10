@@ -73,6 +73,7 @@ a:hover { text-decoration-thickness: 0.15em; }
 .prose table { display: block; overflow-x: auto; width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 0.55rem; }.prose th, .prose td { padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--line); text-align: left; }.prose th { background: var(--surface-muted); }.prose tr:last-child td { border-bottom: 0; }
 .admonition { margin: 1.25rem 0; padding: 0.8rem 1rem; border: 1px solid var(--line); border-left: 0.3rem solid var(--primary); border-radius: 0.55rem; background: var(--surface-muted); }.admonition--warning { border-left-color: var(--focus); }.admonition__title { margin: 0 0 0.3rem; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .children-card { margin-top: 2rem; padding: 1rem; border: 1px solid var(--line); border-radius: 0.65rem; background: var(--surface-muted); }.children-card h2 { margin: 0 0 0.6rem; font-size: 1rem; }.page-children li + li { margin-top: 0.35rem; }
+.graph-links:empty { display: none; }
 .semantic-relations, .semantic-backlinks { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: 0.65rem; background: var(--surface-muted); }
 .semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 0.6rem; font-size: 1rem; font-weight: 750; }
 .semantic-relations::before { content: "Related"; }.semantic-backlinks::before { content: "Linked from"; }

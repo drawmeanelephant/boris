@@ -46,6 +46,7 @@ main { min-width: 0; max-width: var(--measure); }
 .prose table { display: block; overflow-x: auto; border-collapse: collapse; }
 .prose th, .prose td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); text-align: start; }
 .admonition { margin: 1.2rem 0; padding: 0.75rem 0.9rem; border-inline-start: 0.25rem solid var(--ink); background: color-mix(in srgb, CanvasText 5%, Canvas); }
+.graph-links:empty { display: none; }
 .page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; }
 .semantic-relations, .semantic-backlinks { padding-top: 0.75rem; border-top: 1px solid var(--line); font-size: 0.92rem; }
 .semantic-relations::before, .semantic-backlinks::before { content: attr(aria-label); display: block; color: var(--muted); font-size: 0.8rem; font-weight: 750; }

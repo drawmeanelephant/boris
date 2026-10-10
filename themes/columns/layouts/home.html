@@ -19,11 +19,10 @@
       <div class="columns is-variable is-6">
         <article class="column is-8">
           <div class="box article-box article-box--home">
-            <p class="tag is-primary is-light">A flexible starting point</p>
-            <header class="content-header"><h1>{{title}}</h1>{{metadata}}</header>
+            <p class="tag is-primary is-light" data-boris-search-exclude>A flexible starting point</p>
+            <header class="content-header"><h1 data-boris-search-exclude>{{title}}</h1>{{metadata}}</header>
             <div class="content prose">{{content}}
-        {{relations}}
-        {{backlinks}}</div>
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div></div>
           </div>
         </article>
         <aside class="column is-4 sidebar" data-boris-search-exclude>

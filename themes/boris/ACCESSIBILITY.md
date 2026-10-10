@@ -21,9 +21,10 @@ What the default theme guarantees, checked against the built output and
 - `@media print` drops the skip link, search, and menu, flattens the grid,
   removes card chrome, and wraps code blocks.
 - Search is a progressive enhancement: without JavaScript a `<noscript>`
-  message points back to the navigation. The TOC and compiler metadata stay
-  out of the rendered-search index (`data-boris-search-exclude`, compiler
-  chrome rules).
+  message points back to the navigation. The TOC, compiler metadata, and the
+  `graph-links` relations/backlinks wrapper stay out of the rendered-search
+  index (`data-boris-search-exclude`, compiler chrome rules), so a page's
+  entry holds only its authored text.
 
 This is a theme-level pass. It does not replace a manual screen-reader,
 keyboard, zoom, or contrast review of a rendered site.

@@ -16,7 +16,8 @@
 - Reduced-motion preferences disable transitions and smooth scrolling.
 - `@media print` drops the skip link and nodelets, flattens the grid, removes
   the top-bar fill, and wraps code blocks.
-- The on-page TOC nodelet and the status/parent/tags header are
+- The on-page TOC nodelet, the status/parent/tags header, the Writeups
+  list, and the `graph-links` relations/backlinks wrapper are
   `data-boris-search-exclude`, so none of them enter the rendered-search
   index.
 

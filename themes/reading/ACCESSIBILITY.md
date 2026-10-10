@@ -20,7 +20,8 @@ What Reading guarantees, checked against the built output and
 - `prefers-reduced-motion: reduce` disables animations and transitions.
 - `@media print` drops the skip link and rails, widens the measure, and wraps
   code blocks.
-- The TOC is `data-boris-search-exclude`; compiler metadata stays out of the
+- The TOC and the `graph-links` relations/backlinks wrapper are
+  `data-boris-search-exclude`; compiler metadata stays out of the
   rendered-search index.
 
 This is a theme-level pass. It does not replace a manual screen-reader,

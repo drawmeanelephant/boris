@@ -20,15 +20,14 @@
         <article class="column is-8">
           <nav class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</nav>
           <div class="box article-box">
-            <header class="content-header"><h1>{{title}}</h1>{{metadata}}</header>
+            <header class="content-header"><h1 data-boris-search-exclude>{{title}}</h1>{{metadata}}</header>
             <div class="content prose">{{content}}</div>
           </div>
-          <section class="box children-box" aria-labelledby="children-heading">
+          <section class="box children-box" aria-labelledby="children-heading" data-boris-search-exclude>
             <h2 id="children-heading" class="title is-4">In this section</h2>
             {{children}}
           </section>
-        {{relations}}
-        {{backlinks}}
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
         </article>
         <aside class="column is-4 sidebar" aria-label="On this page" data-boris-search-exclude>
           <div class="menu box"><p class="menu-label">On this page</p>{{toc}}</div>

@@ -135,6 +135,7 @@ main > h1 + p, main > p:first-of-type:not(.eyebrow) { font-size: 1.15rem; color:
 .page-metadata div { display: flex; gap: 0.4rem; }
 .page-metadata dt { margin: 0; font-weight: 750; color: var(--accent-ink); }
 .page-metadata dd { margin: 0; }
+.graph-links:empty { display: none; }
 .page-children, .semantic-relations, .semantic-backlinks { margin: 2rem 0 0; padding: 0.85rem 1rem; border: 1px solid var(--line); border-radius: 0.5rem; background: color-mix(in srgb, var(--accent) 5%, Canvas); }
 .page-children ul, .semantic-relations ul, .semantic-backlinks ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
 .semantic-relations::before, .semantic-backlinks::before { display: block; color: var(--accent-ink); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }

@@ -161,7 +161,7 @@ mark { background: var(--mark); color: var(--bright); }
 /* ---------- graph panel ---------- */
 .graph-panel { margin-top: 2.5rem; border-top: 1px dashed var(--rule); padding-top: 1rem; display: grid; gap: 1.25rem; }
 @media (min-width: 48rem) { .graph-panel { grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); } }
-.gp-block:not(:has(a)) { display: none; }
+.gp-block:not(:has(a)), .graph-panel:not(:has(a)) { display: none; }
 .gp-title { font-family: var(--mono); font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0 0 .4rem; }
 .graph-panel ul { list-style: none; padding-left: 0; margin: 0; font-family: var(--mono); font-size: .82rem; }
 .graph-panel li { margin: .18rem 0; }

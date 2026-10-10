@@ -25,12 +25,11 @@
     <main id="content" class="article-card" tabindex="-1" data-boris-search-root>
       {{metadata}}
       <article class="prose">{{content}}</article>
-      <section class="children-card" aria-labelledby="children-heading">
+      <section class="children-card" aria-labelledby="children-heading" data-boris-search-exclude>
         <h2 id="children-heading">In this section</h2>
         {{children}}
       </section>
-      {{relations}}
-      {{backlinks}}
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
     </main>
     <aside class="rail rail--toc" aria-label="On this page" data-boris-search-exclude>
       <p class="eyebrow">On this page</p>

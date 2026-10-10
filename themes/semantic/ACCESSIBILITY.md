@@ -18,8 +18,12 @@ What Semantic guarantees, checked against the built output and
   forces black on white; and wraps code blocks.
 - Relations and backlinks keep their compiler `aria-label`s and gain visible
   headings from the theme.
-- The TOC rail is `data-boris-search-exclude`; compiler metadata stays out of
-  the rendered-search index.
+- The TOC rail, the children panel, layout kickers, the layout title `h1`,
+  and the `graph-links` relations/backlinks wrapper are
+  `data-boris-search-exclude`; compiler metadata stays out of the
+  rendered-search index. The layout `h1` repeats the page's own heading, so
+  a page with no authored `h1` has no indexed `h1` and its search title falls
+  back per the rendered-search contract (currently the page path).
 
 This is a theme-level pass. It does not replace a manual screen-reader,
 keyboard, zoom, or contrast review of a rendered site.

@@ -90,6 +90,7 @@ details summary { cursor: pointer; font-weight: 850; }
 .footnotes { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--op-line); color: var(--op-muted); font-size: 0.88rem; }
 .admonition__title { margin: 0 0 0.3rem; font-size: 0.74rem; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
 .details__body > :first-child { margin-top: 0.7rem; }
+.graph-links:empty { display: none; }
 .semantic-relations, .semantic-backlinks { margin-top: var(--op-size-6); padding-top: var(--op-size-4); border-top: 1px solid var(--op-line); }
 .semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 var(--op-size-2); color: var(--op-muted); font-size: 0.73rem; font-weight: 850; letter-spacing: 0.1em; text-transform: uppercase; }
 .semantic-relations::before { content: "Related"; }

@@ -16,8 +16,9 @@ What Cards guarantees, checked against the built output and
   and transitions.
 - `@media print` drops the skip link and rails, removes card chrome, and wraps
   code blocks.
-- The TOC rail is `data-boris-search-exclude`; compiler metadata stays out of
-  the rendered-search index.
+- The TOC rail, the "In this section" card, and the `graph-links`
+  relations/backlinks wrapper are `data-boris-search-exclude`; compiler
+  metadata stays out of the rendered-search index.
 
 Known limitation: below 42rem the navigation shows top-level entries only
 (nested lists are hidden by CSS). Breadcrumbs and the "In this section" card

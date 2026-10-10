@@ -27,11 +27,27 @@ constrain the stylesheet, so CSS features are not contract-forced.
 | `@media print` | Was a defect (CSS only) | Added: hides the skip link, navigation, and TOC; removes width caps; wraps code |
 | `prefers-reduced-motion` | Not a defect: the theme emits no motion | Added a guard anyway so later edits cannot add motion for users who asked for none |
 | `data-boris-search-*` hooks | **Contract-forced** | `data-*` attributes are outside the Strict vocabulary, and the theme ships no script |
+| Search-index hygiene | **Contract-forced** (documented limitation) | See [Rendered-search limitation](#rendered-search-limitation) |
 
 The skip target id is `boris.main`, not `main-content`. Oliver's GFM heading
 ids are lowercase slugs without periods, so no auto-generated heading id can
 collide with it. A collision would otherwise fail the build with
 `EHTML4STRICT` (duplicate document id).
+
+### Rendered-search limitation
+
+Other themes wrap relations/backlinks and layout chrome in
+`data-boris-search-exclude`. Here that attribute fails the build with
+`EHTML4STRICT` (unsupported attribute). HTML 4.01 also has no `main`,
+`nav`, `header`, `aside`, or `footer`, so the extractor falls back to
+`<body>`. The compiler drops `dl.page-metadata`, `ul.page-tags`, and
+`div.page-parent` by class
+([rendered-search contract](../../docs/contracts/rendered-search.md)). The
+Strict `div` shapes of `{{nav}}`, `{{breadcrumb}}`, `{{toc}}`,
+`{{children}}`, `{{relations}}`, and `{{backlinks}}`, and the skip link, are
+indexed as page text. A search index built from this target is therefore
+noisier than one built from an HTML5 theme. The layout cannot fix this; it
+needs a compiler-side rule.
 
 ## Intentionally absent slots
 

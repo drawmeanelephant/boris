@@ -19,10 +19,11 @@ What Field Notes guarantees, checked against the built output and
   and animations.
 - `@media print` drops the skip link and rails, flattens the grids, and wraps
   code blocks. Content, metadata, and relations still print.
-- The TOC rail and the status/parent/tags header are
-  `data-boris-search-exclude`, so none of them enter the rendered-search
-  index (verified: a unique tag and the status word are absent from
-  `search-index.json`).
+- The TOC rail, the status/parent/tags header, the `graph-links`
+  relations/backlinks wrapper, the home kicker and map, and the section
+  children panel are `data-boris-search-exclude`, so none of them enter the
+  rendered-search index (verified: a unique tag, the status word, and
+  relation link titles are absent from `search-index.json`).
 
 This is a theme-level pass. It does not replace a manual screen-reader,
 keyboard, zoom, or contrast review of a rendered site.

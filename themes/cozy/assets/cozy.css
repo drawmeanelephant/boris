@@ -53,6 +53,7 @@ img { display: block; max-width: 100%; height: auto; }
 .entry-footer { margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: .7rem; text-align: right; text-transform: none; }
 .entry--draft .entry-header::before { content: "Draft \2014  not yet published"; display: inline-block; margin-bottom: .5rem; padding: .15rem .55rem; border: 1px dashed var(--rust); background: #fdf3ea; color: var(--rust); font: bold .72rem var(--sans); letter-spacing: .08em; text-transform: uppercase; }
 .entry--archived .entry-header::before { content: "From the archives"; display: inline-block; margin-bottom: .5rem; color: var(--quiet); font: italic .85rem var(--serif); }
+.graph-links:empty { display: none; }
 .semantic-relations, .semantic-backlinks { margin-top: 1.25rem; padding: .8rem 1rem; border: 1px solid var(--line); background: var(--module); }
 .semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 .5rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; color: var(--quiet); font: bold .8rem var(--sans); letter-spacing: .1em; text-transform: uppercase; }
 .semantic-relations::before { content: "Related entries"; }

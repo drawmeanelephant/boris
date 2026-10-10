@@ -20,12 +20,11 @@
       <article class="node-body">
         <div class="node-copy">{{content}}</div>
       </article>
-      <section class="writeup-list" aria-labelledby="writeups">
+      <section class="writeup-list" aria-labelledby="writeups" data-boris-search-exclude>
         <h2 id="writeups">Writeups</h2>
         {{children}}
       </section>
-      {{relations}}
-      {{backlinks}}
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
     </main>
 
     <aside class="epicenter" aria-label="Nodelets">

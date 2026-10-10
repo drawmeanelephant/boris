@@ -19,11 +19,11 @@ What lab guarantees, checked against the built output and
   Without JavaScript the page stays in the dark default and remains usable.
 - Search is a progressive enhancement over the first-party index. Results
   are an ordered list with a polite live status; without JavaScript a
-  `<noscript>` note points to the navigation tree. Breadcrumb, rail, and TOC
-  are `data-boris-search-exclude`.
+  `<noscript>` note points to the navigation tree. Breadcrumb, rail, TOC,
+  and the graph panel are `data-boris-search-exclude`.
 - Relations and backlinks keep their compiler `aria-label`s inside the
   graph panel, with the relation kind shown as text. Empty panel blocks are
-  hidden.
+  hidden, and so is the whole panel when it has no links.
 - No motion is emitted; `prefers-reduced-motion: reduce` still pins scroll
   behavior, transitions, and animations off.
 - `@media print` renders dark ink on white in every mode and drops the

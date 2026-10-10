@@ -20,16 +20,15 @@
       <article class="reading-column">
         <div class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</div>
         <header class="article-header">
-          <h1>{{title}}</h1>
+          <h1 data-boris-search-exclude>{{title}}</h1>
           {{metadata}}
         </header>
         <div class="prose">{{content}}</div>
-        <section class="children-panel" aria-labelledby="children-heading">
+        <section class="children-panel" aria-labelledby="children-heading" data-boris-search-exclude>
           <h2 id="children-heading">In this section</h2>
           {{children}}
         </section>
-        {{relations}}
-        {{backlinks}}
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
       </article>
       <aside class="toc-rail" aria-label="On this page" data-boris-search-exclude>
         <p class="rail-label">On this page</p>

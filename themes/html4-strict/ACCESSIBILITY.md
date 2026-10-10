@@ -23,7 +23,10 @@ built output (`--target-profile default=html4-strict`) and
 - `@media print` hides the skip link, navigation, and TOC, removes width
   caps, and wraps code blocks.
 - No search UI ships: `data-boris-search-*` hooks are outside the Strict
-  vocabulary.
+  vocabulary. The same rule means the layout cannot mark chrome as
+  search-excluded, so a rendered-search index built from this target
+  includes navigation, breadcrumb, TOC, children, and relation link text
+  (see the README).
 
 The profile contract states that neither Boris nor this theme claims
 accessibility conformance. This is a theme-level pass. It does not replace a

@@ -88,6 +88,7 @@ a:hover { color: var(--blue); }
 .page-tags { display: flex; flex-wrap: wrap; gap: .35rem; padding: 0; list-style: none; }
 .page-tags li { padding: 0 .5rem; border: 1px solid var(--line); background: var(--blue-wash); color: var(--blue-dark); font: .75rem/1.7 var(--mono); }
 .page-tags li::before { content: "#"; color: var(--muted); }
+.graph-links:empty { display: none; }
 .semantic-relations, .semantic-backlinks { margin: 2rem 0 0; padding: 1rem; border-top: 3px solid var(--blue); background: var(--wash); font-size: .92rem; }
 .semantic-relations + .semantic-backlinks { margin-top: 1rem; }
 .semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 .6rem; color: var(--muted); font: 700 .7rem/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
