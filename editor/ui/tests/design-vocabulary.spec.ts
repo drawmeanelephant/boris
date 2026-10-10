@@ -2,8 +2,9 @@ import { expect, test, type Page } from '@playwright/test';
 
 // Design pass (#1044). Pins the shared vocabulary where it carries meaning:
 //
-//   1. panes never claim "empty" before the host has answered, and say they
-//      are unavailable (not loading forever) when it never does;
+//   1. panes never claim "empty" before the host has answered, say they are
+//      unavailable (not loading forever) when it never does, and read a
+//      failed artifact refresh as an error;
 //   2. tones restate host facts — a warning-severity group is not painted as
 //      an error, and a startup `stale` preview is not painted as a failure;
 //   3. a primary button's label and its key-hint chip stay readable in both
@@ -22,6 +23,9 @@ type Options = {
   problems?: Json[];
   preview?: Json;
   publication?: Json;
+  // Commands succeed, and every artifact request after the first one fails:
+  // the shape of a build whose graph/completion refresh the host cannot adapt.
+  refreshFails?: boolean;
 };
 
 function commandResult(overrides: Json = {}): Json {
@@ -59,12 +63,25 @@ async function installApi(page: Page, options: Options = {}) {
     const { path } = route.request().postDataJSON() as { path: string };
     return route.fulfill(json({ status: 'opened', path, content: '# Home\n', fingerprint: 'a'.repeat(64), read_only: false }));
   });
-  await page.route('**/api/commands/run', route => route.fulfill(json(commandResult({ problems: options.problems ?? [] }))));
-  await page.route('**/api/authoring', route => route.fulfill(json({
-    frontmatter_schema: { title: 'Boris frontmatter grammar (schema v1)', properties: { id: { type: 'string' } } },
-    completion: null, completion_status: 'build_required'
-  })));
-  await page.route('**/api/graph', route => route.fulfill(json({ graph: null, graph_status: 'build_required' })));
+  await page.route('**/api/commands/run', route => {
+    const { mode } = route.request().postDataJSON() as { mode: string };
+    const outcome = options.refreshFails ? { mode, exit_code: 0, failure_class: 'success' } : {};
+    return route.fulfill(json(commandResult({ problems: options.problems ?? [], ...outcome })));
+  });
+  const requests = { authoring: 0, graph: 0 };
+  await page.route('**/api/authoring', route => {
+    requests.authoring += 1;
+    if (options.refreshFails && requests.authoring > 1) return route.fulfill(json({ error: 'unsupported_boris_artifact' }, 502));
+    return route.fulfill(json({
+      frontmatter_schema: { title: 'Boris frontmatter grammar (schema v1)', properties: { id: { type: 'string' } } },
+      completion: null, completion_status: 'build_required'
+    }));
+  });
+  await page.route('**/api/graph', route => {
+    requests.graph += 1;
+    if (options.refreshFails && requests.graph > 1) return route.fulfill(json({ error: 'unsupported_boris_artifact' }, 502));
+    return route.fulfill(json({ graph: null, graph_status: 'build_required' }));
+  });
   await page.route('**/api/publication', route => route.fulfill(json(options.publication ?? { profiles: [{ path: 'boris.json' }], proof: null, proof_status: 'absent' })));
   await page.route('**/api/preview/state', route => route.fulfill(json(options.preview ?? {
     phase: 'idle', generation: 0, exit_code: null, used_stderr_fallback: false,
@@ -80,7 +97,7 @@ async function installApi(page: Page, options: Options = {}) {
   await page.goto('/#token=test-session-token');
 }
 
-test.describe('state honesty before the host answers', () => {
+test.describe('state honesty', () => {
   test('panes say they are loading instead of claiming nothing exists', async ({ page }) => {
     await installApi(page, { holdHost: true });
     const project = page.locator('#project');
@@ -113,6 +130,16 @@ test.describe('state honesty before the host answers', () => {
     const publication = page.locator('#publication');
     await expect(publication.locator('.empty-state', { hasText: 'boris-publication-profile' })).toBeVisible();
     await expect(publication.locator('.empty-state', { hasText: 'No local Proof Pack' })).toBeVisible();
+  });
+
+  test('a failed artifact refresh after a build reads as an error, not a quiet sentence', async ({ page }) => {
+    await installApi(page, { refreshFails: true });
+    await page.getByRole('button', { name: 'Build diagnostics', exact: true }).click();
+    const graphStatus = page.getByRole('status', { name: 'Graph status' });
+    await expect(graphStatus).toHaveText('The Boris build succeeded, but graph.json could not be adapted.');
+    await expect(graphStatus).toHaveAttribute('data-tone', 'danger');
+    await expect(page.getByText('The Boris build succeeded, but completion.json could not be adapted.'))
+      .toHaveAttribute('data-tone', 'danger');
   });
 
   test('an unsupported Proof Pack is not also reported as missing', async ({ page }) => {

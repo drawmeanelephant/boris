@@ -11,6 +11,8 @@ import type { AuthoringPayload, CompletionKind, Suggestion } from '../types';
 export const authoring = $state({
   payload: null as AuthoringPayload | null,
   status: 'Loading Boris authoring vocabulary…',
+  // The last refresh request failed; any payload on screen is the previous one.
+  failed: false,
   completionKind: 'frontmatter_key' as CompletionKind,
   completionQuery: '',
   selectedSuggestion: 0,
@@ -27,6 +29,7 @@ export function closedLayoutSlots(): string[] {
 
 export function setAuthoring(payload: AuthoringPayload) {
   authoring.payload = payload;
+  authoring.failed = false;
   if (payload.completion_status === 'unsupported') {
     authoring.status = 'completion.json is stale or unsupported. Build diagnostics to replace it. Frontmatter schema remains available.';
     return;
@@ -40,7 +43,10 @@ export async function refreshAuthoring() {
   authoring.status = 'Refreshing Boris completion…';
   const result = await api<AuthoringPayload>('/api/authoring');
   if (result.response.ok) setAuthoring(result.data);
-  else authoring.status = 'The Boris build succeeded, but completion.json could not be adapted.';
+  else {
+    authoring.failed = true;
+    authoring.status = 'The Boris build succeeded, but completion.json could not be adapted.';
+  }
 }
 
 export async function changeCompletionKind() {

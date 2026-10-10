@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { CompletionKind } from '../lib/types';
-  import { schemaHint } from '../lib/utils';
+  import { schemaHint, type Tone } from '../lib/utils';
   import { authoring, suggestions, changeCompletionKind, refreshAuthoring } from '../lib/state/authoring.svelte';
+  import { connection } from '../lib/state/connection.svelte';
   import { buffer, insertSuggestion } from '../lib/state/buffer.svelte';
 
   // Author mode (#990) keeps the hints present but folded away: the combobox
@@ -19,6 +20,14 @@
       : authoring.payload?.completion_status === 'unsupported'
         ? 'completion.json is stale or unsupported. Build diagnostics to replace it.'
         : 'This category comes from completion.json. Build diagnostics to create it.'
+  );
+
+  const statusTone = $derived<Tone | undefined>(
+    !authoring.payload
+      ? connection.phase === 'connecting' ? 'busy' : 'danger'
+      : authoring.failed ? 'danger'
+        : authoring.payload.completion_status === 'unsupported' ? 'warn'
+          : undefined
   );
 
   // The completion combobox owns its keyboard behavior: Esc closes the list,
@@ -49,7 +58,7 @@
   <div class="pane-heading">
     <div>
       <h3 id="authoring-heading">Boris authoring hints</h3>
-      <p>{authoring.status}</p>
+      <p class:status-text={statusTone !== undefined} data-tone={statusTone}>{authoring.status}</p>
     </div>
     <button type="button" class="ghost" onclick={refreshAuthoring}>Refresh Boris suggestions</button>
   </div>

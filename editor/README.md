@@ -849,7 +849,9 @@ Graph, Publication); when the host never connects (a failed connect or a
 missing token) they say they are unavailable instead of loading forever, the
 header chip turns loud, and Publication stops claiming "no profile" or "no
 Proof Pack". An artifact the host reports as `build_required` is a neutral
-notice, `unsupported` (stale) a warning, and a failed request a danger notice.
+notice, `unsupported` (stale) a warning, and a failed request a danger notice —
+including a refresh after a successful build that the host could not adapt,
+where the previous payload stays on screen under that error.
 A host refusal of a command colors the command status line; a Boris exit code
 stays in the result badge.
 

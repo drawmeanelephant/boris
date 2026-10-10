@@ -34,6 +34,7 @@
   const statusTone = $derived<Tone | undefined>(
     !graph.payload
       ? connection.phase === 'connecting' ? 'busy' : 'danger'
+      : graph.failed ? 'danger'
       : graph.payload.graph_status === 'unsupported' ? 'warn'
         : graph.payload.graph_status === 'build_required' ? 'neutral'
           : undefined

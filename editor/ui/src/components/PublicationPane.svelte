@@ -19,6 +19,7 @@
   const statusTone = $derived<Tone | undefined>(
     !payload
       ? connection.phase === 'connecting' ? 'busy' : 'danger'
+      : publication.failed ? 'danger'
       : payload.proof_status === 'unsupported' ? 'warn'
         : undefined
   );
