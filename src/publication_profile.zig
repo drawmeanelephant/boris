@@ -767,7 +767,10 @@ fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPl
     // artifact and need not carry stub data. Supplied values are still parsed
     // and validated, so malformed configuration fails closed either way.
     if (field(obj, "pubkey")) |v| {
-        out.pubkey = nostr.parseAuthorPubkey(allocator, try string(v)) catch return error.InvalidNostr;
+        out.pubkey = nostr.parseAuthorPubkey(allocator, try string(v)) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.InvalidNostr;
+        };
     } else if (out.enabled) return locusMissingField("pubkey");
 
     if (field(obj, "articles")) |v| {
@@ -801,7 +804,10 @@ fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPl
         const relays_mark = locusEnter("relays");
         out.auth_relays = try parseNostrRelays(allocator, try required(auth, "relays"));
         locusRestore(relays_mark);
-        nostr_auth.validateDeclaration(allocator, .{ .mode = "nip42", .relays = out.auth_relays }, out.relays) catch return error.InvalidNostr;
+        nostr_auth.validateDeclaration(allocator, .{ .mode = "nip42", .relays = out.auth_relays }, out.relays) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.InvalidNostr;
+        };
         locusRestore(mark);
     }
     return out;
@@ -885,7 +891,10 @@ fn parseSite(allocator: std.mem.Allocator, value: std.json.Value) Error!SiteMeta
     if (field(obj, "url")) |v| {
         const raw = try string(v);
         if (raw.len == 0) return error.InvalidSite;
-        site.url = rss.normalizedSiteUrl(allocator, raw) catch return error.InvalidSite;
+        site.url = rss.normalizedSiteUrl(allocator, raw) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.InvalidSite;
+        };
     }
     if (field(obj, "title")) |v| site.title = try boundedText(allocator, v);
     if (field(obj, "description")) |v| site.description = try boundedText(allocator, v);
