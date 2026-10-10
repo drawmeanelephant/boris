@@ -11,7 +11,11 @@ built output (`--target-profile default=html4-strict`) and
 - Links get a 2px `:focus` outline in every browser, plus a 3px offset
   `:focus-visible` outline where supported. `#174781` measures 9.31:1 on the
   white page, above the 3:1 non-text floor.
-- Body text is `#18212a` on `#fff`. The theme uses no color-only signals.
+- Body text is `#18212a` on `#fff`. Visited links are `#5b2a86` (9.9:1),
+  muted labels `#4f5b66` (6.95:1). Aside titles on their tints: note/info
+  `#174781` 8.59:1, tip `#24622a` 6.78:1, warning `#7f4b00` 6.7:1, danger
+  `#9b1c1c` 7.36:1. Every Aside keeps its word title, so the theme uses no
+  color-only signals.
 - There are no HTML5 landmarks or ARIA attributes; the profile forbids them.
   Structure comes from heading order and classed `div`s in a fixed reading
   order: skip link, navigation, breadcrumb, content, TOC, metadata,
@@ -24,9 +28,8 @@ built output (`--target-profile default=html4-strict`) and
   caps, and wraps code blocks.
 - No search UI ships: `data-boris-search-*` hooks are outside the Strict
   vocabulary. The same rule means the layout cannot mark chrome as
-  search-excluded, so a rendered-search index built from this target
-  includes navigation, breadcrumb, TOC, children, and relation link text
-  (see the README).
+  search-excluded. The compiler drops the Strict slot chrome by class, so
+  the only chrome text indexed is the skip link (see the README).
 
 The profile contract states that neither Boris nor this theme claims
 accessibility conformance. This is a theme-level pass. It does not replace a

@@ -69,14 +69,15 @@ Other themes wrap relations/backlinks and layout chrome in
 `data-boris-search-exclude`. Here that attribute fails the build with
 `EHTML4STRICT` (unsupported attribute). HTML 4.01 also has no `main`,
 `nav`, `header`, `aside`, or `footer`, so the extractor falls back to
-`<body>`. The compiler drops `dl.page-metadata`, `ul.page-tags`, and
-`div.page-parent` by class
-([rendered-search contract](../../docs/contracts/rendered-search.md)). The
-Strict `div` shapes of `{{nav}}`, `{{breadcrumb}}`, `{{toc}}`,
-`{{children}}`, `{{relations}}`, and `{{backlinks}}`, and the skip link, are
-indexed as page text. A search index built from this target is therefore
-noisier than one built from an HTML5 theme. The layout cannot fix this; it
-needs a compiler-side rule.
+`<body>`. The compiler drops every Strict slot shape by element and class
+(`dl.page-metadata`, `ul.page-tags`, and the `div` shapes of `{{nav}}`,
+`{{breadcrumb}}`, `{{toc}}`, `{{children}}`, `{{parent}}`, `{{relations}}`,
+and `{{backlinks}}`; see the
+[rendered-search contract](../../docs/contracts/rendered-search.md)). The one
+remaining leak is theme-authored: the skip link's text, "Skip to content",
+is indexed as each page's level-0 section. Checked on 2026-10-10 against
+`_boris/search/search-index.json` from the shared specimen. The layout
+cannot mark it, and moving it would break the skip-link floor.
 
 ## Intentionally absent slots
 

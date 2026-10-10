@@ -1,27 +1,87 @@
 body { color: #18212a; background: #fff; font: 1em/1.6 Georgia, serif; margin: 0; }
-.site { max-width: 70em; margin: auto; padding: 1em; }
-.page { max-width: 45em; }
-.site-nav, .breadcrumb, .page-toc, .page-children { font-family: Arial, sans-serif; }
-.site-nav ul, .breadcrumb ol { padding-left: 1.5em; }
+.site { max-width: 70em; margin: auto; padding: 1em 1.5em 3em; }
+.page { max-width: 40em; }
+.site-nav, .breadcrumb, .page-toc, .page-children, .page-metadata, .semantic-relations, .semantic-backlinks, .admonition__title, .details__summary, .footnotes, th { font-family: Arial, Helvetica, sans-serif; }
 a { color: #174781; }
+a:visited { color: #5b2a86; }
+a:hover, a:active { color: #18212a; }
 a:focus { outline: 2px solid #174781; }
 a:focus-visible { outline: 3px solid #174781; outline-offset: 2px; }
 .skip a { position: absolute; left: -999em; padding: .4em .7em; background: #174781; color: #fff; }
 .skip a:focus { left: 1em; top: 1em; outline-color: #18212a; }
-.page-metadata, .semantic-relations, .semantic-backlinks { margin-top: 1.5em; font-family: Arial, sans-serif; font-size: .9em; }
-.semantic-relations:before, .semantic-backlinks:before { display: block; font-weight: bold; }
+
+.site-nav { margin: 0 0 1em; padding: 0 0 .75em; border-bottom: 1px solid #c9ced3; font-size: .9em; }
+.site-nav:before { content: "Contents"; display: block; margin-bottom: .25em; color: #4f5b66; font-size: .8em; font-weight: bold; letter-spacing: .08em; text-transform: uppercase; }
+.site-nav ul { margin: 0; padding-left: 1.25em; }
+.site-nav > ul { padding-left: 0; list-style: none; }
+.site-nav li { margin: .15em 0; }
+.site-nav li.is-current > a { color: #18212a; font-weight: bold; text-decoration: none; }
+.site-nav li.is-ancestor > a { font-weight: bold; }
+.breadcrumb { margin: 0 0 1.5em; font-size: .85em; color: #4f5b66; }
+.breadcrumb ol { margin: 0; padding: 0; list-style: none; }
+.breadcrumb li { display: inline; }
+.breadcrumb li + li:before { content: " \203A  "; color: #4f5b66; }
+.breadcrumb li.is-current { color: #18212a; font-weight: bold; }
+
+.page h1 { margin: 0 0 .6em; padding-bottom: .25em; border-bottom: 2px solid #18212a; font-size: 2em; line-height: 1.2; }
+.page h2 { margin: 1.8em 0 .5em; padding-bottom: .15em; border-bottom: 1px solid #c9ced3; font-size: 1.45em; line-height: 1.25; }
+.page h3 { margin: 1.5em 0 .4em; font-size: 1.15em; }
+.page h4 { margin: 1.3em 0 .3em; font-size: 1em; font-variant: small-caps; letter-spacing: .04em; }
+.page ul, .page ol { padding-left: 1.75em; }
+.page li { margin: .2em 0; }
+.page dl { margin: 1em 0; }
+.page dt { font-weight: bold; }
+.page dd { margin: .15em 0 .6em 1.75em; }
+.page hr { height: 0; margin: 2em 0; border: 0; border-top: 1px solid #c9ced3; }
+.page blockquote { margin: 1.25em 0; padding: 0 0 0 1em; border-left: 3px solid #c9ced3; color: #4f5b66; font-style: italic; }
+.page code { padding: 0 .2em; background: #f4f4f0; font-size: .9em; }
+pre { overflow: auto; padding: .75em 1em; border: 1px solid #c9ced3; background: #f4f4f0; font-size: .875em; line-height: 1.45; }
+pre code { padding: 0; background: transparent; font-size: 1em; }
+img { max-width: 100%; height: auto; border: 1px solid #c9ced3; }
+.page p img { display: block; }
+
+.page table { margin: 1.25em 0; border-collapse: collapse; border-top: 2px solid #18212a; border-bottom: 2px solid #18212a; font-size: .95em; }
+.page th, .page td { padding: .35em .75em; border-bottom: 1px solid #c9ced3; vertical-align: top; }
+.page th { text-align: left; font-size: .85em; }
+.page th[align="center"] { text-align: center; }
+.page th[align="right"] { text-align: right; }
+
+.admonition { margin: 1.25em 0; padding: .6em 1em; border-left: 4px solid #174781; background: #f3f6fa; }
+.admonition__title { margin: 0 0 .3em; color: #174781; font-size: .8em; font-weight: bold; letter-spacing: .08em; text-transform: uppercase; }
+.admonition__body p { margin: .4em 0; }
+.admonition--tip { border-left-color: #24622a; background: #f2f7f1; }
+.admonition--tip .admonition__title { color: #24622a; }
+.admonition--warning { border-left-color: #7f4b00; background: #fbf6ec; }
+.admonition--warning .admonition__title { color: #7f4b00; }
+.admonition--danger { border-left-color: #9b1c1c; background: #fbf1f1; }
+.admonition--danger .admonition__title { color: #9b1c1c; }
+.details { margin: 1.25em 0; padding: .6em 1em; border: 1px solid #c9ced3; }
+.details__summary { margin: 0 0 .4em; padding-bottom: .3em; border-bottom: 1px dotted #c9ced3; font-weight: bold; }
+.details__body p { margin: .4em 0; }
+
+.footnotes { margin: 1.25em 0; padding-top: .4em; border-top: 1px solid #c9ced3; color: #4f5b66; font-size: .85em; }
+.footnotes ol { margin: 0; padding-left: 1.5em; }
+.footnote-ref a, .footnote-backref { text-decoration: none; }
+
+.page-toc, .page-metadata, .semantic-relations, .semantic-backlinks, .page-children { margin-top: 1.5em; font-size: .88em; }
+.page-toc { padding: .6em 1em; border: 1px solid #c9ced3; background: #f7f8f9; }
+.page-toc ul, .page-children ul, .semantic-relations ul, .semantic-backlinks ul { margin: .3em 0 0; padding-left: 1.25em; }
+.page-toc:before, .page-children:before, .semantic-relations:before, .semantic-backlinks:before { display: block; color: #4f5b66; font-size: .85em; font-weight: bold; letter-spacing: .08em; text-transform: uppercase; }
+.page-toc:before { content: "On this page"; }
+.page-children:before { content: "In this section"; }
 .semantic-relations:before { content: "Related"; }
 .semantic-backlinks:before { content: "Linked from"; }
-.admonition { border-left: 3px solid #174781; padding-left: 1em; }
-.admonition__title { font-weight: bold; }
-pre { overflow: auto; }
-img { max-width: 100%; }
+.page-metadata { overflow: hidden; margin-bottom: 0; padding: .5em 0; border-top: 1px solid #c9ced3; border-bottom: 1px solid #c9ced3; }
+.page-metadata dt { float: left; clear: left; width: 5.5em; color: #4f5b66; font-weight: bold; }
+.page-metadata dd { margin: 0 0 .15em 6em; }
+
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
 @media print {
   .skip, .site-nav, .page-toc { display: none; }
   .site, .page { max-width: none; padding: 0; }
-  a { color: #000; }
+  a, a:visited { color: #000; }
   pre { overflow: visible; white-space: pre-wrap; }
+  .admonition, .details, pre, table { page-break-inside: avoid; }
 }
