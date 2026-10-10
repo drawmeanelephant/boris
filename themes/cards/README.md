@@ -2,7 +2,7 @@
 
 Soft cards and quiet docs. Hand-authored. Not DaisyUI.
 
-- Layouts: `main.html`
+- Layouts: `main.html`, `home.html`
 - Assets: `assets/css/cards.css` (system stack)
 - Sample site: [`examples/cards-site/`](../../examples/cards-site/)
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
@@ -11,9 +11,28 @@ Soft cards and quiet docs. Hand-authored. Not DaisyUI.
 ./zig-out/bin/boris \
   --input examples/cards-site/content \
   --theme themes/cards \
+  --layout-rule default id:index themes/cards/layouts/home.html \
   --html-dir test-output/cards \
   --quiet
 ```
+
+## Named layouts
+
+- `main.html` is the reading card for every page, with the nav and outline
+  rails.
+- `home.html` is the index of a collection. The intro card (metadata, prose,
+  and the outline folded into its foot) sits above a deck of `{{children}}`,
+  one card per direct satellite, under "In this collection". There is no
+  outline rail, so the deck gets the width. It is the shape a recipe box
+  wants: `boris init --type cookbook` content builds with
+  `--cooklang --layout-rule default id:index themes/cards/layouts/home.html`
+  and shows each recipe as a card. Both layouts carry the same slots,
+  search exclusions, and skip target.
+
+`section`, `blog`, `archive`, and `print` are declined. A soft-card docs
+site has one middle level, and `main.html` already lists it under
+"In this section". Cards is not a dated-entry voice, and `@media print`
+drops the rails and card chrome from either layout.
 
 ## Slot coverage
 
