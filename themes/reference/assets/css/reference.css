@@ -621,14 +621,90 @@ a:hover {
   margin: 1.35rem 0 0.45rem;
 }
 
+.prose h4 {
+  margin: 1.2rem 0 0.35rem;
+  font-family: var(--r-sans);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--r-muted);
+  scroll-margin-top: 1.25rem;
+}
+
 .prose p,
 .prose ul,
-.prose ol {
+.prose ol,
+.prose dl {
   margin: 0.75rem 0;
 }
 
-.prose li + li {
+.prose ul,
+.prose ol {
+  padding-left: 1.45rem;
+}
+
+.prose li + li,
+.prose li > ul,
+.prose li > ol {
   margin-top: 0.28rem;
+}
+
+.prose li::marker {
+  color: var(--r-muted);
+}
+
+.prose dt {
+  font-family: var(--r-sans);
+  font-weight: 750;
+}
+
+.prose dd {
+  margin: 0.15rem 0 0.6rem;
+  padding-left: 0.85rem;
+  border-left: 2px solid var(--r-line);
+}
+
+.prose hr {
+  margin: 2rem 0;
+  border: 0;
+  border-top: 1px solid var(--r-line);
+}
+
+.prose img {
+  border-radius: 0.4rem;
+}
+
+.prose sup {
+  line-height: 0;
+}
+
+.footnote-ref a {
+  padding: 0 0.1em;
+  font-family: var(--r-sans);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.prose .footnotes {
+  margin: 1.5rem 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--r-line);
+  font-family: var(--r-sans);
+  font-size: 0.86rem;
+  color: var(--r-muted);
+}
+
+.prose .footnotes ol {
+  margin: 0;
+}
+
+.prose .footnotes p {
+  margin: 0.2rem 0;
+}
+
+.footnote-backref {
+  text-decoration: none;
 }
 
 .prose :not(pre) > code {
@@ -658,15 +734,15 @@ a:hover {
 }
 
 .prose table {
-  display: block;
   width: 100%;
-  overflow-x: auto;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   margin: 1rem 0;
   border: 1px solid var(--r-line);
   border-radius: var(--r-radius-sm);
   font-size: 0.95rem;
   font-family: var(--r-sans);
+  font-variant-numeric: tabular-nums;
 }
 
 .prose th,
@@ -675,6 +751,22 @@ a:hover {
   text-align: left;
   border-bottom: 1px solid var(--r-line);
   vertical-align: top;
+}
+
+.prose th:first-child {
+  border-top-left-radius: var(--r-radius-sm);
+}
+
+.prose th:last-child {
+  border-top-right-radius: var(--r-radius-sm);
+}
+
+.prose [align="center"] {
+  text-align: center;
+}
+
+.prose [align="right"] {
+  text-align: right;
 }
 
 .prose th {
@@ -888,6 +980,11 @@ a:hover {
 
   .prose {
     font-size: 1.02rem;
+  }
+
+  .prose table {
+    display: block;
+    overflow-x: auto;
   }
 }
 
