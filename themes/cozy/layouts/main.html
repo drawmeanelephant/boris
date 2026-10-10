@@ -18,13 +18,15 @@
     <div class="layout">
       <main id="main-content" class="site-main" tabindex="-1" data-boris-search-root>
         <div class="breadcrumb">{{breadcrumb}}</div>
-        <article class="entry">
+        <article class="entry entry--{{page-status}}">
           <header class="entry-header">
             <p class="entry-meta">hand-coded entry · static archive</p>
             {{metadata}}
           </header>
           <div class="entry-content">{{content}}</div>
           <footer class="entry-footer">comments and TrackBacks are preserved as authored metadata</footer>
+          {{relations}}
+          {{backlinks}}
         </article>
         <section class="recent-posts" aria-labelledby="recent-posts">
           <h2 id="recent-posts">Recent posts</h2>

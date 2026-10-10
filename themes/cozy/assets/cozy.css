@@ -2,7 +2,7 @@
   --paper: #ece7d7;
   --panel: #fff;
   --ink: #333;
-  --quiet: #777;
+  --quiet: #666;
   --rust: #a94b15;
   --rust-bright: #cf5e1e;
   --slate: #5a7b8c;
@@ -51,6 +51,16 @@ img { display: block; max-width: 100%; height: auto; }
 .entry-content { font-size: .95rem; }
 .entry-content img { margin: 1rem 0; border: 4px solid #fff; box-shadow: 0 0 5px rgba(0,0,0,.2); }
 .entry-footer { margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: .7rem; text-align: right; text-transform: none; }
+.entry--draft .entry-header::before { content: "Draft \2014  not yet published"; display: inline-block; margin-bottom: .5rem; padding: .15rem .55rem; border: 1px dashed var(--rust); background: #fdf3ea; color: var(--rust); font: bold .72rem var(--sans); letter-spacing: .08em; text-transform: uppercase; }
+.entry--archived .entry-header::before { content: "From the archives"; display: inline-block; margin-bottom: .5rem; color: var(--quiet); font: italic .85rem var(--serif); }
+.semantic-relations, .semantic-backlinks { margin-top: 1.25rem; padding: .8rem 1rem; border: 1px solid var(--line); background: var(--module); }
+.semantic-relations::before, .semantic-backlinks::before { display: block; margin: 0 0 .5rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; color: var(--quiet); font: bold .8rem var(--sans); letter-spacing: .1em; text-transform: uppercase; }
+.semantic-relations::before { content: "Related entries"; }
+.semantic-backlinks::before { content: "TrackBacks"; }
+.semantic-relations ul, .semantic-backlinks ul { margin: 0; padding-left: 1.2rem; }
+.semantic-relations li, .semantic-backlinks li { margin: .25rem 0; }
+.semantic-relations a, .semantic-backlinks a { font-family: var(--serif); }
+.semantic-relations li::after, .semantic-backlinks li::after { content: " (" attr(data-relation-kind) ")"; color: var(--quiet); font-size: .78rem; }
 .recent-posts { border-top: 1px solid var(--rust); }
 .recent-posts h2 { font-size: 1.15rem; }
 .recent-posts ul { padding-left: 1.2rem; }
@@ -92,4 +102,4 @@ img { display: block; max-width: 100%; height: auto; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
-@media print { .skip-link, .sidebar { display: none; } .layout { display: block; } }
+@media print { .skip-link, .sidebar { display: none; } .layout { display: block; } body { background: #fff; } .site-shell { border: 0; box-shadow: none; } .site-header { background: none; color: #000; } .site-header h1, .tagline, .site-kicker { color: #000; text-shadow: none; } pre { white-space: pre-wrap; } }
