@@ -13,15 +13,15 @@
       <div class="container header-inner">
         <p class="eyebrow">HTML-first documentation</p>
         <p class="site-name">Semantic</p>
-        <div class="site-nav" aria-label="Site navigation">{{nav}}</div>
+        <div class="site-nav">{{nav}}</div>
       </div>
     </header>
     <main id="main-content" tabindex="-1" class="container page-grid page-grid--section" data-boris-search-root>
       <article class="reading-column">
-        <div class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</div>
+        <div class="breadcrumb">{{breadcrumb}}</div>
         <header class="article-header">
           <p class="eyebrow" data-boris-search-exclude>Section landing</p>
-          <h1 data-boris-search-exclude>{{title}}</h1>
+          <h1 data-boris-search-exclude data-boris-search-title="layout">{{title}}</h1>
           {{metadata}}
         </header>
         <div class="prose">{{content}}</div>
