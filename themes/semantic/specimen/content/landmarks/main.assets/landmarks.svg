@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 360" role="img" aria-labelledby="title desc">
+  <title id="title">Nested document regions</title>
+  <desc id="desc">A banner region spans the top, a main region in the middle holds an article, and a footer region spans the bottom.</desc>
+  <rect width="560" height="360" rx="12" fill="#eef4ef"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#17211b">
+    <rect x="24" y="24" width="512" height="64" rx="8" fill="#ffffff" stroke="#087f5b" stroke-width="2"/>
+    <text x="40" y="52">header — banner</text>
+    <text x="40" y="74" font-size="11" fill="#65736a">site identity + nav[aria-label=&quot;Site&quot;]</text>
+
+    <rect x="24" y="104" width="512" height="176" rx="8" fill="#ffffff" stroke="#17211b" stroke-width="2"/>
+    <text x="40" y="132">main — one primary region</text>
+
+    <rect x="52" y="148" width="456" height="112" rx="8" fill="#f7f8f6" stroke="#87a08f" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="68" y="176">article — self-contained composition</text>
+    <text x="68" y="198" font-size="11" fill="#65736a">h1 → h2 → h3</text>
+    <text x="68" y="220" font-size="11" fill="#65736a">aside / details stay in document order</text>
+    <text x="68" y="242" font-size="11" fill="#65736a">not a new landmark</text>
+
+    <rect x="24" y="296" width="512" height="40" rx="8" fill="#ffffff" stroke="#087f5b" stroke-width="2"/>
+    <text x="40" y="321">footer — colophon</text>
+  </g>
+</svg>
