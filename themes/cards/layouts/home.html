@@ -10,34 +10,29 @@
 </head>
 <body class="cards-home">
   <a class="skip-link" href="#content">Skip to content</a>
-  <header class="topbar">
-    <p class="brand" aria-label="Cards">
-      <span class="brand__mark" aria-hidden="true">K</span>
-      <span>Cards</span>
-    </p>
-    {{breadcrumb}}
+  <header class="desk-header">
+    <p class="brand"><span class="brand__mark" aria-hidden="true">▤</span> Cards<span class="brand__note">A place for useful things.</span></p>
+    <details class="index-drawer" data-boris-search-exclude>
+      <summary>Open the index</summary>
+      <div class="index-drawer__body">{{nav}}</div>
+    </details>
   </header>
-  <div class="shell shell--home">
-    <aside class="rail rail--nav">
-      <p class="eyebrow">Browse</p>
-      {{nav}}
-    </aside>
-    <main id="content" class="home-main" tabindex="-1" data-boris-search-root>
-      <div class="article-card home-intro">
-        {{metadata}}
-        <article class="prose">{{content}}</article>
-        <section class="home-toc" aria-label="On this page" data-boris-search-exclude>
-          <p class="eyebrow">On this page</p>
-          {{toc}}
-        </section>
-      </div>
-      <section class="home-deck" aria-labelledby="home-deck-heading" data-boris-search-exclude>
-        <h2 id="home-deck-heading" class="eyebrow">In this collection</h2>
-        {{children}}
-      </section>
-      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
-    </main>
-  </div>
-  <footer class="footer">{{footer}}</footer>
+  <main id="content" class="workbench collection" tabindex="-1" data-boris-search-root>
+    <div class="filing-path" data-boris-search-exclude>{{breadcrumb}}</div>
+    <div class="collection-intro" data-status="{{page-status}}">
+      <p class="eyebrow" data-boris-search-exclude>The collection</p>
+      <article class="prose">{{content}}</article>
+    </div>
+    <section class="home-deck" aria-labelledby="deck-heading" data-boris-search-exclude>
+      <div class="deck-heading"><h2 id="deck-heading">Pick a card. Go somewhere.</h2><p>Filed here · open to explore</p></div>
+      {{children}}
+    </section>
+    <div class="collection-record" data-boris-search-exclude>
+      {{metadata}}
+      <details class="card-outline"><summary>Find a line</summary>{{toc}}</details>
+    </div>
+    <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+  </main>
+  <footer class="desk-footer">{{footer}}</footer>
 </body>
 </html>

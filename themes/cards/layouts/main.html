@@ -10,32 +10,33 @@
 </head>
 <body>
   <a class="skip-link" href="#content">Skip to content</a>
-  <header class="topbar">
-    <p class="brand" aria-label="Cards">
-      <span class="brand__mark" aria-hidden="true">K</span>
-      <span>Cards</span>
-    </p>
-    {{breadcrumb}}
+  <header class="desk-header">
+    <p class="brand"><span class="brand__mark" aria-hidden="true">▤</span> Cards<span class="brand__note">A place for useful things.</span></p>
+    <details class="index-drawer" data-boris-search-exclude>
+      <summary>Open the index</summary>
+      <div class="index-drawer__body">{{nav}}</div>
+    </details>
   </header>
-  <div class="shell">
-    <aside class="rail rail--nav">
-      <p class="eyebrow">Browse</p>
-      {{nav}}
-    </aside>
-    <main id="content" class="article-card" tabindex="-1" data-boris-search-root>
-      {{metadata}}
+  <main id="content" class="article-card" tabindex="-1" data-boris-search-root>
+    <div class="filing-path" data-boris-search-exclude>{{breadcrumb}}</div>
+    <div class="reading-card" data-status="{{page-status}}">
+      <div class="card-tab" aria-hidden="true">Reading card</div>
+      <div class="card-tools" data-boris-search-exclude>
+        <p class="eyebrow">One card. One idea.</p>
+        <details class="card-outline">
+          <summary>Find a line</summary>
+          {{toc}}
+        </details>
+      </div>
       <article class="prose">{{content}}</article>
-      <section class="children-card" aria-labelledby="children-heading" data-boris-search-exclude>
-        <h2 id="children-heading">In this section</h2>
-        {{children}}
-      </section>
-      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
-    </main>
-    <aside class="rail rail--toc" aria-label="On this page" data-boris-search-exclude>
-      <p class="eyebrow">On this page</p>
-      {{toc}}
-    </aside>
-  </div>
-  <footer class="footer">{{footer}}</footer>
+      <div class="card-record" data-boris-search-exclude>{{metadata}}</div>
+    </div>
+    <section class="card-deck" aria-labelledby="deck-heading" data-boris-search-exclude>
+      <div class="deck-heading"><h2 id="deck-heading">Keep pulling the thread.</h2><p>Cards in this file</p></div>
+      {{children}}
+    </section>
+    <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+  </main>
+  <footer class="desk-footer">{{footer}}</footer>
 </body>
 </html>
