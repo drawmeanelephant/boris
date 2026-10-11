@@ -65,7 +65,8 @@
 //!   satellites under `gallery`, each page carrying small PNG plates in its
 //!   own `{stem}.assets/` folder inside `<figure>` captions; `layout_rules`
 //!   send `id:index` to `home.html`, whose `{{children}}` is the album grid.
-//!   The images are content, so they embed from `src/init_templates/`.
+//!   The images are content, so they embed straight from the
+//!   `examples/gallery-site` specimen via the `init_example_assets` module.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -90,6 +91,7 @@ const compile = @import("compile.zig");
 const diagnostic = @import("diagnostic.zig");
 const identity = @import("identity.zig");
 const archetype_themes = @import("init_archetype_themes");
+const example_assets = @import("init_example_assets");
 const Io = std.Io;
 
 const ExitCode = diagnostic.ExitCode;
@@ -1863,15 +1865,15 @@ const dashboard_profile =
 
 // --- photo-gallery ----------------------------------------------------------
 
-// Starter images are content, not theme assets, so they live with the init
-// templates under src/ and embed by relative path. They are byte-identical
-// copies of five examples/gallery-site plates (locally generated flat-colour
-// PNGs; provenance and SHA-256 in examples/gallery-site/README.md).
-const photo_gallery_tidewater_png = @embedFile("init_templates/photo-gallery/content/index.assets/tidewater.png");
-const photo_gallery_dawn_png = @embedFile("init_templates/photo-gallery/content/photos/coast.assets/dawn.png");
-const photo_gallery_dusk_png = @embedFile("init_templates/photo-gallery/content/photos/coast.assets/dusk.png");
-const photo_gallery_ridge_png = @embedFile("init_templates/photo-gallery/content/photos/hills.assets/ridge.png");
-const photo_gallery_pines_png = @embedFile("init_templates/photo-gallery/content/photos/hills.assets/pines.png");
+// Starter images are content, not theme assets, so they embed straight from
+// the examples/gallery-site specimen through the init_example_assets module
+// (#1084 — single source of truth; provenance and SHA-256 in
+// examples/gallery-site/README.md).
+const photo_gallery_tidewater_png = example_assets.gallery_tidewater_png;
+const photo_gallery_dawn_png = example_assets.gallery_dawn_png;
+const photo_gallery_dusk_png = example_assets.gallery_dusk_png;
+const photo_gallery_ridge_png = example_assets.gallery_ridge_png;
+const photo_gallery_pines_png = example_assets.gallery_pines_png;
 
 const photo_gallery_index_md =
     \\---
