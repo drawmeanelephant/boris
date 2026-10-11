@@ -8,34 +8,41 @@
   <link rel="stylesheet" href="{{asset-url assets/field-notes.css}}">
   {{head}}
 </head>
-<body data-layout="section">
-  <a class="skip-link" href="#main-content">Skip to content</a>
-  <header class="site-header" role="banner">
-    <div class="site-header__inner">
-      <p class="brand" aria-label="Field Notes">
-        <span class="brand__mark" aria-hidden="true">PF</span>
-        <span class="brand__text">Field Notes</span>
-      </p>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="book-cover">
+    <div class="book-cover__inner">
+      <p class="book-brand">Field Notes<span class="book-brand__sub">log book</span></p>
       {{breadcrumb}}
     </div>
   </header>
-  <div class="section-frame">
-    <aside class="section-nav" aria-label="Browse">
-      <p class="rail__eyebrow">Browse</p>
-      {{nav}}
-    </aside>
-    <main id="main-content" class="section-reading" tabindex="-1" data-boris-search-root>
-      <div class="note-meta" data-boris-search-exclude><p class="note-status note-status--{{page-status}}">{{page-status}}</p>{{parent}}{{tags}}</div>
-      <article class="prose">
-        {{content}}
-      </article>
-      <section class="children-panel" aria-labelledby="children-heading" data-boris-search-exclude>
-        <p class="rail__eyebrow" id="children-heading">In this section</p>
-        {{children}}
-      </section>
-      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
-    </main>
+  <div class="book-frame">
+    <div class="spread">
+      <main id="content" class="leaf" tabindex="-1" data-boris-search-root>
+        <header class="entry-head">
+          <p class="entry-kicker" data-boris-search-exclude>Leg of the route</p>
+          <p class="entry-stamp" data-state="{{page-status}}" data-boris-search-exclude>{{page-status}}</p>
+          <div class="entry-fields" data-boris-search-exclude>{{metadata}}</div>
+        </header>
+        <article class="prose">{{content}}</article>
+        <section class="leg-entries" aria-labelledby="leg-heading" data-boris-search-exclude>
+          <h2 class="leg-heading" id="leg-heading">Entries logged here <small>this leg</small></h2>
+          {{children}}
+        </section>
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+      </main>
+      <aside class="margin-col" data-boris-search-exclude>
+        <div class="margin-block">
+          <p class="margin-label">Logbook index</p>
+          {{nav}}
+        </div>
+        <div class="margin-block">
+          <p class="margin-label">Marginalia</p>
+          {{toc}}
+        </div>
+      </aside>
+    </div>
   </div>
-  <footer class="theme-footer" role="contentinfo">{{footer}}</footer>
+  <footer class="book-back">{{footer}}</footer>
 </body>
 </html>
