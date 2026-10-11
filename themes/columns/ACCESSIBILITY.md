@@ -1,44 +1,50 @@
 # Accessibility notes
 
 What Columns guarantees, checked against the built output and
-`assets/css/columns.css`.
+`assets/css/columns.css`. The newspaper dressing is CSS only — the
+document stays ordinary HTML: a labelled `main`, the compiler's own
+`nav` landmarks, real lists, and native `details`/`summary`.
 
-- Every layout starts with a skip link to `#main-content`, the `main`
-  element (`tabindex="-1"`, so focus lands on it in every browser).
-- `:focus-visible` is two-tone: the theme's 0.2rem yellow (`#ffdd57`) outline sits outside a
-  0.2rem ring in the text color. The ink ring carries the contrast:
-  14.9:1 in light mode (`#18212b` on `#f3f5f7`) and
-  16.2:1 in dark mode (`#f0f4f7` on `#12181e`). The
-  accent alone measures 1.2–1.3:1 on the light background, which is
-  why the ring is there; it measures 13.4:1 in dark mode.
-- Contrast. Links `#006f5a` are 6.14:1 on white; dark links `#5fe2bd`.
-  Muted text was darkened in #1049 from `#6b7785` (4.17:1 on the `#f3f5f7`
-  page, where the breadcrumb and relation eyebrow sit) to `#5c6774` (5.27:1
-  on the page, 5.76:1 on white); dark muted `#a8b3be` is 8.39:1. Callout
-  edges are a secondary cue next to the text title: note/info `#2160c4`
-  (5.94:1 on white), warning `#9a6200` (5.10:1), danger `#cc0f35` (5.70:1);
-  dark `#7fb8ff` (7.64:1), `#ffc966` (10.33:1), `#ff8fa3` (7.27:1) on
-  `#1b242c`.
-- The current page in the navbar (compiler `aria-current="page"`) is drawn
-  as an ink pill with surface text, a shape change and not colour alone.
-- `prefers-color-scheme: dark` swaps the palette.
+- Every layout starts with a skip link to `#content`, the `main` element
+  (`tabindex="-1"`, so focus lands on it in every browser).
+- Reading order is document order: masthead → story header → prose →
+  story jumps → wire → rail. The CSS multi-column flow in `.prose` does
+  not change DOM order; browsers and readers traverse the source.
+- The masthead breadcrumb is the compiler's `nav aria-label="Breadcrumb"`;
+  the section listing is `nav aria-label="Site"`; the TOC keeps
+  `nav aria-label="On this page"`. The theme adds no shadow landmarks.
+- `{{page-status}}` prints as real text in the press stamp; `draft`
+  picks up the accent color in addition to its label, never color alone.
+- Contrast (light): ink `#1d1a14` on paper `#f6f2e7` is 15.5:1; soft ink
+  `#544d3f` on paper is 7.5:1; accent `#8c1d18` on paper is 8.2:1. The
+  `.press-line` edition strip is the smallest text on the page at 0.72rem
+  and still measures 7.5:1.
+- Contrast (dark, "late city edition"): ink `#ece5d4` on `#211e18`
+  is 13.2:1; soft ink `#b3a98f` is 7.1:1; accent `#d9706a` on `#211e18`
+  is 5.1:1.
+- `:focus-visible` is two-tone: a 0.18rem accent-gold (`#b98a1d`) outline
+  outside a 0.24rem ring in the text color. The ink ring carries the
+  contrast in both modes; the gold alone is decoration.
+- The current section in the desks bar is drawn with a 2px accent
+  underline (`aria-current="page"`), a decoration change and not color
+  alone.
+- Justified + hyphenated columns are a visual reflow of the same source;
+  `column-span: all` on `h1`/`h2` is progressive enhancement — engines
+  without it keep headings inside their column, legible but narrower.
+- Empty furniture removes itself: the rail, the wire, the jumps list, and
+  each rail block are `display: none` when the compiler emits no items,
+  so no empty landmarks or borders are announced.
+- `prefers-color-scheme: dark` runs the late city edition.
   `prefers-reduced-motion: reduce` turns off smooth scrolling, the only
   motion the theme has.
-- `@media print` drops the skip link, navbar, footer, and sidebar; flattens the grid;
-  forces black on white; and wraps code blocks.
-- Relations and backlinks keep their compiler `aria-label`s and gain visible
-  headings from the theme. The navbar and breadcrumb wrappers are plain
-  `div`s: the navbar `div` used to carry an `aria-label` with no role (never
-  announced) and the breadcrumb wrapper was a second labelled `nav` around
-  the compiler's own `nav aria-label="Breadcrumb"`. The compiler's labelled
-  `nav` elements are now the only landmarks.
-- The TOC rail, the children panel, layout kickers, the layout title `h1`,
-  and the `graph-links` relations/backlinks wrapper are
-  `data-boris-search-exclude`; compiler metadata stays out of the
-  rendered-search index. The layout `h1` also carries
-  `data-boris-search-title="layout"`, so a page with no authored heading is
-  still titled by its page title in `_boris/search/search-index.json`
-  (verified; before this pass it indexed as "Columns").
+- `@media print` keeps the two-column article set and the press stamp,
+  drops the desks bar, rail, colophon, skip link, and press line, and
+  forces black ink on white.
+- The rail, the jumps/edition lists, layout rubrics, the press stamp, the
+  credit line, and the wire block are `data-boris-search-exclude`; layout
+  furniture stays out of the rendered-search index. `{{title}}` is spent
+  on the document `<title>`; the authored `h1` headlines each page and
+  titles it in `_boris/search/search-index.json` (verified).
 
 This is a theme-level pass. It does not replace a manual screen-reader,
 keyboard, zoom, or contrast review of a rendered site.
