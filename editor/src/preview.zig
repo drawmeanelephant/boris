@@ -54,7 +54,12 @@ pub const Manager = struct {
             .publication_profile = false,
             .input_mode = .empty,
         };
-        const argv: []const []const u8 = if (discovered.input_mode == .cooklang)
+        // A boris.json publication profile carries input, theme, layout rules,
+        // and the HTML output path itself; it composes with --incremental but
+        // not with ad-hoc --input/--html-dir selectors.
+        const argv: []const []const u8 = if (discovered.publication_profile)
+            &.{ self.boris_path, "build", "--profile", "boris.json", "--incremental" }
+        else if (discovered.input_mode == .cooklang)
             &.{ self.boris_path, "build", "--input", "content", "--incremental", "--html-dir", "dist", "--cooklang" }
         else
             &.{ self.boris_path, "build", "--input", "content", "--incremental", "--html-dir", "dist" };

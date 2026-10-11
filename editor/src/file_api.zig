@@ -6,6 +6,7 @@
 //! through a same-directory atomic file after fsync.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 
 pub const max_file_bytes = 8 * 1024 * 1024;
@@ -373,6 +374,25 @@ fn openRegular(io: Io, dir: Io.Dir, basename: []const u8) !Io.File {
     return file;
 }
 
+// Zig 0.17.0 std defect on Windows: Io.File.Permissions.readOnly() and
+// setReadOnly() reference std.os.windows.FILE_ATTRIBUTE_READONLY, a constant
+// that no longer exists, so merely calling them fails compilation. Query and
+// toggle the attribute bit directly on Windows until upstream is fixed.
+fn permissionsReadOnly(permissions: Io.File.Permissions) bool {
+    if (builtin.os.tag == .windows)
+        return permissions.toAttributes().READONLY;
+    return permissions.readOnly();
+}
+
+fn permissionsSetReadOnly(permissions: Io.File.Permissions, read_only: bool) Io.File.Permissions {
+    if (builtin.os.tag == .windows) {
+        var attributes = permissions.toAttributes();
+        attributes.READONLY = read_only;
+        return @fromBackingInt(@intCast(@as(std.os.windows.DWORD, @bitCast(attributes))));
+    }
+    return permissions.setReadOnly(read_only);
+}
+
 fn readBuffer(allocator: std.mem.Allocator, io: Io, dir: Io.Dir, basename: []const u8) !Buffer {
     var file = try openRegular(io, dir, basename);
     defer file.close(io);
@@ -385,7 +405,7 @@ fn readBuffer(allocator: std.mem.Allocator, io: Io, dir: Io.Dir, basename: []con
     return .{
         .content = content,
         .fingerprint = fingerprint(stat, content),
-        .read_only = stat.permissions.readOnly(),
+        .read_only = permissionsReadOnly(stat.permissions),
     };
 }
 
@@ -509,6 +529,10 @@ test "file list is deterministic and excludes outputs and symlinks" {
     try temp.dir.writeFile(io, .{ .sub_path = "dist/index.html", .data = "generated" });
     try temp.dir.writeFile(io, .{ .sub_path = "content/.boris-editor-save-0123456789abcdef0123456789abcdef.tmp", .data = "partial" });
     temp.dir.symLink(io, "content/index.md", "content/link.md", .{}) catch {};
+    // Windows: a denied symlink can leave the created link path behind as a
+    // regular file (the reparse-point write needs privilege); a real file is
+    // legitimately listed, so remove any leftover for a deterministic count.
+    if (builtin.os.tag == .windows) temp.dir.deleteFile(io, "content/link.md") catch {};
     const root = try testProjectPath(&temp, allocator);
     defer allocator.free(root);
     var files = try list(allocator, io, root);
@@ -597,6 +621,9 @@ test "deleted-on-disk requires explicit recreation" {
 }
 
 test "read-only files fail before replacement" {
+    // Io.Dir.setFilePermissions is an unimplemented TODO panic on Windows in
+    // Zig 0.17.0; the read-only fixture cannot be staged there.
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var temp = try createTestProject();
@@ -606,7 +633,7 @@ test "read-only files fail before replacement" {
     var file = try temp.dir.openFile(io, "content/index.md", .{});
     const original_permissions = (try file.stat(io)).permissions;
     file.close(io);
-    try temp.dir.setFilePermissions(io, "content/index.md", original_permissions.setReadOnly(true), .{});
+    try temp.dir.setFilePermissions(io, "content/index.md", permissionsSetReadOnly(original_permissions, true), .{});
     defer temp.dir.setFilePermissions(io, "content/index.md", original_permissions, .{}) catch {};
     var opened = try open(allocator, io, root, "content/index.md");
     defer opened.deinit(allocator);

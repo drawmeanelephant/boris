@@ -470,6 +470,9 @@ fn reportAgeMs(now: i96, report_mtime: i96) u64 {
 }
 
 pub fn termFromStatus(status: u32) std.process.Child.Term {
+    // wait4 status words are POSIX machinery; poll() early-returns on
+    // Windows, so a status can never reach this conversion there.
+    if (comptime builtin.os.tag == .windows) return .{ .unknown = status };
     return if (std.posix.W.IFEXITED(status))
         .{ .exited = @intCast(std.posix.W.EXITSTATUS(status)) }
     else if (std.posix.W.IFSIGNALED(status))
@@ -596,6 +599,7 @@ test "report age is clamped at zero and expressed in milliseconds" {
 }
 
 test "reaped statuses convert to the contracted term shape" {
+    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
     const exited = termFromStatus(3 << 8);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 3 }, exited);
     const signaled = termFromStatus(9);
