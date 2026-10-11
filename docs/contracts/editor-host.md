@@ -2,7 +2,7 @@
 
 **Status:** normative and implemented — `boris-editor/0.1.0`
 
-**Version:** host contract 1 (unversioned on the wire); `boris/0.8.2`-era
+**Version:** host contract 1 (unversioned on the wire); `boris/0.9.0`-era
 compiler surface; no IR schema change
 
 The Boris Editor is a local, compiler-backed authoring host. `boris-editor`
@@ -240,7 +240,7 @@ embedded newline; otherwise `502 invalid_boris_version`. Failure to spawn is
 `503 boris_unavailable`.
 
 ```json
-{"compiler_id":"boris/0.8.2",
+{"compiler_id":"boris/0.9.0",
  "supported":{"completion":[1],"ir":["0.2.0","0.3.0","0.4.0"],
               "documentation_intelligence":["0.2.0"],"publication_plan":[1],
               "frontmatter":[1],"validate_watch":true,"watch_json":true}}
@@ -454,7 +454,7 @@ The result payload is:
 
 ```json
 {"mode":"validate","exit_code":0,"failure_class":"success",
- "compiler_id":"boris/0.8.2","report_version":"html-build-report-0.2.0",
+ "compiler_id":"boris/0.9.0","report_version":"html-build-report-0.2.0",
  "used_stderr_fallback":false,"problems":[],"findings":[],"impact":[],
  "publication_plan":null,"recipe_scale_view":null,
  "graph_document":null,"proof_report":null}

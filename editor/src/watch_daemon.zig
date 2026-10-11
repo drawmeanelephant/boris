@@ -850,11 +850,11 @@ test "event log classifies compiler events and counts build cycles" {
     var log: EventLog = .init(std.testing.allocator);
     defer log.deinit();
 
-    const hello = log.ingestLine("{\"event\":\"hello\",\"watch_events_schema\":1,\"compiler\":\"boris/0.8.2\"}\n");
+    const hello = log.ingestLine("{\"event\":\"hello\",\"watch_events_schema\":1,\"compiler\":\"boris/0.9.0\"}\n");
     try std.testing.expectEqual(EventKind.hello, hello.kind);
     try std.testing.expect(!hello.schema_mismatch);
     try std.testing.expectEqual(@as(u64, 1), log.seq);
-    try std.testing.expectEqualStrings("boris/0.8.2", log.compiler_id.?);
+    try std.testing.expectEqualStrings("boris/0.9.0", log.compiler_id.?);
 
     const started = log.ingestLine("{\"event\":\"build-started\",\"phase\":\"initial\",\"mode\":\"html\",\"targets\":[\"default\"]}");
     try std.testing.expectEqual(EventKind.build_started, started.kind);

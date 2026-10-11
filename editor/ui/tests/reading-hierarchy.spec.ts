@@ -66,7 +66,7 @@ async function installApi(page: Page, mode: 'author' | 'review' = 'review', opti
     contentType: 'application/json',
     body: JSON.stringify({ status: 'ok', editor_id: 'boris-editor/0.1.0', project: { content: true, default_layout: true, publication_profile: true, input_mode: 'markdown' } })
   }));
-  await page.route('**/api/version', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ compiler_id: 'boris/0.8.2' }) }));
+  await page.route('**/api/version', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ compiler_id: 'boris/0.9.0' }) }));
   await page.route('**/api/files', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ files: FILES }) }));
   await page.route('**/api/recovery', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ snapshots: [], skipped: 0 }) }));
   await page.route('**/api/recovery/snapshot', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'snapshotted' }) }));
@@ -91,7 +91,7 @@ async function installApi(page: Page, mode: 'author' | 'review' = 'review', opti
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(options.commands?.[commandMode] ?? {
-        mode: 'validate', exit_code: 1, failure_class: 'content', compiler_id: 'boris/0.8.2',
+        mode: 'validate', exit_code: 1, failure_class: 'content', compiler_id: 'boris/0.9.0',
         report_version: 'html-build-report-0.2.0', used_stderr_fallback: false,
         problems: [PROBLEM], findings: [], impact: []
       })
@@ -121,7 +121,7 @@ async function installApi(page: Page, mode: 'author' | 'review' = 'review', opti
   }));
   await page.route('**/api/watch/state', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ supported: true, state: 'idle', seq: 0, cycle: 0, events_count: 0, oldest_seq: null, dropped_lines: 0, last_event: null, compiler_id: 'boris/0.8.2', hello_schema: null, last_error: null })
+    body: JSON.stringify({ supported: true, state: 'idle', seq: 0, cycle: 0, events_count: 0, oldest_seq: null, dropped_lines: 0, last_event: null, compiler_id: 'boris/0.9.0', hello_schema: null, last_error: null })
   }));
   await page.route(/\/api\/watch\/events/, route => route.fulfill({
     contentType: 'application/json', body: JSON.stringify({ supported: true, seq: 0, oldest_seq: null, gap: false, events: [] })
@@ -302,7 +302,7 @@ const OUTLINE_GRAPH = {
 const OUTLINE_AUTHORING = {
   frontmatter_schema: { title: 'Boris frontmatter grammar (schema v1)', properties: { id: { type: 'string' }, title: { type: 'string' } } },
   completion: {
-    format: 'boris-completion-index', schema_version: 1, compiler_id: 'boris/0.8.2', frozen: true,
+    format: 'boris-completion-index', schema_version: 1, compiler_id: 'boris/0.9.0', frozen: true,
     entities: [
       { id: 'index', title: 'Home', parent: null, role: 'trunk', status: 'published', tags: [], relations: [{ kind: 'relates_to', target: 'guides/intro' }] }
     ],
@@ -323,7 +323,7 @@ const OUTLINE_PUBLICATION = {
 
 const OUTLINE_COMMANDS = {
   plan: {
-    mode: 'plan', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.2',
+    mode: 'plan', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.9.0',
     report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
     publication_plan: {
       format: 'boris-publication-plan', schema_version: 1,
@@ -335,7 +335,7 @@ const OUTLINE_COMMANDS = {
     }
   },
   proof_verify: {
-    mode: 'proof_verify', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.2',
+    mode: 'proof_verify', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.9.0',
     report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
     proof_report: 'boris proof verify: dist/_boris/proof/checks.json\n  checks: 3/3 passed\nverdict: pass\n'
   }

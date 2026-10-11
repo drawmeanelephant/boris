@@ -615,7 +615,7 @@ test "working pack delimiters and verbatim bodies" {
 test "working manifest field order is stable and complete" {
     const gpa = std.testing.allocator;
     const bytes = try renderWorkingManifest(gpa, .{
-        .version = "0.8.2",
+        .version = "0.9.0",
         .scope = "mascots",
         .graph_page_count = 12,
         .selected_page_count = 4,

@@ -35,7 +35,7 @@ async function installApi(page: Page) {
     contentType: 'application/json',
     body: JSON.stringify({ status: 'ok', editor_id: 'boris-editor/0.1.0', project: { content: true, default_layout: true, publication_profile: true, input_mode: 'markdown' } })
   }));
-  await page.route('**/api/version', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ compiler_id: 'boris/0.8.2' }) }));
+  await page.route('**/api/version', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ compiler_id: 'boris/0.9.0' }) }));
   await page.route('**/api/files', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ files: FILES }) }));
   await page.route('**/api/recovery', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ snapshots: [], skipped: 0 }) }));
   await page.route('**/api/recovery/snapshot', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ status: 'snapshotted' }) }));
@@ -52,7 +52,7 @@ async function installApi(page: Page) {
   });
   await page.route('**/api/commands/run', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ mode: 'validate', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.2', report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [] })
+    body: JSON.stringify({ mode: 'validate', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.9.0', report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [] })
   }));
   await page.route('**/api/validate-state', route => route.fulfill({
     contentType: 'application/json', body: JSON.stringify({ supported: false, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 })
