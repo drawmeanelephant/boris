@@ -45,8 +45,9 @@ starter's own `layout_rules` are listed in
 
 Two starters use named layouts added by
 [#1050](https://github.com/drawmeanelephant/boris/issues/1050):
-`cookbook` sends its index to `cards/layouts/home.html`, a deck of one
-card per recipe, and `changelog` sends its `changes` hub to
+`cookbook` sends its index to `cards/layouts/home.html`, a numbered, tabbed
+index-card workbench with one card per recipe (the full graph folds into an
+index drawer, not a sidebar), and `changelog` sends its `changes` hub to
 `journal/layouts/archive.html`, a log listing of the published releases.
 
 ## How the pairings were verified
@@ -78,6 +79,12 @@ marks its search extraction root. Only the `boris` theme ships the
 browser search client, so the alternates publish a correct search index
 with no search box on the page.
 
+The Cards index-card redesign was re-verified on 2026-10-10 against the
+`cookbook` starter (home rule), `link-in-bio` (main), and `photo-gallery`
+(main) using the redesigned catalog theme. All three built with intact local
+links and assets; the gallery remains a stacked-image partial fit. Cards now
+uses a native index drawer and folded page outline instead of navigation rails.
+
 Re-verify a row after a theme changes by rebuilding the scenario tree with
 the named theme. A starter archetype is also re-verified by `zig build
 test-boris-init`.
@@ -98,7 +105,7 @@ Each cell lists the layouts that carry the slot; `-` means none:
 |---|---|---|---|---|---|---|---|
 | `archive` | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main |
 | `boris` | main | main | main | main | main | main | - |
-| `cards` | home, main | home, main | home, main | home, main | home, main | home, main | - |
+| `cards` | home, main | home, main | home, main | home, main | home, main | home, main | home, main |
 | `corporate` | main | main | main | main | main | main | - |
 | `cozy` | main | main | main | main | main | main | main |
 | `engineering` | home, main, section | home, main, section | main, section | home, main, section | home, main, section | home, main, section | home, main, section |
