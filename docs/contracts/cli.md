@@ -242,6 +242,14 @@ through the normal profile-driven path — the compiler has no per-archetype
 branches. An unknown `--type` is a usage error (exit `2`) that lists the
 valid names. Every tree is byte-deterministic across runs.
 
+Before checking whether `DIR` is empty, `init` claims it by creating
+`.boris-init.lock` with exclusive create, so two `init` runs on the same
+target cannot both materialize: the loser refuses (exit `2`) before writing
+anything, and the winner's cleanup only ever removes its own tree. The claim
+file is removed on success or refusal; a claim left behind by an interrupted
+run makes `DIR` non-empty like any other file — remove `.boris-init.lock`
+to retry.
+
 After materializing, `init` compiles the fresh tree through the normal HTML
 pipeline — in the input format the archetype's profile declares, with the
 theme's `main.html` as the only layout (profile `layout_rules` are

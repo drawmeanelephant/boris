@@ -490,6 +490,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     root_mod.addImport("init_archetype_themes", init_archetype_themes_mod);
+    // Same trick for starter content borrowed from examples/ specimen sites:
+    // the photo-gallery archetype embeds its plates straight from
+    // examples/gallery-site instead of keeping copies under
+    // src/init_templates/ (#1084).
+    const init_example_assets_mod = b.createModule(.{
+        .root_source_file = b.path("examples/init_example_assets.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    root_mod.addImport("init_example_assets", init_example_assets_mod);
     root_mod.addOptions("build_info", build_info);
     root_mod.addImport("secp256k1", secp.c_module);
     root_mod.linkLibrary(secp.library);
@@ -987,6 +997,7 @@ pub fn build(b: *std.Build) void {
         });
         nostr_process_fixture_mod.addOptions("build_info", build_info);
         nostr_process_fixture_mod.addImport("init_archetype_themes", init_archetype_themes_mod);
+        nostr_process_fixture_mod.addImport("init_example_assets", init_example_assets_mod);
         nostr_process_fixture_mod.addImport("secp256k1", secp.c_module);
         nostr_process_fixture_mod.linkLibrary(secp.library);
         linkOliver(nostr_process_fixture_mod, oliver_mod);

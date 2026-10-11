@@ -65,7 +65,8 @@
 //!   satellites under `gallery`, each page carrying small PNG plates in its
 //!   own `{stem}.assets/` folder inside `<figure>` captions; `layout_rules`
 //!   send `id:index` to `home.html`, whose `{{children}}` is the album grid.
-//!   The images are content, so they embed from `src/init_templates/`.
+//!   The images are content, so they embed straight from the
+//!   `examples/gallery-site` specimen via the `init_example_assets` module.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -90,6 +91,7 @@ const compile = @import("compile.zig");
 const diagnostic = @import("diagnostic.zig");
 const identity = @import("identity.zig");
 const archetype_themes = @import("init_archetype_themes");
+const example_assets = @import("init_example_assets");
 const Io = std.Io;
 
 const ExitCode = diagnostic.ExitCode;
@@ -1863,15 +1865,15 @@ const dashboard_profile =
 
 // --- photo-gallery ----------------------------------------------------------
 
-// Starter images are content, not theme assets, so they live with the init
-// templates under src/ and embed by relative path. They are byte-identical
-// copies of five examples/gallery-site plates (locally generated flat-colour
-// PNGs; provenance and SHA-256 in examples/gallery-site/README.md).
-const photo_gallery_tidewater_png = @embedFile("init_templates/photo-gallery/content/index.assets/tidewater.png");
-const photo_gallery_dawn_png = @embedFile("init_templates/photo-gallery/content/photos/coast.assets/dawn.png");
-const photo_gallery_dusk_png = @embedFile("init_templates/photo-gallery/content/photos/coast.assets/dusk.png");
-const photo_gallery_ridge_png = @embedFile("init_templates/photo-gallery/content/photos/hills.assets/ridge.png");
-const photo_gallery_pines_png = @embedFile("init_templates/photo-gallery/content/photos/hills.assets/pines.png");
+// Starter images are content, not theme assets, so they embed straight from
+// the examples/gallery-site specimen through the init_example_assets module
+// (#1084 — single source of truth; provenance and SHA-256 in
+// examples/gallery-site/README.md).
+const photo_gallery_tidewater_png = example_assets.gallery_tidewater_png;
+const photo_gallery_dawn_png = example_assets.gallery_dawn_png;
+const photo_gallery_dusk_png = example_assets.gallery_dusk_png;
+const photo_gallery_ridge_png = example_assets.gallery_ridge_png;
+const photo_gallery_pines_png = example_assets.gallery_pines_png;
 
 const photo_gallery_index_md =
     \\---
@@ -2636,6 +2638,13 @@ fn createDirIfMissing(io: Io, dir: Io.Dir, sub_path: []const u8) !void {
     };
 }
 
+/// Name of the per-target claim file `init` creates with exclusive create
+/// before checking that the target is empty. Two racing `init` runs cannot
+/// both hold it, so the holder's failure cleanup never deletes a sibling
+/// run's files. A crash can leave it behind; that makes the directory
+/// non-empty, which the next `init` refuses like any other partial tree.
+const claim_file_name = ".boris-init.lock";
+
 /// Write the archetype's tree under `target_dir`, which must not exist yet
 /// or must be empty. Returns an allocator-owned message on refusal so the
 /// caller can explain the failure without guessing.
@@ -2648,17 +2657,37 @@ pub fn materialize(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, arche
     var dir = try cwd.openDir(io, target_dir, .{ .iterate = true });
     defer dir.close(io);
 
+    // Claim the target before checking it: a bare emptiness check is
+    // check-then-act, so two concurrent `init` runs could both pass it and a
+    // later failure would delete the shared tree — including the other run's
+    // half-written files. Exclusive create gives exactly one run the claim;
+    // everything it cleans up afterwards is its own.
+    var claim = dir.createFile(io, claim_file_name, .{ .exclusive = true }) catch |err| switch (err) {
+        error.PathAlreadyExists => return std.fmt.allocPrint(
+            gpa,
+            "target directory contains {s} — another boris init is running there or a previous one was interrupted; remove that file to retry",
+            .{claim_file_name},
+        ),
+        else => return err,
+    };
+    defer {
+        claim.close(io);
+        dir.deleteFile(io, claim_file_name) catch {};
+    }
+
     // Refuse to clobber an existing project. Empty is fine (a user may point
-    // init at a fresh checkout).
+    // init at a fresh checkout); the claim file above is ours.
     var it = dir.iterate();
-    if (try it.next(io)) |_| {
+    while (try it.next(io)) |entry| {
+        if (std.mem.eql(u8, entry.name, claim_file_name)) continue;
         return gpa.dupe(u8, "target directory is not empty; refusing to overwrite an existing site");
     }
 
     // If any write fails midway (permission, disk, I/O), remove the partial
     // tree so the next invocation can retry without manual cleanup. Installed
     // only after the emptiness check: a refusal writes nothing and must never
-    // delete user content.
+    // delete user content. The claim means this tree is this run's alone — a
+    // concurrent `init` refused above and wrote nothing here.
     errdefer cwd.deleteTree(io, target_dir) catch {};
 
     // Parent directories are derived from the file table: `createDirPath`
@@ -2772,8 +2801,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 
     // Self-verify before claiming success. The starter tree is fixed, so a
     // probe failure means the binary and its starter templates disagree —
-    // never ship that silently. Remove the whole tree (it was empty before
-    // `init` ran) so exit 0 keeps meaning "materialized AND compiled".
+    // never ship that silently. Remove the whole tree — the materialize claim
+    // guaranteed this run was its only writer — so exit 0 keeps meaning
+    // "materialized AND compiled".
     const outcome = verifyStarter(io, gpa, target_dir, archetype) catch |err| {
         Io.Dir.cwd().deleteTree(io, target_dir) catch {};
         std.debug.print(
@@ -3375,5 +3405,104 @@ test "every archetype materializes and compiles through its declared adapter" {
             }
         }
         try std.testing.expectEqual(content_pages, outcome.verified);
+    }
+}
+
+test "materialize refuses a claimed target and leaves the claim untouched" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // A sibling run's claim — live or left by an interrupted run — must stop
+    // this run before it writes anything, and must not be deleted: it is not
+    // this run's to remove.
+    try tmp.dir.createDirPath(io, "claimed");
+    var marker = try tmp.dir.createFile(io, "claimed/" ++ claim_file_name, .{});
+    marker.close(io);
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/claimed", .{tmp.sub_path});
+    defer gpa.free(root);
+    const refused = try materialize(io, gpa, root, .docs);
+    defer gpa.free(refused);
+    try std.testing.expect(std.mem.indexOf(u8, refused, claim_file_name) != null);
+
+    var dir = try tmp.dir.openDir(io, "claimed", .{ .iterate = true });
+    defer dir.close(io);
+    var it = dir.iterate();
+    const entry = (try it.next(io)).?;
+    try std.testing.expectEqualStrings(claim_file_name, entry.name);
+    try std.testing.expect((try it.next(io)) == null);
+}
+
+test "materialize refusal leaves no claim file in an occupied target" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "occupied");
+    var keep = try tmp.dir.createFile(io, "occupied/keep.txt", .{});
+    keep.close(io);
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/occupied", .{tmp.sub_path});
+    defer gpa.free(root);
+    const refused = try materialize(io, gpa, root, .docs);
+    defer gpa.free(refused);
+    try std.testing.expect(std.mem.indexOf(u8, refused, "not empty") != null);
+
+    // The claim this run took to discover the refusal is cleaned up again:
+    // the directory holds exactly what the user had there.
+    var dir = try tmp.dir.openDir(io, "occupied", .{ .iterate = true });
+    defer dir.close(io);
+    var it = dir.iterate();
+    const entry = (try it.next(io)).?;
+    try std.testing.expectEqualStrings("keep.txt", entry.name);
+    try std.testing.expect((try it.next(io)) == null);
+}
+
+test "concurrent materialize on one target: at most one run writes" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/raced", .{tmp.sub_path});
+    defer gpa.free(root);
+
+    // Two runs on the same empty target. The claim makes the interleaving
+    // safe however the threads schedule: the loser either fails the
+    // exclusive create or finds the winner's tree non-empty, so it refuses
+    // without writing — and the winner's tree is its own to keep or clean.
+    var results: [2][]const u8 = .{ "", "" };
+    var threads: [2]std.Thread = undefined;
+    for (0..2) |i| {
+        threads[i] = try std.Thread.spawn(.{}, struct {
+            fn go(run_io: Io, run_gpa: std.mem.Allocator, dir_path: []const u8, out: *[]const u8) void {
+                out.* = materialize(run_io, run_gpa, dir_path, .docs) catch "";
+            }
+        }.go, .{ io, gpa, root, &results[i] });
+    }
+    for (&threads) |*t| t.join();
+    defer for (results) |r| {
+        if (r.len > 0) gpa.free(r);
+    };
+
+    var successes: usize = 0;
+    for (results) |r| successes += @intFromBool(r.len == 0);
+    try std.testing.expect(successes <= 1);
+    if (successes == 1) {
+        // The winner's tree is complete and its claim is gone.
+        _ = try tmp.dir.statFile(io, "raced/boris.json", .{});
+        try std.testing.expectError(
+            error.FileNotFound,
+            tmp.dir.statFile(io, "raced/" ++ claim_file_name, .{}),
+        );
+    } else {
+        // Both refused or failed: the target is untouched, not half-written.
+        var dir = tmp.dir.openDir(io, "raced", .{ .iterate = true }) catch return;
+        defer dir.close(io);
+        var it = dir.iterate();
+        try std.testing.expect((try it.next(io)) == null);
     }
 }
