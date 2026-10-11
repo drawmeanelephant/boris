@@ -32,7 +32,7 @@ themes/<name>/
 | [`ledger`](ledger/) | Dense early-web nodes | `main` (single shape by design) | `--theme themes/ledger` |
 | [`reading`](reading/) | Ink-only typesetting for text that is not US-docs English | `main` (single shape by design) | `--theme themes/reading` |
 | [`semantic`](semantic/) | HTML-first, class-light docs | `main`, `home`, `section` | `--theme themes/semantic` |
-| [`columns`](columns/) | Boxed CSS-only docs | `main`, `home`, `section` | `--theme themes/columns` |
+| [`columns`](columns/) | Broadsheet: masthead, datelines, prose set in real columns | `main`, `home`, `section` | `--theme themes/columns` |
 | [`service`](service/) | Public-service information | `main`, `home`, `section` | `--theme themes/service` |
 | [`engineering`](engineering/) | Dense engineering docs | `main`, `home`, `section` | `--theme themes/engineering` |
 | [`civic`](civic/) | Public-information shell: banner, gold rule, tinted alerts | `main`, `home`, `section` | `--theme themes/civic` |
