@@ -1,40 +1,42 @@
 <!doctype html>
-<html lang="en" data-layout="main">
+<html lang="en" data-theme="semantic" data-layout="main">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Semantic</title>
+    <meta name="color-scheme" content="light dark">
+    <!-- The page title is the document's own name. The layout authors no
+         heading of its own: the page content supplies the only one. -->
+    <title>{{title}}</title>
     <link rel="stylesheet" href="{{asset-url assets/css/semantic.css}}">
-      {{head}}
+    {{head}}
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <header class="site-header">
-      <div class="container header-inner">
-        <p class="eyebrow">HTML-first documentation</p>
-        <p class="site-name">Semantic</p>
-        <div class="site-nav">{{nav}}</div>
+
+    <!-- Landmark: banner. Site identity and the site tree, once per page. -->
+    <header class="banner">
+      <div class="banner__inner">
+        <p class="wordmark">Semantic</p>
+        {{nav}}
       </div>
     </header>
-    <main id="main-content" tabindex="-1" class="container page-grid" data-boris-search-root>
-      <article class="reading-column">
-        <div class="breadcrumb">{{breadcrumb}}</div>
-        <header class="article-header">
-          <h1 data-boris-search-exclude data-boris-search-title="layout">{{title}}</h1>
-          {{metadata}}
-        </header>
+
+    <!-- Landmark: main. The one primary region; the outline rail rides beside it. -->
+    <main id="main-content" class="shell" tabindex="-1" data-boris-search-root>
+      <article class="specimen">
+        <div class="crumbs">{{breadcrumb}}</div>
         <div class="prose">{{content}}</div>
-        <section class="children-panel" aria-labelledby="children-heading" data-boris-search-exclude>
+        <section class="children" aria-labelledby="children-heading" data-boris-search-exclude>
           <h2 id="children-heading">In this section</h2>
           {{children}}
         </section>
         <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+        <footer class="record">{{metadata}}</footer>
       </article>
-      <aside class="toc-rail" aria-label="On this page" data-boris-search-exclude>
-        <p class="rail-label">On this page</p>
-        {{toc}}
-      </aside>
+      {{toc}}
     </main>
-    <footer class="site-footer">{{footer}}</footer>
+
+    <!-- Landmark: contentinfo. The colophon, outside the primary region. -->
+    <footer class="colophon">{{footer}}</footer>
   </body>
 </html>

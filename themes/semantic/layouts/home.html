@@ -1,40 +1,38 @@
 <!doctype html>
-<html lang="en" data-layout="home">
+<html lang="en" data-theme="semantic" data-layout="home">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Semantic</title>
+    <meta name="color-scheme" content="light dark">
+    <title>{{title}}</title>
     <link rel="stylesheet" href="{{asset-url assets/css/semantic.css}}">
-      {{head}}
+    {{head}}
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
-    <header class="site-header site-header--home">
-      <div class="container header-inner">
-        <p class="eyebrow">HTML-first documentation</p>
-        <p class="site-name">Semantic</p>
-        <div class="site-nav">{{nav}}</div>
+
+    <!-- Landmark: banner. -->
+    <header class="banner">
+      <div class="banner__inner">
+        <p class="wordmark">Semantic</p>
+        {{nav}}
       </div>
     </header>
-    <main id="main-content" tabindex="-1" class="container home-grid" data-boris-search-root>
-      <article class="hero-card">
-        <p class="eyebrow" data-boris-search-exclude>Overview</p>
-        <h1 data-boris-search-exclude data-boris-search-title="layout">{{title}}</h1>
-        {{metadata}}
-        <div class="prose">{{content}}
-        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div></div>
-      </article>
-      <aside class="home-rail" aria-label="Explore this site" data-boris-search-exclude>
-        <div class="rail-card">
-          <p class="rail-label">Explore</p>
+
+    <!-- Landmark: main. The site index is a contents page, not a hero card. -->
+    <main id="main-content" class="shell" tabindex="-1" data-boris-search-root>
+      <article class="specimen">
+        <div class="prose">{{content}}</div>
+        <section class="children children--lead" aria-labelledby="children-heading" data-boris-search-exclude>
+          <h2 id="children-heading">Read it in this order</h2>
           {{children}}
-        </div>
-        <div class="rail-card">
-          <p class="rail-label">On this page</p>
-          {{toc}}
-        </div>
-      </aside>
+        </section>
+        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+        <footer class="record">{{metadata}}</footer>
+      </article>
+      {{toc}}
     </main>
-    <footer class="site-footer">{{footer}}</footer>
+
+    <footer class="colophon">{{footer}}</footer>
   </body>
 </html>
