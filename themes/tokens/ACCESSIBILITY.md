@@ -1,47 +1,57 @@
 # Accessibility notes
 
 What Tokens guarantees, checked against the built output and
-`assets/css/tokens.css`.
+`assets/css/tokens.css`. Tokens uses real landmarks, native disclosures, and
+generated links — the spec-sheet look is CSS, not a simulated application.
 
-- Every layout starts with a skip link to `#main-content`, the `main`
-  element (`tabindex="-1"`, so focus lands on it in every browser).
-- `:focus-visible` is two-tone: the theme's 0.2rem amber (`#fab005`) outline sits outside a
-  0.2rem ring in the text color. The ink ring carries the contrast:
-  14.5:1 in light mode (`#20212d` on `#f5f4f0`) and
-  15.9:1 in dark mode (`#f6f3ea` on `#19181d`). The
-  accent alone measures 1.7–1.8:1 on the light background, which is
-  why the ring is there; it measures 9.5:1 in dark mode.
-- Contrast. Links `#6f42c1` are 6.45:1 on the `#fffef9` card and 5.92:1 on
-  the page; hover `#c2410c` is 5.13:1 (the previous hover `#e8590c` was
-  3.55:1). Dark mode now overrides links to `#b197fc` (6.43:1 on `#25232b`,
-  7.31:1 on `#19181d`) with hover `#ffa94d` (8.15:1); before #1049 dark links
-  kept `#6f42c1` and measured 2.38:1. Muted text `#6d6d7a` is 4.63:1 on the
-  page and 5.05:1 on cards.
-- Callouts keep their text title, drawn in the kind token: note/info
-  `#1d5fa8` (6.39:1 on the card), tip `#1f7a52` (5.25:1), warning `#a34e00`
-  (5.70:1), danger `#b42318` (6.51:1); dark `#74c0fc` (7.89:1), `#63e6be`
-  (10.04:1), `#ffc078` (9.65:1), `#ff8787` (6.70:1) on `#25232b`. Before
-  #1049 tip and info shared the accent, warning and danger shared orange,
-  and note had no edge.
-- The current page in the header nav (compiler `aria-current="page"`) is an
-  ink pill with card-coloured text, a shape change and not colour alone.
-- `prefers-color-scheme: dark` swaps the palette.
-  `prefers-reduced-motion: reduce` turns off smooth scrolling, the only
+- Every layout starts with a skip link to `main#content` (`tabindex="-1"`),
+  and each page keeps `header`, `main`, and `footer` landmarks. The catalog
+  column and register sections are labelled; the compiler's own
+  `nav aria-label="Site"`, `"Breadcrumb"`, `"Children"`, and `"On this page"`
+  landmarks survive inside them.
+- `:focus-visible` is a 2px outline in `--focus` with a 3px offset: `#1a5fb4`
+  on the light sheet measures ~5.9:1, and the dark blueprint `#9ecfff` on
+  `#122a3f` measures ~8.9:1. Focus is never color-only — the outline itself
+  is the shape change.
+- Contrast (calculated from the stylesheet's sRGB values). Light: `--ink`
+  `#22201b` on `--sheet` `#fffef9` is ~14.3:1; `--ink-soft` `#6b675c` is
+  ~4.8:1 and is used only for labels and furniture, never sentences; links
+  `#b0431f` are ~6.4:1 on the sheet; visited `#6d4a9e` ~6.0:1. Dark:
+  `--ink` `#d7e4f2` on `#122a3f` ~11.7:1; links `#ffcf6e` ~9.4:1;
+  `--ink-soft` `#8ca6bd` ~5.2:1.
+- The masthead token strip and the cover's working-set band are
+  `aria-hidden`: they restate values the stylesheet already owns, so nothing
+  is communicated by color alone. Signal chips in prose are ordinary table
+  cells next to the token name and hex value in text.
+- Callouts keep their text titles drawn in the kind token: note `#2b5f8a`
+  (~5.7:1 on paper), tip `#2f6b4f` (~5.4:1), warning `#8a5a00` (~5.2:1),
+  danger `#a02515` (~5.9:1); dark equivalents `#7fc4ff`, `#7fd6a4`,
+  `#ffc078`, `#ff9b8a` all exceed 5:1 on the blueprint sheet. Each callout
+  keeps a colored left edge plus its label — never color alone.
+- A `status: draft` page gets a dashed sheet border and a printed DRAFT
+  stamp; the same status remains as text in the spec table (`{{metadata}}`),
+  so the state never depends on noticing the stamp.
+- Register entries are ordinary links inside the compiler's
+  `nav aria-label="Children"`. Row numbers are CSS counters and the "see
+  sheet" hint has an empty accessibility alternative; the accessible name is
+  the real page title. The catalog's current entry keeps
+  `aria-current="page"` plus a left accent edge and weight change.
+- The cover's **Full catalog index** and callout details are native
+  `details`/`summary` elements — keyboard-operable with no script.
+- `prefers-color-scheme: dark` swaps to the blueprint palette;
+  `prefers-reduced-motion: reduce` disables smooth scrolling, the only
   motion the theme has.
-- `@media print` drops the skip link, header, footer, and rails; flattens the grid;
-  forces black on white; and wraps code blocks.
-- Relations and backlinks keep their compiler `aria-label`s and gain visible
-  headings from the theme. The header nav and breadcrumb wrappers are plain
-  `div`s; their former `aria-label`s sat on role-less elements and were
-  never announced. The compiler's `nav aria-label="Site"` and
-  `nav aria-label="Breadcrumb"` inside them are the landmarks.
-- The TOC rail, the children panel, layout kickers, the layout title `h1`,
-  and the `graph-links` relations/backlinks wrapper are
-  `data-boris-search-exclude`; compiler metadata stays out of the
-  rendered-search index. The layout `h1` also carries
-  `data-boris-search-title="layout"`, so a page with no authored heading is
-  still titled by its page title in `_boris/search/search-index.json`
-  (verified; before this pass it indexed as "Tokens").
+- The catalog column drops below the sheet under 52rem instead of
+  truncating; sheets, tables, and code scroll locally rather than forcing a
+  minimum body width.
+- The catalog column, sheet path, register, spec table labels, working-set
+  band, cross-references, and footer furniture carry
+  `data-boris-search-exclude`; only author prose is indexed. The theme
+  supplies no browser search client.
+- `@media print` removes the masthead, tick ruler, catalog column, cover
+  index, working set, and footer; flattens the sheet to plain black on
+  white; and wraps code blocks.
 
-This is a theme-level pass. It does not replace a manual screen-reader,
-keyboard, zoom, or contrast review of a rendered site.
+This is a theme-level pass with calculated contrast, not a screen-reader
+certification. Review a real author's content for keyboard, zoom, image
+descriptions, and reading order before publication.
