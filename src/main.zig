@@ -3564,7 +3564,7 @@ test "renderBuildInfoJson: closed shape, stable key order, base version" {
     const bytes = try renderBuildInfoJson(std.testing.allocator);
     defer std.testing.allocator.free(bytes);
     try std.testing.expect(std.mem.startsWith(u8, bytes, "{\"format\": \"boris-build-info\""));
-    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"version\": \"boris/0.8.2\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"version\": \"boris/0.9.0\"") != null);
     const version_pos = std.mem.indexOf(u8, bytes, "\"version\"").?;
     const vcs_pos = std.mem.indexOf(u8, bytes, "\"vcsRevision\"").?;
     try std.testing.expect(version_pos < vcs_pos);

@@ -9,7 +9,7 @@
 
 ## Mission
 
-Keep `content/` a living sample site that matches the released Boris v0.8.2
+Keep `content/` a living sample site that matches the released Boris v0.9.0
 **publisher-platform** identity (issue #538 / `docs/STATUS.md`):
 
 1. Markdown in → validated Trunk/Satellite graph → one or more contracted

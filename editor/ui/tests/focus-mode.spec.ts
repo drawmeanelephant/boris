@@ -27,7 +27,7 @@ async function installApi(page: Page, options: FocusMockOptions = {}) {
   }));
   await page.route('**/api/version', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ compiler_id: 'boris/0.8.2' })
+    body: JSON.stringify({ compiler_id: 'boris/0.9.0' })
   }));
   await page.route('**/api/files', route => route.fulfill({
     contentType: 'application/json',
@@ -73,7 +73,7 @@ async function installApi(page: Page, options: FocusMockOptions = {}) {
   await page.route('**/api/commands/run', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
-      mode: 'validate', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.2',
+      mode: 'validate', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.9.0',
       report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: []
     })
   }));

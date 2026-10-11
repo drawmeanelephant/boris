@@ -30,7 +30,7 @@ type Options = {
 
 function commandResult(overrides: Json = {}): Json {
   return {
-    mode: 'validate', exit_code: 1, failure_class: 'content', compiler_id: 'boris/0.8.2',
+    mode: 'validate', exit_code: 1, failure_class: 'content', compiler_id: 'boris/0.9.0',
     report_version: 'html-build-report-0.2.0', used_stderr_fallback: false,
     problems: [], findings: [], impact: [], ...overrides
   };
@@ -51,7 +51,7 @@ async function installApi(page: Page, options: Options = {}) {
     if (options.healthStatus) return route.fulfill(json({ error: 'host_unavailable' }, options.healthStatus));
     return route.fulfill(json({ status: 'ok', editor_id: 'boris-editor/0.1.0', project: { content: true, default_layout: true, publication_profile: true, input_mode: 'markdown' } }));
   });
-  await page.route('**/api/version', route => route.fulfill(json({ compiler_id: 'boris/0.8.2' })));
+  await page.route('**/api/version', route => route.fulfill(json({ compiler_id: 'boris/0.9.0' })));
   await page.route('**/api/files', async route => {
     if (options.holdHost) await hold();
     return route.fulfill(json({ files: [{ path: 'boris.json' }, { path: 'content/index.md' }], last_open: null }));

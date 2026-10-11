@@ -1,5 +1,13 @@
 # Queued-fragment inventory
 
+**Note (2026-10-11):** the 114 numeric fragments (`809-*` through `1108-*`) and
+six named fragments (`dialog-empty-submit-disabled`, `focus-writing-mode`,
+`graph-nav-disabled`, `nav-token-preserve`, `section-nav-feedback`,
+`watch-daemon-stop-park`) queued since the v0.8.2 cut were assembled into the
+`[0.9.0]` section of [`CHANGELOG.md`](../../CHANGELOG.md) at the v0.9.0 release
+cut — categories in the documented order (Added 43, Changed 31, Fixed 69,
+Docs 8 bullets) — and removed from this queue.
+
 **Note (2026-09-02):** the sixteen fragments queued since that cut
 (`531-pds-dpop-nonce-and-transport-fixes`, `781-artifact-build-provenance`,
 `789-scale-smoke-version-flag`, `795-source-rag-vcs-revision`, `800-lab-theme`,

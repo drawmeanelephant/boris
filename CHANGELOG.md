@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: the current product release is **v0.8.2** (2026-09-02) with base
-IR `schemaVersion` **`0.2.0`** and compiler id **`boris/0.8.2`**. Breaking IR
+Versioning: the current product release is **v0.9.0** (2026-10-11) with base
+IR `schemaVersion` **`0.2.0`** and compiler id **`boris/0.9.0`**. Breaking IR
 changes must bump `schemaVersion` and update `docs/contracts/`. Product version
 bumps may update `compiler_id` / `boris_version` without changing IR schema.
 The historical `v0.8.0` tag is preserved as erroneous evidence; see
@@ -28,8 +28,999 @@ How to use going forward:
 
 New fragments land under
 [`docs/changelog.d/`](docs/changelog.d/README.md); the release owner assembles
-them into a dated section at the next release cut. The `[0.8.2]` section was
-assembled from those fragments on 2026-09-02.
+them into a dated section at the next release cut. The `[0.9.0]` section was
+assembled from those fragments on 2026-10-11.
+
+## [0.9.0] — 2026-10-11
+
+The v0.9.0 release keeps base IR `0.2.0` (conditional semantic-relation and
+recipe artifacts retain their conditional IR `0.3.0` / recipe `0.4.0` schemas)
+and steps the line past the post-v0.8.2 maintenance phase into a fuller
+publisher platform: publication profiles now *execute* — `build`, `watch`, and
+`validate --profile` run declared HTML targets end to end — the CLI gains
+`boris graph` (Mermaid / Graphviz DOT) and the `boris proof verify` enforcement
+gate, opt-in compiler-owned head metadata ships with a bounded RSS
+autodiscovery rider, HTML 4.01 Strict is an opt-in publication profile with its
+own theme, `boris init` materializes fifteen compile-verified starter
+archetypes, Windows builds and runs natively on the Zig 0.17 toolchain, the
+opt-in NIP-42 signing supervisor lands for the Nostr surface, and the Boris
+Editor grows a managed watch daemon, a graph map, a focus writing mode,
+dark-mode design tokens, density modes, and a certified keyboard-first
+accessibility posture. Every catalog theme reached a measured accessibility
+floor, and several — cards, tokens, field-notes, columns, semantic,
+html4-strict — gained a distinct voice of their own.
+
+### Added
+
+- Added opt-in HTML 4.01 Strict publication with a compatible theme, fail-closed whole-page and proof presentation checks, and located diagnostics; HTML/XHTML defaults remain unchanged ([profile contract](/docs/contracts/html4-strict.md), [#1003](https://github.com/drawmeanelephant/boris/issues/1003)).
+
+- `boris validate --profile PATH` runs the profile's declared HTML targets as a zero-write prepublication validation pass: declared layouts, layout rules, static directory, sitemap path, input, and site URL drive the run, competing HTML selectors are conflicts, and declarations the validator cannot execute (editions, per-target RSS/llms, multi-target sitemap/static, publication locations, a sitemap declaration without `site.url`) refuse with exit 2 and a named field. Links: [the publication-profile contract](/docs/contracts/publication-profile.md) (Refs #1006; profile-driven build/watch remain deferred).
+
+- `boris build --profile` and `boris watch --profile --serve` now execute supported declared HTML targets without repeated layout/theme/static flags, using the profile workspace and the existing compiler/watch pipeline; validation shares the mapping, static-file links participate in both output audits, and unsupported declarations fail before subset publication. See [the profile execution contract](/docs/contracts/publication-profile.md#html-execution).
+
+- Opt-in [compiler-owned head metadata](/docs/contracts/head-metadata.md):
+  target-local canonical/description, real OpenGraph and explicit Twitter tags,
+  exact-page overrides, image preflight, Strict omission/refusal, draft exclusion,
+  and shared build/validate semantics. The bounded single-target RSS rider emits
+  autodiscovery; article publication dates use existing frontmatter, modification
+  dates require explicit configuration. New declarations negotiate plan schema 3;
+  existing configurations and profile execution limits otherwise stay unchanged.
+
+- Implement the opt-in NIP-42 signing supervisor and proactive article gate, with schema-2 negotiation and hostile two-process loopback tests, including startup custody, forged controls, blocked-operation teardown and entropy/signing failure injection. Invalid/overlong session keys retain content-refusal exit 1. The capability remains unreleased pending review and required CI; macOS is the only supported session launcher, and ordinary schema-1 plan/sign/publish bytes remain unchanged. See [the Nostr evidence and limits](/docs/contracts/nostr-publication.md#phase-2-implementation-notes-and-release-evidence-boundary).
+
+
+- `boris check` now reports advisory findings for valid-but-flat corpora —
+  `flat_graph`, `unlinked_page`, `zero_includes`, and `zero_relations` — all
+  informational (exit 0) unless a matching `--fail-on-*` flag opts in;
+  corpus-level findings use the new `graph` endpoint type in the report. See
+  the [Documentation Intelligence contract](/docs/contracts/documentation-intelligence.md)
+  and the [CLI contract](/docs/contracts/cli.md).
+
+- Added additive [theme metadata hooks](/docs/contracts/templating-and-themes.md)
+  (#1007): a repeatable, attribute-safe `{{page-status}}` token (e.g.
+  `<body data-status="{{page-status}}">`, empty string when `status` is unset),
+  a once-only `{{tags}}` slot emitting `<ul class="page-tags"><li>…</li></ul>`
+  from closed `tags` frontmatter, and a once-only `{{parent}}` slot emitting a
+  resolved direct-parent `<nav class="page-parent">` title/link from the frozen
+  graph. The frozen `{{metadata}}` `<dl>` shape, raw parent id, and absent-marker
+  output are unchanged; `ul.page-tags` and the Strict `div.page-parent` are
+  excluded from [rendered search](/docs/contracts/rendered-search.md) as
+  compiler chrome.
+
+- `boris init [DIR] [--type NAME]` materializes five deterministic,
+  compile-verified starter archetypes: `docs` (the unchanged default),
+  `garden` (dense wiki links, semantic relations, `{{include}}`
+  composition, and a registered `<Aside>` under the `ledger` theme),
+  `cookbook` (Cooklang `.cook` pages under `cards`, profile declaring
+  `"input_format": "cook"`), `blog` (dated posts on a parent chain under
+  `cozy`), and `textile` (`.textile` pages under `press`, profile
+  declaring `"input_format": "textile"`). Each archetype ships its own
+  theme byte-identical to the `themes/` catalog and a `boris.json`
+  profile that drives the build — the compiler gains no per-archetype
+  branches. Missing-content diagnostics now point at `boris init` as a
+  starter path. See [the CLI contract](/docs/contracts/cli.md#init-deterministic-starter-scaffold-with-self-verification),
+  [the includes contract](/docs/contracts/includes-and-wiki-links.md),
+  [Cooklang compatibility](/docs/contracts/cooklang-compatibility.md), and
+  [Textile compatibility](/docs/contracts/textile-compatibility.md).
+
+- The published-output link audit shared by `boris build` and `boris validate`
+  now checks the `#fragment` of every resolved local reference against the
+  target page's rendered element `id` set (all elements, not only headings —
+  matching `doctor`). A fragment that names no rendered anchor reports
+  `EFRAGMENTMISSING` as a **warning**: it is printed and collected without
+  failing the build, and the stale `href` is published verbatim rather than
+  rewritten. Links:
+  [diagnostics contract](/docs/contracts/diagnostics.md),
+  [documentation-links contract](/docs/contracts/documentation-links.md),
+  [link-fragments fixture](/docs/contracts/fixtures/link-fragments/README.md).
+
+- The editor host's preview state (`GET /api/preview/state` and a `200` from
+  `POST /api/preview/rebuild`) carries an additive `stale_reason` —
+  `earlier_build` when `dist/` was already on disk at startup, `failed_rebuild`
+  when a rebuild failed, timed out, or could not run and the last valid tree was
+  kept, and `null` whenever `phase` is not `stale` — so the shell no longer
+  infers a startup warning from a failed rebuild's `exit_code`. Older hosts
+  without the field keep the `exit_code` fallback. Links:
+  [the editor-host contract](/docs/contracts/editor-host.md#82-fixed-rebuild-command),
+  [issue #1068](https://github.com/drawmeanelephant/boris/issues/1068).
+
+- Added the first-class [`gallery` theme](/themes/gallery/README.md) (#1052):
+  an image-first `home` layout that lays out `{{children}}` as an album grid,
+  a `main` layout for albums and single images with `figure`/`figcaption`
+  styling for hand-scaled [content-local assets](/docs/contracts/content-local-assets.md),
+  the full accessibility floor, and no JavaScript. The
+  [`gallery-site` specimen](/examples/gallery-site/README.md) ships
+  deterministic, locally generated images at three page depths.
+
+- [The init theme coverage matrix](/docs/init-theme-matrix.md) names at
+  least two smoke-verified first-party themes for every `boris init --type`
+  scenario, the theme slots each one carries, and the theme gaps that
+  remain ([#1051](https://github.com/drawmeanelephant/boris/issues/1051)).
+- `boris init --type landing` writes a single-Trunk site under `service`:
+  one long page composed from `{{include}}` section fragments, one
+  satellite, and profile `layout_rules` that send `id:index` to the
+  theme's `home.html`
+  ([#1054](https://github.com/drawmeanelephant/boris/issues/1054),
+  [the CLI contract](/docs/contracts/cli.md#init-deterministic-starter-scaffold-with-self-verification)).
+- `boris init --type wiki` writes a three-level reference tree under
+  `reference` (index → section hubs → entries) with cross-entry wiki
+  links; `layout_rules` send the index to `home.html` and the hubs, via a
+  single `glob:wiki/*` rule, to `section.html`
+  ([#1055](https://github.com/drawmeanelephant/boris/issues/1055)).
+- `boris init --type link-in-bio` writes the smallest starter: one trunk
+  page holding a personal link list, under `minimal`
+  ([#1057](https://github.com/drawmeanelephant/boris/issues/1057)).
+- `boris init --type changelog` writes release notes under `journal`: an
+  `index` → `changes` → dated-entry chain with `published_at` +
+  `summary`, and one `status: draft` unreleased entry that renders but
+  stays out of search, RSS, and sitemap output
+  ([#1056](https://github.com/drawmeanelephant/boris/issues/1056),
+  [status gating](/docs/contracts/html-output.md)).
+- `boris init --type resume` writes a single-page CV under `corporate`:
+  tags rendered by `{{metadata}}`, one "now" satellite, and the theme's
+  print stylesheet as the PDF path
+  ([#1058](https://github.com/drawmeanelephant/boris/issues/1058)).
+- `boris init --type newsletter` writes a weekly paper under `press`
+  whose `layout_rules` route the masthead, back-issue archive, and dated
+  issues to press's `home`, `archive`, and `blog` layouts. Its profile
+  declares `site.url` and a target `sitemap`, so the first build emits
+  `dist/sitemap.xml`. Profile `rss` is not declared yet because press
+  layouts lack the `{{head}}` slot the RSS rider requires
+  ([#1060](https://github.com/drawmeanelephant/boris/issues/1060),
+  [head metadata](/docs/contracts/head-metadata.md#bounded-rss-rider-and-execution-boundary)).
+- `boris init --type portfolio` writes a studio site under `showcase`: an
+  index, an about page, and three dated project satellites, with profile
+  `layout_rules` sending `id:index` to the theme's `home.html` and every
+  other page to `main.html`
+  ([#1053](https://github.com/drawmeanelephant/boris/issues/1053)).
+
+- `boris init --type archive` writes a long-lived archive under `archive`:
+  four tagged entries joined by `relates_to` and `supersedes` relations, so
+  entry pages render `{{relations}}` and the derived `{{backlinks}}`; one
+  `status: archived` record; and a hand-kept `topics` index by tag.
+  `layout_rules` send `id:index` to the theme's `archive.html`
+  ([#1059](https://github.com/drawmeanelephant/boris/issues/1059),
+  [the CLI contract](/docs/contracts/cli.md#init-deterministic-starter-scaffold-with-self-verification)).
+- `boris init --type dashboard` writes a project-status board under
+  `engineering`: three projects, one per `status:` value, each showing a
+  visible status label, with the status-to-project-state mapping
+  (`published` = active, `draft` = proposed, `archived` = retired)
+  documented on the board, `depends_on` / `supersedes` relations, and
+  status-history tables. `layout_rules` send `id:index` to `home.html`
+  ([#1062](https://github.com/drawmeanelephant/boris/issues/1062)).
+- `boris init --type photo-gallery` writes an image gallery under the new
+  `gallery` theme: a cover page and two albums, each page carrying small
+  self-made PNG plates in its own `{stem}.assets/` folder inside
+  `<figure>` captions, with `layout_rules` sending `id:index` to the
+  album-grid `home.html`
+  ([#1061](https://github.com/drawmeanelephant/boris/issues/1061),
+  [content-local assets](/docs/contracts/content-local-assets.md)).
+- The `boris init --type newsletter` profile now enables `head` and
+  declares `rss`, so the first build writes a three-item `dist/feed.xml`
+  and an autodiscovery link in every non-draft page head; a `status:
+  draft` issue stays out of the feed and sitemap
+  ([#1060](https://github.com/drawmeanelephant/boris/issues/1060),
+  [head metadata](/docs/contracts/head-metadata.md#bounded-rss-rider-and-execution-boundary)).
+- Every `boris init` starter now writes its theme's full catalog file set,
+  including the `ACCESSIBILITY.md` that the `cards`, `service`,
+  `reference`, `minimal`, `corporate`, and `showcase` READMEs link to
+  ([#1046](https://github.com/drawmeanelephant/boris/issues/1046)).
+
+- Every single-layout theme now has a recorded named-layout decision in its
+  README ([theme catalog](/themes/README.md), #1050). `journal` gains
+  `layouts/archive.html`, a log index whose `$ ls entries/` listing is the
+  page's `{{children}}`, for dated-entry trees such as the `changelog`
+  starter (`id:changes`). `cards` gains `layouts/home.html`, an intro card
+  above a deck of child cards, the shape a cookbook recipe box wants.
+  `boris`, `cozy`, `ledger`, `reading`, `corporate`, `minimal`, and
+  `html4-strict` stay single shape by design, and each README records the
+  reason. `showcase/layouts/home.html` now renders `{{children}}` as a
+  search-excluded project grid, so the `portfolio` index lists its projects
+  from the graph (#1053). Every catalog theme maps to a buildable specimen in
+  [`examples/README.md`](/examples/README.md): `studies-site` is the shared
+  corpus for `semantic`, `columns`, `service`, `engineering`, `civic`,
+  `tokens`, `corporate`, `minimal`, `boris`, and `html4-strict`, and it gains
+  a typed relation and a footnote. Its documented command no longer fails
+  with `FileNotFound` for the single-layout themes. `corporate`'s print pass
+  also forces a white shell surface and keeps body links underlined.
+
+- `boris proof verify` (#840 piece 2): the publication-check enforcement gate as a contracted product command. It reads the committed `checks.json` of one target (target-bound from the report itself) and applies an explicit severity policy — `--max-errors` (default `0`), `--max-warnings` (default unlimited; warnings counted and reported), and repeatable `--block-code` promotions. Exit `0` pass, `1` policy failure, `2` usage, `3` missing/unparsable proof (fail-closed: missing evidence never passes). `incomplete` verdicts and not-applicable checks are always reported. The GitHub Pages deploy now runs it before the upload, so committed error findings block publication while warnings stay visible and non-blocking. Links: [the CLI contract](/docs/contracts/cli.md), [#840](https://github.com/drawmeanelephant/boris/issues/840).
+
+- Publication-check verdict in the build and watch output (#840 piece 1): every non-quiet HTML build and every watch rebuild/initial build prints one line read back from the committed `checks.json` — `checks: 3/3 passed`, or the failing/incomplete checks with severity counts and the deploy consequence (`checks: 2/3 — rendered-html failed: 1 warning — deploy passes`; error findings read `deploy blocks`). Not-applicable checks are counted, never silent; a missing or unparsable report omits the line (chrome never fails the build). Enforcement itself stays out of the build per #740/#741 — the `boris proof verify` gate and the deploy wiring are the next pieces. Links: [the publication-checks contract](/docs/contracts/publication-checks.md), [#840](https://github.com/drawmeanelephant/boris/issues/840).
+
+- The Boris Editor UI ships a design-token system with a dark mode: semantic color/spacing/radius/elevation tokens derived from the existing green-and-rust identity, a persisted `Theme: dark` / `Theme: light` header toggle that defaults to `prefers-color-scheme`, WCAG AA contrast in both themes, and the rust focus ring kept as the a11y signature; the Svelte app is migrated to runes mode with typed state modules under `editor/ui/src/lib/state/` and reduced-motion-gated motion (dialog fade/scale, problem-group and palette transitions, preview width tween) that only reflects real state changes ([editor/README.md](/editor/README.md)).
+
+- The editor host now supervises one managed `boris watch --watch-json` daemon
+  per project: authenticated start/stop/state/event endpoints surface the
+  compiler's contracted NDJSON build-event stream with monotonically
+  increasing sequence numbers, rebuilds are refused while the daemon owns the
+  `dist/` writer seat, and stopping the daemon (or the host) always reaps it.
+  An explicit stop also clears any crash residue, so the post-stop state reads
+  `idle` with no stale `last_error`.
+  See [the editor README](/editor/README.md) and
+  [the watch-mode contract](/docs/contracts/watch-mode.md).
+
+- The editor UI gains a Watch pane for the managed watch daemon: honest
+  idle/running/success/failed/stale state naming, a bounded newest-first feed
+  of the compiler's `--watch-json` build events with ring-eviction boundaries
+  labeled, explicit Start/Stop controls plus command-palette entries, a
+  preview-rebuild refusal note when the daemon owns the `dist/` writer seat,
+  and an honest "not supported" notice against hosts without the backend —
+  see [the editor README](/editor/README.md) and
+  [the watch-mode contract](/docs/contracts/watch-mode.md).
+
+- `scripts/agent-pack.sh` gains opt-in `--with-editor`: it builds the
+  `boris-editor` host and bundles it with the prebuilt UI shell under
+  `ui/dist/`, records `"editor_ui": true` in `MANIFEST.json`, and covers the
+  UI files in `SHA256SUMS`. The default kit stays slim. Links:
+  [the agent binary kit guide](/docs/AGENT-BINARY-KITS.md),
+  [the editor README](/editor/README.md).
+
+- CI now fails a PR that references an open issue without declaring, per issue, whether the merge closes it (`Closes #N` — one issue per keyword, any GitHub close synonym, no comma lists, no bold-wrapped keywords) or leaves it open (`Refs #N` / `Related to #N` — reported to the reviewer, never force-closed) — a bare `#N` mention declares neither — so multi-issue fixes can no longer orphan issues at merge time ([the PR template](/.github/PULL_REQUEST_TEMPLATE.md)).
+
+- The `pr-issue-close` lint can now be driven offline: `--pr` and `--body-file`
+  share one verdict path, and `ISSUE_CLOSE_LINT_FIXTURE=<path>` supplies issue
+  states in place of the API, so a body is judged with no network and no `gh`.
+  The grammar self-test uses that seam to run the real entry point as a
+  subprocess, pinning the inert-vs-live matrix — report text, class guard, and
+  exit codes — in 61 cases under macOS `bash` 3.2. A number the fixture omits
+  is an error rather than a skip, so a fixture typo cannot turn a real violation
+  into a passing test. Links:
+  [the lint](/scripts/check-pr-issue-close.sh),
+  [the CI lane](/.github/workflows/ci.yml).
+
+- `boris graph` renders the frozen content graph as deterministic text: Mermaid (default, copy-pasteable into GitHub/Notion) or Graphviz DOT, with read-only compile semantics, `--input DIR`, `--format mermaid|dot`, and `--out PATH` (stdout otherwise). The projection consumes the frozen nodes and typed `parent` / `include` / `reference` edges plus author semantic relations, aliases source endpoints, and escapes labels through the shared encoder. Links: [the graph render contract](/docs/contracts/graph-formats.md), [the CLI contract](/docs/contracts/cli.md), [documentation-intelligence fixtures](/docs/contracts/fixtures/documentation-intelligence/README.md).
+
+- The Editor **Graph** pane now draws a deterministic visual map of the frozen graph above its lists: pages layer by hierarchy, `parent` edges are solid, references dashed, and node borders scale with topology (direct children plus incoming references). The SVG is `aria-hidden` — a pointer convenience for review, with the existing named lists kept as the keyboard path. Links: [the editor guide](/content/guides/editor.md), [the graph render contract](/docs/contracts/graph-formats.md).
+
+- The Editor graph map opens fit-to-width (never upscaled past actual size) and gains visible zoom controls — zoom in/out, Fit, and Actual size with a live percentage — plus a focusable scroll viewport so the wheel, touch, and arrow keys pan. This fixes wide-graph clipping without adding a dependency or a drag handler; the SVG stays `aria-hidden` and the named lists remain the keyboard path. Links: [the editor guide](/content/guides/editor.md).
+
+- The editor now documents a CLI to editor capability matrix and allowlists two more read-only Boris commands: **Export graph** (`boris graph`, Mermaid by default or Graphviz DOT) and **Verify proof** (`boris proof verify --html-dir dist`), while conflict compare panes open at the top of both columns. Links: [the editor-host contract](/docs/contracts/editor-host.md), [the editor README matrix](/editor/README.md#cli-to-editor-capability-matrix), [#983](https://github.com/drawmeanelephant/boris/issues/983), [#984](https://github.com/drawmeanelephant/boris/issues/984), [#985](https://github.com/drawmeanelephant/boris/issues/985), [#986](https://github.com/drawmeanelephant/boris/issues/986).
+
+- Every ordered scale the editor declares — the type chain, the spacing rhythm,
+  the corner steps, and the stacking ladder — now writes its order down exactly
+  once, in a `--scale-*` list in `editor/ui/src/lib/tokens.css`, and nothing
+  else keeps a copy. `--scale-space-base` declares the spacing rhythm's base
+  instead of describing it in prose, and the six bare `z-index` values in
+  `styles.css` became `--layer-*` names, so the ladder is the only authority on
+  stacking order.
+- `editor/ui/scripts/check-scales.mjs`, run by `npm run check`, holds the static
+  half: every declared token of each family is classified, every listed name
+  exists, each list ascends (numerically where a value is resolvable without a
+  viewport, and reported as deferred where it is a `clamp`), spacing steps are
+  whole multiples of the declared base, the layer ladder holds bare numbers,
+  every scale token is declared once and only in `tokens.css`, every `var()`
+  reference lands on a declared step, no `z-index` is a bare number, and each
+  documented section names its scale's list without naming tokens that do not
+  exist. It runs its own self-tests first, so the checker is checked.
+- `editor/ui/tests/scales.spec.ts` holds the half that needs a viewport. It
+  resolves the same lists out of the *applied* stylesheet at four widths, which
+  is the only way to check a `clamp` step, a value overridden further down the
+  cascade, or the rhythm's base — and it asserts that the sticky nav and the
+  skip link carry the declared layer rather than a loose number. The rendered
+  heading levels stay in `editor/ui/tests/reading-hierarchy.spec.ts`, now
+  measured in both density modes.
+- That last point is why any of this exists: the prior hierarchy suite pinned
+  Review density only, so an Author-only override could flatten the app title
+  onto the pane-title size with every suite green. Which is exactly what
+  happened, and what these scales are now walked against.
+
+- The editor UI gains a focus writing mode: a full-screen, word-processor
+  style surface for the open buffer with Write / Split / Preview layouts
+  (choice persisted per browser), typography controls (text size
+  S/M/L/XL, reading measure Narrow/Medium/Wide, and a Serif/Sans
+  typeface toggle, persisted and validated on load), a live reading aid
+  that renders the bounded Markdown subset an author types (headings,
+  paragraphs, emphasis, code fences, quotes, lists, wiki links, and Aside
+  tokens) with honest non-navigable wiki links, full escaping, and a
+  frontmatter block that renders as a muted collapsed band rather than
+  body text, word count and caret status, and entry/exit from the Source
+  pane's Focus button or the command palette. Opt-in writing aids
+  (persisted and validated on load): typewriter scrolling keeps the typed
+  line vertically centered, and paragraph dimming veils everything but the
+  caret's paragraph through a masked overlay. The overlay edits the
+  shared buffer, so undo/redo, recovery snapshots, conflict handling, and
+  saves are the shell's existing machinery — see [the editor
+  README](/editor/README.md).
+
+- Editor section navigation now gives arrival feedback (#941): activating a
+  nav link focuses the target section and pulses it (static highlight under
+  `prefers-reduced-motion`), a scrollspy hands `aria-current` to the section
+  at the reading top, the nav sticks below the viewport with targets carrying
+  a measured `scroll-margin-top`, nav activation hands focus to the landed
+  section, and narrow viewports gain edge affordances on the pill row. The
+  change also resolves the duplicate `id="graph"` between the Source pane's
+  empty state and the real Graph pane.
+  Links: [the component](/editor/ui/src/components/SectionNav.svelte).
+
+### Changed
+
+- Boris now builds on Zig **0.17.0**: `minimum_zig_version` is `0.17.0` across
+  the root, editor, and tool packages, CI pins 0.17.0, and the Oliver pin moves
+  to `2a0a1e9` (its 0.17-compatible revision). Author-facing grammar, IR, and
+  `dist/` output are unchanged. Links:
+  [the Oliver renderer contract](/docs/contracts/oliver-renderer.md),
+  [project status](/docs/STATUS.md).
+
+- The editor shell has one visual vocabulary over its tokens — a single button
+  system (primary, secondary, danger, ghost), badge, notice, empty state, card,
+  toolbar, and row list — and every pane now renders a designed loading,
+  unavailable, empty, stale, or `build_required` state instead of incidental
+  text. Panes no longer claim "no files", "no profile", or "no Proof Pack"
+  before the host answers (or when it never does), warning-severity problems
+  stop rendering as errors, and a startup `stale` preview reads as a warning
+  rather than a failure. Two contrast defects are fixed: the Publication
+  **Run publication plan** label inherited muted ink on the accent fill, and
+  light-theme key-hint chips on primary buttons were white on near-white.
+  `check-scales.mjs` now fails any absolute length in a type, spacing, or
+  corner property of `styles.css`. No host endpoint or contract changed.
+  Links: [the editor README](/editor/README.md#component-vocabulary-and-state-honesty),
+  [issue #1044](https://github.com/drawmeanelephant/boris/issues/1044).
+
+- Focus writing mode's Typography and Writing aids panels open as overlays
+  under their summaries instead of expanding inside the header, so opening one
+  no longer reflows the chrome or shrinks the writing surface. They stay native
+  disclosures with their saved preferences, and act as one light-dismiss menu:
+  opening one closes the other, a click outside closes it, and Esc closes the
+  open panel (focus returns to its summary) before a second Esc exits focus
+  mode. The panel sits on one new stacking step, `--layer-focus-popover`, in
+  the editor's declared layer ladder. Links: [the editor
+  guide](/editor/README.md#focus-writing-mode),
+  [#1066](https://github.com/drawmeanelephant/boris/issues/1066).
+
+- In the editor's Review density, Graph and Publication are top-level panes
+  in the workspace rail (after Problems, Preview, and Watch) instead of
+  sub-panes under the writing surface, so Source no longer grows into a tall
+  column beside a short rail; the section nav now lists every destination in
+  the order it appears on screen. The Project file actions take the compact
+  size and pair up instead of stacking one per line. The section-nav
+  scrollspy keeps the pane you jumped to marked current on Review's shorter
+  page, follows rail scrolling after a switch from Author, and lands
+  mode-switch jumps correctly under reduced motion. No host endpoint or
+  contract changed. Links: [the editor README](/editor/README.md#density-modes-and-the-writing-surface),
+  [issue #1067](https://github.com/drawmeanelephant/boris/issues/1067).
+
+- Themes batch A (#1047, #1048): `reference`, `press`, `showcase`,
+  `archive`, `journal`, `compact`, `minimal`, `corporate`, `service`, and
+  `engineering` now wire `{{head}}` and labelled, search-excluded
+  `{{relations}}`/`{{backlinks}}` on every layout, adopt `{{page-status}}`
+  (a visible status label on `engineering`), `{{tags}}`, and `{{parent}}`
+  where the theme's voice uses them, and record each intentional omission
+  in the theme README. Each theme ships an `ACCESSIBILITY.md` with measured
+  focus and text contrast; fixes include sub-3:1 focus rings (`press`,
+  `service`, `engineering` header), dark-mode link and print palettes,
+  missing focus/print/motion passes (`showcase`, `archive`), and a clean
+  single-column CV print for `corporate`. See
+  [the theme catalog](/themes/README.md) and
+  [the slot contract](/docs/contracts/templating-and-themes.md).
+
+- Twelve shipped themes (boris, field-notes, cards, cozy, ledger, reading,
+  semantic, columns, civic, tokens, lab, html4-strict) now reach the
+  accessibility floor and style every slot they emit. field-notes, cards, and
+  cozy gain relations and backlinks. field-notes and ledger replace the flat
+  metadata list with the status, parent, and tags hooks. cozy adds a draft
+  stamp. Light-mode focus rings below 3:1 are fixed in five themes. ledger and
+  html4-strict gain print styles, and html4-strict gains a skip link and
+  `:focus-visible`. Each theme now ships `ACCESSIBILITY.md`, and its README
+  lists the slots it leaves out and why. Links:
+  [theme slot contract](/docs/contracts/templating-and-themes.md),
+  [HTML 4.01 Strict profile](/docs/contracts/html4-strict.md),
+  [#1047](https://github.com/drawmeanelephant/boris/issues/1047),
+  [#1048](https://github.com/drawmeanelephant/boris/issues/1048).
+- Eleven of those themes (all but html4-strict) keep layout text out of the
+  rendered-search index. Relations and backlinks sit in a `graph-links`
+  wrapper marked `data-boris-search-exclude`, as in the other ten themes.
+  Children panels, kickers, sidebar headings, and layout title `h1`s are
+  excluded too. A page's search entry now holds only its authored text.
+  html4-strict cannot carry the attribute, so its README documents that its
+  index includes navigation and relation link text. Link:
+  [rendered-search contract](/docs/contracts/rendered-search.md).
+
+- Visual quality pass for the docs-voice themes (#1049, part of #1045):
+  [`reference`](/themes/reference/README.md), [`compact`](/themes/compact/README.md),
+  [`semantic`](/themes/semantic/README.md), [`columns`](/themes/columns/README.md),
+  [`service`](/themes/service/README.md), [`engineering`](/themes/engineering/README.md),
+  [`civic`](/themes/civic/README.md), and [`tokens`](/themes/tokens/README.md)
+  now style breadcrumbs, outlines, Details, definition lists, footnotes,
+  figures, h4, and per-kind Aside colours in each theme's voice, and keep
+  Markdown table alignment. These constructs previously fell back to browser
+  defaults. Dark-mode links in `semantic`, `civic`, and `tokens` now pass
+  contrast (they measured 2.4–3.6:1). The six themes whose layouts show
+  `<h1>{{title}}</h1>` mark it with `data-boris-search-title`, so a page with
+  no authored heading is indexed under its own title rather than the theme
+  name ([rendered search](/docs/contracts/rendered-search.md)). They also
+  drop `aria-label`s that sat on role-less wrapper `div`s. Measured contrast
+  is in each theme's `ACCESSIBILITY.md`.
+
+- Seven personal-voice themes (press, cozy, journal, ledger, field-notes,
+  cards, reading) now style every authored construct in their own voice:
+  all five Aside kinds are told apart, and Details, definition lists,
+  footnotes, figures and captions, blockquotes, `hr`, `h4`, and Markdown
+  table alignment no longer fall back to browser defaults. Images no longer
+  overflow the column in journal, ledger, cards, and reading. Visited and
+  current-page link states are styled to match each voice. Breadcrumbs in
+  cozy, journal, and ledger are inline trails instead of numbered lists.
+  journal and cozy no longer put the site name in an `h1`, so the page
+  title is each page's only `h1`. cards keeps nested navigation below
+  42rem. Children panels in press, cozy, ledger, field-notes, and cards
+  hide when the page has no children. reading still adds no English of its
+  own and keeps its `:lang(ja|zh|ko)` rules. Each theme's
+  `ACCESSIBILITY.md` records the new contrast figures. Links:
+  [theme catalog](/themes/README.md),
+  [theme slot contract](/docs/contracts/templating-and-themes.md),
+  [#1049](https://github.com/drawmeanelephant/boris/issues/1049).
+
+- `boris init` starters use the named layouts that
+  [#1050](https://github.com/drawmeanelephant/boris/issues/1050) added.
+  The `cookbook` profile sends `id:index` to the `cards` theme's `home.html`,
+  which shows each recipe as a card. The rule selects the `.cook` index
+  like any other page. The `changelog` profile sends `id:changes` to the
+  `journal` theme's `archive.html`, whose listing names the published
+  releases and leaves out the draft. The `portfolio` index drops its
+  hand-written project list, because the `showcase` home now lists the
+  about page and the projects through `{{children}}`
+  ([#1053](https://github.com/drawmeanelephant/boris/issues/1053)). Both new
+  layout files are embedded too, so every starter theme again matches its
+  catalog copy file for file
+  ([#1046](https://github.com/drawmeanelephant/boris/issues/1046),
+  [the CLI contract](/docs/contracts/cli.md#init-deterministic-starter-scaffold-with-self-verification),
+  [theme matrix](/docs/init-theme-matrix.md)).
+
+- `boris init` (the default `--type docs`) now writes the catalog
+  [`boris`](/themes/boris/README.md) theme's full file set, as every other
+  archetype writes its theme
+  ([#1063](https://github.com/drawmeanelephant/boris/issues/1063),
+  [#1046](https://github.com/drawmeanelephant/boris/issues/1046)). The
+  private two-file starter theme it used to write had no `{{relations}}`,
+  `{{backlinks}}`, `{{children}}`, or `{{metadata}}`, so the starter's index
+  promised a semantic relation the theme could not show. It had also
+  drifted from the catalog theme's fixes: slot adoption, the accessibility
+  floor, the [#1049](https://github.com/drawmeanelephant/boris/issues/1049)
+  visual pass, and the search-title marker. The relation now
+  renders on both of its pages, the index lists its guides, and tags
+  appear in the page header. Search works as before: the catalog layout
+  ships the same browser search client. The cost is that `init --type
+  docs` no longer writes the historical starter bytes, and the sidebar,
+  `<title>` suffix, and footer say "Boris" until you edit the theme copy.
+  See [the CLI contract](/docs/contracts/cli.md#init-deterministic-starter-scaffold-with-self-verification)
+  and [the init theme matrix](/docs/init-theme-matrix.md).
+
+- `boris init --type photo-gallery` embeds its five PNG plates straight from
+  the [`examples/gallery-site`](/examples/gallery-site/) specimen through a
+  new `init_example_assets` module instead of byte copies under
+  `src/init_templates/`, so the starter and the example share one source of
+  truth ([#1084](https://github.com/drawmeanelephant/boris/issues/1084)).
+
+- The `cards` theme is now an index-card workbench with its own point of view:
+  collections spread across the desk as numbered, tabbed, ruled card decks of
+  real generated child links, a document becomes one pulled reading sheet, the
+  page outline folds under a native "Find a line" disclosure, and the site
+  graph lives in a native "Open the index" drawer instead of a sidebar and
+  outline rail. Page metadata files itself below the prose as a record rather
+  than a badge strip above the headline, and the theme ships a six-card
+  "useful-things box" specimen in place of the shared calm-documentation copy.
+  Presentation only — the layouts keep every existing slot, the content model
+  and config schema are unchanged, and the published pages stay
+  JavaScript-free. See [the Cards theme](/themes/cards/README.md) and the
+  updated [theme matrix](/docs/init-theme-matrix.md).
+
+- The `tokens` theme is now a token sheet for a design system with its own
+  point of view: pages are spec sheets with hairline rules, field-table
+  metadata, and a DRAFT stamp on `status: draft`; collections list children
+  as a numbered register; the site graph folds into a mono catalog column;
+  and the masthead and cover display the stylesheet's own tokens as live
+  swatches, type steps, and space bars. Dark mode prints the same set as a
+  blueprint. The theme ships a six-sheet "house set" specimen in its README
+  in place of the shared calm-documentation copy, and `{{title}}` now names
+  the document `<title>` instead of printing the static word "Tokens" on
+  every tab. Presentation only — every existing slot is retained, the
+  content model and config schema are unchanged, and the published pages
+  stay JavaScript-free. See [the Tokens theme](/themes/tokens/README.md).
+
+- `themes/field-notes` is now a bound expedition logbook — grid-paper
+  leaves, punched binding, stamped entry headers, children filed as
+  numbered route legs, and a logbook-index margin — instead of the shared
+  documentation skeleton. Links: [theme README](/themes/field-notes/README.md),
+  [init theme matrix](/docs/init-theme-matrix.md).
+
+- `themes/columns` is now a broadsheet — nameplate masthead, edition
+  line, credit-line metadata, a press stamp for page status, and article
+  prose set in real justified columns — instead of the shared boxed-docs
+  skeleton. Links: [theme README](/themes/columns/README.md).
+
+- The `semantic` theme is now a landmark-first documentation theme with its own
+  point of view: the page's structure is the surface. Every region names itself
+  in a small monospace label — `header`, `main`, `article`, `section`, `nav`,
+  `footer` — every heading carries its level in the left margin, and callouts,
+  disclosure, tables, and definition lists are the platform elements styled in
+  place. The banner drops the hero-card and badge skeleton; the home page becomes
+  a contents page whose two-column deck is the graph's first level of real child
+  links; the footer is a quiet colophon instead of self-narration. Light and dark
+  palettes follow the operating system, `prefers-reduced-motion` pins the only
+  motion the theme has, and print drops the labels and the rails. The decorative
+  region and heading labels are CSS generated content given an empty accessible
+  name, so a screen reader announces the real landmark or heading level and the
+  label stays visual. Presentation only — the layouts keep every existing slot,
+  the content model and config schema are unchanged, the published pages stay
+  JavaScript-free and offline, and the layout authors no heading of its own so a
+  page has exactly one `<h1>`, the one the content provides. The theme ships a
+  small, complete specimen under `themes/semantic/specimen/` that demonstrates
+  landmarks, heading hierarchy, and native components on its own content graph.
+  See [the Semantic theme](/themes/semantic/README.md), its
+  [accessibility notes](/themes/semantic/ACCESSIBILITY.md), and the updated
+  [theme matrix](/docs/init-theme-matrix.md).
+
+- The `html4-strict` compatibility theme is redesigned as **"the standard
+  sheet"**: 1999 markup set like a Swiss design manual — a ruled margin rail
+  with the site index and numbered page outline, one grotesque system stack,
+  hairline structure rules, and a single poster red for links, markers, and
+  the title full-stop. Same Strict DTD, same slot vocabulary, new
+  presentation only; every assembled page still passes the whole-document
+  `EHTML4STRICT` gate and the W3C HTML 4.01 Strict validator. See
+  [the theme README](/themes/html4-strict/README.md) and
+  [the recomputed accessibility notes](/themes/html4-strict/ACCESSIBILITY.md).
+
+- The editor now carries reading order in type: one documented scale in
+  `lib/tokens.css` (meta → body → sub-pane title → pane title → app title),
+  a 1.55 prose line-height with a readable measure, and a shared pane header
+  row so a title, its lede, and its actions stop competing at the same size.
+  Pane titles rise above body copy, `h4` group labels become small-caps
+  labels, field labels step below prose, the Problems result chip no longer
+  squeezes its lede into a word-per-line column, and Focus writing mode scales
+  its document headings with the chosen text size. Presentation only — no
+  endpoint, contract, or pipeline change. Links:
+  [editor README](/editor/README.md#reading-hierarchy-and-pane-headers),
+  [issue #418](https://github.com/drawmeanelephant/boris/issues/418).
+- The Project pane renders the project as an indented, collapsible directory
+  tree derived from the host's flat path list, so a long project path stops
+  breaking mid-token. A row shows its own path segment and indentation carries
+  the rest; folder rows are named disclosure buttons with `aria-expanded` and a
+  CSS-only caret, and the 200-file budget still counts files only. Each file row
+  keeps its full project-relative path as its accessible name and tooltip, the
+  filter still matches whole paths, collapsed folders persist and are validated
+  on load, and opening a file expands the folders above it. The host's file list
+  stays flat — the tree is derived presentation and holds no directory model of
+  its own. Links: [editor README](/editor/README.md#project-file-tree),
+  [issue #418](https://github.com/drawmeanelephant/boris/issues/418).
+- The editor host API is now a normative contract, so the surface cannot drift:
+  [editor-host.md](/docs/contracts/editor-host.md) pins the loopback
+  transport/security discipline and launch line, the closed endpoint surface
+  with its payloads and error taxonomy, author-owned file operations and
+  fingerprint/atomic-save rules, the fixed Boris command allowlist and artifact
+  version negotiation, both managed daemons (validation, watch) with their
+  start/stop/backoff/reaping contract and dist-writer exclusion, and the
+  preview origin. It also records the compiler-serve reconciliation as open
+  work and names each black-box script that pins a section. Docs plus one type
+  correction: the shell declared `hello_schema` as a string while the host has
+  always sent a number.
+- The editor host contract is now executable: new
+  `editor/scripts/test-host-contract.sh` parses the endpoint table and error
+  taxonomy out of [editor-host.md](/docs/contracts/editor-host.md), reconciles
+  both against the host's own route table and error set in both directions,
+  probes every documented endpoint for its exact method set, rejects generated
+  near-miss and plausible-but-absent `/api/*` paths, and drives **every** code in
+  the taxonomy to its documented status with a live request — a 50 000-file
+  fixture, a directory where a page is expected, and four stub-compiler/host
+  scenarios — so a documented code that no request can raise now fails the
+  build instead of rotting as a "reserved" row. It also floods the watch event
+  ring with two stub compilers to pin the §7.3 bounds: the 100-event cap
+  (`gap`, `oldest_seq`, `dropped_lines`, and the rule that an unparseable line
+  consumes no `seq`) and the ~4 MiB byte budget, where eviction is byte-driven
+  rather than count-driven. The same sweep removed `corrupt_recovery`, which no
+  handler could raise. It runs as a stage of
+  `editor/scripts/test-editor-gate.sh`, so a route or code that drifts from the
+  contract fails CI. The first run found a real defect the contract had
+  documented but the host did not honor: `POST /api/commands/run` let runner
+  errors escape, so an invalid command request or an unrecognized artifact
+  version closed the connection with no response at all instead of the
+  documented `400 invalid_command_request` / `502 unsupported_boris_artifact`.
+  The handler now maps them like every other endpoint.
+- Corrected two stale claims in the editor README: the watch-admin section
+  still called the editor's watch UI a non-goal, and M5 still justified the
+  host's preview origin with a compiler serve mode not existing — that shipped
+  as `boris watch --serve` ([CLI contract](/docs/contracts/cli.md)). M5 now
+  records the overlap and the reconciliation as open work instead of a settled
+  rationale. Docs only.
+
+- `boris-content-audit` graduated to its own repository
+  ([`drawmeanelephant/boris-content-audit`](https://github.com/drawmeanelephant/boris-content-audit),
+  tagged `v0.8.2`, issue [#834](https://github.com/drawmeanelephant/boris/issues/834)).
+  The tool tree left with its history (21 commits, moved via
+  `git filter-repo`), and this repo dropped its one-shot gate, its
+  `content-audit` / `test-content-audit` build steps, and its
+  `content-audit-test` CI lane plus the strict aggregate requirement on it.
+  The tool keeps its own build, tests, and unconditional both-OS CI lane, and
+  pins the closed frontmatter and identity grammar by Boris release tag.
+  Links: [the tools registry](/docs/tools-registry.md),
+  [the split plan](/docs/plans/content-audit-standalone-repo.md).
+
+- The Boris Editor's accessibility contract is certified **keyboard-first**
+  against the CI accessibility tree, and spoken OS voice control (macOS Voice
+  Control / Windows Voice Access) is descoped from v1 — sub-issue
+  [#677](https://github.com/drawmeanelephant/boris/issues/677) closes as not
+  planned. Every [#418](https://github.com/drawmeanelephant/boris/issues/418)
+  workflow already completes by keyboard with stable accessible names and no
+  workflow was voice-only, so no shipped capability is removed. Links:
+  [the posture](/editor/README.md#accessibility-posture),
+  [the certification](/editor/accessibility-certification.md).
+
+- Bumped the [GitHub Pages target](/docs/contracts/publication-platforms.md) workflow's `configure-pages`, `upload-pages-artifact`, `upload-artifact`, `download-artifact`, and `deploy-pages` pins to their current Node 24 releases, clearing the runner's Node 20 deprecation annotations (#962). `mlugg/setup-zig` remains on its latest upstream release, which still declares Node 20.
+
+- Bumped the CI workflow's `actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, and `dorny/paths-filter` to their current Node 24 releases and pinned every action in [the CI workflow](/.github/workflows/ci.yml) by commit SHA, clearing the runner's Node 20 deprecation annotations (#963). `mlugg/setup-zig` stays pinned at its latest upstream v2.2.1, which still declares Node 20.
+
+- Repointed the CI and [GitHub Pages](/.github/workflows/github-pages.yml) workflows from `mlugg/setup-zig` to [`drawmeanelephant/setup-zig`](https://github.com/drawmeanelephant/setup-zig), a v2.2.1 fork whose only change is `runs.using: node20` → `node24`, clearing the last Node 20 deprecation notice after upstream moved to Codeberg (#964).
+
+- The editor's everyday surface now reads as a writing tool first: a default **Author** density mode (Source + Project; review panes unmounted, authoring hints folded, and section-nav links to Review panes switching modes before they land) beside the full **Review** chrome, Source as a measured hero surface with a measured line gutter, current-line band, and presentation-only frontmatter seam, and a primary/secondary action hierarchy in Problems with per-command `aria-busy` progress and large reports collapsed behind an explicit disclosure; a mode-gated landing that clamps at max scroll keeps its active nav marker while it covers the reading line. Links: [the editor guide](/content/guides/editor.md#density-modes-and-the-writing-surface), [#988](https://github.com/drawmeanelephant/boris/issues/988), [#989](https://github.com/drawmeanelephant/boris/issues/989), [#990](https://github.com/drawmeanelephant/boris/issues/990), [#991](https://github.com/drawmeanelephant/boris/issues/991).
+
+- Author mode stops reading as an equal-card dashboard: Project is demoted to a
+  file drawer under the writing page (no shared height, elevation, or heavy
+  edge) instead of a peer card, the section nav leads with Project and Source
+  while the Review destinations recede into a captioned, faint cluster that
+  still switches modes and lands on activation, and Source takes page material
+  rather than a wider dashboard tile — no card elevation, a focus-within edge,
+  and a readable-measure cap centered in its column on wide windows, so the
+  pane edge is the page edge and heading, editor, gutter, and status line share
+  one column. The top band quiets too: the header drops its decorative eyebrow
+  so the product mark and the live connection status share one row, the
+  connection readout collapses to a compact state chip whose honest sentence is
+  one activation away (the live region announces the short label rather than
+  re-reading a sentence), the theme control states only its state, and Author
+  takes a smaller product mark and tighter header/nav bands than Review. Links:
+  [the editor
+  guide](/content/guides/editor.md#density-modes-and-the-writing-surface),
+  [#993](https://github.com/drawmeanelephant/boris/issues/993).
+
+
+- Removed the contract-claim registry gate added in [#997](https://github.com/drawmeanelephant/boris/pull/997), and forbade standing up a replacement. Quoted-tether records and the `--audit` worklist were extra process on top of existing unit, CLI, and release-gate checks; they made `zig build test` slower without changing compiler behavior. [`AGENTS.md`](/AGENTS.md) now treats parallel verification products (claim registries, quote-tethers, contract-audit worklists, `known-divergence` ratchets) as needing an explicit user request; a contract the code does not honor is a defect to fix or rewrite, not a new gate. The Cooklang `{`-adjacency defect stays open. Links: [the test harness](/test/README.md), [the agent playbook](/docs/AGENT-PLAYBOOK.md), [#907](https://github.com/drawmeanelephant/boris/issues/907).
+
+### Fixed
+
+- Fixed Cooklang name termination at the Boris seam: a `{` later in the line no
+  longer swallows prose into the ingredient name, so
+  `Add @salt into the {bowl} and stir.` yields ingredient `salt` with no
+  quantity and keeps `{bowl}` in the prose — enforcing the adjacency rule in
+  the [Cooklang compatibility contract](/docs/contracts/cooklang-compatibility.md)
+  via the repinned Oliver parser ([Oliver renderer pin](/docs/contracts/oliver-renderer.md),
+  #907).
+
+- Rendered search now omits compiler metadata chrome, keeps authored definition
+  list terms and values separate, and covers both cases in the contract fixture.
+  Links: [rendered-search contract](/docs/contracts/rendered-search.md),
+  [#1005](https://github.com/drawmeanelephant/boris/issues/1005).
+
+- HTML `build --profile` now refuses profile target or edition settings that its CLI configuration does not select, instead of silently compiling a mismatched default site; matching Standard.site and Nostr metadata opt-ins still work. See [the publication-profile contract](/docs/contracts/publication-profile.md) (Refs #1006; full profile execution remains deferred).
+
+- Complete the editor document head with a deep-green SVG favicon, a browser
+  chrome color that follows the active light/dark surface, and a JavaScript-
+  disabled fallback. Links: [the Boris Editor](/editor/README.md),
+  [#1010](https://github.com/drawmeanelephant/boris/issues/1010).
+
+- Reserve concurrent execution for WebSocket deadline races so worker-pool saturation cannot run a blocking operation or timer inline. Keep the full loopback write-fuzz coverage and checked allocation while avoiding per-frame allocator stack unwinding. CI prints test commands and timing summaries without raising its timeout. See [the transport evidence](/docs/contracts/nostr-publication.md#conformance-matrix).
+
+- Require AUTH transmission before its matching positive OK can open the NIP-42 article gate; keep retired signer replies relay-local, preserve large article delivery after replacement authentication, and retain replacement rejection/Close outcomes and diagnostics. Six offline recording-relay regressions cover the fixes without changing the approved opt-in boundary or ordinary schema-1 behavior. See [the Nostr acceptance evidence](/docs/contracts/nostr-publication.md#phase-2-implementation-notes-and-release-evidence-boundary).
+
+- Windows builds and runs natively: `zig build` installs a `boris` POSIX
+  launcher shim beside `boris.exe`, threaded-I/O file opens and readers
+  follow Windows async semantics, the preview server shuts down without
+  an overlapped-accept panic, and test scripts account for Windows
+  signal, jq-CRLF, and symlink behaviors. `zig build test` is green on
+  Windows Server 2022 (208 steps, 16518 tests). See
+  [the PR](https://github.com/drawmeanelephant/boris/pull/1019).
+
+- Frontmatter-sourced graph diagnostics now point at the offending field line
+  instead of `1:1`: `EPARENTMISSING`, `EPARENTSELF`, and each `EPARENTCYCLE`
+  participant report the page's `parent:` line, and `ERELATIONMISSING`,
+  `ERELATIONSELF`, and `ERELATIONDUPLICATE` report the `relations:` line.
+  Diagnostic `remediation` now carries a concrete action at every emit site
+  where one exists (including parser failures, which previously fell back to a
+  generic hint), and machine-readable reports no longer contain the circular
+  "See the stderr diagnostic" pointer — see the
+  [diagnostics contract](/docs/contracts/diagnostics.md) (#1021).
+
+- The [GitHub Pages target](/docs/contracts/publication-platforms.md)
+  workflow installs Zig **0.17.0** in both the build job and the optional
+  deployment-observer job, matching `minimum_zig_version` and the `ci.yml`
+  pins. The `0.16.0` pins left over from before the 0.17 toolchain migration
+  (#1026) failed every push-to-`main` run at `zig build`, leaving the live
+  Pages site undeployed since 2026-10-07 (#1033).
+
+- Gated the shipped search UI's `h1` section-score bias on an actual term
+  match in all three themes (`boris`, `lab`, `corporate` under
+  [themes/](/themes/)) and the `boris init` starter layout
+  (`src/init_templates/layouts/main.html`, since retired by #1063): a non-empty query that
+  matches no term now reports "No results." instead of returning every document
+  with an `h1` ([#1037](https://github.com/drawmeanelephant/boris/issues/1037)).
+  Consumer rules: [rendered-search](/docs/contracts/rendered-search.md).
+
+- `boris build`, `boris watch`, and `boris init` no longer hang at the end of
+  compile on Windows: the [publication-claims](/docs/contracts/publication-claims.md)
+  evidence chain now reads each committed report once and replays the collected
+  bytes to the parser from memory, removing the rewind-and-reread pass that
+  never completed on asynchronous no-follow file handles under Zig 0.17
+  ([#1032](https://github.com/drawmeanelephant/boris/issues/1032)). The
+  transient buffer is bounded at 64 MiB per report; a larger committed report
+  is rejected as malformed rather than allocated.
+
+- Target-declaration failures (`TargetOutputSymlink`, `TargetOutputCollision`, `WorkspaceEscape`, and siblings) raised before per-target compilation begins now emit the same locus diagnostic the per-target wrapper reports — `sourcePath` names the offending output and remediation is targeted — instead of a generic `sourcePath: null` entry with "check the command line". `watch --watch-json` stays exclusively NDJSON through a failing initial build: one `build-failed` record, exit 2, no trailing prose. A wrong-typed container inside `targets[].head` (`"defaults": []`, `"pages": {}`, `"values": []`, `"image": []`) names the field in the object that holds it instead of fabricating a nested path segment. See [the watch-mode contract](/docs/contracts/watch-mode.md) and [the publication-profile contract](/docs/contracts/publication-profile.md) (Fixes #1035, #1036, #1038).
+
+- Malformed publication profiles now name the offending key or field and its object path — including paths inside `targets[].head` — for example `unknown key "bogus" in targets[0].head.pages[0].values`, `duplicate key "format"`, or `missing required field "id" in targets[0].head.pages[0]`, instead of printing a bare error enumeration. Duplicate keys are compared after JSON escape decoding, so `"name"` and `"na\u006de"` collide. Semantic rejections with no JSON-shape fault still report the bare error name. See [the publication-profile contract](/docs/contracts/publication-profile.md) (Fixes #1038).
+
+- `build`/`validate --sitemap` with a `--site-url` that disagrees with the declared Pages publication location now emits an `EPUBLICATIONLOCATION` diagnostic naming both URLs instead of failing silently with a generic `EIO` report entry, and `watch` no longer labels the failure an unrecoverable I/O error. See [the diagnostics contract](/docs/contracts/diagnostics.md) (Fixes #1035).
+
+- Static-directory, sitemap-path, RSS feed-path, and target-output usage failures (`StaticSymlink`, `StaticDirMissing`, `SitemapOutputCollision`, `RssOutputCollision`, `TargetOutputSymlink`, and siblings) now keep their specific error and report `EUSAGE` diagnostics naming the offending path, instead of collapsing into `LayoutSelectionFailed` with `ELAYOUT` diagnostics and the layout path. RSS feed collisions report their own `InvalidRssPath`/`RssOutputCollision` names and blame `rss.path`, not a sitemap the target may not declare. See [the diagnostics contract](/docs/contracts/diagnostics.md) (Fixes #1036).
+
+- Publication-profile parsing no longer reports an allocation failure during
+  the initial JSON parse as malformed input — the run now exits 3 (the
+  system-error class) instead of the exit-2 usage class — and the `head`
+  declaration grammar rejects the wrong-type values `std.json` used to
+  coerce: numeric and numeric-string enum values (`type: 0`, `type: "0"`) and
+  byte-array strings (`title: [116,105,116]`) now fail with a diagnostic that
+  names the field, per the
+  [head metadata contract](/docs/contracts/head-metadata.md).
+- Allocation failures deeper in the profile parse keep their OutOfMemory
+  identity and memory safety: Standard.site location normalization no longer
+  degrades OOM to `InvalidLocation`/`InvalidPublication`, the `input` /
+  `html_output` string overrides no longer free the replaced value before its
+  successor exists (a double free on allocation failure), and partially built
+  `standard-site` publication configs and `layout_rules` entries release their
+  intermediate strings instead of leaking them.
+
+- Focus writing mode's Typography and Writing aids panels now close when
+  keyboard focus leaves them — Tab past the last control or Shift+Tab before
+  the summary dismisses the open panel and lets focus keep moving to the next
+  control, instead of leaving the panel hanging over the writing surface.
+  Links: [the editor guide](/editor/README.md#focus-writing-mode),
+  [#1076](https://github.com/drawmeanelephant/boris/issues/1076).
+
+- Editor: `--section-nav-h` now tracks the section nav's live height — a
+  `ResizeObserver` on the band plus a re-measure before a mode-gated jump —
+  so a pane landed after an Author → Review density switch parks below the
+  nav instead of too tight under the stale margin (#1078). Links:
+  [SectionNav.svelte](/editor/ui/src/components/SectionNav.svelte),
+  [section-nav.spec.ts](/editor/ui/tests/section-nav.spec.ts).
+
+- Editor: Graph and Publication group labels no longer skip a heading level —
+  the `.group-label` role renders as `h3` under a pane title and `h4` under a
+  sub-pane title, so screen-reader heading navigation reads `h2 → h3 → h4`
+  with no gap. Links: [editor reading hierarchy](/editor/README.md),
+  [issue #1077](https://github.com/drawmeanelephant/boris/issues/1077).
+
+- The editor preview can no longer stick on `running`: a Boris process that
+  exits `0` without producing `dist/index.html` now lands the preview on
+  `failed` with a message naming the missing output, and the shell re-reads
+  `/api/preview/state` after any refused or failed rebuild response so the
+  Rebuild preview action stays usable. Links:
+  [the editor host contract](/docs/contracts/editor-host.md),
+  [#1073](https://github.com/drawmeanelephant/boris/issues/1073).
+
+- [Rendered search](/docs/contracts/rendered-search.md) no longer fabricates a
+  slug `fragment` for a heading without an `id` (the empty fragment links the
+  page), so layout `<h1>{{title}}</h1>` headings stop failing the
+  `rendered-search` publication check with `SEARCH_CONTENT_MISMATCH`. It also
+  reaches the `<title>` fallback on doctype-led pages, lets a search-excluded
+  layout heading marked `data-boris-search-title` supply the document title,
+  and keeps compiler-emitted `{{relations}}`/`{{backlinks}}` and the HTML 4.01
+  Strict nav, breadcrumb, TOC, and children wrappers out of the index
+  (#1045, #1047, #1048).
+
+- Themes visual pass, product batch (#1049): `boris`, `showcase`,
+  `archive`, `lab`, `html4-strict`, `corporate`, `minimal`, and `gallery`
+  now style every authored construct (all five Aside kinds with measured
+  kind colours, Details, aligned tables, nested and definition lists,
+  footnotes, code, blockquotes, figures, h1–h4, children). Fixes include
+  table column alignment overridden by `text-align` in `boris`, `showcase`,
+  `lab`, and `gallery`, Aside
+  titles that `corporate` and `minimal` never matched (`admonition__title`),
+  images and code overflowing at 390px in `showcase` and `archive`, `lab`
+  printing near-white headings from its dark and pride modes, `archive`
+  showing an empty "More entries" panel, and the `archive` index taking the
+  theme name as its search title (its layout `<h1>` now carries
+  `data-boris-search-title`). The `corporate` CV print is unchanged. See
+  [the theme catalog](/themes/README.md) and
+  [the rendered-search contract](/docs/contracts/rendered-search.md).
+
+- Catalog themes no longer carry demo-site copy into `boris init --type`
+  starters, which copy each theme byte for byte (#1045, #1046). A fresh
+  `archive` site no longer shows "Personal index · 2018—2024" and a fixed
+  lede over its own title, and the `dashboard` board no longer says "Theme
+  study". Fake site names, an owner bio, a `©` line, and theme pitches are
+  gone from [`cozy`](/themes/cozy/README.md),
+  [`press`](/themes/press/README.md), [`showcase`](/themes/showcase/README.md),
+  [`reference`](/themes/reference/README.md),
+  [`journal`](/themes/journal/README.md), and six other themes. Each theme
+  shows its own name or a neutral label instead, within the closed slot
+  vocabulary ([templating and themes](/docs/contracts/templating-and-themes.md)).
+  Theme READMEs now link repository-only targets by absolute GitHub URL,
+  so the copies inside a starter no longer have dead `../../examples/` links.
+
+- `zig build test` no longer flakes under machine load: the Nostr publication
+  matrix and auth-IPC tests stopped asserting on wall-clock timing. Plans that
+  expect a non-timeout outcome now carry a deadline scheduler starvation cannot
+  beat, stall scenarios drive a test-only clock instead of racing `sleep`, and
+  promptness checks compare cross-thread event ordering rather than elapsed
+  milliseconds. Product deadlines are unchanged. Links:
+  [nostr publication contract](/docs/contracts/nostr-publication.md),
+  [issue](https://github.com/drawmeanelephant/boris/issues/1075).
+
+- `boris init` now claims its target with an exclusive-create `.boris-init.lock` marker before the emptiness check, so two concurrent `init` runs on the same directory can no longer both materialize — or have one's failure cleanup delete the other's half-written tree. See [the CLI contract](/docs/contracts/cli.md) (Fixes #1099).
+
+- Editor host now compiles and runs its full test suite on Windows (Zig 0.17.0
+  std shims for file permissions and wait4 status), and the Preview pane's
+  rebuild honors a project's `boris.json` publication profile instead of
+  assuming the default theme, so profiled projects preview correctly.
+  Links: [editor host contract](/docs/contracts/editor-host.md).
+
+- A page file whose name violates the identity rules no longer bricks the build with a bare `InvalidPath`: discovery carries the offending walk path to the diagnostic boundary, so the build fails with a located `EINVALIDPATH` (e.g. `content/my page.md: not a valid page path`) and a rename remediation naming the actual file. Links: [the identity-and-paths contract](/docs/contracts/identity-and-paths.md), [#851](https://github.com/drawmeanelephant/boris/issues/851).
+
+- Frontmatter's closing `---` must be a complete (newline-terminated) line, matching the opening-fence rule and the contract wording: a file whose last line is `---` with no trailing newline now fails closed with `EFRONTMATTER` ("unclosed frontmatter") instead of being silently accepted with an empty body — ending the asymmetry where `---<EOF>` closed but `---\r<EOF>` did not. Links: [the frontmatter contract](/docs/contracts/frontmatter.md), [#852](https://github.com/drawmeanelephant/boris/issues/852).
+
+- Entity ids may no longer end with a page extension (`.md`, `.mdx`, `.textile`, `.cook`): such an id could byte-equal another page's `sourcePath`, conflating the incremental cache keys and silently missing rebuilds. `id:`/`parent:` frontmatter values, wiki-link targets, and every other id surface now reject the shape fail-loud with a located `EINVALIDPATH` (frontmatter) or `EREFERENCESYNTAX` (wiki link). Links: [the identity-and-paths contract](/docs/contracts/identity-and-paths.md), [#854](https://github.com/drawmeanelephant/boris/issues/854).
+
+- A footnote definition no longer disappears when an `<Aside>`/`<Details>` component sits between it and its reference: before rendering, definitions that a component split from their referencing segment are relocated (moved, never duplicated) to the first segment that references them, so the published page renders the `footnote-ref` link and the footnotes section instead of literal `[^1]` prose and silently dropped definitions. Unreferenced definitions stay where the author put them; scanning is fence- and inline-code-aware. Links: [the Oliver renderer contract](/docs/contracts/oliver-renderer.md), [#860](https://github.com/drawmeanelephant/boris/issues/860).
+
+- Theme and content-local asset walks reject a file whose name contains a literal backslash with a located `EASSET` diagnostic naming the actual file (e.g. `theme/assets/css/weird\name.css`), instead of normalizing the name into a nested path and failing later with a bare `FileNotFound` for a file that visibly exists. POSIX-only edge; the normal-name control keeps building. Links: [the templating-and-themes contract](/docs/contracts/templating-and-themes.md), [#870](https://github.com/drawmeanelephant/boris/issues/870).
+
+- Single-cause conflicting-options rejections now name both tokens as typed per the #764 rule: `boris plan --profile p.json --timings` reports `plan conflicts with --timings`, `validate`/`check`/`impact --profile` name the mode (`validate conflicts with --profile`), and flag×flag pairs name both flags (`--watch conflicts with --profile`) instead of the generic `conflicting options (try --help)`. Multi-cause argv keeps the generic form; exit code 2 is unchanged. Links: [the CLI contract](/docs/contracts/cli.md), [#874](https://github.com/drawmeanelephant/boris/issues/874).
+
+- `llms.txt` descriptions no longer describe decoration: a CommonMark thematic break (`---`, `***`, `___`, space-separated forms) after the heading is skipped instead of becoming the page's exported description, and a break closes an already-started paragraph. Links: [the llms.txt contract](/docs/contracts/llms-txt.md), [#879](https://github.com/drawmeanelephant/boris/issues/879).
+- The focused rendered-search gate (`zig build --build-file tools/search-index/build.zig test`) no longer prints a `failed command` block on green runs: `parse` is now side-effect-free (the usage text is printed by the CLI runner, not the parser), so the `--help` unit test no longer writes to stderr, which the Zig 0.16 build runner reports as a step failure even when every test passes. CLI behavior is unchanged. Links: [the rendered-search contract](/docs/contracts/rendered-search.md), [#882](https://github.com/drawmeanelephant/boris/issues/882).
+- Wiki-link targets accept UTF-8 entity ids: `[[guides/café]]` now scans and rewrites like any other reference instead of failing with `EREFERENCESYNTAX`, while `identity.validateEntityId` still rejects malformed UTF-8, whitespace, and URL-significant bytes fail-loud. The wiki heading-fragments fixture gains a UTF-8 entity-id case and the release gate asserts its rendered href. Links: [the includes-and-wiki-links contract](/docs/contracts/includes-and-wiki-links.md), [the identity-and-paths contract](/docs/contracts/identity-and-paths.md), [#883](https://github.com/drawmeanelephant/boris/issues/883).
+
+- The publication Proof Pack schema now accepts its own builds: `publication-proof-pack-1.schema.json` adds `static-file` to the artifact-kind enum, so a `--static-dir` target's `_boris/proof/proof-pack.json` no longer fails the published schema it is bound to (the schema already required the `static-file` key in `summary.artifacts.by_kind`). A runtime-vs-schema parity test now pins the Proof Pack vocabularies to the emitter, mirroring the artifacts, checks, claims, and touches evidence modules. Links: [the Proof Pack contract](/docs/contracts/publication-proof-pack.md), [#884](https://github.com/drawmeanelephant/boris/issues/884).
+
+- `boris plan` output now validates against its own published schema when the profile configures a Nostr surface: `publication-plan-1.schema.json` gains the closed conditional `nostr` object (emitted after `editions`, exactly the shape the renderer emits), and the [publication plan](/docs/contracts/publication-plan.md) and [publication profile](/docs/contracts/publication-profile.md) contracts document the ninth root field, its emitted position, and the offline-boundary transport-declaration exception, ending the three-way disagreement with [nostr-publication.md](/docs/contracts/nostr-publication.md) (#885). A new golden fixture (`fixtures/publication-plan/nostr/`) pins the emitted bytes and a schema-conformance test covers the nostr-bearing plan.
+
+- The [publication checks contract](/docs/contracts/publication-checks.md) now states the rendered-search evidence truthfully: the declared supporting scope (and its `supporting_sha256` digest, and the Touch Atlas `artifact-supports-check` edges) covers every committed `html-page` record — the selector vocabulary has no advertised dimension — while the search-document inspection set excludes unadvertised `status: draft` pages per #752. Contract prose only; emitted evidence was already self-consistent (#886).
+
+- Refreshed the [publication-touches](/docs/audits/publication-touches/README.md) and [publication-proof-pack](/docs/audits/publication-proof-pack/README.md) audit examples and READMEs to shipped behavior: the "not yet shipped" status lines are replaced with the shipped story, all three proof-pack examples gain the schema-required `static-file: 0` counter, and the supporting-scope edges, `supporting_artifact_ids` rows, relationship counts, and README tables now model the shipped selector semantics (every committed artifact supports `rendered-html`; committed `html-page` records support `rendered-search`). All six examples validate against their published schemas and the HTML↔JSON parity check passes (#887).
+
+- Standard.site profile `name`/`description` now honor the contract's 5000/30000-byte bounds instead of the shared 1024-byte site bound, so contract-legal publication records are configurable; the plan schema's `maxLength` pins moved with them and the JSON transport ceiling was raised above the largest semantic string (#895). Links: [the Standard.site contract](/docs/contracts/standard-site.md).
+- The Standard.site exclusion reason vocabulary is pinned to the rendered hyphenated wire form `missing-date` in the contract and in a byte-level plan-render test, ending the `missing_date`/`missing-date` spelling disagreement (#896). Links: [the Standard.site contract](/docs/contracts/standard-site.md).
+- Standard.site `include`/`exclude` filters now reject mid-glob patterns (`guides/*/x`, `a**`) at profile parse with `InvalidPublication` instead of silently giving them exact-match semantics; the closed filter grammar (exact entity id or trailing-`*` prefix) is documented in the contract (#899). Links: [the Standard.site contract](/docs/contracts/standard-site.md).
+- The profile parser's Standard.site branch now has parser-level tests: valid-shape normalization, invalid `did`, invalid `pds` origin (path/query/userinfo/port/plain-HTTP), name/description bounds, mid-glob filter rejection, and the unknown-target fallback — plus a fix for the invalid-`pds` error path that leaked the dup'd origin string (#900).
+
+- Wasm and host embeds now report a missing or broken layout the way the native compiler does: the HTML phase maps the failure into a structured `ELAYOUT`-class diagnostic, and a content-class HTML fault completes the compile with status 1 plus diagnostics instead of the opaque "unexpected compile error" ABI code `-4`. A closed fault set keeps embed misuse and system failures on the ABI-error path, and the fix also removes a double-deinit on the embed error path that could corrupt memory after cleanup (#909). Links: [the embedding contract](/docs/contracts/embedding.md).
+- The container-runner contract no longer claims `theme/`, `layouts/`, or a publication profile in the job archive are visible to the compiler: in `boris-job-1` only `content/` reaches the build (the fixed argv names no theme/layout/profile flag), content-local `content/themes/...` trees are the way to ship managed theme assets, and the default layout resolves against the runner process cwd as the official image already documents (#910). Links: [the container-runner contract](/docs/contracts/cloudflare-container-runner.md).
+
+- `boris-job-runner` accepts standard ustar archives containing directory members: trailing-slash names (`content/`) are validated as the directory path instead of rejected as `archive` ([container-runner contract](/docs/contracts/cloudflare-container-runner.md), #908).
+
+- Fence-aware scanners honor CommonMark-indented (`≤3`-space) fenced code blocks: wiki-links (#858), include directives (#859), and content-local images (#869) inside indented fences — including unterminated fences — stay literal instead of failing the build or corrupting published code samples. The image scanner additionally leaves top-level 4-space indented code blocks literal while still validating list-nested images ([includes-and-wiki-links](/docs/contracts/includes-and-wiki-links.md), [content-local-assets](/docs/contracts/content-local-assets.md)).
+
+- Full rebuilds no longer delete declared `--static-dir` `.html` passthrough files: the stale-output walker now skips currently-declared static paths (stale entries are still scrubbed), so declared embeds survive and `artifact-integrity` passes ([html-output](/docs/contracts/html-output.md), #866).
+
+- `boris watch` survives transient filesystem hiccups: a root scan failure keeps the previous snapshot and emits no events instead of firing a mass-delete rebuild storm that kills the watcher (#876).
+- `boris watch --timings` now records phase/counter data for initial and rebuild compiles, so the shutdown report carries real measurements instead of an all-zero artifact ([watch-mode](/docs/contracts/watch-mode.md), #877).
+
+- CLI usage diagnostics name the offending option instead of misattributing it: duplicate `--layout-rule` selectors blame `--layout-rule` (#867), bad `--site-url` values blame `--site-url` (#880), `--site-url` without `--rss`/`--sitemap` and `--out` with `nostr plan` name their conflict pairs (#905). Session-family flags (`--did`, `--prune`, `--dist`, …) are now rejected outside `standard-site` instead of silently ignored (#872). The `--help` conflict list documents the new pairs ([cli](/docs/contracts/cli.md)).
+
+- Documentation links rewrite inside compact (blank-line-free) `<Aside>`/`<Details>` bodies instead of failing the link audit: component tags no longer open the raw-HTML-block skip (#861). A stray unmatched backtick no longer suppresses link rewriting for the rest of the page (#862).
+- Published-path collisions emit a located `EASSET` diagnostic naming the shared output path and the colliding page/entity instead of a bare `AssetCollision` ([content-local-assets](/docs/contracts/content-local-assets.md), #868).
+
+- Standard.site omitted-status pages are now pinned as eligible in the contract (mirroring RSS), and the unreachable `unsupported` exclusion reason is removed from the contract, code, and wire vocabulary, ending the plan-vs-contract drift (#892). Links: [the Standard.site contract](/docs/contracts/standard-site.md).
+
+- `boris nostr plan` now fails closed (`ENOSTRMARKDOWN`, `relative-url`) on an ordinary authored relative link or image destination in the publication-safe Markdown view, not only on the four Boris-mediated classes; every link and image destination must be scheme- or origin-qualified. Links: [Nostr publication contract](/docs/contracts/nostr-publication.md), [#893](https://github.com/drawmeanelephant/boris/issues/893).
+
+- A disabled `nostr` profile section no longer requires `pubkey`, `articles`, or `relays`: those are requirements of an *enabled* section per the contract, so a staged-but-disabled surface may be `{"enabled": false}` alone. Supplied values are still validated and fail closed. Links: [Nostr publication contract](/docs/contracts/nostr-publication.md), [#894](https://github.com/drawmeanelephant/boris/issues/894).
+
+- The `pr-issue-close` lint now models GitHub's reference rules exactly, closing
+  two ways a PR body could look correctly linked while landing nothing. `Refs #N`
+  / `Related to #N` is accepted as a declared keep-open intent — the check
+  reports the issue to the reviewer and GitHub never auto-closes it, so a parent
+  or umbrella issue can be named without being force-closed by a merge — while a
+  bare `#N` mention still fails for declaring neither intent. And a declaration
+  written inside backticks or a fenced block now fails as INERT instead of being
+  stripped away as if it were not there: GitHub does not linkify those regions,
+  so an inert `Closes #N` closes nothing while reading exactly like a working
+  one. This is the failure that orphaned issue #834 on 2026-09-11. The grammar
+  self-test grew from 29 to 50 cases. Links:
+  [the lint](/scripts/check-pr-issue-close.sh),
+  [the PR template](/.github/PULL_REQUEST_TEMPLATE.md).
+
+- The section nav's scrollspy no longer hands `aria-current` to the wrong pane
+  when the panes are laid out in columns that disagree with nav order. Currency
+  went to the last qualifying section in nav order, so a jump to Graph settled
+  on Preview — a pane parked off the top of the rail and clipped — and the
+  reading line sat a nav height *below* where a jump actually parks a pane,
+  which let a neighbouring pane score as nearer the line at some widths. It now
+  takes the qualifying section nearest the line, measured at that pane's own
+  scroll-margin-top, and the pane a jump just landed on wins a tie against one
+  sharing its offset in another column. The e2e suite pins the resulting
+  contract across the desktop three-column, narrow two-column, and mobile
+  single-column layouts, so a pane that reintroduces the order-versus-layout
+  divergence fails loudly instead of silently mislabelling the active pane.
+  Links:
+  [the component](/editor/ui/src/components/SectionNav.svelte),
+  [the spec](/editor/ui/tests/section-nav.spec.ts).
+
+- Corrected nine stale `blob/afterparty/...` links to `blob/main/...` across author-facing surfaces — the [publishing](/content/guides/publishing.md), [Nostr publication](/content/guides/nostr-publication.md), [Cooklang](/content/guides/cooklang.md), and [overview](/content/guides/overview.md) guides, the [homepage](/content/index.md), the [commands reference](/content/reference/commands.md), and the `boris init` starter text — so a reader who follows a contract link lands on current normative text instead of a frozen staging branch that predates those contracts' own current state. The [STATUS pointer table](/docs/STATUS.md) now cites open roadmap issues (#454, #840, #907) instead of four closed ones.
+
+- Editor dialogs keep shortcut chips visible without gluing them into accessible names (`CancelEsc`), completion suggestions name value and detail separately, Create/Rename failures stay inside the dialog as human sentences, Graph is reachable with no file open, conflict compare panes reset to the top, `/api/version` emits schema versions as `[1]` instead of a raw `0x01` byte, and a successful create/rename/delete still updates the Project file list when the follow-up `GET /api/files` fails. Links: [the editor-host contract](/docs/contracts/editor-host.md), [the editor guide](/content/guides/editor.md).
+
+- Editor graph map opens at a readable zoom (50% floor) centered on the active
+  page while Fit still shows the whole graph; typing coalesces into one undo
+  step per phrase; a cold launch restores the last author-owned file from the
+  disposable state root (or `content/index.md`); and an existing `dist/` tree
+  is framed as stale instead of an empty idle preview. Links: [the editor-host
+  contract](/docs/contracts/editor-host.md), [the editor
+  guide](/content/guides/editor.md).
+
+- Review corrections to the Author surface above. The Author app title step is
+  its own link in the type chain (`--text-2xl-compact`) rather than the
+  pane-title size, which had made `h1` exactly as large as the pane titles it
+  outranks. The theme control drops `aria-pressed`: a pressed state presumes a
+  name that does not change with it, and here the changing label *is* the
+  state. The Author Source textarea keeps no focus ring of its own now that the
+  shell owns one, so the page shows a single edge instead of a frame within a
+  frame. The connection readout's live region is text-only, matching every other
+  status region in the editor, with the disclosure chip as a sibling rather than
+  a button nested inside an atomic region.
+
+
+- `boris --help` no longer prints a stray backslash on the `recipe-scale` mode
+  line — a doubled multiline marker that shipped because nothing read the help
+  text, which is now a named constant with a test over its shape — and the
+  interactive CLI reference documents the three shipped commands it was missing
+  (`graph`, `proof verify`, and `init`) instead of describing a
+  six-command surface. Links: [the command
+  reference](/content/reference/commands.md), [the CLI
+  contract](/docs/contracts/cli.md).
+
+- The required CI aggregate now depends on the `changes` path-filter job and
+  fails when it fails, so a broken change-detection step can no longer wave the
+  skipped conditional lanes through as green; PR body edits (`edited`) rerun
+  the workflow so the issue-close lint revalidates the current body; and the
+  optional GitHub Pages audit summary reports the actual `deploy-pages` step
+  outcome instead of an unconditional success line after a failed deployment
+  ([the CI workflow](/.github/workflows/ci.yml), [the Pages
+  workflow](/.github/workflows/github-pages.yml)).
+
+- Editor: Create and Rename dialogs no longer fail silently on an empty
+  path — the submit action is natively disabled while the trimmed path is
+  empty, so the muted state is visible and the browser refuses implicit Enter
+  submission while the only submitter is disabled.
+  Links: [the editor README](/editor/README.md).
+
+- Editor: the Graph nav link is honestly disabled while no file is open
+  (#944) — `aria-disabled="true"` with a tooltip, and activation reports the
+  reason ("Graph is available once a file is open.") through the
+  editing-status live region instead of doing nothing. The link stays
+  focusable, re-enables when a file opens, and the scrollspy never marks the
+  absent section current. Refs #942, #941.
+
+- Editor: section nav clicks preserve the launch fragment (#943) — the URL
+  is rewritten as `#token=…&section=<id>` so a reload after a nav jump stays
+  authenticated; the consumed `open=` launch path is deliberately dropped so
+  it cannot re-open the file on every reload.
+
+- The managed watch daemon no longer lets trailing spool events resurrect a
+  parked daemon: an explicit stop now parks the state `idle` for good, even
+  when the dying compiler's final bytes carry a `build-started` (or other
+  build boundary) event that races the teardown. Late events are still
+  recorded in the event log as factual history (seq, cycle, ring buffer)
+  but no longer flip the lifecycle state; the next explicit start clears
+  the parked flag and events apply normally again.
+
+### Docs
+
+- Documented the [rendered-search](/docs/contracts/rendered-search.md)
+  `data-boris-search-title` marker: a marked heading overrides the document
+  title (last one wins), falling back to first `h1`, `<title>`, then the
+  canonical path — previously shipped behavior known only from the source
+  (#881), now pinned by a contract fixture and unit tests.
+
+- The [code-health pass](https://github.com/drawmeanelephant/boris/milestone/2) closed: all eleven audit cards and the black-box binary round completed, findings filed as GitHub issues for remediation, and the one-pass reports archived from `/docs/audits/code-health/` to [the archived audits](/docs/archived/audits/README.md) per the #693 pattern.
+
+- Added a [tools registry](/docs/tools-registry.md): one table mapping every `tools/` member (docs-maintenance, github-pages-audit, scale-smoke, search-index, source-rag, testdata-generator) to its build wiring (root vs own `build.zig`), coupling class (product CLI / in-process product-module import / product-binary black-box / fully standalone), CI lane, audience, and reason for existing — plus a split-vs-keep reading of the seams. Linked from the [documentation map](/docs/SOURCE-MAP.md) beside the `src/` source map. Implements [#836](https://github.com/drawmeanelephant/boris/issues/836).
+
+- Code-health audit report for the export surfaces (IR, RAG, context bundle, llms.txt, RSS, sitemap, rendered search): determinism verified byte-identical across all surfaces, #778/#750 falsified as recurrences, five low-severity findings filed ([report](/docs/archived/audits/code-health/exports/REPORT.md)).
+
+- Code-health black-box binary round 2 (#808): kit cold-start (neutral prompt, verified `cbc9fa9fe3fc` kit) + 8-group CLI matrix on the archive-layout-audit fixture; two low-severity findings filed (#904, #905), prior-round regressions verified fixed ([report](/docs/archived/audits/code-health/black-box-round-2/REPORT.md)).
+
+- Corrected stale contract wording and help text from the audit sweep: [ir-schema](/docs/contracts/ir-schema.md) output-publication file count and internal edge-kind inventory (#855, #856), [oliver-renderer](/docs/contracts/oliver-renderer.md) Oliver-API scope (#864), [cli](/docs/contracts/cli.md) `--profile`/`--out` rejection on `validate`/`check`/`impact` plus `--help` conflict list (#873), [publication-artifacts](/docs/contracts/publication-artifacts.md) `static` semantics for `static.dir` passthrough (#889), [nostr-publication](/docs/contracts/nostr-publication.md) secret-key hex case (#897), [publication-platforms](/docs/contracts/publication-platforms.md) registry validation mechanism (#898), [standard-site](/docs/contracts/standard-site.md) proof-tree ownership marker (#902), [cloudflare-container-runner](/docs/contracts/cloudflare-container-runner.md) `BORIS_BIN`/`BORIS_WORK_ROOT` environment table (#911); plus two zero-behavior one-liners: removed a duplicated `static-file` kind-table entry (#888) and asserted the `ExitCode.session` (9) contract value (#901).
+
+- Recorded the answer to [#584](https://github.com/drawmeanelephant/boris/issues/584): Nostr NIP-23 stays off the verified-target seam as a decision, not deferred work. A relay list is not a location provider, relays hold no committed artifact inventory, and a `complete` publish verdict is not a Proof Pack claim — so no registry membership, no Nostr Proof Pack claim, and no required live-smoke gate. Reopening requires a product reason that accepts a new location invariant for a destination with no `base_url`. The [first-tester fixture](/docs/contracts/fixtures/nostr-live-smoke/README.md) stays the opt-in Nostr-shaped evidence. Links: [the platform model](/docs/contracts/publication-platforms.md), [the Nostr contract](/docs/contracts/nostr-publication.md).
+
+- Added a [Surge.sh static-host recipe](/docs/surge.md): the shell path from `dist/` to a Surge domain, with the declared-versus-deployment-owned `CNAME` distinction (a Surge-written `dist/CNAME` survives a rebuild untouched; `--static-dir static` makes it an inventoried artifact), the `_boris/proof/` upload boundary a bare `surge ./dist` does not enforce, preview/revision/rollback commands, and a scoped-token CI example. Surge stays a commodity host with no `publication.target` name; [the platform model](/docs/contracts/publication-platforms.md) is unchanged (#848).
 
 ## [0.8.2] — 2026-09-02
 
