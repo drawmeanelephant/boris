@@ -8,33 +8,33 @@
   <link rel="stylesheet" href="{{asset-url assets/field-notes.css}}">
   {{head}}
 </head>
-<body data-layout="home">
-  <a class="skip-link" href="#main-content">Skip to content</a>
-  <header class="site-header site-header--home" role="banner">
-    <div class="site-header__inner">
-      <p class="brand" aria-label="Field Notes">
-        <span class="brand__mark" aria-hidden="true">PF</span>
-        <span class="brand__text">Field Notes</span>
-      </p>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="book-cover">
+    <div class="book-cover__inner">
+      <p class="book-brand">Field Notes<span class="book-brand__sub">log book</span></p>
       {{breadcrumb}}
     </div>
   </header>
-  <main id="main-content" class="home-frame" tabindex="-1" data-boris-search-root>
-    <div class="home-intro">
-      <p class="home-kicker" data-boris-search-exclude>Overview</p>
-      <div class="note-meta" data-boris-search-exclude><p class="note-status note-status--{{page-status}}">{{page-status}}</p>{{parent}}{{tags}}</div>
-    </div>
-    <div class="home-body">
-      <article class="prose prose--home">
-        {{content}}
-        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
-      </article>
-      <aside class="home-map" aria-label="Site map" data-boris-search-exclude>
-        <p class="rail__eyebrow">The map</p>
+  <div class="book-frame">
+    <main id="content" class="leaf cover-leaf" tabindex="-1" data-boris-search-root>
+      <header class="entry-head">
+        <p class="entry-kicker" data-boris-search-exclude>The logbook</p>
+        <p class="entry-stamp" data-state="{{page-status}}" data-boris-search-exclude>{{page-status}}</p>
+        <div class="entry-fields" data-boris-search-exclude>{{metadata}}</div>
+      </header>
+      <article class="prose">{{content}}</article>
+      <section class="leg-entries cover-legs" aria-labelledby="leg-heading" data-boris-search-exclude>
+        <h2 class="leg-heading" id="leg-heading">Legs of the route <small>open one</small></h2>
+        {{children}}
+      </section>
+      <details class="book-index" data-boris-search-exclude>
+        <summary>The whole logbook</summary>
         {{nav}}
-      </aside>
-    </div>
-  </main>
-  <footer class="theme-footer" role="contentinfo">{{footer}}</footer>
+      </details>
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+    </main>
+  </div>
+  <footer class="book-back">{{footer}}</footer>
 </body>
 </html>

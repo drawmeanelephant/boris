@@ -85,6 +85,13 @@ The Cards index-card redesign was re-verified on 2026-10-10 against the
 links and assets; the gallery remains a stacked-image partial fit. Cards now
 uses a native index drawer and folded page outline instead of navigation rails.
 
+The Field Notes expedition-logbook redesign was re-verified on 2026-10-11
+against the `garden` and `archive` starters (both `main`, the layouts each
+row names) using the redesigned theme. Both built complete trees with intact
+links and assets. Field Notes now renders pages as grid-paper leaves behind
+a punched binding, with the graph in a logbook-index margin column instead
+of navigation rails.
+
 Re-verify a row after a theme changes by rebuilding the scenario tree with
 the named theme. A starter archetype is also re-verified by `zig build
 test-boris-init`.
