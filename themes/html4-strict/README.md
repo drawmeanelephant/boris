@@ -1,9 +1,29 @@
-# HTML 4.01 Strict compatibility theme
+# HTML 4.01 Strict theme — "the standard sheet"
 
 Select with `--theme themes/html4-strict --target-profile default=html4-strict`.
 The layout supplies the complete Strict DOCTYPE, head, and body; it uses only
 HTML 4.01 vocabulary. Boris checks the *assembled page*, including every slot,
 before publication. See [the profile contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/html4-strict.md).
+
+## The idea
+
+Not "what HTML 4.01 Strict can't do" — what CSS can do inside it. The design
+is **the standard sheet**: 1999 markup set like a page from a Swiss design
+manual. A ruled margin rail carries the site index and the page outline;
+hairline rules are drawn wherever the document's structure changes; one
+grotesque family (the system Helvetica stack) and one poster red
+(`#d5281b`, 5.06:1 on white) do all the pointing — links, the current page,
+list markers, the red full-stop square after each title. Every page is a
+sheet: sharp corners, hard rules, no shadows, no custom properties, literal
+values.
+
+A visitor's one sentence: **Swiss-modernist discipline — a drawn margin grid,
+one grotesque family, and a single red accent, set in markup a 1999 validator
+can certify.**
+
+The CSS stays presentation-only: no JavaScript, no remote resources, no
+generated images. The layout's vocabulary is `div`, headings, lists, and the
+Strict slot shapes the compiler emits; everything visual is the stylesheet.
 
 This compatibility theme deliberately omits the JavaScript search UI and native
 HTML5 disclosure behavior. Aside and Details remain visible, but Details are
@@ -33,13 +53,22 @@ which builds with the same flags.
 
 ## Named layouts
 
-Single shape by design. This theme is a compatibility profile, not a voice.
-Any named layout would be a second complete Strict document that must pass
-[the profile contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/html4-strict.md) on its own. It
-could not use the landmarks, `data-*` hooks, or ARIA labels that separate
-page shapes in the HTML5 themes, so a `home` or `section` here would differ
-from `main.html` only in class names. `print` is covered by the
+Single shape by design. The sheet layout is the theme's one voice: a rail
+(`{{nav}}`, then `{{toc}}`) beside a main column (`{{breadcrumb}}`, then
+`div.page` with `{{content}}` and the graph slots). Any named layout would be
+a second complete Strict document that must pass [the profile contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/html4-strict.md) on its
+own. It could not use the landmarks, `data-*` hooks, or ARIA labels that
+separate page shapes in the HTML5 themes, so a `home` or `section` here would
+differ from `main.html` only in class names. `print` is covered by the
 stylesheet's `@media print`.
+
+## Page anatomy (reading order)
+
+Skip link → rail: site navigation, this page's outline → breadcrumb →
+content → metadata colophon → related pages → linked-from pages → children.
+The rail exists so the outline (`{{toc}}`) sits beside the prose instead of
+after it; on narrow viewports the rail stacks above the text and the two rail
+lists sit side by side.
 
 ## Accessibility floor: what the profile forces
 
@@ -53,7 +82,7 @@ constrain the stylesheet, so CSS features are not contract-forced.
 | Focusable skip target | **Contract-forced** | HTML 4.01 allows `tabindex` only on `a`, `area`, `button`, `input`, `object`, `select`, and `textarea`, so the target cannot take `tabindex="-1"`. Browsers still move the sequential-focus start point to the fragment target |
 | Landmarks / ARIA labels | **Contract-forced** | Strict chrome replaces `nav`/`section`/`aside` with classed `div` and omits ARIA (contract §Authoring tradeoffs) |
 | `:focus-visible` | Was a defect (CSS only) | Added `a:focus-visible`; the legacy `a:focus` rule stays separate so old browsers that drop the unknown selector keep a focus outline |
-| `@media print` | Was a defect (CSS only) | Added: hides the skip link, navigation, and TOC; removes width caps; wraps code |
+| `@media print` | Was a defect (CSS only) | Added: hides the skip link and the rail; removes width caps; wraps code |
 | `prefers-reduced-motion` | Not a defect: the theme emits no motion | Added a guard anyway so later edits cannot add motion for users who asked for none |
 | `data-boris-search-*` hooks | **Contract-forced** | `data-*` attributes are outside the Strict vocabulary, and the theme ships no script |
 | Search-index hygiene | **Contract-forced** (documented limitation) | See [Rendered-search limitation](#rendered-search-limitation) |
@@ -73,11 +102,11 @@ Other themes wrap relations/backlinks and layout chrome in
 (`dl.page-metadata`, `ul.page-tags`, and the `div` shapes of `{{nav}}`,
 `{{breadcrumb}}`, `{{toc}}`, `{{children}}`, `{{parent}}`, `{{relations}}`,
 and `{{backlinks}}`; see the
-[rendered-search contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/rendered-search.md)). The one
-remaining leak is theme-authored: the skip link's text, "Skip to content",
-is indexed as each page's level-0 section. Checked on 2026-10-10 against
-`_boris/search/search-index.json` from the shared specimen. The layout
-cannot mark it, and moving it would break the skip-link floor.
+[rendered-search contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/rendered-search.md)), wherever the
+layout places them. The one remaining leak is theme-authored: the skip link's
+text, "Skip to content", is indexed as each page's level-0 section. Checked on
+2026-10-11 against `_boris/search/search-index.json` from the shared specimen.
+The layout cannot mark it, and moving it would break the skip-link floor.
 
 ## Intentionally absent slots
 
