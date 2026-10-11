@@ -388,7 +388,7 @@ fn permissionsSetReadOnly(permissions: Io.File.Permissions, read_only: bool) Io.
     if (builtin.os.tag == .windows) {
         var attributes = permissions.toAttributes();
         attributes.READONLY = read_only;
-        return @enumFromInt(@as(std.os.windows.DWORD, @bitCast(attributes)));
+        return @fromBackingInt(@intCast(@as(std.os.windows.DWORD, @bitCast(attributes))));
     }
     return permissions.setReadOnly(read_only);
 }
