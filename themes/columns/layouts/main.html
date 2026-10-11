@@ -3,37 +3,37 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Columns</title>
+    <title>{{title}} · The Columns</title>
     <link rel="stylesheet" href="{{asset-url assets/css/columns.css}}">
       {{head}}
   </head>
   <body>
-    <a class="skip-link" href="#main-content">Skip to content</a>
-    <header class="navbar">
-      <div class="container navbar-inner">
-        <div><p class="brand-kicker">Boxed documentation</p><p class="brand">Columns</p></div>
-        <div class="navbar-menu">{{nav}}</div>
-      </div>
-    </header>
-    <main id="main-content" tabindex="-1" class="section container" data-boris-search-root>
-      <div class="columns is-variable is-6">
-        <article class="column is-8">
-          <div class="breadcrumb">{{breadcrumb}}</div>
-          <div class="box article-box">
-            <header class="content-header"><h1 data-boris-search-exclude data-boris-search-title="layout">{{title}}</h1>{{metadata}}</header>
-            <div class="content prose">{{content}}</div>
-          </div>
-          <section class="box children-box" aria-labelledby="children-heading" data-boris-search-exclude>
-            <h2 id="children-heading" class="title is-4">In this section</h2>
+    <a class="skip-link" href="#content">Skip to the story</a>
+    <div class="sheet">
+      <header class="masthead">
+        <div class="press-line"><span>Late edition</span><div class="press-trail">{{breadcrumb}}</div><span>Filed nightly</span></div>
+        <p class="nameplate">The Columns</p>
+        <div class="desks-bar" data-boris-search-exclude>{{nav}}</div>
+      </header>
+      <div class="paper">
+        <main id="content" class="story" tabindex="-1" data-boris-search-root>
+          <header class="story-head">
+            <p class="rubric" data-boris-search-exclude>Report</p>
+            <p class="press-stamp" data-state="{{page-status}}" data-boris-search-exclude>{{page-status}}</p>
+            <div class="credit-line" data-boris-search-exclude>{{metadata}}</div>
+          </header>
+          <article class="prose">{{content}}</article>
+          <section class="jumps" data-boris-search-exclude>
+            <p class="jumps-label">More from this desk</p>
             {{children}}
           </section>
-        <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
-        </article>
-        <aside class="column is-4 sidebar" aria-label="On this page" data-boris-search-exclude>
-          <div class="menu box"><p class="menu-label">On this page</p>{{toc}}</div>
+          <div class="wire" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+        </main>
+        <aside class="rail" aria-label="Story furniture" data-boris-search-exclude>
+          <div class="rail-block"><p class="rail-label">Inside this story</p>{{toc}}</div>
         </aside>
       </div>
-    </main>
-    <footer class="footer">{{footer}}</footer>
+      <footer class="colophon">{{footer}}</footer>
+    </div>
   </body>
 </html>
