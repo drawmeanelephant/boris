@@ -5,6 +5,36 @@ them. It is the standing field manual; detailed operating procedures live in
 [`docs/AGENT-PLAYBOOK.md`](docs/AGENT-PLAYBOOK.md), and long-term build-system
 direction lives in [`docs/ARCHITECTURE-DIRECTION.md`](docs/ARCHITECTURE-DIRECTION.md).
 
+## Cold start: fresh machine
+
+Boris is one toolchain, three platforms. CI gates Linux (ubuntu-latest) and
+macOS (macos-latest) on Zig 0.17.0; Windows builds the same way but is not in
+the required CI matrix — a Windows failure is a finding, not a signal to work
+around it silently.
+
+1. Install Zig at or above the `minimum_zig_version` in `build.zig.zon`, from
+   the official download index (`https://ziglang.org/download/index.json`),
+   verifying the SHA-256 it publishes. Unix convention: unpack under
+   `~/.local/opt/`, symlink `~/.local/bin/zig`. Windows: unzip anywhere and
+   put it on `PATH`.
+2. `zig build` — the first build fetches the pinned Oliver and secp256k1
+   packages named in `build.zig.zon`. Never edit a pin to make a fetch pass;
+   a `hash mismatch` means wrong bytes, not a stale pin.
+3. `zig build test` — the baseline gate (next section).
+4. Install the CLI where you need it: `cp zig-out/bin/boris ~/.local/bin/boris`
+   on Unix; on Windows copy `zig-out/bin/boris.exe` into a `PATH` directory.
+   The specialist tools stay in `zig-out/bin/`.
+
+Known Zig 0.17.0 traps (toolchain bugs, not Boris defects):
+
+- Every network fetch fails with `ResolvConfParseFailed` when
+  `/etc/resolv.conf` lacks a trailing newline byte; curl and git still work.
+  Fix the file (one byte, needs root), or pre-seed the package cache.
+- Pre-seeding must run `zig fetch --save=<name> <tarball>` inside any scratch
+  `zig init` project: standalone `zig fetch` packs the cache tarball one
+  directory too deep, and later `zig build` runs then report `hash mismatch`
+  for packages whose content is actually correct.
+
 ## Start safely
 
 Before every substantive task:
