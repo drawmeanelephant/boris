@@ -1,6 +1,8 @@
 # Publication profile (schema v1, GitHub Pages declaration slice)
 
 **Status:** normative parser, static-plan, and bounded HTML execution contract.
+Worked `boris.json` examples live in the
+[profile cookbook](../profile-cookbook.md).
 `boris plan --profile PATH` declares the full profile. With no HTML CLI
 selectors, `build`, `watch`, and `validate --profile PATH` execute the declared
 HTML configuration through the existing compiler coordinator; validation
