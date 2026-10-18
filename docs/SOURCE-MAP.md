@@ -77,6 +77,7 @@ Completed audits were archived per
 | [`docs/changelog.d/`](changelog.d/) | Pending release fragments |
 | [`docs/archived/CHANGELOG-pre-0.8.md`](archived/CHANGELOG-pre-0.8.md) | Archived pre-0.8 history (pre-slim, not standing context) |
 | [`docs/authoring-spine.md`](authoring-spine.md) | Teaching path from `boris init` to publish + verify |
+| [`docs/profile-cookbook.md`](profile-cookbook.md) | Worked `boris.json` profiles: minimal, sitemap, RSS + head, `html4_strict` |
 | [boris-migration-lab](https://github.com/drawmeanelephant/boris-migration-lab) | Standalone migration-lab commands, guide, and Contoso fixture |
 | [`tools/search-index/README.md`](../tools/search-index/README.md) | Rendered search tool |
 | [`docs/github-pages.md`](github-pages.md) | GitHub Pages setup, location model, workflow, and evidence boundary |

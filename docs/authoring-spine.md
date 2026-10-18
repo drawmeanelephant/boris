@@ -112,6 +112,7 @@ For a hosted site, the deployment URL is publication truth: `base_url`,
 
 - Contracts: [publication profile](contracts/publication-profile.md) ·
   [publication plan](contracts/publication-plan.md) ·
+  [profile cookbook](profile-cookbook.md) ·
   [GitHub Pages](github-pages.md) ·
   [Standard.site](standard-site.md) ·
   [Surge.sh recipe](surge.md) ·
