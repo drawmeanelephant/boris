@@ -5418,7 +5418,7 @@ test "parse detail: --rss with one forbidden companion names the pair (#1113)" {
     // Two forbidden companions stay ambiguous and keep the generic form.
     var multi = ParseErrorDetail{};
     try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
-        "boris", "--rss", "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d",
+        "boris",         "--rss",             "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d",
         "--html-layout", "layouts/main.html", "--html-dir", "dist",
     }, &multi));
     try expect(multi.conflict_a == null and multi.conflict_b == null);
