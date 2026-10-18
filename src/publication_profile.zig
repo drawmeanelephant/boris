@@ -1075,6 +1075,15 @@ fn parseTarget(allocator: std.mem.Allocator, value: std.json.Value) Error!HtmlTa
             // scalar keeps the parent path and reports the field itself.
             if (v == .object) locusPushField("head");
             diagnoseJsonShape(head_metadata.Declaration, v);
+            // diagnoseJsonShape covers only static shape faults; once it
+            // finds none, an enabled declaration with no `base_url` is the
+            // first semantic rejection in head_metadata.parse, so name the
+            // conditionally required field rather than a bare InvalidHead.
+            if (locus_detail_len == 0 and v == .object) {
+                const enabled = if (v.object.get("enabled")) |e| e == .bool and e.bool else false;
+                if (enabled and v.object.get("base_url") == null)
+                    locusDetail("missing required field \"{s}\"", .{"base_url"});
+            }
             return error.InvalidHead;
         };
         locusRestore(mark);
@@ -1430,6 +1439,14 @@ test "structural rejections record the offending key and object path (#1038)" {
             .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"enabled\":\"yes\"}}]}",
             .err = error.InvalidHead,
             .detail = "wrong type for field \"enabled\" in targets[0].head",
+        },
+        // `base_url` is required only when `enabled` is true, so the shape
+        // re-walk finds nothing; the parse failure is still reported with the
+        // field name and object path rather than a bare InvalidHead (#1110).
+        .{
+            .text = "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"targets\":[{\"name\":\"a\",\"output\":\"d\",\"head\":{\"enabled\":true}}]}",
+            .err = error.InvalidHead,
+            .detail = "missing required field \"base_url\" in targets[0].head",
         },
         // Wrong-type container values stay on the parent object path: the
         // field is named in the message, not duplicated as a path segment.

@@ -41,7 +41,9 @@ for field "defaults" in targets[0].head`, never a fabricated
 `targets[0].head.defaults` path for a non-object value. Semantic rejections
 that have no JSON shape fault to blame (an invalid `base_url`, duplicate head
 page ids, an empty target name after validation) still report only the error
-enumeration.
+enumeration — except an enabled `head` declaration with no `base_url`, which
+reports the conditionally required field, e.g. `missing required field
+"base_url" in targets[0].head`.
 
 | Bound | Value |
 |---|---:|
@@ -108,7 +110,10 @@ schema-3 negotiation are defined by [head-metadata.md](head-metadata.md).
 `layout_rules` entries contain exactly `selector` and `layout` and use the
 existing closed selector grammar and canonical ordering. A target's `sitemap`,
 `rss`, `llms`, and `static` objects respectively allow only `path`,
-`path`/`limit`, `path`, and `dir`. `static.dir` (#804) is a project-relative
+`path`/`limit`, `path`, and `dir`. `rss` parses as an ordinary optional field
+but executes only under the single-target enabled-`head` rider in
+[head-metadata.md](head-metadata.md); the HTML coordinator refuses it
+otherwise. `static.dir` (#804) is a project-relative
 input directory whose contents copy byte-identically into the target root; it
 may not nest with the target output or the content root in either direction.
 Project editions require `output`; RAG also accepts `scope`,
