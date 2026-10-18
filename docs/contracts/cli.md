@@ -203,6 +203,9 @@ catalog themes that fit each one.
   non-draft page head carries the feed's autodiscovery link through the
   [single-target RSS rider](head-metadata.md#bounded-rss-rider-and-execution-boundary).
   A `status: draft` issue renders but stays out of the feed and sitemap.
+  Its emitted `boris.json` is the canonical `site.url` + `head` + `rss` +
+  `sitemap` composition; the [profile cookbook](../profile-cookbook.md)
+  annotates it and the neighboring declarations.
 - `portfolio` — a studio site under `showcase`: trunk `index`, an `about`
   satellite, and three `projects/` satellites with `published_at` +
   `summary` (one `relates_to` edge). Its profile's `layout_rules` send
@@ -586,8 +589,11 @@ heading-harvest and incremental-cache fast paths.
 `--rss` and `--rss-path PATH` select the deterministic RSS-only projection.
 It requires `--site-url`, `--rss-title`, and `--rss-description`; `--rss-limit`
 is 1–500 (default 20). RSS is incompatible with every other build projection,
-`validate`, `check`, and `impact`. See the normative
-[RSS 2.0 contract](rss-2.0.md).
+`validate`, `check`, and `impact`. The feed uses no HTML layout, so the HTML
+layout/theme/target selectors are conflicts as well; a single offending
+companion is named as the pair (e.g. `--rss conflicts with --html-layout`),
+while several offenders keep the generic `conflicting options` form. See the
+normative [RSS 2.0 contract](rss-2.0.md).
 
 ## Nostr NIP-23 publication
 
