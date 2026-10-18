@@ -979,6 +979,12 @@ fn htmlSelectorToken(st: *const ParseState) ?[]const u8 {
     return null;
 }
 
+/// User-typed RSS selector for conflict naming (#1113): `--rss` wins when
+/// both spellings appear; `--rss-path` alone also selects the mode.
+fn rssSelectorToken(st: *const ParseState) []const u8 {
+    return if (st.saw_rss) "--rss" else "--rss-path";
+}
+
 fn applyModeBoolFlag(st: *ParseState, entry: ModeBoolFlag) ParseError!void {
     const saw: *bool = switch (entry) {
         .textile => &st.saw_textile,
@@ -2408,7 +2414,33 @@ fn validateProjectionConflicts(st: *ParseState) ParseError!void {
     if (st.saw_complete and st.saw_scope) return error.ConflictingFlags;
     if (st.saw_complete and (st.saw_split_size or st.saw_bundles_only)) return error.ConflictingFlags;
     if (wants_llms and (wants_rag or wants_ir or wants_context or wants_rss or explicit_html)) return error.ConflictingFlags;
-    if (wants_rss and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
+    if (wants_rss) {
+        // One unambiguous forbidden companion names the pair as typed
+        // (#764, #1113); several keep the generic form. --theme mirrors into
+        // saw_html_layout, so that leaf is suppressed when --theme was the
+        // typed spelling.
+        const rss_scan = scanConflicts(&.{
+            .{ .token = "--rag", .triggered = st.saw_rag },
+            .{ .token = "--rag-dir", .triggered = st.saw_rag_dir },
+            .{ .token = "--context", .triggered = st.saw_context },
+            .{ .token = "--context-dir", .triggered = st.saw_context_dir },
+            .{ .token = "--out", .triggered = st.saw_out },
+            .{ .token = "--no-rag", .triggered = st.saw_no_rag },
+            .{ .token = "--html", .triggered = st.saw_html },
+            .{ .token = "--html-dir", .triggered = st.saw_html_dir },
+            .{ .token = "--theme", .triggered = st.saw_theme },
+            .{ .token = "--html-layout", .triggered = st.saw_html_layout and !st.saw_theme },
+            .{ .token = "--target", .triggered = st.hasExplicitTargets() },
+            .{ .token = "--target-layout", .triggered = st.hasTargetLayouts() },
+            .{ .token = "--target-profile", .triggered = st.hasTargetProfiles() },
+            .{ .token = "--layout-rule", .triggered = st.hasLayoutRules() },
+            .{ .token = "--sitemap", .triggered = st.saw_sitemap },
+            .{ .token = "--sitemap-path", .triggered = st.saw_sitemap_path },
+            .{ .token = "--static-dir", .triggered = st.saw_static_dir },
+        });
+        if (rss_scan.triggered == 1) return failConflict(st, rssSelectorToken(st), rss_scan.offender);
+        if (rss_scan.triggered > 1) return error.ConflictingFlags;
+    }
     if (saw_pages_location and (wants_rag or wants_ir or wants_context)) return error.ConflictingFlags;
     if ((st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
     if (st.saw_site_url and !(wants_rss or wants_sitemap)) return failConflict(st, "--site-url", "--rss/--sitemap");
@@ -2816,7 +2848,8 @@ pub const usage_text =
     \\  --bundles-only      Accepted for RAG compatibility; working packs are bundle-style by design
     \\  --llms              Deterministic llms.txt export → llms.txt
     \\  --llms-path PATH    llms.txt export path (implies --llms)
-    \\  --rss               Deterministic RSS 2.0 export → rss.xml
+    \\  --rss               Deterministic RSS 2.0 export → rss.xml (uses no HTML
+    \\                      layout, so layout/theme/target selectors conflict)
     \\  --rss-path PATH     RSS output path (implies --rss)
     \\  --sitemap           Add deterministic sitemap.xml to the HTML target
     \\  --sitemap-path PATH Target-root-relative sitemap path (implies --sitemap)
@@ -5363,6 +5396,33 @@ test "parse detail: single-cause mode conflicts name the pair (#874)" {
         "boris", "validate", "--profile", "p.json", "--llms",
     }, &multi_mode));
     try expect(multi_mode.conflict_a == null and multi_mode.conflict_b == null);
+}
+
+test "parse detail: --rss with one forbidden companion names the pair (#1113)" {
+    // The archetype-site repro: --rss plus a single HTML selector names both
+    // tokens as typed instead of the generic conflicting-options line.
+    const cases = [_]struct { argv: []const []const u8, a: []const u8, b: []const u8 }{
+        .{ .argv = &.{ "boris", "--rss", "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d", "--html-layout", "themes/showcase/layouts/main.html" }, .a = "--rss", .b = "--html-layout" },
+        .{ .argv = &.{ "boris", "--rss-path", "feed.xml", "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d", "--theme", "themes/showcase" }, .a = "--rss-path", .b = "--theme" },
+        .{ .argv = &.{ "boris", "--rss", "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d", "--html-dir", "dist" }, .a = "--rss", .b = "--html-dir" },
+        .{ .argv = &.{ "boris", "--rss", "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d", "--sitemap" }, .a = "--rss", .b = "--sitemap" },
+        .{ .argv = &.{ "boris", "--rss", "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d", "--rag" }, .a = "--rss", .b = "--rag" },
+        .{ .argv = &.{ "boris", "--rss", "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d", "--out", "ir" }, .a = "--rss", .b = "--out" },
+    };
+    for (cases) |c| {
+        var d = ParseErrorDetail{};
+        try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, c.argv, &d));
+        try expectEqualStrings(c.a, d.conflict_a.?);
+        try expectEqualStrings(c.b, d.conflict_b.?);
+    }
+
+    // Two forbidden companions stay ambiguous and keep the generic form.
+    var multi = ParseErrorDetail{};
+    try expectError(error.ConflictingFlags, parseOptionsWithDetail(std.testing.allocator, &.{
+        "boris",         "--rss",             "--site-url", "https://example.test/", "--rss-title", "t", "--rss-description", "d",
+        "--html-layout", "layouts/main.html", "--html-dir", "dist",
+    }, &multi));
+    try expect(multi.conflict_a == null and multi.conflict_b == null);
 }
 
 test "parse detail: channel stays empty on success and parseOptions is unchanged" {
