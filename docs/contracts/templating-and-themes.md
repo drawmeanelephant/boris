@@ -252,7 +252,11 @@ For each `(target, page)` pair:
 Rule declaration order never affects selection. Canonical rule order for
 diagnostics and plan digests is `(selector rank, selector bytes, layout path)`.
 A winning layout that is missing or invalid fails without silent fallback to
-the next rule.
+the next rule. When the missing file is the defaulted product fallback
+`themes/boris/layouts/main.html`, the failure remediation names
+`--html-layout PATH` as the escape hatch (archetype trees ship another theme
+and never selected a layout); an explicitly selected fallback keeps the
+generic layout remediation.
 
 ### 4.3 One theme root per target
 

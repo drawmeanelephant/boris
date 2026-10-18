@@ -589,8 +589,11 @@ heading-harvest and incremental-cache fast paths.
 `--rss` and `--rss-path PATH` select the deterministic RSS-only projection.
 It requires `--site-url`, `--rss-title`, and `--rss-description`; `--rss-limit`
 is 1–500 (default 20). RSS is incompatible with every other build projection,
-`validate`, `check`, and `impact`. See the normative
-[RSS 2.0 contract](rss-2.0.md).
+`validate`, `check`, and `impact`. The feed uses no HTML layout, so the HTML
+layout/theme/target selectors are conflicts as well; a single offending
+companion is named as the pair (e.g. `--rss conflicts with --html-layout`),
+while several offenders keep the generic `conflicting options` form. See the
+normative [RSS 2.0 contract](rss-2.0.md).
 
 ## Nostr NIP-23 publication
 
