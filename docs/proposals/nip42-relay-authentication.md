@@ -17,7 +17,7 @@ document is wrong.
 
 Some configured relays demand NIP-42 client authentication before accepting an
 `EVENT`. The v1 publish slice reports that demand honestly as `auth-required`
-(unsupported) and moves on — the Refs #493 decision, which stands. Issue #1002
+(unsupported) and moves on — the #493 decision, which stands. Issue #1002
 asks for an opt-in phase-2 capability under fixed constraints:
 
 - Authentication is explicit and opt-in; nothing changes for profiles that do
