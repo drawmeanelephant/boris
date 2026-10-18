@@ -883,7 +883,7 @@ test "NIP-42 process context and seed failures destroy custody before begin" {
         defer tmp.cleanup();
         var base = try MockRelay.init(testing.io, .ok);
         defer base.deinit();
-        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 200);
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 2000);
         defer artifacts.deinit(gpa);
         var child = try spawnFaultProcess(&tmp, scenario, artifacts, .pipe);
         defer child.kill(testing.io);
@@ -910,7 +910,7 @@ test "NIP-42 process invalid or wrong-identity key is a content refusal before b
         defer tmp.cleanup();
         var base = try MockRelay.init(testing.io, .ok);
         defer base.deinit();
-        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 200);
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 2000);
         defer artifacts.deinit(gpa);
         var child = try spawnFaultProcess(&tmp, "key_input", artifacts, .pipe);
         defer child.kill(testing.io);
@@ -942,7 +942,7 @@ test "NIP-42 process hostile requests and controls terminate without relay write
         defer tmp.cleanup();
         var base = try MockRelay.init(testing.io, .ok);
         defer base.deinit();
-        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 200);
+        var artifacts = try makeAuthArtifacts(gpa, &.{base.port}, &.{base.port}, 2000);
         defer artifacts.deinit(gpa);
         var child = try spawnFaultProcess(&tmp, scenario, artifacts, .pipe);
         defer child.kill(testing.io);
