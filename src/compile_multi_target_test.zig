@@ -878,3 +878,72 @@ test "multi-target publication derives claims per target" {
         parsed_b.value.object.get("publication_checks").?.object.get("sha256").?.string,
     ));
 }
+
+test "#1113: missing default fallback layout names the --html-layout escape hatch" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-1113-layout", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Hi\n");
+
+    const cwd_abs = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_abs);
+    const work_abs = try std.fs.path.resolve(gpa, &.{ cwd_abs, work });
+    defer gpa.free(work_abs);
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work_abs});
+    defer gpa.free(content_path);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work_abs});
+    defer gpa.free(dist);
+
+    const suppressed = diag.text_suppressed.load(.unordered);
+    diag.text_suppressed.store(true, .unordered);
+    defer diag.text_suppressed.store(suppressed, .unordered);
+
+    // Archetype site: the defaulted product path is absent, so the diagnostic
+    // points at --html-layout instead of "fix the template".
+    {
+        const targets = [_]target_mod.TargetSpec{
+            .{ .name = "default", .output_dir = dist },
+        };
+        var collector = diag.Collector.init(gpa, io);
+        defer collector.deinit();
+        const res = compileHtmlSiteMulti(io, gpa, &targets, .{
+            .workspace_root = work_abs,
+            .content_root = content_path,
+            .layout_path = compile.default_layout_path,
+            .diagnostics = &collector,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.MultiTargetIoFailed, res);
+        try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+        const d = collector.list.items[0];
+        try std.testing.expectEqual(diag.Code.ELAYOUT, d.code);
+        try std.testing.expect(std.mem.indexOf(u8, d.remediation, "--html-layout") != null);
+        try std.testing.expectEqualStrings(compile.default_layout_path, d.source_path);
+    }
+
+    // An explicitly selected missing fallback keeps the generic remediation —
+    // the author already named a layout, so the escape hatch does not apply.
+    {
+        const targets = [_]target_mod.TargetSpec{
+            .{ .name = "default", .output_dir = dist },
+        };
+        var collector = diag.Collector.init(gpa, io);
+        defer collector.deinit();
+        const res = compileHtmlSiteMulti(io, gpa, &targets, .{
+            .workspace_root = work_abs,
+            .content_root = content_path,
+            .layout_path = "layouts/missing.html",
+            .diagnostics = &collector,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.MultiTargetIoFailed, res);
+        try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+        const d = collector.list.items[0];
+        try std.testing.expect(std.mem.indexOf(u8, d.remediation, "--html-layout") == null);
+    }
+}
