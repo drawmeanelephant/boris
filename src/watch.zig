@@ -922,6 +922,37 @@ pub const WatchCoordinator = struct {
         self.emitLine(line);
     }
 
+    /// One-line failure summary for the `--serve` status endpoint and stale
+    /// banner (#1114): the first error diagnostic in prose form (matching
+    /// the suppressed/printed stderr line), or the bare error name when no
+    /// diagnostic was collected. gpa-owned; null on allocation failure.
+    fn failureSummary(self: *WatchCoordinator, collector: ?*diag.Collector, err: ?anyerror) ?[]u8 {
+        if (collector) |c| {
+            diag.sortDiagnostics(c.list.items);
+            for (c.list.items) |d| {
+                if (d.isError()) return diag.formatText(d, self.gpa) catch null;
+            }
+            if (c.list.items.len > 0) return diag.formatText(c.list.items[0], self.gpa) catch null;
+        }
+        if (err) |e| return std.fmt.allocPrint(self.gpa, "{s}", .{@errorName(e)}) catch null;
+        return null;
+    }
+
+    /// Push a completed cycle's outcome to the `--serve` preview server so
+    /// `GET /__boris/status`, the SSE `stale` event, and the injected banner
+    /// reflect it (#1114).
+    fn notifyServe(self: *WatchCoordinator, outcome: BuildOutcome, collector: ?*diag.Collector) void {
+        if (self.serve) |*s| {
+            if (outcome.ok) {
+                s.notifyRebuild(outcome.duration_ms);
+            } else {
+                const summary = self.failureSummary(collector, outcome.err);
+                defer if (summary) |sm| self.gpa.free(sm);
+                s.notifyBuildFailed(summary orelse "", outcome.duration_ms);
+            }
+        }
+    }
+
     fn emitBuildFailed(self: *WatchCoordinator, phase: []const u8, targets: []const []const u8, changed: ?[]const []const u8, outcome: BuildOutcome, collector: ?*diag.Collector) void {
         var diagnostics: []diag.Diagnostic = &.{};
         if (collector) |c| {
@@ -1059,12 +1090,13 @@ pub const WatchCoordinator = struct {
         // Under `--watch-json` the prose diagnostic form is suppressed for the
         // duration of the compile; the same data flows into the collector and
         // then into the build-failed NDJSON event. Validate mode also collects
-        // when `--report` is set so the report file is rewritten every cycle.
+        // when `--report` is set so the report file is rewritten every cycle,
+        // and `--serve` collects so `/__boris/status` can name the failure.
         const prior_text_suppressed = diag.text_suppressed.load(.unordered);
         if (json) diag.text_suppressed.store(true, .unordered);
         defer if (json) diag.text_suppressed.store(prior_text_suppressed, .unordered);
 
-        const need_collector = json or (self.action == .validate and self.options.report_path != null);
+        const need_collector = json or self.serve != null or (self.action == .validate and self.options.report_path != null);
         var collector: ?diag.Collector = null;
         if (need_collector) collector = diag.Collector.init(self.gpa, self.io);
         defer if (collector) |*c| c.deinit();
@@ -1078,6 +1110,7 @@ pub const WatchCoordinator = struct {
             if (self.action == .validate and !isRecoverableFailure(err)) {
                 appendValidateEscapedDiagnostic(collector_ptr, err);
             }
+            self.notifyServe(outcome, collector_ptr);
             if (json) {
                 const targets = try targetNamesOf(self.gpa, subset orelse self.options.targets.items);
                 defer self.gpa.free(targets);
@@ -1103,7 +1136,7 @@ pub const WatchCoordinator = struct {
             self.printChecksVerdict();
         }
         if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, true);
-        if (self.serve) |*s| s.notifyRebuild();
+        self.notifyServe(outcome, collector_ptr);
     }
 
     /// Perform initial build, set up signal handlers, and execute the watch poll loop.
@@ -1121,12 +1154,13 @@ pub const WatchCoordinator = struct {
         // Under `--watch-json` the prose diagnostic form is suppressed for the
         // duration of the compile; the same data flows into the collector and
         // then into the build-failed NDJSON event. Validate mode also collects
-        // when `--report` is set so the report file is rewritten every cycle.
+        // when `--report` is set so the report file is rewritten every cycle,
+        // and `--serve` collects so `/__boris/status` can name the failure.
         const prior_text_suppressed = diag.text_suppressed.load(.unordered);
         if (json) diag.text_suppressed.store(true, .unordered);
         defer if (json) diag.text_suppressed.store(prior_text_suppressed, .unordered);
 
-        const need_collector = json or (self.action == .validate and self.options.report_path != null);
+        const need_collector = json or self.serve != null or (self.action == .validate and self.options.report_path != null);
         var collector: ?diag.Collector = null;
         if (need_collector) collector = diag.Collector.init(self.gpa, self.io);
         defer if (collector) |*c| c.deinit();
@@ -1181,6 +1215,10 @@ pub const WatchCoordinator = struct {
             if (self.action == .validate) self.maybeWriteValidateReport(collector_ptr, false);
         }
 
+        // Record the initial build's outcome for `/__boris/status` and the
+        // stale banner before the server starts accepting (#1114).
+        self.notifyServe(outcome, collector_ptr);
+
         if (json) self.emitWatcherStarted(targets);
 
         // Register POSIX signal handlers
@@ -1205,7 +1243,7 @@ pub const WatchCoordinator = struct {
             if (json) {
                 self.emitServeStarted(port);
             } else if (!self.options.quiet) {
-                std.debug.print("preview: http://127.0.0.1:{d}/  (auto-reload helper: http://127.0.0.1:{d}/__boris/)\n", .{ port, port });
+                std.debug.print("preview: http://127.0.0.1:{d}/  (auto-reload helper: http://127.0.0.1:{d}/__boris/, status: http://127.0.0.1:{d}/__boris/status)\n", .{ port, port, port });
             }
         }
 
