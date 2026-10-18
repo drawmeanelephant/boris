@@ -254,6 +254,10 @@ pub const CompileStats = struct {
     last_reset_capacity: usize = 0,
 };
 
+/// Product default layout: the shipped `boris` theme's main template.
+/// Archetype trees that ship another theme do not carry this path (#1113).
+pub const default_layout_path = "themes/boris/layouts/main.html";
+
 pub const CompileOptions = struct {
     /// Profile-relative layout/theme reads and output containment use this
     /// workspace without changing the process CWD.
@@ -262,7 +266,7 @@ pub const CompileOptions = struct {
     content_root: []const u8 = "content",
     dist_dir: []const u8 = "dist",
     /// Fallback layout path (global / --target-layout / product default).
-    layout_path: []const u8 = "themes/boris/layouts/main.html",
+    layout_path: []const u8 = default_layout_path,
     /// Target-owned layout rules (`--layout-rule`). Empty → one layout for all pages.
     layout_rules: []const layout_select.LayoutRule = &.{},
     quiet: bool = true,
@@ -501,7 +505,7 @@ pub fn compileHtmlToSink(
             .severity = .error_,
             .code = layoutCodeFor(err),
             .message = msg,
-            .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+            .remediation = layoutLoadRemediation(options.layout_path, err),
             .source_path = options.layout_path,
         });
         return err;
@@ -1211,7 +1215,7 @@ pub fn compileHtmlSite(
             .severity = .error_,
             .code = layoutCodeFor(err),
             .message = msg,
-            .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+            .remediation = layoutLoadRemediation(options.layout_path, err),
             .source_path = options.layout_path,
         });
         return err;
@@ -1784,14 +1788,20 @@ fn loadLayoutsForPlan(
         const gop = try layout_cache.getOrPut(gpa, lp);
         if (gop.found_existing) continue;
         const layout = loadLayoutOnce(io, cwd, lp, layout_arena) catch |err| {
-            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s} [{s}]\n", .{ plan.name, lp, @errorName(err), diag.Code.remediationForLayout(layoutCodeFor(err)) });
+            // The --html-layout escape hatch applies only when the missing
+            // path is the target fallback, not a rule-declared layout (#1113).
+            const remediation = if (std.mem.eql(u8, lp, plan.layout_path))
+                layoutLoadRemediation(lp, err)
+            else
+                diag.Code.remediationForLayout(layoutCodeFor(err));
+            if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: target '{s}' failed to load layout {s}: {s} [{s}]\n", .{ plan.name, lp, @errorName(err), remediation });
             const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
             defer gpa.free(msg);
             appendHtmlDiagnostic(base_options, .{
                 .severity = .error_,
                 .code = layoutCodeFor(err),
                 .message = msg,
-                .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+                .remediation = remediation,
                 .source_path = lp,
             });
             any_failed.* = true;
@@ -2312,6 +2322,19 @@ fn targetFailureLocus(
             .source_path = p.layout_path,
         },
     };
+}
+
+/// Remediation for a failed *fallback* layout load. A FileNotFound on the
+/// product default means the site ships another theme and never selected a
+/// layout (archetype trees carry no themes/boris), so name the --html-layout
+/// escape hatch (#1113); every other failure keeps the code-table text.
+/// Callers pass rule-declared paths only when they are also the target
+/// fallback — a missing rule layout is not fixed by --html-layout.
+fn layoutLoadRemediation(path: []const u8, err: anyerror) []const u8 {
+    if (err == error.FileNotFound and std.mem.eql(u8, path, default_layout_path)) {
+        return "The default layout path assumes the shipped themes/boris theme; pass --html-layout PATH to select an existing template";
+    }
+    return diag.Code.remediationForLayout(layoutCodeFor(err));
 }
 
 /// Stable diagnostic code for layout/theme load failures.
