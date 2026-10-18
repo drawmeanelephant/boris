@@ -203,6 +203,9 @@ catalog themes that fit each one.
   non-draft page head carries the feed's autodiscovery link through the
   [single-target RSS rider](head-metadata.md#bounded-rss-rider-and-execution-boundary).
   A `status: draft` issue renders but stays out of the feed and sitemap.
+  Its emitted `boris.json` is the canonical `site.url` + `head` + `rss` +
+  `sitemap` composition; the [profile cookbook](../profile-cookbook.md)
+  annotates it and the neighboring declarations.
 - `portfolio` — a studio site under `showcase`: trunk `index`, an `about`
   satellite, and three `projects/` satellites with `published_at` +
   `summary` (one `relates_to` edge). Its profile's `layout_rules` send
