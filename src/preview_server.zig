@@ -5,18 +5,23 @@
 //! thread, because SSE clients hold the connection open and handling inline
 //! would stall the accept loop. The watch loop drives reloads through a
 //! generation counter: `notifyRebuild` bumps it after every successful
-//! rebuild and broadcasts, and every connected `/__boris/events` client
-//! wakes, compares generations, and emits an SSE `reload` event when it
-//! changed.
+//! rebuild and `notifyBuildFailed` bumps it after every failed one, then
+//! broadcasts; every connected `/__boris/events` client wakes, compares
+//! generations, and emits an SSE `reload` or `stale` event when it changed.
 //!
 //! Routes:
 //!   `/`               static files under the served root (`index.html` default)
 //!   `/__boris/`       helper page (site iframe + EventSource), generated on the fly
-//!   `/__boris/events` SSE stream
+//!   `/__boris/events` SSE stream (`reload` after a successful rebuild,
+//!                     `stale` after a failed one)
+//!   `/__boris/status` build-state JSON (`{state, stale_reason, last_error,
+//!                     last_build_ms}`) for external tooling (#1114)
 //!
-//! Artifacts on disk are never modified: the helper page and SSE stream are
-//! server-generated responses only, and static responses are served with
-//! `cache-control: no-store` so the reloaded page always reads fresh bytes.
+//! Artifacts on disk are never modified: the helper page, SSE stream, status
+//! response, and the stale banner injected into served HTML while the last
+//! build is failed are server-generated responses only, and static responses
+//! are served with `cache-control: no-store` so the reloaded page always reads
+//! fresh bytes.
 //! Targets are served only when they are safe relative paths — no `..`,
 //! backslashes, percent escapes, or non-ASCII bytes.
 
@@ -41,9 +46,20 @@ pub const Server = struct {
     root_dir: ?Io.Dir = null,
     listener: Io.net.Server,
     bound_port: u16,
-    /// Bumped under `mutex` after each successful rebuild; SSE clients
-    /// compare against their last-seen value.
+    /// Bumped under `mutex` after each completed rebuild (success or
+    /// failure); SSE clients compare against their last-seen value.
     generation: u64 = 0,
+    /// Last completed build cycle's outcome, guarded by `mutex`. When
+    /// `build_failed` is set, `/__boris/status` reports `state:"failed"`,
+    /// SSE clients get `stale` events, and served HTML carries the stale
+    /// banner (#1114).
+    build_failed: bool = false,
+    /// Owned one-line summary of the last failure (the first error
+    /// diagnostic in prose form, or the error name). `null` when the last
+    /// build succeeded or no diagnostic was collected.
+    last_error: ?[]u8 = null,
+    /// Wall time of the last completed build cycle; `null` before the first.
+    last_build_ms: ?u64 = null,
     shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     mutex: Io.Mutex = .init,
     cond: Io.Condition = .init,
@@ -88,10 +104,36 @@ pub const Server = struct {
         self.accept_thread = try std.Thread.spawn(.{}, acceptLoop, .{self});
     }
 
-    /// Signal a successful rebuild: bump the generation and wake SSE clients.
-    pub fn notifyRebuild(self: *Server) void {
+    /// Signal a successful rebuild: clear the stale flag, record the cycle's
+    /// wall time, bump the generation, and wake SSE clients.
+    pub fn notifyRebuild(self: *Server, duration_ms: u64) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
+        self.build_failed = false;
+        self.last_build_ms = duration_ms;
+        if (self.last_error) |old| {
+            self.gpa.free(old);
+            self.last_error = null;
+        }
+        self.generation +%= 1;
+        self.cond.broadcast(self.io);
+    }
+
+    /// Signal a failed rebuild (#1114): mark the served tree stale, record a
+    /// one-line diagnostic summary and the cycle's wall time, bump the
+    /// generation, and wake SSE clients (they emit `stale`, not `reload`).
+    /// `summary` may be empty when no structured diagnostic was collected.
+    pub fn notifyBuildFailed(self: *Server, summary: []const u8, duration_ms: u64) void {
+        const owned: ?[]u8 = if (summary.len > 0)
+            self.gpa.dupe(u8, summary) catch null
+        else
+            null;
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        self.build_failed = true;
+        self.last_build_ms = duration_ms;
+        if (self.last_error) |old| self.gpa.free(old);
+        self.last_error = owned;
         self.generation +%= 1;
         self.cond.broadcast(self.io);
     }
@@ -169,6 +211,7 @@ pub const Server = struct {
         // socket must not be closed again here.
         self.stop();
         if (self.root_dir) |d| d.close(self.io);
+        if (self.last_error) |e| self.gpa.free(e);
         self.gpa.free(self.root_path);
         self.* = undefined;
     }
@@ -242,6 +285,10 @@ fn handleConnection(self: *Server, stream: Io.net.Stream) void {
         handleSse(self, &request);
         return;
     }
+    if (std.mem.eql(u8, target, "/__boris/status")) {
+        handleStatus(self, &request);
+        return;
+    }
     if (std.mem.eql(u8, target, "/__boris") or std.mem.eql(u8, target, "/__boris/")) {
         request.respond(helper_page, .{
             .status = .ok,
@@ -254,6 +301,149 @@ fn handleConnection(self: *Server, stream: Io.net.Stream) void {
 }
 
 const plain_headers = [_]http.Header{.{ .name = "content-type", .value = "text/plain; charset=utf-8" }};
+
+/// `GET /__boris/status` (#1114): machine-readable build state for the
+/// served tree, so external tooling (and authors) can tell the preview is
+/// stale without reading watch-process stderr.
+///
+/// `{"state":"ok","stale_reason":null,"last_error":null,"last_build_ms":45}`
+/// `{"state":"failed","stale_reason":"failed_rebuild","last_error":"error: EPARENTMISSING: …","last_build_ms":12}`
+///
+/// `stale_reason` shares vocabulary with the editor host's
+/// `/api/preview/state` (docs/contracts/editor-host.md): `"failed_rebuild"`
+/// names "the last build failed and the served tree is the previous good
+/// output". `last_error` is the first error diagnostic in prose form
+/// (`error: CODE: path:line:col: message`), `null` when no diagnostic was
+/// collected or the last build succeeded. `last_build_ms` is `null` until
+/// the first cycle completes.
+fn handleStatus(self: *Server, request: *http.Server.Request) void {
+    self.mutex.lockUncancelable(self.io);
+    const failed = self.build_failed;
+    const last_ms = self.last_build_ms;
+    const err_copy: ?[]u8 = if (self.last_error) |e| self.gpa.dupe(u8, e) catch null else null;
+    self.mutex.unlock(self.io);
+    defer if (err_copy) |e| self.gpa.free(e);
+
+    const Sink = @import("structured_out.zig").Sink;
+    var sink = Sink.init(self.gpa);
+    defer sink.deinit();
+    sink.lit("{\"state\":") catch return;
+    sink.jsonString(if (failed) "failed" else "ok") catch return;
+    sink.lit(",\"stale_reason\":") catch return;
+    if (failed) sink.jsonString("failed_rebuild") catch return else sink.lit("null") catch return;
+    sink.lit(",\"last_error\":") catch return;
+    if (err_copy) |e| sink.jsonString(e) catch return else sink.lit("null") catch return;
+    sink.lit(",\"last_build_ms\":") catch return;
+    if (last_ms) |ms| sink.num(@intCast(ms)) catch return else sink.lit("null") catch return;
+    sink.lit("}") catch return;
+
+    request.respond(sink.items(), .{
+        .status = .ok,
+        .keep_alive = false,
+        .extra_headers = &.{
+            .{ .name = "content-type", .value = "application/json" },
+            .{ .name = "cache-control", .value = "no-store" },
+        },
+    }) catch {};
+}
+
+/// Append `s` to `list` with HTML special characters escaped for element
+/// content (`&`, `<`, `>`).
+fn appendHtmlEscaped(list: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '&' => try list.appendSlice(gpa, "&amp;"),
+            '<' => try list.appendSlice(gpa, "&lt;"),
+            '>' => try list.appendSlice(gpa, "&gt;"),
+            else => try list.append(gpa, c),
+        }
+    }
+}
+
+/// Render the stale-preview banner injected into served HTML while the last
+/// build is failed (#1114). Fixed-position top bar; the diagnostic summary is
+/// escaped for element content. Returns a gpa-owned slice.
+fn renderStaleBanner(gpa: std.mem.Allocator, summary: []const u8) ![]u8 {
+    var list: std.ArrayList(u8) = .empty;
+    errdefer list.deinit(gpa);
+    try list.appendSlice(gpa, "<div id=\"__boris-stale\" role=\"alert\" style=\"position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#8f1d1d;color:#fff;padding:8px 14px;font:13px/1.45 system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.5);\">Boris preview is stale: the last rebuild failed.");
+    if (summary.len > 0) {
+        try list.appendSlice(gpa, " <code style=\"font:inherit;color:#ffd7d7;\">");
+        try appendHtmlEscaped(&list, gpa, summary);
+        try list.appendSlice(gpa, "</code>");
+    }
+    try list.appendSlice(gpa, " Fix the error and save; this is the last good build.</div>");
+    return list.toOwnedSlice(gpa);
+}
+
+/// First index of `needle` in `haystack`, ASCII case-insensitive. Used to
+/// locate `<body>` in served HTML without assuming a casing convention.
+fn indexOfIgnoreCase(haystack: []const u8, needle: []const u8) ?usize {
+    if (needle.len == 0 or haystack.len < needle.len) return null;
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        if (std.ascii.eqlIgnoreCase(haystack[i..][0..needle.len], needle)) return i;
+    }
+    return null;
+}
+
+/// First index of a `<body` open tag in `html` (ASCII case-insensitive);
+/// the byte after `body` must end the tag or start an attribute so
+/// `<bodyguard`-style element names do not match.
+fn bodyTagStart(html: []const u8) ?usize {
+    var from: usize = 0;
+    while (indexOfIgnoreCase(html[from..], "<body")) |hit| {
+        const start = from + hit;
+        const next = start + "<body".len;
+        if (next >= html.len) return null;
+        switch (html[next]) {
+            '>', ' ', '\t', '\n', '\r', '/' => return start,
+            else => {
+                from = next;
+                continue;
+            },
+        }
+    }
+    return null;
+}
+
+/// Splice `banner` into `html` immediately after the `<body …>` open tag,
+/// falling back to the top of the document when no body tag exists. The
+/// banner is `position:fixed`, so either anchor renders identically.
+/// Returns a gpa-owned slice.
+fn injectBanner(gpa: std.mem.Allocator, html: []const u8, banner: []const u8) ![]u8 {
+    var at: usize = 0;
+    if (bodyTagStart(html)) |body_start| {
+        if (std.mem.indexOfScalarPos(u8, html, body_start, '>')) |close| {
+            at = close + 1;
+        }
+    }
+    var out = try gpa.alloc(u8, html.len + banner.len);
+    @memcpy(out[0..at], html[0..at]);
+    @memcpy(out[at..][0..banner.len], banner);
+    @memcpy(out[at + banner.len ..], html[at..]);
+    return out;
+}
+
+/// When the last build failed, return `bytes` with the stale banner spliced
+/// in (gpa-owned); `null` when the build state is ok or on allocation
+/// failure (serve the file unmodified — a dev preview must never 500 on
+/// banner bookkeeping).
+fn maybeInjectStaleBanner(self: *Server, bytes: []const u8) ?[]u8 {
+    self.mutex.lockUncancelable(self.io);
+    const failed = self.build_failed;
+    const err_copy: ?[]u8 = if (failed and self.last_error != null)
+        self.gpa.dupe(u8, self.last_error.?) catch null
+    else
+        null;
+    self.mutex.unlock(self.io);
+    if (!failed) return null;
+    defer if (err_copy) |e| self.gpa.free(e);
+
+    const banner = renderStaleBanner(self.gpa, err_copy orelse "") catch return null;
+    defer self.gpa.free(banner);
+    return injectBanner(self.gpa, bytes, banner) catch null;
+}
 
 fn handleStatic(self: *Server, request: *http.Server.Request, target: []const u8) void {
     var rel = stripQueryFragment(target);
@@ -298,11 +488,20 @@ fn handleStatic(self: *Server, request: *http.Server.Request, target: []const u8
     };
     defer self.gpa.free(bytes);
 
-    request.respond(bytes, .{
+    const ct = contentType(rel);
+    var body: []const u8 = bytes;
+    var bannered: ?[]u8 = null;
+    defer if (bannered) |b| self.gpa.free(b);
+    if (std.mem.eql(u8, ct, "text/html; charset=utf-8")) {
+        bannered = maybeInjectStaleBanner(self, bytes);
+        if (bannered) |b| body = b;
+    }
+
+    request.respond(body, .{
         .status = .ok,
         .keep_alive = false,
         .extra_headers = &.{
-            .{ .name = "content-type", .value = contentType(rel) },
+            .{ .name = "content-type", .value = ct },
             .{ .name = "cache-control", .value = "no-store" },
         },
     }) catch {};
@@ -331,13 +530,18 @@ fn handleSse(self: *Server, request: *http.Server.Request) void {
 
     // Send the current generation on connect so a (re)connecting client can
     // resync without a missed-rebuild gap; the helper page suppresses the
-    // first event and only reloads on a *change*.
+    // first event and only reloads on a *change*. The event name reflects
+    // the current build state: `stale` while the last build is failed,
+    // `reload` otherwise (#1114).
     //
     // `BodyWriter.flush` only flushes the underlying output; the chunked
     // `bw.writer` must be flushed first so its buffered frame actually drains
     // to the socket.
-    var last: u64 = self.generation;
-    bw.writer.print("event: reload\ndata: {d}\n\n", .{last}) catch {
+    self.mutex.lockUncancelable(self.io);
+    const last: u64 = self.generation;
+    const failed_at_connect = self.build_failed;
+    self.mutex.unlock(self.io);
+    bw.writer.print("event: {s}\ndata: {d}\n\n", .{ if (failed_at_connect) "stale" else "reload", last }) catch {
         bw.end() catch {};
         return;
     };
@@ -350,13 +554,15 @@ fn handleSse(self: *Server, request: *http.Server.Request) void {
         return;
     };
 
+    var seen: u64 = last;
     while (!self.shutdown.load(.monotonic)) {
         self.mutex.lockUncancelable(self.io);
         const gen = self.generation;
-        if (gen != last) {
+        const failed = self.build_failed;
+        if (gen != seen) {
             self.mutex.unlock(self.io);
-            last = gen;
-            bw.writer.print("event: reload\ndata: {d}\n\n", .{gen}) catch break;
+            seen = gen;
+            bw.writer.print("event: {s}\ndata: {d}\n\n", .{ if (failed) "stale" else "reload", gen }) catch break;
             bw.writer.flush() catch break;
             bw.flush() catch break;
             continue;
@@ -424,15 +630,32 @@ const helper_page =
     \\<iframe id="site" src="/" title="site preview"></iframe>
     \\<script>
     \\const es = new EventSource('/__boris/events');
+    \\const bar = document.getElementById('bar');
+    \\const barHtml = bar.innerHTML;
     \\let last = null;
-    \\es.addEventListener('reload', (e) => {
+    \\// `reload` follows a successful rebuild; `stale` follows a failed one —
+    \\// the served tree is the previous good output plus an injected banner,
+    \\// and the bar goes red until the next successful reload (#1114).
+    \\function onChange(e, stale) {
     \\  const g = Number(e.data);
-    \\  if (last === null) { last = g; return; }  // initial sync, no reload
-    \\  if (g === last) return;
+    \\  const first = last === null;
+    \\  if (!first && g === last) return;
     \\  last = g;
+    \\  if (stale) {
+    \\    bar.style.background = '#8f1d1d';
+    \\    bar.style.color = '#fff';
+    \\    bar.textContent = 'Boris preview — last rebuild failed; showing the previous build. Check the watch process output.';
+    \\  } else {
+    \\    bar.style.background = '';
+    \\    bar.style.color = '';
+    \\    bar.innerHTML = barHtml;
+    \\  }
+    \\  if (first) return;  // initial sync, no reload
     \\  const f = document.getElementById('site');
     \\  if (f && f.contentWindow) f.contentWindow.location.reload();
-    \\});
+    \\}
+    \\es.addEventListener('reload', (e) => onChange(e, false));
+    \\es.addEventListener('stale', (e) => onChange(e, true));
     \\</script>
     \\</body>
     \\</html>
@@ -457,6 +680,184 @@ test "stripQueryFragment trims ? and # suffixes" {
     try std.testing.expectEqualStrings("index.html", stripQueryFragment("index.html"));
     try std.testing.expectEqualStrings("index.html", stripQueryFragment("index.html?v=2"));
     try std.testing.expectEqualStrings("a/b.css", stripQueryFragment("a/b.css#x"));
+}
+
+test "renderStaleBanner escapes HTML in the diagnostic summary" {
+    const gpa = std.testing.allocator;
+    const banner = try renderStaleBanner(gpa, "error: EFRONTMATTER: a.md:1:1: bad <key> & \"value\"");
+    defer gpa.free(banner);
+    try std.testing.expect(std.mem.indexOf(u8, banner, "__boris-stale") != null);
+    try std.testing.expect(std.mem.indexOf(u8, banner, "bad &lt;key&gt; &amp; \"value\"") != null);
+    // No raw markup from the diagnostic leaks into the injected element.
+    try std.testing.expect(std.mem.indexOf(u8, banner, "bad <key>") == null);
+}
+
+test "injectBanner splices after <body> and falls back to prepend" {
+    const gpa = std.testing.allocator;
+
+    const with_body = try injectBanner(gpa, "<html><body class=\"x\"><p>hi</p></body></html>", "BANNER");
+    defer gpa.free(with_body);
+    try std.testing.expectEqualStrings("<html><body class=\"x\">BANNER<p>hi</p></body></html>", with_body);
+
+    // Body tag casing is not assumed.
+    const upper = try injectBanner(gpa, "<html><BODY>hi</BODY></html>", "BANNER");
+    defer gpa.free(upper);
+    try std.testing.expectEqualStrings("<html><BODY>BANNERhi</BODY></html>", upper);
+
+    // Fragments without a body still get the banner (fixed-position element).
+    const frag = try injectBanner(gpa, "<p>hi</p>", "BANNER");
+    defer gpa.free(frag);
+    try std.testing.expectEqualStrings("BANNER<p>hi</p>", frag);
+
+    // A `<body`-prefixed element name is not the body tag.
+    const not_body = try injectBanner(gpa, "<bodyguard>x</bodyguard><body>y</body>", "BANNER");
+    defer gpa.free(not_body);
+    try std.testing.expectEqualStrings("<bodyguard>x</bodyguard><body>BANNERy</body>", not_body);
+}
+
+// #1114: a failed rebuild must be visible from the preview itself — the
+// status endpoint reports `failed`, served HTML carries the stale banner,
+// and SSE clients get a `stale` event instead of `reload`.
+test "preview server reports failed build via status, banner, and stale event" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root_path = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-1114-serve", .{tmp.sub_path});
+    defer gpa.free(root_path);
+    try tmp.dir.createDirPath(io, "boris-1114-serve/assets");
+    try tmp.dir.writeFile(io, .{ .sub_path = "boris-1114-serve/index.html", .data = "<html><body><h1>hi</h1></body></html>" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "boris-1114-serve/assets/site.css", .data = "body{}" });
+
+    var server = try Server.init(gpa, io, root_path, 0);
+    defer server.deinit();
+    try server.start();
+    const port = server.boundPort();
+    var addr = try Io.net.IpAddress.parseIp4("127.0.0.1", port);
+
+    // Before any build completes: state ok, null fields.
+    {
+        var conn = try addr.connect(io, .{ .mode = .stream });
+        defer conn.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var writer = conn.writer(io, &wbuf);
+        try writer.interface.writeAll("GET /__boris/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.flush();
+        var rbuf: [8192]u8 = undefined;
+        var reader = conn.reader(io, &rbuf);
+        var got: std.ArrayList(u8) = .empty;
+        defer got.deinit(gpa);
+        try slurpToEof(&reader.interface, gpa, &got);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"state\":\"ok\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"stale_reason\":null") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"last_build_ms\":null") != null);
+    }
+
+    server.notifyRebuild(45);
+    server.notifyBuildFailed("error: EPARENTMISSING: about.md:4:1: parent \"nope\" does not exist", 12);
+
+    // Failed state: status JSON names the failure in editor vocabulary.
+    {
+        var conn = try addr.connect(io, .{ .mode = .stream });
+        defer conn.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var writer = conn.writer(io, &wbuf);
+        try writer.interface.writeAll("GET /__boris/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.flush();
+        var rbuf: [8192]u8 = undefined;
+        var reader = conn.reader(io, &rbuf);
+        var got: std.ArrayList(u8) = .empty;
+        defer got.deinit(gpa);
+        try slurpToEof(&reader.interface, gpa, &got);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"state\":\"failed\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"stale_reason\":\"failed_rebuild\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"last_error\":\"error: EPARENTMISSING: about.md:4:1: parent \\\"nope\\\" does not exist\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"last_build_ms\":12") != null);
+    }
+
+    // Served HTML carries the visible banner; non-HTML is untouched.
+    {
+        var conn = try addr.connect(io, .{ .mode = .stream });
+        defer conn.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var writer = conn.writer(io, &wbuf);
+        try writer.interface.writeAll("GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.flush();
+        var rbuf: [8192]u8 = undefined;
+        var reader = conn.reader(io, &rbuf);
+        var got: std.ArrayList(u8) = .empty;
+        defer got.deinit(gpa);
+        try slurpToEof(&reader.interface, gpa, &got);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "__boris-stale") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "parent \"nope\" does not exist") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "EPARENTMISSING") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "<body>") != null);
+    }
+    {
+        var conn = try addr.connect(io, .{ .mode = .stream });
+        defer conn.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var writer = conn.writer(io, &wbuf);
+        try writer.interface.writeAll("GET /assets/site.css HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.flush();
+        var rbuf: [8192]u8 = undefined;
+        var reader = conn.reader(io, &rbuf);
+        var got: std.ArrayList(u8) = .empty;
+        defer got.deinit(gpa);
+        try slurpToEof(&reader.interface, gpa, &got);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "__boris-stale") == null);
+    }
+
+    // SSE: a mid-stream failure emits `stale`, not `reload`.
+    {
+        var conn = try addr.connect(io, .{ .mode = .stream });
+        defer conn.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var writer = conn.writer(io, &wbuf);
+        try writer.interface.writeAll("GET /__boris/events HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        try writer.interface.flush();
+        var rbuf: [8192]u8 = undefined;
+        var reader = conn.reader(io, &rbuf);
+        // Connect-time sync event reflects the already-failed state.
+        var buf: [4096]u8 = undefined;
+        try std.testing.expect(try readUntil(&reader.interface, &buf, "event: stale"));
+
+        server.notifyRebuild(30);
+        var buf2: [4096]u8 = undefined;
+        try std.testing.expect(try readUntil(&reader.interface, &buf2, "event: reload"));
+    }
+
+    // Recovery: status clears and the banner is gone from served HTML.
+    {
+        var conn = try addr.connect(io, .{ .mode = .stream });
+        defer conn.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var writer = conn.writer(io, &wbuf);
+        try writer.interface.writeAll("GET /__boris/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.flush();
+        var rbuf: [8192]u8 = undefined;
+        var reader = conn.reader(io, &rbuf);
+        var got: std.ArrayList(u8) = .empty;
+        defer got.deinit(gpa);
+        try slurpToEof(&reader.interface, gpa, &got);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"state\":\"ok\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"last_error\":null") != null);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "\"last_build_ms\":30") != null);
+    }
+    {
+        var conn = try addr.connect(io, .{ .mode = .stream });
+        defer conn.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var writer = conn.writer(io, &wbuf);
+        try writer.interface.writeAll("GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.flush();
+        var rbuf: [8192]u8 = undefined;
+        var reader = conn.reader(io, &rbuf);
+        var got: std.ArrayList(u8) = .empty;
+        defer got.deinit(gpa);
+        try slurpToEof(&reader.interface, gpa, &got);
+        try std.testing.expect(std.mem.indexOf(u8, got.items, "__boris-stale") == null);
+    }
 }
 
 /// Read until `needle` appears (or the buffer fills), returning whether it
@@ -575,7 +976,7 @@ test "preview server serves files and pushes reload events" {
         var buf: [4096]u8 = undefined;
         try std.testing.expect(try readUntil(&reader.interface, &buf, "event: reload"));
 
-        server.notifyRebuild();
+        server.notifyRebuild(9);
 
         var buf2: [4096]u8 = undefined;
         try std.testing.expect(try readUntil(&reader.interface, &buf2, "event: reload"));
@@ -641,7 +1042,7 @@ test "preview server: repeated start/stop cycles tear down cleanly" {
             var buf: [4096]u8 = undefined;
             try std.testing.expect(try readUntil(&reader.interface, &buf, "event: reload"));
 
-            server.notifyRebuild();
+            server.notifyRebuild(9);
 
             var buf2: [4096]u8 = undefined;
             try std.testing.expect(try readUntil(&reader.interface, &buf2, "event: reload"));

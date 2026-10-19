@@ -2886,6 +2886,7 @@ pub const usage_text =
     \\                      including validate --watch); see docs/contracts/watch-mode.md §8
     \\  --serve             Serve the built tree over loopback HTTP (watch only);
     \\                      auto-reload helper: http://127.0.0.1:PORT/__boris/
+    \\                      build status:     http://127.0.0.1:PORT/__boris/status
     \\  --port N            Loopback port for --serve (default 8090; 0 = ephemeral);
     \\                      implies --serve
     \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
