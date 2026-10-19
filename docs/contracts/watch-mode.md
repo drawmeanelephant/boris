@@ -102,6 +102,7 @@ Nested output under a watched content root is supported only when exclusion matc
 - **Unrecoverable I/O**: Missing content roots and other hard I/O/system failures exit the process (same policy as a non-watch HTML build), rather than spinning forever on a dead tree.
 - **Output Preservation**: A failed rebuild must **never** destroy previously published valid HTML output. This is guaranteed by the atomic file publication mechanism.
 - **Successful Recovery**: A subsequent successful build after a correction fully recovers without process restart.
+- **Serve-state signal (#1114)**: When `--serve` is active, each completed cycle's outcome is pushed to the preview server: `GET /__boris/status` reports `state` `"ok"`/`"failed"` with `stale_reason` `"failed_rebuild"`, `last_error` (the first error diagnostic in prose form), and `last_build_ms`; the SSE stream emits `stale` instead of `reload` for failed cycles; and served HTML pages carry an injected `__boris-stale` banner until the next successful build clears it. Route details live in the [CLI contract](cli.md).
 
 ## 6. Shutdown
 
