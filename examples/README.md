@@ -40,6 +40,7 @@ for the per-theme commands.
 |---|---|
 | `archive`, `cards`, `compact`, `cozy`, `field-notes`, `gallery`, `journal`, `lab`, `ledger`, `press`, `reading`, `reference`, `showcase` | Own `examples/<theme>-site/` |
 | `semantic`, `columns`, `service`, `engineering`, `civic`, `tokens` | `studies-site` with the theme's `home.html` / `section.html` rules |
+| `blueprint` | `studies-site` with the `id:index` → `home.html` rule. The `boris init --type blueprint` tree is its teaching specimen |
 | `corporate`, `minimal` | `studies-site` with no layout rules. The `boris init --type resume` tree is corporate's print specimen |
 | `boris` | `studies-site` with no layout rules. The repository's own [`content/`](../content/) docs site is its dogfood specimen |
 | `html4-strict` | `studies-site` under `--target-profile default=html4-strict`. [`fixtures/html4-strict/content`](../fixtures/html4-strict/content/) is the minimal regression fixture |

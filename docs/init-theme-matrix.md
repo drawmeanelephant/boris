@@ -34,6 +34,7 @@ behavior are normative in
 | newsletter | `newsletter` ([#1060](https://github.com/drawmeanelephant/boris/issues/1060)) | `published_at` issues, profile `rss` / `sitemap` | `press` (home, archive, blog) | `journal`, `cozy` | — (resolved: press layouts carry `{{head}}`, so the starter's profile ships `rss` on an enabled `head`) |
 | photo-gallery | `photo-gallery` ([#1061](https://github.com/drawmeanelephant/boris/issues/1061)) | `{stem}.assets/` content-local images, `<figure>` captions | `gallery` (home) | `showcase` (partial), `cards` (partial) | Both alternates publish every image but do not style `gallery-grid`, so figures stack in one column. |
 | dashboard | `dashboard` ([#1062](https://github.com/drawmeanelephant/boris/issues/1062)) | `status:` as visible page state, dense tables, relations | `engineering` (home) | `ledger`, `corporate` (partial) | `corporate` shows status only as plain `{{metadata}}` text; it has no `{{page-status}}` hook. |
+| blueprint | `blueprint` | token-driven theming, `.theme-*` surfaces, `status:` pill, author kit classes | `blueprint` (home) | `tokens`, `cards`, `engineering` (home) | — |
 
 "(home)" means the pairing was also built with
 `--layout-rule default id:index themes/NAME/layouts/home.html`.
@@ -92,6 +93,11 @@ links and assets. Field Notes now renders pages as grid-paper leaves behind
 a punched binding, with the graph in a logbook-index margin column instead
 of navigation rails.
 
+The `blueprint` row was verified on this theme's landing branch
+(2026-10-19): the `boris init --type blueprint` tree builds under its own
+profile, and under `tokens`, `cards`, and `engineering` with the `id:index`
+home rule — all four pages each, exit 0.
+
 Re-verify a row after a theme changes by rebuilding the scenario tree with
 the named theme. A starter archetype is also re-verified by `zig build
 test-boris-init`.
@@ -111,6 +117,7 @@ Each cell lists the layouts that carry the slot; `-` means none:
 | Theme | `{{children}}` | `{{toc}}` | `{{breadcrumb}}` | `{{relations}}` | `{{backlinks}}` | `{{head}}` | `{{page-status}}` |
 |---|---|---|---|---|---|---|---|
 | `archive` | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main |
+| `blueprint` | home, main | home, main | home, main | home, main | home, main | home, main | home, main |
 | `boris` | main | main | main | main | main | main | - |
 | `cards` | home, main | home, main | home, main | home, main | home, main | home, main | home, main |
 | `corporate` | main | main | main | main | main | main | - |
