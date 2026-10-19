@@ -2564,7 +2564,7 @@ fn runHtmlProfile(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*tim
     }
     for (plan.targets) |t| {
         if (t.rss != null and (t.head == null or !t.head.?.value.enabled or plan.targets.len != 1)) {
-            errPrint("error: --profile target '{s}' declares rss; this HTML coordinator does not execute feeds\n", .{t.name});
+            errPrint("error: --profile target '{s}' declares rss; this HTML coordinator does not execute feeds; single-target RSS requires the head declaration with enabled=true (docs/contracts/head-metadata.md)\n", .{t.name});
             return .usage;
         }
         if (t.llms != null) {
