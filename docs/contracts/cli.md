@@ -246,6 +246,17 @@ catalog themes that fit each one.
   beside its page. Boris does no resizing or thumbnailing. Its profile's
   `layout_rules` send `id:index` to `themes/gallery/layouts/home.html`,
   whose `{{children}}` is the album grid.
+- `blueprint` — a small product/docs site under `blueprint`, the
+  token-driven theme that speaks the Bootstrap 6 grammar (`:root` custom
+  properties, `.theme-*` surface classes, `light-dark()` color modes; no
+  vendored code). Trunk `index` carries hero copy and a `.grid` of
+  `.card theme-*` demos; satellites `guide` (admonitions, `<Details>`, a
+  table) and `kit` (`tags`, a `relates_to` edge, `.badge`/`.chip` demos)
+  exercise the slot surface, and `roadmap` is `status: draft` so the
+  status pill renders while the page stays out of `{{children}}` and
+  `{{nav}}`. Its profile's `layout_rules` send `id:index` to
+  `themes/blueprint/layouts/home.html`, whose `{{children}}` is the card
+  deck.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

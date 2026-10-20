@@ -99,6 +99,13 @@ pub const archive_css = @embedFile("archive/assets/archive.css");
 pub const archive_readme = @embedFile("archive/README.md");
 pub const archive_accessibility = @embedFile("archive/ACCESSIBILITY.md");
 
+pub const blueprint_layout_main = @embedFile("blueprint/layouts/main.html");
+pub const blueprint_layout_home = @embedFile("blueprint/layouts/home.html");
+pub const blueprint_footer = @embedFile("blueprint/footer.html");
+pub const blueprint_css = @embedFile("blueprint/assets/css/blueprint.css");
+pub const blueprint_readme = @embedFile("blueprint/README.md");
+pub const blueprint_accessibility = @embedFile("blueprint/ACCESSIBILITY.md");
+
 pub const engineering_layout_main = @embedFile("engineering/layouts/main.html");
 pub const engineering_layout_home = @embedFile("engineering/layouts/home.html");
 pub const engineering_layout_section = @embedFile("engineering/layouts/section.html");

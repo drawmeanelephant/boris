@@ -67,6 +67,13 @@
 //!   send `id:index` to `home.html`, whose `{{children}}` is the album grid.
 //!   The images are content, so they embed straight from the
 //!   `examples/gallery-site` specimen via the `init_example_assets` module.
+//! - `blueprint` — a small product/docs site under `blueprint`, the
+//!   token-driven theme that speaks the Bootstrap 6 grammar (`:root`
+//!   tokens, `.theme-*` surfaces, `light-dark()`): the trunk index uses
+//!   `home.html` (hero + `{{children}}` card deck), satellites demo the
+//!   author kit (`.card`, `.badge`, `.theme-*`) and admonitions, and a
+//!   `status: draft` page shows the status pill; `layout_rules` send
+//!   `id:index` to `home.html`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -97,7 +104,7 @@ const Io = std.Io;
 const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard, @"photo-gallery" };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard, @"photo-gallery", blueprint };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -2001,6 +2008,191 @@ const photo_gallery_profile =
     \\
 ;
 
+// --- blueprint ---------------------------------------------------------------
+
+const blueprint_index_md =
+    \\---
+    \\title: Blueprint Starter
+    \\summary: A small site on the token-driven blueprint theme.
+    \\---
+    \\
+    \\# Blueprint Starter
+    \\
+    \\A token-driven Boris site: every visual value is a `:root` custom
+    \\property, and tinted surfaces read `--theme-*`, so one class moves a
+    \\component through the whole palette. Light and dark follow your system
+    \\via `light-dark()` — there is no toggle and no JavaScript.
+    \\
+    \\<p><a class="btn theme-primary" href="guide.html">Read the orientation</a></p>
+    \\
+    \\<div class="grid">
+    \\
+    \\<div class="card theme-info">
+    \\
+    \\**Tokens, not Sass.** The palette, spacing, and radii are plain CSS
+    \\variables. Change `--primary-*` in `themes/blueprint` and every surface
+    \\follows.
+    \\
+    \\</div>
+    \\
+    \\<div class="card theme-success">
+    \\
+    \\**Boris chrome stays Boris.** `{{nav}}`, `{{breadcrumb}}`,
+    \\`{{children}}`, and `{{metadata}}` emit their fixed classes; the theme
+    \\adapts them instead of renaming them.
+    \\
+    \\</div>
+    \\
+    \\<div class="card theme-warning">
+    \\
+    \\**Native interactivity.** The site rail is a `<details>` disclosure and
+    \\author `<Details>` blocks animate with `::details-content` — no scripts.
+    \\
+    \\</div>
+    \\
+    \\</div>
+    \\
+    \\The card deck below is the layout's `{{children}}` slot listing this
+    \\page's satellites. A fourth page, [[roadmap]], is `status: draft`: it
+    \\renders at its route and shows a status pill, but stays out of the
+    \\deck, the nav, search, and feeds until you publish it.
+    \\
+;
+
+const blueprint_guide_md =
+    \\---
+    \\title: Orientation
+    \\parent: index
+    \\summary: What the blueprint theme does with Boris's slots and tokens.
+    \\tags: [theme, shells]
+    \\---
+    \\
+    \\# Orientation
+    \\
+    \\This page sits on `main.html`: the graph lives in the left rail (an
+    \\always-open `<details>`), the page outline in the right rail, and the
+    \\breadcrumb above.
+    \\
+    \\<Aside kind="note">
+    \\
+    \\Admonitions ride the theme-token surface: this note reads
+    \\`--info-*`, and `warning` or `danger` kinds switch to their own
+    \\`--*-bg-subtle` / `--*-fg` / `--*-border` triple.
+    \\
+    \\</Aside>
+    \\
+    \\<Aside kind="warning">
+    \\
+    \\The palette leans on `light-dark()`, `oklch()`, and `color-mix()` —
+    \\Chrome/Edge 130+, Firefox 132+, Safari 18+.
+    \\
+    \\</Aside>
+    \\
+    \\<Details summary="The closed slot vocabulary" id="slots">
+    \\
+    \\The closed slot vocabulary is fixed: `{{content}}`, `{{nav}}`,
+    \\`{{breadcrumb}}`, `{{toc}}`, `{{children}}`, `{{metadata}}`, `{{tags}}`,
+    \\`{{parent}}`, `{{relations}}`, `{{backlinks}}`, `{{footer}}`,
+    \\`{{head}}`, and the `{{asset-url ...}}` helper. Blueprint styles them
+    \\all without adding a single class to what the compiler emits.
+    \\
+    \\</Details>
+    \\
+    \\| Layer | What it holds |
+    \\|---|---|
+    \\| `:root` tokens | colors, space, radius, type, focus ring |
+    \\| `.theme-*` classes | point components at a kind's token triple |
+    \\| `light-dark()` | light and dark from one declaration |
+    \\
+;
+
+const blueprint_kit_md =
+    \\---
+    \\title: The author kit
+    \\parent: index
+    \\summary: Classes you can use in raw HTML inside Markdown.
+    \\tags: [theme, components]
+    \\relations: [relates_to=guide]
+    \\---
+    \\
+    \\# The author kit
+    \\
+    \\Raw HTML inside Markdown can use the theme's classes — each one reads
+    \\`--theme-*`, so a `.theme-*` class re-skins it. This page's own
+    \\`relations:` edge renders below as a kind-chipped link.
+    \\
+    \\<p>
+    \\<span class="badge theme-primary">stable</span>
+    \\<span class="badge theme-success">shipped</span>
+    \\<span class="chip">chip</span>
+    \\</p>
+    \\
+    \\<div class="grid">
+    \\
+    \\<div class="card">
+    \\
+    \\**Plain card.** No `.theme-*` class, so it reads the neutral surface
+    \\tokens.
+    \\
+    \\</div>
+    \\
+    \\<div class="card theme-danger">
+    \\
+    \\**Tinted card.** `.theme-danger` repoints the same component at the
+    \\danger triple.
+    \\
+    \\</div>
+    \\
+    \\</div>
+    \\
+    \\The tag chips under this page's header come from `{{tags}}`; the
+    \\status pill comes from `{{page-status}}` via `data-status` on `<body>`.
+    \\
+;
+
+const blueprint_roadmap_md =
+    \\---
+    \\title: Roadmap
+    \\parent: index
+    \\status: draft
+    \\summary: Draft pages render at their route but are not advertised.
+    \\---
+    \\
+    \\# Roadmap
+    \\
+    \\This page is `status: draft`. It renders here — look at the status
+    \\pill under the breadcrumb — but Boris keeps it out of `{{children}}`
+    \\decks, `{{nav}}`, the search index, feeds, and the sitemap. To publish
+    \\it, change `status: draft` to `status: published`.
+    \\
+    \\- Ship the starter
+    \\- Retheme one `--*-` triple
+    \\- Publish the page
+    \\
+;
+
+const blueprint_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Blueprint Starter" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/blueprint",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/blueprint/layouts/home.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -2257,6 +2449,20 @@ const photo_gallery_files = [_]FileToWrite{
     .{ .path = "themes/gallery/README.md", .data = archetype_themes.gallery_readme },
     .{ .path = "themes/gallery/ACCESSIBILITY.md", .data = archetype_themes.gallery_accessibility },
     .{ .path = "boris.json", .data = photo_gallery_profile },
+};
+
+const blueprint_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = blueprint_index_md },
+    .{ .path = "content/guide.md", .data = blueprint_guide_md },
+    .{ .path = "content/kit.md", .data = blueprint_kit_md },
+    .{ .path = "content/roadmap.md", .data = blueprint_roadmap_md },
+    .{ .path = "themes/blueprint/layouts/main.html", .data = archetype_themes.blueprint_layout_main },
+    .{ .path = "themes/blueprint/layouts/home.html", .data = archetype_themes.blueprint_layout_home },
+    .{ .path = "themes/blueprint/footer.html", .data = archetype_themes.blueprint_footer },
+    .{ .path = "themes/blueprint/assets/css/blueprint.css", .data = archetype_themes.blueprint_css },
+    .{ .path = "themes/blueprint/README.md", .data = archetype_themes.blueprint_readme },
+    .{ .path = "themes/blueprint/ACCESSIBILITY.md", .data = archetype_themes.blueprint_accessibility },
+    .{ .path = "boris.json", .data = blueprint_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -2607,6 +2813,29 @@ const photo_gallery_spec = ArchetypeSpec{
     ,
 };
 
+const blueprint_spec = ArchetypeSpec{
+    .layout_path = "themes/blueprint/layouts/main.html",
+    .files = &blueprint_files,
+    .tree_report =
+    \\  content/index.md                  trunk page — hero and the {{children}} deck (home layout)
+    \\  content/guide.md                  satellite — admonitions and a <Details> block
+    \\  content/kit.md                    satellite — the author kit (.card, .badge, .theme-*)
+    \\  content/roadmap.md                satellite — status: draft renders the status pill
+    \\  themes/blueprint/                 shipped "blueprint" theme — :root tokens, .theme-* surfaces
+    \\  boris.json                        profile (theme: blueprint, layout_rules id:index → home)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json            build the site (index gets the hero + card deck)
+    \\  boris check                           graph-health report
+    \\  boris watch --profile boris.json      rebuild on change
+    ,
+    .conventions =
+    \\  the theme is token-driven: change a --*- token in themes/blueprint/assets/css/blueprint.css
+    \\  .theme-* classes re-skin .card/.badge/.admonition by repointing --theme-* variables
+    \\  status: draft renders at its route but stays out of decks, nav, search, and feeds
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -2624,6 +2853,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .archive => &archive_spec,
         .dashboard => &dashboard_spec,
         .@"photo-gallery" => &photo_gallery_spec,
+        .blueprint => &blueprint_spec,
     };
 }
 
@@ -2848,7 +3078,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive, dashboard, photo-gallery", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive, dashboard, photo-gallery, blueprint", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -2906,8 +3136,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive", "themes/engineering", "themes/gallery" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive", "themes/engineering", "themes/gallery", "themes/blueprint" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";

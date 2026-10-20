@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive dashboard photo-gallery)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive dashboard photo-gallery blueprint)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -434,6 +434,31 @@ done
 [[ "$images" == 5 ]] || fail "photo-gallery rendered $images images, expected 5"
 grep -q '<figcaption><strong>Dawn.</strong>' "$G/dist/photos/coast.html" || fail "photo-gallery figure caption did not render"
 pass "photo-gallery: home grid; 5 images at depths 0 and 1 resolve page-relative and publish byte-identical"
+
+note "blueprint: token theme, home hero deck, draft gating, author kit classes"
+B="$OUT/arch-blueprint"
+grep -q 'data-layout="home"' "$B/dist/index.html" || fail "blueprint index does not use the home layout"
+for page in guide kit roadmap; do
+    grep -q 'data-layout="main"' "$B/dist/$page.html" || fail "blueprint $page is not on the main layout"
+done
+deck="$(sed -n '/<section class="bp-deck"/,/<\/section>/p' "$B/dist/index.html")"
+grep -q '<nav class="page-children"' <<<"$deck" || fail "blueprint home deck has no {{children}} list"
+for page in guide kit; do
+    grep -q "href=\"$page.html\"" <<<"$deck" || fail "blueprint deck does not list $page"
+done
+grep -q 'roadmap' <<<"$deck" && fail "blueprint draft satellite leaked into the home deck"
+grep -q '<body data-status="draft">' "$B/dist/roadmap.html" \
+    || fail "blueprint roadmap does not carry status draft"
+grep -q '<dd>draft</dd>' "$B/dist/roadmap.html" || fail "blueprint roadmap shows no status pill"
+grep -q 'data-relation-kind="relates_to".*href="guide.html"' "$B/dist/kit.html" \
+    || fail "blueprint kit relates_to relation did not render"
+sed -n '/semantic-backlinks/,/<\/section>/p' "$B/dist/guide.html" \
+    | grep -q 'data-relation-kind="relates_to".*href="kit.html"' \
+    || fail "blueprint guide has no relates_to backlink"
+grep -q 'admonition--warning' "$B/dist/guide.html" || fail "blueprint warning admonition did not render"
+grep -q '<details class="details"' "$B/dist/guide.html" || fail "blueprint Details block did not render"
+grep -q 'theme-danger' "$B/dist/kit.html" || fail "blueprint author kit classes did not survive"
+pass "blueprint: home deck lists published satellites; draft renders unadvertised; relations and kit classes render"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site" "$OUT/raced" "$OUT/claimed"
 for t in "${ARCHETYPES[@]}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done
