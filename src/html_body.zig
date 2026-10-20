@@ -118,6 +118,57 @@ fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed
     diag.printText(structured, gpa);
 }
 
+/// Emit an adapter refusal (ETEXTILE / ECOOKLANG) once: prose to stderr plus
+/// the structured diagnostic for `--report` / `--watch-json`, so a content
+/// refusal never degrades to the bare `EIO` escaped-error fallback (#1122).
+fn emitAdaptDiagnostic(
+    code: diag.Code,
+    gpa: std.mem.Allocator,
+    source_path: []const u8,
+    line: u32,
+    column: u32,
+    message: []const u8,
+    remediation: []const u8,
+    sink: ?*diag.Collector,
+) void {
+    const structured: diag.Diagnostic = .{
+        .severity = .error_,
+        .code = code,
+        .message = message,
+        .remediation = remediation,
+        .source_path = source_path,
+        .line = line,
+        .column = column,
+    };
+    if (sink) |s| s.append(structured);
+    diag.printText(structured, gpa);
+}
+
+/// The xhtml profile fails closed on verbatim raw HTML in page content —
+/// report the refusing page once, through prose and the report collector,
+/// before the typed error unwinds (oliver-renderer.md: the typed error is
+/// "surfaced with page/offset context"; it carries no byte offset, so the
+/// page paths are the locus). Covers every renderSource caller — render and
+/// heading-harvest passes alike (#1122).
+fn reportXhtmlRefusal(
+    gpa: std.mem.Allocator,
+    source_path: []const u8,
+    output_path: []const u8,
+    sink: ?*diag.Collector,
+) void {
+    const message = std.fmt.allocPrint(gpa, "xhtml page '{s}': verbatim raw HTML in page content is not XML-well-formed", .{output_path}) catch null;
+    defer if (message) |m| gpa.free(m);
+    const structured: diag.Diagnostic = .{
+        .severity = .error_,
+        .code = .EXHTML,
+        .message = message orelse "xhtml page: verbatim raw HTML in page content is not XML-well-formed",
+        .remediation = "Remove the raw HTML from the page, or publish this target under the html output profile",
+        .source_path = source_path,
+    };
+    if (sink) |s| s.append(structured);
+    diag.printText(structured, gpa);
+}
+
 /// An adapted page body plus whatever structured data the adapter recovered.
 pub const AdaptedBody = struct {
     markdown: []const u8,
@@ -131,7 +182,10 @@ pub const AdaptedBody = struct {
 /// arena must pass a longer-lived one.
 ///
 /// An adaptation diagnostic is fatal, so it is never gated on `--quiet`: that
-/// flag suppresses progress and success output only.
+/// flag suppresses progress and success output only. The structured
+/// diagnostic is also appended to `diagnostics` so `--report` / `--watch-json`
+/// consumers see the real code and locus instead of the escaped-error
+/// fallback (#1122).
 pub fn bodyForInput(
     allocator: std.mem.Allocator,
     input_format: identity.InputFormat,
@@ -143,18 +197,14 @@ pub fn bodyForInput(
     /// validation call in `compile.zig` prints; the render and heading-harvest
     /// passes pass false so each warning surfaces exactly once per build.
     print_warnings: bool,
+    diagnostics: ?*diag.Collector,
 ) !AdaptedBody {
     switch (input_format) {
         .markdown => return .{ .markdown = body },
         .textile => {
             const adapted = try textile.toMarkdown(body, allocator);
             if (adapted.diagnostic) |td| {
-                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
-                    source_path,
-                    sourceLineAt(source, body_offset) + td.line - 1,
-                    td.column,
-                    td.message,
-                });
+                emitAdaptDiagnostic(.ETEXTILE, allocator, source_path, sourceLineAt(source, body_offset) + td.line - 1, td.column, td.message, "Use only the bounded Textile compatibility subset", diagnostics);
                 return error.TextileFailed;
             }
             return .{ .markdown = adapted.markdown };
@@ -162,12 +212,7 @@ pub fn bodyForInput(
         .cook => {
             const adapted = try cooklang_seam.toMarkdown(body, allocator);
             if (adapted.diagnostic) |cd| {
-                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: ECOOKLANG: {s}:{d}:{d}: {s} [Use only the bounded Cooklang subset]\n", .{
-                    source_path,
-                    sourceLineAt(source, body_offset) + cd.line - 1,
-                    cd.column,
-                    cd.message,
-                });
+                emitAdaptDiagnostic(.ECOOKLANG, allocator, source_path, sourceLineAt(source, body_offset) + cd.line - 1, cd.column, cd.message, "Use only the bounded Cooklang subset", diagnostics);
                 return error.CooklangFailed;
             }
             // Oliver's structural warnings degrade to literal text; they
@@ -417,7 +462,12 @@ pub fn renderSource(
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try render.renderProfile(md, doc_arena, options.output_profile);
+                const h = render.renderProfile(md, doc_arena, options.output_profile) catch |err| {
+                    if (err == error.RawHtmlNotXmlWellFormed) {
+                        reportXhtmlRefusal(gpa, source_path, output_path, options.diagnostics);
+                    }
+                    return err;
+                };
                 try html_buf.appendSlice(arena, h.bytes);
             },
             .aside => |component| {
@@ -491,7 +541,7 @@ fn prepareBody(
         try printParserDiagnostic(gpa, source_path, pd, options.diagnostics);
         return error.ParseFailed;
     }
-    const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, false)).markdown;
+    const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, false, options.diagnostics)).markdown;
 
     // Graph-backed Markdown documentation links → canonical page URLs
     // (pre-render). This runs before include expansion so source-relative links

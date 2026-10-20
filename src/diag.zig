@@ -67,6 +67,9 @@ pub const Code = enum {
     /// A selected HTML 4.01 Strict page failed rendering or whole-document
     /// validation, including selected layouts and generated chrome.
     EHTML4STRICT,
+    /// A page selected for the xhtml output profile contains verbatim raw
+    /// HTML that is not XML-well-formed; the profile fails closed.
+    EXHTML,
     /// Published local `href`/`src` resolves to no output this build keeps.
     EROUTEMISSING,
     /// Published local `href`/`src` climbs above the output root.
