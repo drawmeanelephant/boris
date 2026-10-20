@@ -898,6 +898,66 @@ test "seam: a distant brace does not swallow prose into the name (#907)" {
     try std.testing.expect(std.mem.indexOf(u8, result.markdown, "and stir") != null);
 }
 
+test "seam: a sigil ends a single-word name; the marker opens the next token (#1123)" {
+    // `~` is a symbol (Sm), not P-category punctuation, so Oliver's
+    // single-word name scan needed the explicit marker stop the multiword
+    // scan already had. Without it, `@a~b{2%kg}` read `a~b` as the name
+    // and the touching `{2%kg}` fell to prose — silent amount loss. With
+    // the pin carrying oliver#205, the contract's name-termination rule
+    // holds: ingredient `a` plus timer `b`{2%kg}.
+    const gpa = std.testing.allocator;
+    const result = try toMarkdown("Add @a~b{2%kg} and stir.\n", gpa);
+    try std.testing.expect(result.isOk());
+    defer freeResult(gpa, result);
+    try std.testing.expectEqual(@as(usize, 1), result.recipe.ingredients.len);
+    try std.testing.expectEqualStrings("a", result.recipe.ingredients[0].name);
+    try std.testing.expectEqual(@as(usize, 1), result.recipe.timers.len);
+    try std.testing.expectEqualStrings("b", result.recipe.timers[0].name);
+    try std.testing.expectEqualStrings("2", result.recipe.timers[0].quantity.amount);
+    try std.testing.expectEqualStrings("kg", result.recipe.timers[0].quantity.unit);
+}
+
+test "seam: ~~ pairs stay prose and never mint timers (#1123)" {
+    // `~~x~~` is strikethrough-looking prose, not two timer markers:
+    // before the pin, the second `~` retried the marker and minted a
+    // phantom timer named `~x~~` into the recipe facet.
+    const gpa = std.testing.allocator;
+    const result = try toMarkdown("Strike ~~x~~ now.\n", gpa);
+    try std.testing.expect(result.isOk());
+    defer freeResult(gpa, result);
+    try std.testing.expectEqual(@as(usize, 0), result.recipe.timers.len);
+    try std.testing.expectEqual(@as(usize, 0), result.recipe.ingredients.len);
+    // `~` is backslash-escaped in author prose (live strikethrough), so
+    // the rendered step keeps the literal characters.
+    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "Strike \\~\\~x\\~\\~ now.") != null);
+}
+
+test "seam: a nested { in a quantity degrades the token to prose (#1123)" {
+    // Contract: a nested `{` in a quantity parses as ordinary prose —
+    // silently, not a refusal and not a warning. The whole token stays
+    // literal rather than capturing truncated garbage (`2{3`).
+    const gpa = std.testing.allocator;
+    const result = try toMarkdown("Add @flour{2{3} and stir.\n", gpa);
+    try std.testing.expect(result.isOk());
+    defer freeResult(gpa, result);
+    try std.testing.expectEqual(@as(usize, 0), result.recipe.ingredients.len);
+    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "@flour\\{2\\{3\\}") != null);
+}
+
+test "seam: a nested ( in a preparation stays literal after the token (#1123)" {
+    // The closed group `fine (grain` cannot be a preparation: it stays
+    // trailing prose while the well-formed `@sugar{1}` still parses.
+    const gpa = std.testing.allocator;
+    const result = try toMarkdown("Mix @sugar{1}(fine (grain) well.\n", gpa);
+    try std.testing.expect(result.isOk());
+    defer freeResult(gpa, result);
+    try std.testing.expectEqual(@as(usize, 1), result.recipe.ingredients.len);
+    try std.testing.expectEqualStrings("sugar", result.recipe.ingredients[0].name);
+    try std.testing.expectEqualStrings("1", result.recipe.ingredients[0].quantity.amount);
+    try std.testing.expectEqualStrings("", result.recipe.ingredients[0].preparation);
+    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "(fine (grain)") != null);
+}
+
 test "seam: braces end a multi-word ingredient name" {
     const gpa = std.testing.allocator;
     const result = try toMarkdown("Add @ground black pepper{} to taste.\n", gpa);
@@ -1039,7 +1099,11 @@ test "seam: block comments span lines and keep the step reading as one sentence"
     );
     try std.testing.expect(result.isOk());
     defer freeResult(gpa, result);
-    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "1. Cook for 9 minutes, then drain.") != null);
+    // Upstream (oliver#197) removes `[- -]` as a pure deletion: the space
+    // before the comment and the line-join space are both kept verbatim,
+    // so the step prose carries two spaces. CommonMark collapses them at
+    // render, so the published sentence is unchanged.
+    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "1. Cook for 9 minutes,  then drain.") != null);
 }
 
 test "seam: author text is escaped so it cannot forge document structure" {

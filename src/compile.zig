@@ -792,6 +792,24 @@ fn promoteScannedPages(
             if (diagnostics) |sink| sink.append(d);
             return error.ParseFailed;
         }
+        // Forward the advisory zero-width Unicode warning the IR pipeline
+        // already reports (pipeline.zig): "reported and never rewritten" per
+        // diagnostics.md. This once-per-build promote pass is the only place
+        // it surfaces — the render and heading-harvest parse calls stay
+        // silent so the warning prints exactly once (#1124).
+        if (parsed.doc.unicode_warning) |uw| {
+            const d: diag.Diagnostic = .{
+                .severity = .warning,
+                .code = .EUNICODE,
+                .message = uw.message,
+                .remediation = uw.remediation,
+                .source_path = disc.source_path,
+                .line = uw.line,
+                .column = uw.column,
+            };
+            diag.printText(d, gpa);
+            if (diagnostics) |sink| sink.append(d);
+        }
         // Validates the adapter subset for this page; the adapted body is
         // discarded because rendering adapts again per target.
         //
@@ -807,7 +825,7 @@ fn promoteScannedPages(
         // each warning surfaces exactly once.
         var body_arena = std.heap.ArenaAllocator.init(gpa);
         defer body_arena.deinit();
-        _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, true);
+        _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, true, diagnostics);
 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
         try db.promote(disc, final_id, parsed.doc.meta.id != null, parsed.doc.meta, parsed.doc.body_offset, .{});
@@ -1434,6 +1452,8 @@ pub fn isContentCompileFailure(err: anyerror) bool {
         error.ParseFailed,
         error.ComponentFailed,
         error.TextileFailed,
+        error.CooklangFailed,
+        error.RawHtmlNotXmlWellFormed,
         error.InputFormatMismatch,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
@@ -1534,6 +1554,7 @@ pub fn isUsageTargetFailure(err: anyerror) bool {
 fn alreadyReportedTargetFailure(err: anyerror) bool {
     return err == error.IncludeFailed or err == error.ReferenceFailed or
         err == error.Html4StrictFailed or err == error.ComponentFailed or
+        err == error.RawHtmlNotXmlWellFormed or err == error.CooklangFailed or
         err == error.GraphValidationFailed or err == error.AmbiguousGlob or
         err == error.DuplicateSelector or err == error.MixedThemeRoots or
         err == error.LayoutSelectionFailed or head_metadata.isFailure(err);

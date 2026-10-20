@@ -4,12 +4,13 @@
     .fingerprint = 0x6cd378330da76efc, // Changing this has security and trust implications.
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
-        // Oliver #131: opt-in HTML 4.01 Strict fragment serialization. The
-        // shared pin also carries the Cooklang and Markdown extensions.
-        // See docs/contracts/oliver-renderer.md for the pin and boundary.
+        // Oliver #205: Cooklang token-marker name termination + nested
+        // delimiter degradation (boris#1123). The shared pin also carries the
+        // HTML 4.01 Strict profile and the Markdown extensions. See
+        // docs/contracts/oliver-renderer.md for the pin and boundary.
         .oliver = .{
-            .url = "https://github.com/drawmeanelephant/oliver/archive/2a0a1e9.tar.gz",
-            .hash = "oliver-1.1.0-LOsZkOeMKAB1o3ynv6PTycxCt3nzpYB6l_hz-J3lVvxF",
+            .url = "https://github.com/drawmeanelephant/oliver/archive/af2233b.tar.gz",
+            .hash = "oliver-1.3.0-LOsZkGUXLwB9ygrMZ3drtbYkQzvjPkI9B68MK-BsVKvU",
         },
         .secp256k1 = .{
             .url = "git+https://github.com/bitcoin-core/secp256k1#6e2c8bc4ecdc6e71dbe7a368f360d8d453ce435d",

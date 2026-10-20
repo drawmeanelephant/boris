@@ -3435,8 +3435,12 @@ fn mapHtmlError(
         // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
         => return .content_error,
-        // The HTML loader already emitted the structured ETEXTILE diagnostic.
+        // The HTML loader already emitted the structured ETEXTILE / ECOOKLANG
+        // diagnostic for the adapter refusals; the xhtml refusal's page-context
+        // diagnostic is emitted at render time (#1122).
         error.TextileFailed,
+        error.CooklangFailed,
+        error.RawHtmlNotXmlWellFormed,
         error.InputFormatMismatch,
         => return .content_error,
         error.MultiTargetIoFailed => {
@@ -3687,6 +3691,17 @@ test "mapHtmlError: unsafe SVG content failure exits 1 without a generic wrapper
     // content-asset path; mapHtmlError must classify it as a content error
     // (exit 1) and must not print either generic wrapper line.
     try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, "content"));
+}
+
+test "mapHtmlError: adapter and xhtml refusals are content failures (exit 1)" {
+    // #1122: the load-time adapter refusals and the xhtml raw-HTML refusal
+    // already emitted structured diagnostics with real loci; mapping them to
+    // the generic I/O class misroutes them as environment failures.
+    inline for (.{
+        error.TextileFailed,
+        error.CooklangFailed,
+        error.RawHtmlNotXmlWellFormed,
+    }) |err| try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(err, "content"));
 }
 
 fn writeTreeFileMain(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8) !void {
