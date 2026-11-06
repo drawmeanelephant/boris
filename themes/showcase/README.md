@@ -4,7 +4,7 @@ Docs + blog shell with a soft component feel. Hand-authored CSS. DaisyUI
 was evaluated and rejected; this sheet is not DaisyUI and must not be
 labeled as such. See [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
-- Layouts: `home`, `section`, `blog`, `main`
+- Layouts: `home`, `section`, `blog`, `main`, `portfolio`
 - Assets: local CSS and mark SVG. System UI stack.
 - Sample site: [`examples/showcase-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/showcase-site/)
 
@@ -23,14 +23,24 @@ Build the specimen from a Boris checkout:
 
 ## Slot coverage
 
+The `portfolio` layout leads with the authored studio introduction and its
+compiler-owned child collection, without the generic masthead, full site
+index, metadata card or outline. Select it with
+`--layout-rule default id:index themes/showcase/layouts/portfolio.html`;
+`boris init --type portfolio` declares this rule in its profile.
+The collection is labelled "Work & about": About and projects are all direct
+children, not a filtered taxonomy or a second hand-maintained list.
+Generic home/docs/blog layouts remain unchanged. Only the portfolio layout
+loads the extra local `assets/css/portfolio.css`.
+
 | Slot | Decision |
 |---|---|
 | `{{head}}` | Every layout, directly inside `<head>`. |
 | `{{relations}}` / `{{backlinks}}` | Every layout, after the article, as two soft cards ("Related" / "Backlinks") with kind badges. The wrapper is `data-boris-search-exclude`. Pages with no relations emit nothing. |
-| `{{page-status}}` | Every layout, as `<body data-status="…">`. The Status entry of the metadata card becomes a badge in the same family as the navbar badges: pink for draft, teal for published, grey for archived. |
-| `{{children}}` | Every layout. On `home` the index page's direct satellites render as a card grid ("Explore") after the prose, so a portfolio index lists its projects without hand-written links; the panel hides when the page has no children. `section` and `main` list "In this section", `blog` "More posts". Every children panel is `data-boris-search-exclude` and hides when the page has no children. |
+| `{{page-status}}` | Every layout, as `<body data-status="…">`. Generic layouts turn the Status metadata entry into a badge: pink for draft, teal for published, grey for archived. Portfolio omits that metadata chrome. |
+| `{{children}}` | Every layout. `home` keeps its generic "Explore" grid; `portfolio` uses "Work & about". `section` and `main` list "In this section", `blog` "More posts". Every children panel is `data-boris-search-exclude` and hides when the page has no children. |
 | `{{tags}}` | `blog` only, as `#tag` chips under the metadata card; the duplicate Tags entry in the card is hidden. Docs layouts keep tags inside `{{metadata}}`. |
-| `{{parent}}` | Intentionally absent. Every layout except `home` renders `{{breadcrumb}}`, which already links the parent; `home` serves the `index` trunk. |
+| `{{parent}}` | Intentionally absent. Generic page layouts render `{{breadcrumb}}`; `home` and `portfolio` serve an index trunk without it. |
 
 ## Search
 

@@ -277,6 +277,12 @@ grep -q 'href="../techniques/sharpening.html"' "$W/wiki/tools/chisels.html" \
 pass "wiki: index → hub → entry breadcrumb, home/section/main layouts, cross-entry links"
 
 note "link-in-bio: one page is a complete, checkable site"
+BIO="$OUT/arch-link-in-bio"
+grep -q 'class="links-page"' "$BIO/dist/index.html" || fail "link-in-bio did not select the focused links layout"
+grep -q 'href="assets/links.css"' "$BIO/dist/index.html" || fail "link-in-bio lacks its local link-row stylesheet"
+grep -q 'mobile-nav-details\|class="toc-sidebar"' "$BIO/dist/index.html" && fail "link-in-bio still publishes documentation rails"
+grep -q 'smallest graph' "$BIO/content/index.md" && fail "link-in-bio publishes author wiring as visitor prose"
+grep -q -- '--serve' "$BIO/README.md" || fail "link-in-bio README lacks the native preview command"
 grep -q '^verified: starter compiled 1 page(s)$' "$OUT/arch-link-in-bio.stderr" \
     || fail "link-in-bio probe did not compile exactly one page"
 [[ "$(find "$OUT/arch-link-in-bio/dist" -name '*.html' -not -path '*/_boris/*' | wc -l | tr -d ' ')" == 1 ]] \
@@ -356,20 +362,47 @@ grep -q 'application/rss+xml' "$ND/dist/issues/2026-10-10-held-back.html" && fai
 rm -rf "$ND"
 pass "newsletter: home/archive/blog layouts, dist/feed.xml with three items + head autodiscovery, sitemap; drafts held back"
 
-note "portfolio: index on the showcase home layout lists the work through {{children}}"
+note "portfolio: the focused studio front lists work and about through {{children}}"
 P="$OUT/arch-portfolio/dist"
-grep -q 'home-card' "$P/index.html" || fail "portfolio index does not use the showcase home layout"
+grep -q 'data-layout="portfolio"' "$P/index.html" || fail "portfolio index does not use the focused layout"
+grep -q 'href="assets/css/portfolio.css"' "$P/index.html" || fail "portfolio lacks its local stylesheet"
+grep -q 'Browse the site\|parent: index' "$P/index.html" && fail "portfolio still leads with documentation chrome or wiring"
+grep -q 'portfolio.html' "$OUT/arch-portfolio/README.md" || fail "portfolio author README lacks its layout wiring"
 # The list is the layout's {{children}}, not prose: the article links no page.
-work="$(sed -n '/<section class="children-panel home-work"/,/<\/section>/p' "$P/index.html")"
+work="$(sed -n '/<section class="children-panel home-work portfolio-collection"/,/<\/section>/p' "$P/index.html")"
 grep -q '<nav class="page-children"' <<<"$work" || fail "portfolio home has no {{children}} list"
-sed -n '/<article class="prose">/,/<\/article>/p' "$P/index.html" | grep -q '<a href=' \
+sed -n '/<article class="prose portfolio-intro">/,/<\/article>/p' "$P/index.html" | grep -q '<a href=' \
     && fail "portfolio index still carries a hand-written page list"
 for page in about projects/harbor-signage projects/field-almanac projects/specimen-book; do
     grep -q 'class="main card"' "$P/$page.html" || fail "portfolio $page is not on the showcase main layout"
-    grep -q 'home-card' "$P/$page.html" && fail "portfolio $page should not use the home layout"
+    grep -q 'data-layout="portfolio"' "$P/$page.html" && fail "portfolio $page should not use the front layout"
     grep -q "href=\"${page}.html\"" <<<"$work" || fail "portfolio home {{children}} does not list $page"
 done
-pass "portfolio: home layout on index lists about and three projects via nav.page-children; satellites on main"
+cat > "$OUT/arch-portfolio/content/projects/additional-work.md" <<'MD'
+---
+title: Additional work
+parent: index
+published_at: 2026-10-01T09:00:00Z
+summary: Another authored satellite.
+---
+
+# Additional work
+MD
+cat > "$OUT/arch-portfolio/content/projects/draft-work.md" <<'MD'
+---
+title: Draft work
+parent: index
+status: draft
+---
+
+# Draft work
+MD
+(cd "$OUT/arch-portfolio" && "$ROOT/zig-out/bin/boris" build --profile boris.json --quiet) \
+    || fail "portfolio with additional work did not build"
+grep -q 'href="projects/additional-work.html"' "$P/index.html" || fail "portfolio collection does not pick up new work"
+grep -q 'href="projects/draft-work.html"' "$P/index.html" && fail "portfolio advertises a draft"
+[[ -f "$P/projects/draft-work.html" ]] || fail "portfolio draft route was not emitted"
+pass "portfolio: identity-first layout, automatic children, draft gating, and unchanged detail layout"
 
 note "archive: entries render their relations and the backlinks derived from them"
 A="$OUT/arch-archive/dist"

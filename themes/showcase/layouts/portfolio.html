@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-layout="portfolio" data-theme="boris-showcase">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}}</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
+  <link rel="stylesheet" href="{{asset-url assets/css/portfolio.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+  {{head}}
+</head>
+<body data-layout="portfolio" data-status="{{page-status}}">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <main id="main-content" class="portfolio-main" tabindex="-1" data-boris-search-root>
+    <article class="prose portfolio-intro">{{content}}</article>
+    <section class="children-panel home-work portfolio-collection" aria-labelledby="portfolio-children-heading" data-boris-search-exclude>
+      <h2 id="portfolio-children-heading">Work &amp; about</h2>
+      {{children}}
+    </section>
+    <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+  </main>
+</body>
+</html>
