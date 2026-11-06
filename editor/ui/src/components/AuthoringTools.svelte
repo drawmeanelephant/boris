@@ -4,18 +4,21 @@
   import { authoring, suggestions, changeCompletionKind, refreshAuthoring } from '../lib/state/authoring.svelte';
   import { connection } from '../lib/state/connection.svelte';
   import { buffer, insertSuggestion } from '../lib/state/buffer.svelte';
+  import { problems } from '../lib/state/problems.svelte';
 
   // Author mode (#990) keeps the hints present but folded away: the combobox
   // and schema bounds are one disclosure, not a permanent slab under the
   // writing surface. Review mode renders the same content expanded.
-  let { collapsed = false }: { collapsed?: boolean } = $props();
+  let { collapsed = false, onBuildDiagnostics }: { collapsed?: boolean; onBuildDiagnostics: () => void } = $props();
 
   // Frontmatter keys and status values come from the embedded schema; every
   // other category needs a Boris completion index, so an empty list says why
   // using the host-reported completion status rather than a guess.
   const SCHEMA_KINDS: CompletionKind[] = ['frontmatter_key', 'status'];
   const emptyReason = $derived(
-    SCHEMA_KINDS.includes(authoring.completionKind) || authoring.payload?.completion
+    authoring.failed
+      ? 'Suggestions could not be refreshed. Try Refresh Boris suggestions again.'
+      : SCHEMA_KINDS.includes(authoring.completionKind) || authoring.payload?.completion
       ? `No ${authoring.completionKind.replaceAll('_', ' ')} suggestions match.`
       : authoring.payload?.completion_status === 'unsupported'
         ? 'completion.json is stale or unsupported. Build diagnostics to replace it.'
@@ -62,6 +65,17 @@
     </div>
     <button type="button" class="ghost" onclick={refreshAuthoring}>Refresh Boris suggestions</button>
   </div>
+  {#if authoring.payload && !authoring.failed && authoring.payload.completion_status !== 'ready'}
+    <div class="notice" data-tone={authoring.payload.completion_status === 'unsupported' ? 'warn' : 'neutral'}>
+      <p>Build diagnostics checks saved pages and loads entity, link, and layout hints. Results open in Problems.</p>
+      <button
+        type="button"
+        class:is-running={problems.running && problems.runningMode === 'ir_build'}
+        aria-busy={problems.running && problems.runningMode === 'ir_build'}
+        disabled={problems.running}
+        onclick={onBuildDiagnostics}>Build diagnostics for hints</button>
+    </div>
+  {/if}
   <div class="completion-controls">
     <div>
       <label for="completion-kind">Completion category</label>
