@@ -1,0 +1,4 @@
+### Fixed
+
+- Keep complete long titles, navigation labels, prose URLs and inline identifiers inside the [catalog themes](/themes/README.md), and give wide tables/code local scrolling with printable full content. The [shared specimen](/examples/studies-site/README.md#content-resilience-check) covers ordinary and stress content without changing theme voices or adding a site runtime.
+- Preserve native table grids inside compiler-owned [keyboard-accessible scroll containers](/docs/contracts/html-output.md#table-presentation), with one entry for every table, including ordinary ones (the explicitly approved cross-browser accessibility tradeoff). Strict uses valid native markup without JavaScript. Printed Columns code retains its original punctuation, and the HTML cache discriminator advances to prevent reuse of earlier unwrapped bodies.

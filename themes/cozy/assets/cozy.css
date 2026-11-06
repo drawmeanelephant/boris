@@ -16,6 +16,10 @@
 }
 
 * { box-sizing: border-box; }
+/* Emergency breaks for author text and graph labels, not tabular data. */
+body { overflow-wrap: anywhere; }
+table { overflow-wrap: normal; }
+
 body { margin: 0; padding: 1.25rem 0; background: var(--paper); color: var(--ink); font: 14px/1.65 var(--sans); }
 a { color: var(--rust); text-decoration: underline; text-underline-offset: 3px; }
 a:visited { color: var(--visited); }
@@ -35,7 +39,7 @@ code { padding: .1rem .25rem; border: 1px solid var(--soft-line); background: #f
 pre { overflow-x: auto; padding: 1rem; border: 1px solid var(--line); background: #f4f4f4; line-height: 1.5; }
 pre code { padding: 0; border: 0; background: none; }
 blockquote { margin: 1.5rem 0; padding: .75rem 1.25rem; border-left: 5px solid var(--slate); background: var(--module); color: #444; font-family: var(--serif); font-style: italic; }
-table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
+table { display: block; max-width: 100%; overflow-x: auto; width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
 th, td { padding: .45rem .7rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { background: var(--module); color: var(--rust); font-family: var(--serif); font-size: 1.05em; font-weight: normal; }
 tbody tr:nth-child(even) td { background: #fcfbf7; }
@@ -150,3 +154,26 @@ hr { height: 0; margin: 2rem 0; border: 0; border-top: 1px dashed var(--line); }
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
 }
 @media print { .skip-link, .sidebar { display: none; } .layout { display: block; } body { background: #fff; } .site-shell { border: 0; box-shadow: none; } .site-header { background: none; color: #000; } .site-title, .tagline, .site-kicker { color: #000; text-shadow: none; } pre { white-space: pre-wrap; } }
+
+/* Paper has no scrollbars: retain columns and wrap only when necessary. */
+@media print {
+  table { display: table; width: 100%; max-width: none; table-layout: fixed; overflow: visible; }
+  th, td { overflow-wrap: anywhere; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+}
+
+/* Keep the native grid inside its keyboard-accessible scroll surface. */
+.table-viewport { max-width: 100%; overflow-x: auto; }
+.table-viewport > table { display: table; max-width: none; overflow: visible; }
+.table-viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.table-entry { margin: 0; font-size: 0.85em; }
+.table-entry a { display: inline-block; color: inherit; text-decoration: none; }
+@media print {
+  .table-viewport { overflow: visible; }
+  .table-entry { display: none; }
+}
+
+/* Preserve the theme's existing intrinsic-width grid in this screen mode. */
+@media screen and (max-width: 760px) {
+  .table-viewport > table { width: max-content; }
+}

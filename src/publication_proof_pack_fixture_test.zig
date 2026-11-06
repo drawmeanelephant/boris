@@ -110,7 +110,9 @@ fn overallStatus(root: std.json.ObjectMap) []const u8 {
 /// presentation change and must be deliberate.
 /// Re-pinned for #778: code-span word boundaries in `search-index.json`
 /// (an inventoried artifact) shift every downstream evidence digest.
-const poisoned_golden_sha256 = "ecc1401a0c7470fb9adbe6064c41ea088b0f0a247ed3f02e29719138a0481096";
+/// Re-pinned for table presentation: HTML pages gain the 85-byte wrapper
+/// and their evidence digests change; findings, claims and report shape do not.
+const poisoned_golden_sha256 = "a5b350aaa67391fb99da357ee04db8fa8137ecfeb5dc942d8f90a75cca9cd1c5";
 const poisoned_golden_len: usize = 50475;
 
 test "poisoned publication derives a deterministic Proof Pack with findings" {
