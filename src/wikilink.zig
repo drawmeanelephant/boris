@@ -168,9 +168,7 @@ fn hexNibble(n: u4) u8 {
 }
 
 /// Percent-encode a fragment for a Markdown link destination (RFC 3986 unreserved stay plain).
-pub fn encodeFragment(allocator: std.mem.Allocator, fragment: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
+fn appendEncodedFragment(out: *std.ArrayList(u8), allocator: std.mem.Allocator, fragment: []const u8) !void {
     for (fragment) |c| {
         const unreserved = (c >= 'A' and c <= 'Z') or
             (c >= 'a' and c <= 'z') or
@@ -184,7 +182,6 @@ pub fn encodeFragment(allocator: std.mem.Allocator, fragment: []const u8) ![]u8 
             try out.append(allocator, hexNibble(@intCast(c & 0xf)));
         }
     }
-    return try out.toOwnedSlice(allocator);
 }
 
 /// Scan body for wiki-links outside fences. Views into `body`.
@@ -427,17 +424,14 @@ fn appendUniqueIdLocHashed(
     try locs.append(allocator, loc);
 }
 
-fn escapeMdLabel(allocator: std.mem.Allocator, label: []const u8) ![]u8 {
+fn appendEscapedMdLabel(out: *std.ArrayList(u8), allocator: std.mem.Allocator, label: []const u8) !void {
     // Minimal: escape `]` and `\` in link text.
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
     for (label) |c| {
         if (c == '\\' or c == ']') {
             try out.append(allocator, '\\');
         }
         try out.append(allocator, c);
     }
-    return try out.toOwnedSlice(allocator);
 }
 
 /// Options for wiki rewrite / reference validation.
@@ -577,6 +571,8 @@ fn rewriteWithNodeMap(
 ) WikiError![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
+    var to_out: std.ArrayList(u8) = .empty;
+    defer to_out.deinit(allocator);
     var copy_from: usize = 0;
 
     for (hits) |hit| {
@@ -594,35 +590,28 @@ fn rewriteWithNodeMap(
 
         try out.appendSlice(allocator, body[copy_from..hit.offset]);
 
-        const to_out = identity.htmlOutputPath(allocator, node.id) catch {
+        to_out.clearRetainingCapacity();
+        identity.appendHtmlOutputPath(&to_out, allocator, node.id) catch {
             if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
             return error.PathError;
         };
-        defer allocator.free(to_out);
-        const href = href_blk: {
-            if (opts.base_url) |base| {
-                break :href_blk try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, to_out });
-            }
-            break :href_blk identity.relativeHref(allocator, current_output_path, to_out) catch {
+
+        try out.append(allocator, '[');
+        try appendEscapedMdLabel(&out, allocator, hit.label orelse (node.title orelse node.id));
+        try out.appendSlice(allocator, "](");
+        if (opts.base_url) |base| {
+            try out.appendSlice(allocator, base);
+            try out.append(allocator, '/');
+            try out.appendSlice(allocator, to_out.items);
+        } else {
+            identity.appendRelativeHref(&out, allocator, current_output_path, to_out.items) catch {
                 if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
                 return error.PathError;
             };
-        };
-        defer allocator.free(href);
-
-        const raw_label = hit.label orelse (node.title orelse node.id);
-        const label = try escapeMdLabel(allocator, raw_label);
-        defer allocator.free(label);
-
-        try out.append(allocator, '[');
-        try out.appendSlice(allocator, label);
-        try out.appendSlice(allocator, "](");
-        try out.appendSlice(allocator, href);
+        }
         if (hit.fragment) |frag| {
             try out.append(allocator, '#');
-            const enc = try encodeFragment(allocator, frag);
-            defer allocator.free(enc);
-            try out.appendSlice(allocator, enc);
+            try appendEncodedFragment(&out, allocator, frag);
         }
         try out.append(allocator, ')');
 
@@ -728,14 +717,12 @@ fn materialFromIdLocsWithMap(
             }
             return error.ReferenceMissing;
         };
-        const out_path = identity.htmlOutputPath(allocator, node.id) catch {
+        try out.appendSlice(allocator, loc.id);
+        try out.append(allocator, 0);
+        identity.appendHtmlOutputPath(&out, allocator, node.id) catch {
             if (fail_out) |f| f.set(loc.line, loc.column, loc.id, loc.locus);
             return error.PathError;
         };
-        defer allocator.free(out_path);
-        try out.appendSlice(allocator, loc.id);
-        try out.append(allocator, 0);
-        try out.appendSlice(allocator, out_path);
         try out.append(allocator, 0);
         if (node.title) |t| try out.appendSlice(allocator, t);
         try out.append(allocator, 0);
@@ -1511,14 +1498,16 @@ test "rewriteWikiLinks missing target with FailInfo" {
     try std.testing.expectEqual(@as(u32, 1), fail.line);
 }
 
-test "encodeFragment leaves unreserved plain" {
+test "fragment appends preserve prefixes and percent encode reserved bytes" {
     const gpa = std.testing.allocator;
-    const a = try encodeFragment(gpa, "section-one");
-    defer gpa.free(a);
-    try std.testing.expectEqualStrings("section-one", a);
-    const b = try encodeFragment(gpa, "has/slash");
-    defer gpa.free(b);
-    try std.testing.expectEqualStrings("has%2Fslash", b);
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    try out.appendSlice(gpa, "page.html#");
+    try appendEncodedFragment(&out, gpa, "section-one.A_Z~09");
+    try std.testing.expectEqualStrings("page.html#section-one.A_Z~09", out.items);
+    out.clearRetainingCapacity();
+    try appendEncodedFragment(&out, gpa, "has/slash é?&%#");
+    try std.testing.expectEqualStrings("has%2Fslash%20%C3%A9%3F%26%25%23", out.items);
 }
 
 test "makeDiagnostic maps ReferenceMissing" {
@@ -1627,6 +1616,45 @@ test "rewriteWikiLinks stays relative when no base url is configured" {
     });
     defer gpa.free(out);
     try std.testing.expectEqualStrings("Go to [Intro](guides/intro.html).", out);
+}
+
+test "wiki buffer rendering preserves repeated links labels fragments and code bytes" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "guides/café", .source_path = "guides/café.md", .title = "A ] title \\ & text" },
+        .{ .id = "other/deep/page", .source_path = "other/deep/page.md" },
+    };
+    var map = try buildNodeMap(gpa, &nodes);
+    defer map.deinit(gpa);
+    var headings: HeadingIndex = .{};
+    defer headings.deinit(gpa);
+    try headings.putOwned(gpa, "guides/café", &.{"part/é?&%#"});
+    const body = "[[guides/café#part/é?&%#]] / [[other/deep/page|custom \\ text]] / [[guides/café]]\n`[[literal]]`\n```\n[[fenced]]\n```\n";
+    const relative = try rewriteWikiLinksWithMapOpts(gpa, body, &map, "guides/deep/current.html", null, .{ .heading_index = &headings });
+    defer gpa.free(relative);
+    try std.testing.expectEqualStrings(
+        "[A \\] title \\\\ & text](../café.html#part%2F%C3%A9%3F%26%25%23) / [custom \\\\ text](../../other/deep/page.html) / [A \\] title \\\\ & text](../café.html)\n`[[literal]]`\n```\n[[fenced]]\n```\n",
+        relative,
+    );
+    const absolute = try rewriteWikiLinksWithMapOpts(gpa, body, &map, "guides/deep/current.html", null, .{ .heading_index = &headings, .base_url = "https://example.com/docs" });
+    defer gpa.free(absolute);
+    try std.testing.expectEqualStrings(
+        "[A \\] title \\\\ & text](https://example.com/docs/guides/café.html#part%2F%C3%A9%3F%26%25%23) / [custom \\\\ text](https://example.com/docs/other/deep/page.html) / [A \\] title \\\\ & text](https://example.com/docs/guides/café.html)\n`[[literal]]`\n```\n[[fenced]]\n```\n",
+        absolute,
+    );
+}
+
+test "wiki output path failure retains the link location" {
+    const gpa = std.testing.allocator;
+    // A mismatched caller-supplied map must still go through path validation.
+    var map: NodeMap = .{};
+    defer map.deinit(gpa);
+    try map.put(gpa, "target", .{ .id = "../escape", .source_path = "target.md" });
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.PathError, rewriteWikiLinksWithMapOpts(gpa, "Before\n[[target]]", &map, "index.html", &fail, .{}));
+    try std.testing.expectEqualStrings("target", fail.detail());
+    try std.testing.expectEqual(@as(u32, 2), fail.line);
+    try std.testing.expectEqual(@as(u32, 1), fail.column);
 }
 
 test "rewriteWikiLinks emits absolute canonical urls under a base url" {
