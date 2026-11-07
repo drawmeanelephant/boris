@@ -646,7 +646,7 @@ fn reportFirstDuplicateKey(allocator: std.mem.Allocator, bytes: []const u8) void
         index: usize = 0,
         path_mark: usize,
         last_key: []const u8 = "",
-        seen: std.StringHashMapUnmanaged(void) = .{},
+        seen: std.StringHashMapUnmanaged(void) = .empty,
     };
     var stack: std.ArrayList(Frame) = .empty;
     var path: std.ArrayList(u8) = .empty;

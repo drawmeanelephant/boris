@@ -12,10 +12,10 @@ pub const Scanner = struct {
     allocator: std.mem.Allocator,
     options: ScanOptions,
 
-    records: std.ArrayListUnmanaged(model.Record),
-    relationships: std.ArrayListUnmanaged(model.Relationship),
-    diagnostics: std.ArrayListUnmanaged(model.Diagnostic),
-    claims: std.ArrayListUnmanaged(model.DossierClaim),
+    records: std.ArrayList(model.Record),
+    relationships: std.ArrayList(model.Relationship),
+    diagnostics: std.ArrayList(model.Diagnostic),
+    claims: std.ArrayList(model.DossierClaim),
 
     pub fn init(allocator: std.mem.Allocator, options: ScanOptions) Scanner {
         return .{
@@ -89,7 +89,7 @@ pub const Scanner = struct {
     }
 
     fn scanEvidenceRoots(self: *Scanner, io: Io, root_dir: *Io.Dir) !void {
-        var targets: std.ArrayListUnmanaged([]const u8) = .empty;
+        var targets: std.ArrayList([]const u8) = .empty;
         defer targets.deinit(self.allocator);
 
         try targets.append(self.allocator, self.options.source_root);
@@ -205,7 +205,7 @@ pub const Scanner = struct {
         var active_begin_path: ?[]const u8 = null;
         var active_begin_line: u32 = 0;
 
-        var claims_in_file: std.ArrayListUnmanaged(model.DossierClaim) = .empty;
+        var claims_in_file: std.ArrayList(model.DossierClaim) = .empty;
         defer {
             for (claims_in_file.items) |claim| {
                 self.allocator.free(claim.source_path);
@@ -338,7 +338,7 @@ pub const Scanner = struct {
     }
 
     fn deriveRelationships(self: *Scanner) !void {
-        var claim_map = std.StringHashMap(std.ArrayListUnmanaged([]const u8)).init(self.allocator);
+        var claim_map = std.StringHashMap(std.ArrayList([]const u8)).init(self.allocator);
         defer {
             var it = claim_map.iterator();
             while (it.next()) |entry| {
@@ -391,7 +391,7 @@ pub const Scanner = struct {
             const dossier_list = entry.value_ptr.items;
 
             if (!known_records.contains(src_path)) {
-                var d_paths: std.ArrayListUnmanaged([]const u8) = .empty;
+                var d_paths: std.ArrayList([]const u8) = .empty;
                 for (dossier_list) |dp| {
                     try d_paths.append(self.allocator, try self.allocator.dupe(u8, dp));
                 }
@@ -405,7 +405,7 @@ pub const Scanner = struct {
             }
 
             if (dossier_list.len > 1) {
-                var d_paths: std.ArrayListUnmanaged([]const u8) = .empty;
+                var d_paths: std.ArrayList([]const u8) = .empty;
                 for (dossier_list) |dp| {
                     try d_paths.append(self.allocator, try self.allocator.dupe(u8, dp));
                 }

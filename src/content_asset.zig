@@ -513,7 +513,7 @@ fn scrubOrphanContentAssetsInner(
     gpa: std.mem.Allocator,
     inv: *const SiteAssetInventory,
 ) !void {
-    var live: std.StringHashMapUnmanaged(void) = .{};
+    var live: std.StringHashMapUnmanaged(void) = .empty;
     defer live.deinit(gpa);
     for (inv.pages) |page| {
         for (page.entries) |e| {

@@ -215,10 +215,12 @@ pub const PageList = struct {
     pages: std.ArrayList(Page) = .empty,
     /// Walk path of the page whose identity derivation failed (#851),
     /// duplicated into `retain` and carried to the diagnostic boundary so
-    /// the EINVALIDPATH diagnostic can name the file. Arena-owned, so deinit
-    /// frees it with the rest of the retained strings.
+    /// the EINVALIDPATH diagnostic can name the file. Released when the
+    /// caller destroys the retain arena, not by `PageList.deinit`.
     invalid_path: ?[]const u8 = null,
 
+    /// Create an empty list. `list_gpa` owns its spine; the caller owns the
+    /// retain arena and must keep it alive while page strings are in use.
     pub fn init(list_gpa: std.mem.Allocator, retain: std.mem.Allocator) PageList {
         return .{
             .list_gpa = list_gpa,
@@ -227,12 +229,15 @@ pub const PageList = struct {
         };
     }
 
+    /// Free only the list spine, not the caller-owned retain arena or strings.
     pub fn deinit(self: *PageList) void {
         // Strings live on `retain` (arena: free via arena deinit).
         self.pages.deinit(self.list_gpa);
         self.* = undefined;
     }
 
+    /// Append a shallow record; strings must already have retain lifetime.
+    /// May fail with OutOfMemory while growing the list.
     pub fn append(self: *PageList, page: Page) !void {
         try self.pages.append(self.list_gpa, page);
     }
@@ -254,6 +259,7 @@ pub fn pageLessThan(_: void, a: Page, b: Page) bool {
     return std.mem.order(u8, a.source_path, b.source_path) == .lt;
 }
 
+/// Sort discovery records in place by `pageLessThan`; strings are not copied.
 pub fn sortPages(pages: []Page) void {
     std.mem.sort(Page, pages, {}, pageLessThan);
 }
@@ -327,6 +333,8 @@ pub const PageDb = struct {
     retain: std.mem.Allocator,
     pages: std.ArrayList(DurablePage) = .empty,
 
+    /// Create an empty database with separate spine and retain owners.
+    /// The caller must keep `retain` alive beyond every borrowed page view.
     pub fn init(list_gpa: std.mem.Allocator, retain: std.mem.Allocator) PageDb {
         return .{
             .list_gpa = list_gpa,
@@ -335,19 +343,25 @@ pub const PageDb = struct {
         };
     }
 
+    /// Free only the list spine. The caller separately destroys the retain arena.
     pub fn deinit(self: *PageDb) void {
         self.pages.deinit(self.list_gpa);
         self.* = undefined;
     }
 
+    /// Append a shallow record whose strings/recipe already live on `retain`.
+    /// Use `promote` for parser views. Growing the spine may return OutOfMemory.
     pub fn append(self: *PageDb, page: DurablePage) !void {
         try self.pages.append(self.list_gpa, page);
     }
 
+    /// Borrow records until the next append or deinit; strings retain arena lifetime.
     pub fn items(self: *const PageDb) []const DurablePage {
         return self.pages.items;
     }
 
+    /// Borrow mutable records until the next append or deinit. Graph builders
+    /// update indices before freeze; do not mutate a frozen graph's metadata.
     pub fn itemsMut(self: *PageDb) []DurablePage {
         return self.pages.items;
     }
@@ -372,12 +386,11 @@ pub const PageDb = struct {
     /// All string data is copied onto `retain`. Callers may free the source
     /// buffer immediately after this returns.
     ///
-    /// `path_entity_id` / `source_path` / `output_path` / `kind` come from
-    /// discovery (already retain-owned or duped by the caller). When the
-    /// caller passes discovery slices that already live on `retain`, they are
-    /// re-used without a second copy when equal-owner is not detectable — the
-    /// pipeline always re-dupes path strings that came from a separate scan
-    /// arena into the PageDb retain arena for a single owner.
+    /// Discovery paths and the final entity id are copied even if already
+    /// retain-owned. The recipe is the exception: it is borrowed as an already
+    /// retain-owned value, not deep-copied. Allocation failure leaves any
+    /// partial promotions on the retain arena for its owner to release.
+    /// Governing metadata grammar: docs/contracts/frontmatter.md.
     pub fn promote(
         self: *PageDb,
         discovery: Page,

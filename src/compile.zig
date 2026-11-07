@@ -1,3 +1,9 @@
+//! HTML target orchestration: discover and promote pages, freeze the graph,
+//! render through Oliver, stage output, and publish target-local artifacts.
+//! `pipeline.zig` owns IR/RAG projections; `assemble.zig` owns layout splicing
+//! and atomic page writes. This module coordinates those existing boundaries.
+//! Normative behavior: docs/contracts/html-output.md.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const Io = std.Io;
@@ -54,7 +60,9 @@ const head_metadata = @import("head_metadata.zig");
 const rss = @import("rss.zig");
 const image_dimensions = @import("image_dimensions.zig");
 
+/// Durable page store shared with the discovery/IR pipeline.
 pub const PageDb = page_mod.PageDb;
+/// Retain-owned metadata record, re-exported from `page.zig`.
 pub const DurablePage = page_mod.DurablePage;
 
 /// Long-lived frozen graph + nav for one HTML site compile (Feature 6).
@@ -70,6 +78,8 @@ pub const FrozenSite = struct {
     /// Empty when layout has no graph chrome.
     site_nav_digest: []const u8 = "",
 
+    /// Free graph arrays, navigation, and digest through `gpa`, not borrowed
+    /// PageDb strings. No renderer may still be using this site.
     pub fn deinit(self: *FrozenSite) void {
         if (self.site_nav_digest.len > 0) self.gpa.free(self.site_nav_digest);
         graph_mod.freeNav(self.gpa, self.nav);
@@ -78,6 +88,7 @@ pub const FrozenSite = struct {
         self.* = undefined;
     }
 
+    /// Look up an exact entity id without allocating; null means absent.
     pub fn indexOf(self: *const FrozenSite, entity_id: []const u8) ?u32 {
         for (self.nodes, 0..) |n, i| {
             if (std.mem.eql(u8, n.id, entity_id)) return @intCast(i);
@@ -86,6 +97,8 @@ pub const FrozenSite = struct {
     }
 };
 
+/// Explain an evidence-refresh failure after publication already committed.
+/// Borrow inputs for this write; propagate the writer's failure.
 pub fn writePublicationChecksFailure(
     writer: *Io.Writer,
     target_name: []const u8,
@@ -247,6 +260,7 @@ fn findNodeById(nodes: []const graph_mod.Node, id: []const u8) ?graph_mod.Node {
 /// Experimental path marker — keep CLI default off this surface.
 pub const experimental: bool = true;
 
+/// Counts and scratch-arena capacities observed during an HTML compile.
 pub const CompileStats = struct {
     pages_written: usize = 0,
     pages_attempted: usize = 0,
@@ -258,6 +272,8 @@ pub const CompileStats = struct {
 /// Archetype trees that ship another theme do not carry this path (#1113).
 pub const default_layout_path = "themes/boris/layouts/main.html";
 
+/// Borrowed configuration for one HTML target. Referenced paths, rules, and
+/// optional collectors must outlive the compile; diagnostics own their copies.
 pub const CompileOptions = struct {
     /// Profile-relative layout/theme reads and output containment use this
     /// workspace without changing the process CWD.
@@ -1167,9 +1183,6 @@ fn writeCacheManifest(allocator: std.mem.Allocator, writer: anytype, manifest: C
     return compile_cache.writeCacheManifest(allocator, writer, manifest);
 }
 
-/// Site compile: layout → promote PageDb → graph freeze → whiteboard loop → dist/.
-///
-/// Single-threaded when `jobs == 1`. Does not mutate IR emit semantics.
 /// A content root that scans to zero pages still publishes a valid target
 /// (proof, search, and theme assets) and exits 0 (#775). That success is easy
 /// to misread as a populated site — most visibly when a `--timings` report
@@ -1181,6 +1194,12 @@ fn warnZeroPages(content_root: []const u8) void {
     }
 }
 
+/// Compile and publish one HTML target under `options.dist_dir`.
+/// `gpa` backs locally managed retain/scratch arenas and worker state; no
+/// allocation ownership is transferred to the caller. Returns observed stats
+/// or a configuration, content, I/O, rendering, or publication error. Evidence
+/// refresh may fail after committed pages exist; diagnostics name that boundary.
+/// See docs/contracts/html-output.md for staging and preservation semantics.
 pub fn compileHtmlSite(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1671,7 +1690,7 @@ pub fn compileHtmlSiteMulti(
     // Layout templates cached by path (per-target layouts share the same arena).
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
-    var layout_cache: std.StringHashMapUnmanaged(CachedLayout) = .{};
+    var layout_cache: std.StringHashMapUnmanaged(CachedLayout) = .empty;
     defer layout_cache.deinit(gpa);
 
     var any_failed = false;
@@ -2015,6 +2034,9 @@ pub fn compilePages(
     return compilePagesWithSite(io, gpa, db, layout, options, &site);
 }
 
+/// Compile `db` using a caller-frozen graph and layout. Borrow all inputs for
+/// this call, read layout fingerprint bytes locally, and return compile stats.
+/// Propagates file, content, rendering, publication, and allocation failures.
 pub fn compilePagesWithSite(
     io: Io,
     gpa: std.mem.Allocator,
@@ -2045,6 +2067,9 @@ pub fn compilePagesWithShared(
     return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, &site);
 }
 
+/// Compile one target while borrowing shared fingerprint inputs, layout bytes,
+/// and a frozen graph prepared by the caller. All inputs must outlive the
+/// call. Errors and output preservation match `compilePagesWithSite`.
 pub fn compilePagesWithSharedAndSite(
     io: Io,
     gpa: std.mem.Allocator,
@@ -2162,6 +2187,7 @@ fn publishStageFile(
     return compile_stage.publishStageFile(io, source_dir, source_path, final_dir, final_path);
 }
 
+/// Compare publication paths, treating slash directions as equivalent.
 pub fn publishPathsEqual(left: []const u8, right: []const u8) bool {
     // Delegated to compile_stage's internal helper; kept for any direct callers.
     if (left.len != right.len) return false;
@@ -2173,6 +2199,10 @@ pub fn publishPathsEqual(left: []const u8, right: []const u8) bool {
     return true;
 }
 
+/// Publish staged files into `final_dir`, skipping `deferred_path` when set.
+/// Borrow both handles and the path; `gpa` owns temporary walk storage.
+/// Propagate walk/read/write failures. Atomicity is per file, not per tree;
+/// see docs/contracts/html-output.md.
 pub fn publishStageTree(
     io: Io,
     gpa: std.mem.Allocator,
@@ -2479,7 +2509,7 @@ fn validatePrepublicationTarget(
     if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
     if (options.feed) |feed| try audit_assets.append(gpa, feed.path);
 
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     for (db.items()) |page| try intended.put(gpa, page.output_path, {});
     for (audit_assets.items) |path| try intended.put(gpa, path, {});
@@ -2639,7 +2669,7 @@ fn preparePageLayouts(
     const declared = try layout_select.collectDeclaredLayouts(gpa, options.layout_path, options.layout_rules);
     defer gpa.free(declared);
 
-    var layouts_by_path: std.StringHashMapUnmanaged(CachedLayout) = .{};
+    var layouts_by_path: std.StringHashMapUnmanaged(CachedLayout) = .empty;
     errdefer {
         var it = layouts_by_path.iterator();
         while (it.next()) |e| {
@@ -4213,7 +4243,7 @@ fn cleanupStaleOutputs(
     // Live page-output set for this build. Shared by stale cleanup AND the theme
     // scrub below, so a page published under `assets/` is never mistaken for an
     // orphan theme asset.
-    var live_paths: std.StringHashMapUnmanaged(void) = .{};
+    var live_paths: std.StringHashMapUnmanaged(void) = .empty;
     defer live_paths.deinit(gpa);
     for (db.items()) |p| {
         try live_paths.put(gpa, p.output_path, {});
@@ -4233,14 +4263,14 @@ fn cleanupStaleOutputs(
         // publishes them into dist/, and they are not page outputs. Orphan theme
         // assets are handled by scrubOrphanThemeAssets below (#61).
         // Skip content-local `*.assets/**` files (including .html embeds).
-        var theme_html_assets: std.StringHashMapUnmanaged(void) = .{};
+        var theme_html_assets: std.StringHashMapUnmanaged(void) = .empty;
         defer theme_html_assets.deinit(gpa);
         for (theme_bundle.assets) |a| {
             if (std.mem.endsWith(u8, a.rel_path, ".html")) {
                 try theme_html_assets.put(gpa, a.rel_path, {});
             }
         }
-        var content_html_assets: std.StringHashMapUnmanaged(void) = .{};
+        var content_html_assets: std.StringHashMapUnmanaged(void) = .empty;
         defer content_html_assets.deinit(gpa);
         for (content_assets.pages) |page_bundle| {
             for (page_bundle.entries) |e| {
@@ -4253,7 +4283,7 @@ fn cleanupStaleOutputs(
         // `.html` embed): they are committed generations, not stale page
         // outputs. Stale (no-longer-declared) static files are already
         // removed by scrubStaleStaticFiles before this walker runs.
-        var static_html_paths: std.StringHashMapUnmanaged(void) = .{};
+        var static_html_paths: std.StringHashMapUnmanaged(void) = .empty;
         defer static_html_paths.deinit(gpa);
         for (static_entries) |entry| {
             if (std.mem.endsWith(u8, entry.rel_path, ".html")) {

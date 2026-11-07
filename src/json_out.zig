@@ -6,6 +6,33 @@ const std = @import("std");
 const encode = @import("encode.zig");
 
 pub fn escapeAppend(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+    var output: ListWriter = .{ .buf = buf, .gpa = gpa };
+    escapeWrite(&output.writer, s) catch return error.OutOfMemory;
+}
+
+const ListWriter = struct {
+    buf: *std.ArrayList(u8),
+    gpa: std.mem.Allocator,
+    writer: std.Io.Writer = .{ .buffer = &.{}, .vtable = &.{ .drain = drain } },
+
+    fn drain(writer: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *@This() = @fieldParentPtr("writer", writer);
+        var written: usize = 0;
+        for (data[0 .. data.len - 1]) |part| {
+            // Preserve ArrayList growth history for arena-backed evidence writers.
+            for (part) |byte| self.buf.append(self.gpa, byte) catch return error.WriteFailed;
+            written += part.len;
+        }
+        for (0..splat) |_| {
+            for (data[data.len - 1]) |byte| self.buf.append(self.gpa, byte) catch return error.WriteFailed;
+            written += data[data.len - 1].len;
+        }
+        return written;
+    }
+};
+
+fn escapeWrite(writer: *std.Io.Writer, s: []const u8) std.Io.Writer.Error!void {
+    var start: usize = 0;
     var i: usize = 0;
     while (i < s.len) {
         // U+0085/U+2028/U+2029 are legal raw inside a JSON string, so a parser
@@ -16,29 +43,21 @@ pub fn escapeAppend(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const 
         // fragment like `role: system` standing as its own line. The `\uXXXX`
         // form decodes to the identical string and cannot split anything.
         if (encode.separatorAt(s[i..])) |sep| {
-            try buf.appendSlice(gpa, sep.json_escape);
+            try std.json.Stringify.encodeJsonStringChars(s[start..i], .{}, writer);
+            try writer.writeAll(sep.json_escape);
             i += sep.len;
+            start = i;
             continue;
         }
-        const c = s[i];
-        switch (c) {
-            '"' => try buf.appendSlice(gpa, "\\\""),
-            '\\' => try buf.appendSlice(gpa, "\\\\"),
-            '\n' => try buf.appendSlice(gpa, "\\n"),
-            '\r' => try buf.appendSlice(gpa, "\\r"),
-            '\t' => try buf.appendSlice(gpa, "\\t"),
-            else => {
-                if (c < 0x20) {
-                    var tmp: [6]u8 = undefined;
-                    const piece = try std.fmt.bufPrint(&tmp, "\\u{x:0>4}", .{c});
-                    try buf.appendSlice(gpa, piece);
-                } else {
-                    try buf.append(gpa, c);
-                }
-            },
+        // Preserve the existing byte representation instead of std's \b/\f.
+        if (s[i] == 0x08 or s[i] == 0x0c) {
+            try std.json.Stringify.encodeJsonStringChars(s[start..i], .{}, writer);
+            try writer.writeAll(if (s[i] == 0x08) "\\u0008" else "\\u000c");
+            start = i + 1;
         }
         i += 1;
     }
+    try std.json.Stringify.encodeJsonStringChars(s[start..], .{}, writer);
 }
 
 pub fn indent(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, level: usize) !void {
@@ -84,6 +103,14 @@ test "escapeAppend quotes and newlines" {
     defer buf.deinit(gpa);
     try escapeAppend(&buf, gpa, "a\"b\nc");
     try std.testing.expectEqualStrings("a\\\"b\\nc", buf.items);
+}
+
+test "stdlib JSON escaping preserves existing control and UTF-8 bytes" {
+    const gpa = std.testing.allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try escapeAppend(&buf, gpa, "\x00\x08\x0c\x1f\n\r\t\"\\é");
+    try std.testing.expectEqualStrings("\\u0000\\u0008\\u000c\\u001f\\n\\r\\t\\\"\\\\é", buf.items);
 }
 
 test "escapeAppend escapes unicode line terminators so a JSONL record cannot split" {

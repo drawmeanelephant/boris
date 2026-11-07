@@ -8,10 +8,9 @@
 //! value that is safe in one is a breakout in the next.
 //!
 //! This module owns those rules so no emitter has to remember them. It follows
-//! `json_out.escapeAppend`'s proven shape — a byte loop over a `switch`,
-//! appending into a caller-owned `ArrayList` — and deliberately does not
-//! duplicate it: JSON stays in `json_out.zig`; this covers the non-JSON
-//! containers.
+//! container-specific rules, appending into a caller-owned `ArrayList`.
+//! JSON stays in `json_out.zig`, which delegates ordinary string escaping to
+//! `std.json.Stringify`; this module covers the non-JSON containers.
 //!
 //! Encoding here is total and deterministic: it never fails on content and
 //! never rejects. Content *policy* (what a document is allowed to contain at

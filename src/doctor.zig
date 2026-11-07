@@ -894,7 +894,7 @@ fn auditSearch(
         return .incomplete;
     };
 
-    var actual_index: std.StringHashMapUnmanaged(usize) = .{};
+    var actual_index: std.StringHashMapUnmanaged(usize) = .empty;
     for (actual_documents, 0..) |document, i| {
         if (!validSearchDocument(document)) {
             try searchMalformed(builder, input.target_name, "rendered-search document shape is invalid");
@@ -918,7 +918,7 @@ fn auditSearch(
     std.mem.sort([]const u8, expected_paths, {}, lessString);
 
     var status: CoverageStatus = .checked;
-    var expected_set: std.StringHashMapUnmanaged(void) = .{};
+    var expected_set: std.StringHashMapUnmanaged(void) = .empty;
     for (expected_paths) |path| {
         safeSnapshotPath(builder.allocator, path) catch return error.UnsafeSnapshotPath;
         const put = try expected_set.getOrPut(builder.allocator, path);
@@ -1075,8 +1075,8 @@ pub const TargetAnalysisBuilder = struct {
     intended_route_paths: []const []const u8,
     search_page_paths: []const []const u8,
     states: std.ArrayList(PageState) = .empty,
-    page_index: std.StringHashMapUnmanaged(usize) = .{},
-    intended: std.StringHashMapUnmanaged(void) = .{},
+    page_index: std.StringHashMapUnmanaged(usize) = .empty,
+    intended: std.StringHashMapUnmanaged(void) = .empty,
     findings: std.ArrayList(Finding) = .empty,
     html_status: CoverageStatus = .checked,
     missing_expected_pages: usize = 0,
@@ -1250,7 +1250,7 @@ pub fn analyzeTarget(gpa: std.mem.Allocator, input: TargetInput) Error!Report {
     std.mem.sort(PageInput, sorted_pages, {}, pageInputLess);
 
     var states = try a.alloc(PageState, sorted_pages.len);
-    var page_index: std.StringHashMapUnmanaged(usize) = .{};
+    var page_index: std.StringHashMapUnmanaged(usize) = .empty;
     for (sorted_pages, 0..) |page, i| {
         try safeSnapshotPath(a, page.path);
         if (!std.mem.endsWith(u8, page.path, ".html")) return error.UnsafeSnapshotPath;
@@ -1260,7 +1260,7 @@ pub fn analyzeTarget(gpa: std.mem.Allocator, input: TargetInput) Error!Report {
         states[i] = .{ .page = page };
     }
 
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     for (input.intended_route_paths) |path| {
         try safeSnapshotPath(a, path);
         try intended.put(a, path, {});
