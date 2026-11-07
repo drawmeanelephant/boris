@@ -24,6 +24,10 @@
 
 ::selection { background: var(--mark); color: var(--bright); }
 
+/* Emergency breaks for author text and graph labels, not tabular data. */
+body { overflow-wrap: anywhere; }
+table { overflow-wrap: normal; }
+
 body {
   margin: 0 auto;
   max-width: 66rem;
@@ -214,4 +218,22 @@ mark { background: var(--mark); color: var(--bright); }
   .site-content h2 { border-color: #999; }
   .admonition, .details, .site-content figure, .site-content pre { break-inside: avoid; }
   .site-content pre { white-space: pre-wrap; }
+  .site-content table { display: table; width: 100%; max-width: none; table-layout: fixed; overflow: visible; }
+  .site-content th, .site-content td { overflow-wrap: anywhere; }
+}
+
+/* Keep the native grid inside its keyboard-accessible scroll surface. */
+.table-viewport { max-width: 100%; overflow-x: auto; }
+.table-viewport > table { display: table; max-width: none; overflow: visible; }
+.table-viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.table-entry { margin: 0; font-size: 0.85em; }
+.table-entry a { display: inline-block; color: inherit; text-decoration: none; }
+@media print {
+  .table-viewport { overflow: visible; }
+  .table-entry { display: none; }
+}
+
+/* Preserve the theme's existing intrinsic-width grid in this screen mode. */
+@media screen {
+  .table-viewport > table { width: max-content; }
 }

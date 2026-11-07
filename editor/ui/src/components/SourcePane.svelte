@@ -16,7 +16,8 @@
     onOpenGraphNode,
     onScale,
     onReset,
-    onEnterFocus
+    onEnterFocus,
+    onBuildDiagnostics
   }: {
     onSave: () => void;
     onNavigate: (problem: Problem) => void;
@@ -25,6 +26,7 @@
     onScale: () => void;
     onReset: () => void;
     onEnterFocus: (trigger: HTMLElement | null) => void;
+    onBuildDiagnostics: () => void;
   } = $props();
 
   let focusEntry = $state() as HTMLButtonElement | undefined;
@@ -415,7 +417,7 @@
         </ul>
       </aside>
     {/if}
-    <AuthoringTools collapsed={density.mode === 'author'} />
+    <AuthoringTools collapsed={density.mode === 'author'} onBuildDiagnostics={onBuildDiagnostics} />
     <RecipePane
       onScale={onScale}
       onReset={onReset}
@@ -424,6 +426,7 @@
     <ThemePane
       onOpenFile={onOpenFile}
       onNavigate={onNavigate}
+      onBuildDiagnostics={onBuildDiagnostics}
     />
   {/if}
 </section>

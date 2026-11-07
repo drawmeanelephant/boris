@@ -45,7 +45,7 @@ export async function refreshAuthoring() {
   if (result.response.ok) setAuthoring(result.data);
   else {
     authoring.failed = true;
-    authoring.status = 'The Boris build succeeded, but completion.json could not be adapted.';
+    authoring.status = 'Boris authoring hints could not be refreshed. Previous suggestions, if any, are unchanged.';
   }
 }
 

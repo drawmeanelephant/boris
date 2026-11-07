@@ -5,14 +5,19 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 
 - **Skip link.** "Skip to content" targets `#main-content`, a `main` with
   `tabindex="-1"`.
-- **Landmarks.** A body-level `header`, a navigation `aside` whose menu is a
+- **Main-layout landmarks.** A body-level `header`, a navigation `aside` whose menu is a
   native `<details>` disclosure (open by default, keyboard-operable without
   JavaScript), one `main`, a labelled "On this page" `aside`, and a footer.
 - **Palette.** One light palette only; there is no dark variant to verify.
+- **Link front.** `links.html` keeps the skip target and one main landmark,
+  without documentation rails or fixed-header offsets. Tight and loose
+  top-level link lists use 56px minimum-height targets with the same visible
+  focus treatment. Prose links outside those lists remain inline. Print adds
+  actual URL destinations and removes the link-row borders.
 - **Focus.** `:focus-visible` draws a 2px outline in the primary colour with
   a 2px offset: `#00535b` is 8.35:1 on the surface `#fcf8f9`. Anchored
   headings carry `scroll-margin-top` so a fragment jump is not hidden under
-  the fixed header.
+  `main.html`'s fixed header; the link front uses only a small top margin.
 - **Contrast.** Body text `#1b1b1c` on `#fcf8f9`; secondary text `#3e494a`
   8.83:1; links `#00535b` 8.35:1. Aside titles use the kind colour on the
   flat `#f6f3f4` panel: note/info `#00535b` 7.97:1, tip `#2d6a2d` 5.93:1,

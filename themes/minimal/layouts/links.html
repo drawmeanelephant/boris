@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  <link rel="stylesheet" href="{{asset-url assets/minimal.css}}">
+  <link rel="stylesheet" href="{{asset-url assets/links.css}}">
+  {{head}}
+</head>
+<body class="links-page">
+<a class="skip-link" href="#main-content">Skip to content</a>
+<main id="main-content" class="links-main" tabindex="-1" data-boris-search-root>
+  <div class="boris-content">{{content}}</div>
+  <div class="graph-links" data-boris-search-exclude>{{children}}{{relations}}{{backlinks}}</div>
+</main>
+</body>
+</html>

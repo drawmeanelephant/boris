@@ -271,7 +271,7 @@ apply to the whole target; rules do not create per-page asset namespaces.
 
 ### 4.4 Cache and watch
 
-HTML cache format is `boris-cache-v3-nav-digest`. Each page entry records
+HTML cache format is `boris-cache-v4-table-viewport`. Each page entry records
 `selected_layout`. Fingerprints hash the effective selected layout path and
 bytes (plus theme material for that layout), not the full rule table. Watch
 observes every declared layout path; a changed layout rebuilds only targets
@@ -584,7 +584,7 @@ Node, a bundler, or network access.
 
 - `--layout-rule TARGET SELECTOR LAYOUT_PATH` with `id:` / `glob:` / `role:`.
 - Deterministic precedence, one theme root per target, cache format
-  `boris-cache-v3-nav-digest` with per-page `selected_layout`.
+  `boris-cache-v4-table-viewport` with per-page `selected_layout`.
 - Fixtures: `docs/contracts/fixtures/layout-rules/`; pure selector module
   `src/layout_select.zig`. No IR schema change; no DaisyUI/Node/CSS pipeline.
 
