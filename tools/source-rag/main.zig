@@ -1847,7 +1847,7 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir, opts: Options) !void {
     const common_suffix =
         \\## Regenerating
         \\
-        \\From the repo root (Zig 0.16+):
+        \\From the repo root (Zig 0.17+):
         \\
         \\```bash
         \\zig build source-rag

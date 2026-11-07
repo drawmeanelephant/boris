@@ -1749,7 +1749,7 @@ fn readExactlyFd(fd: std.c.fd_t, buf: []u8) !void {
     }
 }
 
-/// Raw socket write. `std.posix` no longer wraps write in 0.16, so the relay
+/// Raw socket write. `std.posix` no longer wraps write in 0.17, so the relay
 /// (which deliberately avoids the Io interface layer) goes through libc.
 fn writeAllFd(fd: std.c.fd_t, bytes: []const u8) !void {
     var i: usize = 0;
@@ -2431,7 +2431,7 @@ test "matrix: the golden publish-report fixture matches the contract shape" {
 }
 
 // =============================================================================
-// wss:// end-to-end: a real TLS mock relay. std 0.16 has no TLS *server*, so
+// wss:// end-to-end: a real TLS mock relay. std 0.17 has no TLS *server*, so
 // the relay is a tiny python `ssl` process (scripts/nostr-mock-relay-tls.py)
 // pinned by the committed self-signed CA (docs/contracts/fixtures/.../tls/).
 // =============================================================================
@@ -2478,7 +2478,7 @@ const TlsRelay = struct {
             .stderr = .inherit,
         }) catch return error.SpawnFailed;
         errdefer {
-            // `Child.kill` in 0.16 blocks until the child is reaped; a later
+            // `Child.kill` in 0.17 blocks until the child is reaped; a later
             // `wait` would assert on the already-cleared id.
             if (child.id != null) child.kill(testing.io);
         }

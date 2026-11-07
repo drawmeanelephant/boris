@@ -226,7 +226,7 @@ pub fn computePageFingerprintThemeInputCounted(
 /// visited in order, and within a node `id` is registered before `sourcePath`,
 /// so the first node matching a key still wins.
 pub const NodeLookup = struct {
-    map: std.StringHashMapUnmanaged([]const u8) = .{},
+    map: std.StringHashMapUnmanaged([]const u8) = .empty,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !NodeLookup {
@@ -274,10 +274,10 @@ pub fn getAffectedPagesIndexed(
     lookup: *const NodeLookup,
     dep_index: *const dependency.DependencyIndex,
 ) ![]const []const u8 {
-    var affected_ids: std.StringHashMapUnmanaged(void) = .{};
+    var affected_ids: std.StringHashMapUnmanaged(void) = .empty;
     defer affected_ids.deinit(allocator);
 
-    var visited: std.StringHashMapUnmanaged(void) = .{};
+    var visited: std.StringHashMapUnmanaged(void) = .empty;
     defer visited.deinit(allocator);
 
     var stack: std.ArrayList([]const u8) = .empty;

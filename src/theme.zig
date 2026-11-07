@@ -400,7 +400,7 @@ fn scrubOrphanThemeAssetsInner(
     };
     defer assets_dir.close(io);
 
-    var live: std.StringHashMapUnmanaged(void) = .{};
+    var live: std.StringHashMapUnmanaged(void) = .empty;
     defer live.deinit(gpa);
     try live.ensureTotalCapacity(gpa, @intCast(live_assets.len));
     for (live_assets) |a| {
@@ -661,7 +661,7 @@ test "scrubOrphanThemeAssets removes deleted and renamed assets" {
     const live = [_]AssetEntry{.{ .rel_path = keep_path, .bytes = keep_bytes }};
 
     // No content pages published under assets/ in this build.
-    var no_pages: std.StringHashMapUnmanaged(void) = .{};
+    var no_pages: std.StringHashMapUnmanaged(void) = .empty;
     defer no_pages.deinit(gpa);
 
     scrubOrphanThemeAssets(io, out_dir, gpa, &live, &no_pages);
@@ -704,7 +704,7 @@ test "scrubOrphanThemeAssets preserves page outputs published under assets/" {
     const live = [_]AssetEntry{.{ .rel_path = theme_css, .bytes = css_bytes }};
 
     // The build's live page-output set carries the assets/-namespaced page.
-    var page_outputs: std.StringHashMapUnmanaged(void) = .{};
+    var page_outputs: std.StringHashMapUnmanaged(void) = .empty;
     defer page_outputs.deinit(gpa);
     try page_outputs.put(gpa, "assets/css/docs.html", {});
 

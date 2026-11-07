@@ -132,7 +132,7 @@ pub fn expandDirtySet(
     var lookup = try cache_mod.NodeLookup.init(gpa, nodes);
     defer lookup.deinit();
 
-    var by_entity_id: std.StringHashMapUnmanaged(usize) = .{};
+    var by_entity_id: std.StringHashMapUnmanaged(usize) = .empty;
     defer by_entity_id.deinit(gpa);
     try by_entity_id.ensureTotalCapacity(gpa, @intCast(pages.len));
     for (pages, 0..) |page, idx| {

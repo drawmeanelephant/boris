@@ -74,14 +74,14 @@ pub fn collectFragmentTargetSet(
     include_bytes: [][][]u8,
     include_paths: [][][]u8,
 ) !std.StringHashMapUnmanaged(void) {
-    var targets: std.StringHashMapUnmanaged(void) = .{};
+    var targets: std.StringHashMapUnmanaged(void) = .empty;
     errdefer {
         var it = targets.keyIterator();
         while (it.next()) |k| gpa.free(k.*);
         targets.deinit(gpa);
     }
 
-    var seen: std.StringHashMapUnmanaged(void) = .{};
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
     defer seen.deinit(gpa);
     var raw_ids: std.ArrayList([]const u8) = .empty;
     defer raw_ids.deinit(gpa);
@@ -209,7 +209,7 @@ pub fn buildSiteHeadingIndex(
     if (needed.count() == 0) return .{ index, snapshot };
 
     // entity_id → prior entry
-    var prior_map: std.StringHashMapUnmanaged(*const ParsedHeadingHarvestEntry) = .{};
+    var prior_map: std.StringHashMapUnmanaged(*const ParsedHeadingHarvestEntry) = .empty;
     defer prior_map.deinit(gpa);
     if (prior_harvest) |ph| {
         if (std.mem.eql(u8, ph.format, HEADING_HARVEST_FORMAT)) {

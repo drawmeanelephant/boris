@@ -797,42 +797,47 @@ fn validateLoopbackRedirect(value: []const u8) Error!void {
 fn appendFormPair(list: *std.ArrayList(u8), allocator: std.mem.Allocator, name: []const u8, value: []const u8) !void {
     try list.appendSlice(allocator, name);
     try list.append(allocator, '=');
-    for (value) |byte| {
-        if (isUnreserved(byte)) {
-            try list.append(allocator, byte);
-        } else {
-            const hex = "0123456789ABCDEF";
-            try list.appendSlice(allocator, &.{ '%', hex[byte >> 4], hex[byte & 15] });
-        }
-    }
+    var output = std.Io.Writer.Allocating.fromArrayList(allocator, list);
+    defer list.* = output.toArrayList();
+    writeFormEncoded(&output.writer, value) catch return error.OutOfMemory;
 }
 
 fn writeFormEncoded(writer: *std.Io.Writer, value: []const u8) std.Io.Writer.Error!void {
-    const hex = "0123456789ABCDEF";
-    for (value) |byte| {
-        if (isUnreserved(byte)) try writer.writeByte(byte) else try writer.writeAll(&.{ '%', hex[byte >> 4], hex[byte & 15] });
-    }
+    return std.Uri.Component.percentEncode(writer, value, isUnreserved);
 }
 
 fn formDecode(buffer: []u8, encoded: []const u8) Error![]const u8 {
-    var out: usize = 0;
+    var decoded_len: usize = 0;
     var index: usize = 0;
-    while (index < encoded.len) : (index += 1) {
-        if (out >= buffer.len) return error.CallbackMalformed;
+    while (index < encoded.len) {
+        if (decoded_len == buffer.len) return error.CallbackMalformed;
         const byte = encoded[index];
-        if (byte == '+') {
-            buffer[out] = ' ';
-        } else if (byte == '%') {
+        // Form '+' means a space, which this opaque callback field rejects.
+        // Check before decoding so a percent-encoded '+' remains literal.
+        if (byte == '+') return error.CallbackMalformed;
+        if (byte == '%') {
             if (index + 2 >= encoded.len or !std.ascii.isHex(encoded[index + 1]) or !std.ascii.isHex(encoded[index + 2])) return error.CallbackMalformed;
-            buffer[out] = std.fmt.parseInt(u8, encoded[index + 1 ..][0..2], 16) catch return error.CallbackMalformed;
-            index += 2;
-        } else {
-            buffer[out] = byte;
-        }
-        if (buffer[out] <= 0x20 or buffer[out] >= 0x7f) return error.CallbackMalformed;
-        out += 1;
+            index += 3;
+        } else index += 1;
+        decoded_len += 1;
     }
-    return buffer[0..out];
+    const decoded = std.Uri.percentDecodeBackwards(buffer, encoded);
+    for (decoded) |byte| if (byte <= 0x20 or byte >= 0x7f) return error.CallbackMalformed;
+    return decoded;
+}
+
+test "form codec preserves encoded plus and rejects malformed opaque callback values" {
+    var buffer: [2]u8 = undefined;
+    try std.testing.expectEqualStrings("AB", try formDecode(&buffer, "%41%42"));
+    try std.testing.expectEqualStrings("+", try formDecode(&buffer, "%2B"));
+    try std.testing.expectEqualStrings("%", try formDecode(&buffer, "%25"));
+    for ([_][]const u8{ "abc", "%", "%2", "%GG", "+", "%20", "%00", "%7F", "%FF", "%C3%A9" }) |invalid| {
+        try std.testing.expectError(error.CallbackMalformed, formDecode(&buffer, invalid));
+    }
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+    try writeFormEncoded(&output.writer, "AZaz09-._~ +%/\xc3\xa9");
+    try std.testing.expectEqualStrings("AZaz09-._~%20%2B%25%2F%C3%A9", output.written());
 }
 
 fn validOpaque(value: []const u8, limit: usize) bool {

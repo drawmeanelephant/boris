@@ -7,11 +7,13 @@
 const std = @import("std");
 const parser = @import("parser.zig");
 
+/// Shared diagnostic severity vocabulary from docs/contracts/diagnostics.md.
 pub const Severity = enum {
     error_,
     warning,
     info,
 
+    /// Stable serialized spelling; the error enum tag is not its wire name.
     pub fn jsonName(self: Severity) []const u8 {
         return switch (self) {
             .error_ => "error",
@@ -143,6 +145,7 @@ pub const Code = enum {
     EUSAGE,
     EIO,
 
+    /// Borrow static author guidance for a layout error; no allocation.
     pub fn remediationForLayout(code: Code) []const u8 {
         return switch (code) {
             .ELAYOUTMISSINGMARKER => "Add the required {{content}} (and any other referenced slot) marker to the layout template",
@@ -172,15 +175,22 @@ pub fn parserCategoryToCode(cat: parser.Category) Code {
     };
 }
 
+/// Borrowed diagnostic record. The producer owns strings unless a `Collector`
+/// has copied them; source positions follow docs/contracts/diagnostics.md.
 pub const Diagnostic = struct {
+    /// Determines whether the diagnostic contributes to a failing build.
     severity: Severity,
+    /// Stable category shared by CLI text and machine-readable reports.
     code: Code,
+    /// Author-facing explanation; borrowed from the producer.
     message: []const u8,
     /// Clear remediation guidance for authors/tools.
     remediation: []const u8 = "",
     /// Content-root-relative path, or empty if not applicable.
     source_path: []const u8 = "",
+    /// One-based physical source line, or null when unavailable.
     line: ?u32 = null,
+    /// One-based byte column, or null when unavailable.
     column: ?u32 = null,
     /// Related entity id, or empty if unknown.
     id: []const u8 = "",
@@ -209,6 +219,7 @@ pub fn lessThan(_: void, a: Diagnostic, b: Diagnostic) bool {
     return std.mem.order(u8, a.message, b.message) == .lt;
 }
 
+/// Sort records in place using the contract order; string ownership is unchanged.
 pub fn sortDiagnostics(diags: []Diagnostic) void {
     std.mem.sort(Diagnostic, diags, {}, lessThan);
 }
@@ -224,7 +235,7 @@ pub fn sortDiagnostics(diags: []Diagnostic) void {
 /// Unit-test binaries are the one other default-on context: they compile with
 /// `builtin.is_test`, so expected negative-path prose (validation failures,
 /// publication-evidence failures) stays off stderr during green runs. The
-/// Zig 0.16 build runner captures a test binary's stderr and re-prints it on
+/// Zig 0.17 build runner captures a test binary's stderr and re-prints it on
 /// the step even when every test passes, appending a red `failed command:`
 /// line — indistinguishable from a real failure (#768). Test evidence flows
 /// through returned diagnostics, `Collector`s, and writer-injected buffers,
@@ -280,6 +291,7 @@ pub fn formatText(d: Diagnostic, allocator: std.mem.Allocator) ![]u8 {
     });
 }
 
+/// Count only error-severity records; warnings and information do not fail builds.
 pub fn countErrors(diags: []const Diagnostic) usize {
     var n: usize = 0;
     for (diags) |d| {
@@ -304,10 +316,14 @@ pub const Collector = struct {
     mutex: std.Io.Mutex = .init,
     io: std.Io,
 
+    /// Create an empty collector backed by `gpa`; `io` drives its mutex.
+    /// Call `deinit` after all producers and report readers have stopped.
     pub fn init(gpa: std.mem.Allocator, io: std.Io) Collector {
         return .{ .arena = std.heap.ArenaAllocator.init(gpa), .io = io };
     }
 
+    /// Copy every string from `d` into the collector's arena under the mutex.
+    /// The caller may release its strings on return. OOM drops the record.
     pub fn append(self: *Collector, d: Diagnostic) void {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
@@ -325,6 +341,7 @@ pub const Collector = struct {
         self.list.append(self.arena.child_allocator, owned) catch {};
     }
 
+    /// Release the list and copied strings. Requires exclusive access.
     pub fn deinit(self: *Collector) void {
         self.list.deinit(self.arena.child_allocator);
         self.arena.deinit();

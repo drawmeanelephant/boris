@@ -72,7 +72,7 @@ fn parse(args: []const []const u8) CliError!Options {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             // Side-effect-free: printing the usage text is the caller's job.
             // The --help unit test exercises this path, and output here would
-            // leak onto stderr, which the Zig 0.16 build runner surfaces as a
+            // leak onto stderr, which the Zig 0.17 build runner surfaces as a
             // "failed command" block on green focused-gate runs (#882).
             return error.Help;
         }

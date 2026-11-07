@@ -192,7 +192,7 @@ pub fn expectDirTreesEqual(io: Io, gpa: std.mem.Allocator, left_rel: []const u8,
     var right = try cwd.openDir(io, right_rel, .{ .iterate = true });
     defer right.close(io);
 
-    var seen: std.StringHashMapUnmanaged(void) = .{};
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
     defer {
         var it = seen.keyIterator();
         while (it.next()) |k| gpa.free(k.*);
