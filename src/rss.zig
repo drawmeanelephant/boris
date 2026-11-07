@@ -108,6 +108,13 @@ fn appendElement(buf: *Sink, comptime indent: []const u8, comptime name: []const
 }
 
 pub fn render(allocator: std.mem.Allocator, pages: []const graph.Node, options: Options) ![]u8 {
+    var out = Sink.init(allocator);
+    errdefer out.deinit();
+    try renderInto(&out, allocator, pages, options);
+    return try out.toOwnedSlice();
+}
+
+fn renderInto(out: *Sink, allocator: std.mem.Allocator, pages: []const graph.Node, options: Options) !void {
     if (options.limit < 1 or options.limit > 500) return error.InvalidLimit;
     if (options.publication_location) |location| {
         publication_location.validateSiteUrl(allocator, location, options.site_url) catch |err| switch (err) {
@@ -127,37 +134,30 @@ pub fn render(allocator: std.mem.Allocator, pages: []const graph.Node, options: 
     std.mem.sort(Item, items.items, {}, itemLess);
     if (items.items.len > options.limit) items.shrinkRetainingCapacity(options.limit);
 
-    var out = Sink.init(allocator);
-    errdefer out.deinit();
     try out.lit("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss version=\"2.0\">\n  <channel>\n");
-    try appendElement(&out, "    ", "title", options.title);
-    try appendElement(&out, "    ", "link", site_url);
-    try appendElement(&out, "    ", "description", options.description);
-    try appendElement(&out, "    ", "generator", pipeline.compiler_id);
+    try appendElement(out, "    ", "title", options.title);
+    try appendElement(out, "    ", "link", site_url);
+    try appendElement(out, "    ", "description", options.description);
+    try appendElement(out, "    ", "generator", pipeline.compiler_id);
     for (items.items) |item| {
         try out.lit("    <item>\n");
-        try appendElement(&out, "      ", "title", item.node.title orelse item.node.id);
+        try appendElement(out, "      ", "title", item.node.title orelse item.node.id);
         var url = Sink.init(allocator);
         defer url.deinit();
         try appendPageUrl(&url, allocator, site_url, item.node.id);
-        try appendElement(&out, "      ", "link", url.items());
+        try appendElement(out, "      ", "link", url.items());
         try out.lit("      <guid isPermaLink=\"true\">");
         try out.field(.xml_text, url.items());
         try out.lit("</guid>\n");
-        try appendElement(&out, "      ", "description", item.node.summary.?);
+        try appendElement(out, "      ", "description", item.node.summary.?);
         var date: std.ArrayList(u8) = .empty;
         defer date.deinit(allocator);
         try rss_date.appendRfc822(&date, allocator, item.timestamp);
-        try appendElement(&out, "      ", "pubDate", date.items);
-        for (item.node.tags) |tag| try appendElement(&out, "      ", "category", tag);
+        try appendElement(out, "      ", "pubDate", date.items);
+        for (item.node.tags) |tag| try appendElement(out, "      ", "category", tag);
         try out.lit("    </item>\n");
     }
     try out.lit("  </channel>\n</rss>\n");
-    return try out.toOwnedSlice();
-}
-
-fn ensureParent(io: Io, path: []const u8) !void {
-    if (std.fs.path.dirname(path)) |parent| if (parent.len > 0) try Io.Dir.cwd().createDirPath(io, parent);
 }
 
 fn readFileAlloc(io: Io, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
@@ -167,23 +167,15 @@ fn readFileAlloc(io: Io, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return try reader.interface.allocRemaining(allocator, .unlimited);
 }
 
-fn publish(io: Io, allocator: std.mem.Allocator, path: []const u8, data: []const u8) !void {
-    _ = allocator;
-    var stage_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const stage = try std.fmt.bufPrint(&stage_buf, "{s}.boris-stage", .{path});
-    var previous_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const previous = try std.fmt.bufPrint(&previous_buf, "{s}.boris-prev", .{path});
-    const cwd = Io.Dir.cwd();
-    cwd.deleteFile(io, stage) catch {};
-    cwd.deleteFile(io, previous) catch {};
-    try ensureParent(io, stage);
-    try cwd.writeFile(io, .{ .sub_path = stage, .data = data });
-    cwd.rename(path, cwd, previous, io) catch {};
-    cwd.rename(stage, cwd, path, io) catch |err| {
-        cwd.rename(previous, cwd, path, io) catch {};
-        return err;
-    };
-    cwd.deleteFile(io, previous) catch {};
+fn publish(io: Io, allocator: std.mem.Allocator, path: []const u8, pages: []const graph.Node, options: Options) !void {
+    var atomic = try Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true, .make_path = true });
+    defer atomic.deinit(io);
+    var buffer: [4096]u8 = undefined;
+    var writer = atomic.file.writer(io, &buffer);
+    var out = Sink.initWriter(allocator, &writer.interface);
+    try renderInto(&out, allocator, pages, options);
+    try writer.interface.flush();
+    try atomic.replace(io);
 }
 
 pub fn run(io: Io, allocator: std.mem.Allocator, options: Options) !Result {
@@ -200,9 +192,7 @@ pub fn run(io: Io, allocator: std.mem.Allocator, options: Options) !Result {
     }) };
     errdefer result.deinit();
     if (!result.compile.ok) return result;
-    const data = try render(allocator, result.compile.pages.items, options);
-    defer allocator.free(data);
-    try publish(io, allocator, options.out_path, data);
+    try publish(io, allocator, options.out_path, result.compile.pages.items, options);
     result.published = true;
     return result;
 }
@@ -221,6 +211,79 @@ test "RSS renderer is deterministic, sorted, escaped, and bounded" {
     try std.testing.expect(std.mem.indexOf(u8, rendered, "draft.html") == null);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "old.html") == null);
     try std.testing.expect(std.mem.indexOf(u8, rendered, "posts/a.html").? < std.mem.indexOf(u8, rendered, "posts/z.html").?);
+}
+
+test "RSS atomic streaming preserves the destination after a late validation failure" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, ".zig-cache/tmp/{s}/rss.xml", .{tmp.sub_path});
+    const options: Options = .{ .site_url = "https://example.test/docs", .title = "News", .description = "Updates", .limit = 500 };
+    const summary: [1024]u8 = @splat('x');
+    var pages: [21]graph.Node = @splat(.{
+        .id = "a",
+        .source_path = "a.md",
+        .published_at = "2026-07-28T14:30:00Z",
+        .summary = &summary,
+    });
+    pages[20].id = "z";
+    pages[20].tags = &.{"bad\x01"};
+    try tmp.dir.writeFile(io, .{ .sub_path = "rss.xml", .data = "previous feed" });
+    try std.testing.expectError(error.InvalidXml, publish(io, gpa, path, &pages, options));
+    const previous = try readFileAlloc(io, path, gpa);
+    defer gpa.free(previous);
+    try std.testing.expectEqualStrings("previous feed", previous);
+    var iterator = tmp.dir.iterate();
+    var entries: usize = 0;
+    while (try iterator.next(io)) |entry| {
+        entries += 1;
+        try std.testing.expectEqualStrings("rss.xml", entry.name);
+    }
+    try std.testing.expectEqual(@as(usize, 1), entries);
+
+    pages[20].tags = &.{"news"};
+    try publish(io, gpa, path, &pages, options);
+    const actual = try readFileAlloc(io, path, gpa);
+    defer gpa.free(actual);
+    const expected = try render(gpa, &pages, options);
+    defer gpa.free(expected);
+    try std.testing.expectEqualStrings(expected, actual);
+    var buffer: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    var sink = Sink.initWriter(gpa, &writer);
+    try std.testing.expectError(error.WriteFailed, renderInto(&sink, gpa, &pages, options));
+}
+
+test "RSS file publication does not allocate an artifact-sized serialization buffer" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, ".zig-cache/tmp/{s}/rss.xml", .{tmp.sub_path});
+    const summary: [1024]u8 = @splat('&');
+    var ids: [500][8]u8 = undefined;
+    var pages: [500]graph.Node = undefined;
+    for (&pages, &ids, 0..) |*node, *id, index| {
+        node.* = .{
+            .id = try std.fmt.bufPrint(id, "p{d:0>3}", .{index}),
+            .source_path = "page.md",
+            .published_at = "2026-07-28T14:30:00Z",
+            .summary = &summary,
+        };
+    }
+    var memory: [512 * 1024]u8 = undefined;
+    var allocator = std.heap.FixedBufferAllocator.init(&memory);
+    try publish(io, allocator.allocator(), path, &pages, .{
+        .site_url = "https://example.test",
+        .title = "News",
+        .description = "Updates",
+        .limit = 500,
+    });
+    const file = try tmp.dir.openFile(io, "rss.xml", .{});
+    defer file.close(io);
+    try std.testing.expect((try file.stat(io)).size > memory.len);
 }
 
 test "XML escaping and site URL validation reject unsafe values" {
