@@ -426,38 +426,42 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
 /// a control byte anywhere in a page's text shipped raw inside a JSON string
 /// and the whole search index failed to parse — client search silently dead for
 /// the entire site, not just that page. That is the cost of a second escaper.
-fn jsonString(out: *std.ArrayList(u8), a: std.mem.Allocator, value: []const u8) !void {
-    try json_out.writeString(out, a, value);
+fn jsonString(out: *std.Io.Writer, value: []const u8) !void {
+    try json_out.writeStringTo(out, value);
 }
 pub fn writeJson(a: std.mem.Allocator, documents: []const Document) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(a);
-    try out.appendSlice(a, "{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n  \"documents\": [");
+    var out = std.Io.Writer.Allocating.init(a);
+    errdefer out.deinit();
+    writeJsonTo(&out.writer, documents) catch return error.OutOfMemory;
+    return try out.toOwnedSlice();
+}
+
+pub fn writeJsonTo(out: *std.Io.Writer, documents: []const Document) std.Io.Writer.Error!void {
+    try out.writeAll("{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n  \"documents\": [");
     for (documents, 0..) |d, di| {
-        if (di > 0) try out.appendSlice(a, ",");
-        try out.appendSlice(a, "\n    {\n      \"path\": ");
-        try jsonString(&out, a, d.path);
-        try out.appendSlice(a, ",\n      \"title\": ");
-        try jsonString(&out, a, d.title);
-        try out.appendSlice(a, ",\n      \"sections\": [");
+        if (di > 0) try out.writeAll(",");
+        try out.writeAll("\n    {\n      \"path\": ");
+        try jsonString(out, d.path);
+        try out.writeAll(",\n      \"title\": ");
+        try jsonString(out, d.title);
+        try out.writeAll(",\n      \"sections\": [");
         for (d.sections, 0..) |s, si| {
-            if (si > 0) try out.appendSlice(a, ",");
+            if (si > 0) try out.writeAll(",");
             var prefix: [96]u8 = undefined;
-            const prefix_text = try std.fmt.bufPrint(&prefix, "\n        {{\"level\": {d}, \"heading\": ", .{s.level});
-            try out.appendSlice(a, prefix_text);
-            try jsonString(&out, a, s.heading);
-            try out.appendSlice(a, ", \"fragment\": ");
-            try jsonString(&out, a, s.fragment);
-            try out.appendSlice(a, ", \"text\": ");
-            try jsonString(&out, a, s.text);
-            try out.appendSlice(a, ", \"code\": ");
-            try jsonString(&out, a, s.code);
-            try out.appendSlice(a, "}");
+            const prefix_text = std.fmt.bufPrint(&prefix, "\n        {{\"level\": {d}, \"heading\": ", .{s.level}) catch unreachable;
+            try out.writeAll(prefix_text);
+            try jsonString(out, s.heading);
+            try out.writeAll(", \"fragment\": ");
+            try jsonString(out, s.fragment);
+            try out.writeAll(", \"text\": ");
+            try jsonString(out, s.text);
+            try out.writeAll(", \"code\": ");
+            try jsonString(out, s.code);
+            try out.writeAll("}");
         }
-        try out.appendSlice(a, "\n      ]\n    }");
+        try out.writeAll("\n      ]\n    }");
     }
-    try out.appendSlice(a, "\n  ]\n}\n");
-    return out.toOwnedSlice(a);
+    try out.writeAll("\n  ]\n}\n");
 }
 
 fn readFileAlloc(io: std.Io, dir: std.Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
@@ -515,13 +519,11 @@ pub fn writeOverlay(
         try documents.append(allocator, document);
     }
 
-    const json = try writeJson(allocator, documents.items);
-    defer allocator.free(json);
     var atomic = try staged_dir.createFileAtomic(io, output_path, .{ .replace = true, .make_path = true });
     defer atomic.deinit(io);
     var buffer: [4096]u8 = undefined;
     var writer = atomic.file.writer(io, &buffer);
-    try writer.interface.writeAll(json);
+    try writeJsonTo(&writer.interface, documents.items);
     try writer.interface.flush();
     try atomic.replace(io);
 }
@@ -1033,4 +1035,43 @@ test "writeJson escapes control characters so the index stays parseable" {
     for (bytes) |c| try std.testing.expect(c >= 0x20 or c == '\n');
     var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
     defer parsed.deinit();
+    var buffer: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try writeJsonTo(&writer, &docs);
+    try std.testing.expectEqualStrings(bytes, writer.buffered());
+    var full = std.Io.Writer.fixed(&.{});
+    try std.testing.expectError(error.WriteFailed, writeJsonTo(&full, &docs));
+}
+
+test "search streaming cleans up its temporary file after atomic replacement fails" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var stage = std.testing.tmpDir(.{});
+    defer stage.cleanup();
+    var live = std.testing.tmpDir(.{});
+    defer live.cleanup();
+    const prose: [8192]u8 = @splat('x');
+    var html_buffer: [8400]u8 = undefined;
+    var html = std.Io.Writer.fixed(&html_buffer);
+    try html.writeAll("<main data-boris-search-root><h1>Title</h1><p>");
+    try html.writeAll(&prose);
+    try html.writeAll("</p></main>");
+    try live.dir.writeFile(io, .{ .sub_path = "index.html", .data = html.buffered() });
+    try stage.dir.createDirPath(io, output_path);
+    try stage.dir.writeFile(io, .{ .sub_path = output_path ++ "/keep", .data = "untouched" });
+    if (writeOverlay(io, gpa, stage.dir, live.dir, &.{"index.html"}, true)) |_| {
+        return error.ExpectedReplacementFailure;
+    } else |_| {}
+    const keep = try stage.dir.readFileAlloc(io, output_path ++ "/keep", gpa, .unlimited);
+    defer gpa.free(keep);
+    try std.testing.expectEqualStrings("untouched", keep);
+    var parent = try stage.dir.openDir(io, "_boris/search", .{ .iterate = true });
+    defer parent.close(io);
+    var iterator = parent.iterate();
+    var entries: usize = 0;
+    while (try iterator.next(io)) |entry| {
+        entries += 1;
+        try std.testing.expectEqualStrings("search-index.json", entry.name);
+    }
+    try std.testing.expectEqual(@as(usize, 1), entries);
 }

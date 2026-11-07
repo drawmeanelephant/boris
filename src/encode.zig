@@ -8,7 +8,7 @@
 //! value that is safe in one is a breakout in the next.
 //!
 //! This module owns those rules so no emitter has to remember them. It follows
-//! container-specific rules, appending into a caller-owned `ArrayList`.
+//! container-specific rules, writing to a caller-owned `std.Io.Writer`.
 //! JSON stays in `json_out.zig`, which delegates ordinary string escaping to
 //! `std.json.Stringify`; this module covers the non-JSON containers.
 //!
@@ -53,50 +53,58 @@ pub const Target = enum {
     dot_label,
 };
 
-pub fn escapeAppend(
-    buf: *std.ArrayList(u8),
-    gpa: std.mem.Allocator,
+pub fn write(
+    writer: *std.Io.Writer,
     comptime target: Target,
     s: []const u8,
-) !void {
+) std.Io.Writer.Error!void {
     switch (target) {
-        .yaml_scalar => try appendYaml(buf, gpa, s, false),
-        .yaml_flow_item => try appendYaml(buf, gpa, s, true),
-        .yaml_quoted_scalar => try appendYamlQuoted(buf, gpa, s),
-        .md_table_cell => try appendMdTableCell(buf, gpa, s),
-        .md_heading => try appendMdHeading(buf, gpa, s),
-        .md_block_text => try appendSingleLine(buf, gpa, s),
-        .xml_text => try appendXml(buf, gpa, s, false),
-        .xml_attr => try appendXml(buf, gpa, s, true),
-        .mermaid_label => try appendMermaidLabel(buf, gpa, s),
-        .dot_label => try appendDotLabel(buf, gpa, s),
+        .yaml_scalar => try appendYaml(writer, s, false),
+        .yaml_flow_item => try appendYaml(writer, s, true),
+        .yaml_quoted_scalar => try appendYamlQuoted(writer, s),
+        .md_table_cell => try appendMdTableCell(writer, s),
+        .md_heading => try appendMdHeading(writer, s),
+        .md_block_text => try appendSingleLine(writer, s),
+        .xml_text => try appendXml(writer, s, false),
+        .xml_attr => try appendXml(writer, s, true),
+        .mermaid_label => try appendMermaidLabel(writer, s),
+        .dot_label => try appendDotLabel(writer, s),
     }
 }
 
-/// Encode the concatenation of `parts` as one value.
-///
-/// Safety is decided on the joined string, never per part. An emitter that
-/// builds `content/pages/<id>.md` must not be able to launder a hostile `<id>`
-/// by sitting it next to a benign literal.
-pub fn escapeAppendJoined(
-    buf: *std.ArrayList(u8),
+/// Encode joined parts as one value, so boundaries cannot launder syntax.
+pub fn writeJoined(
+    writer: *std.Io.Writer,
     gpa: std.mem.Allocator,
     comptime target: Target,
     parts: []const []const u8,
 ) !void {
-    if (parts.len == 1) return escapeAppend(buf, gpa, target, parts[0]);
-    var joined: std.ArrayList(u8) = .empty;
-    defer joined.deinit(gpa);
-    for (parts) |part| try joined.appendSlice(gpa, part);
-    try escapeAppend(buf, gpa, target, joined.items);
+    if (parts.len == 1) return write(writer, target, parts[0]);
+    var joined = std.Io.Writer.Allocating.init(gpa);
+    defer joined.deinit();
+    for (parts) |part| joined.writer.writeAll(part) catch return error.OutOfMemory;
+    try write(writer, target, joined.written());
 }
 
-/// Convenience wrapper for callers that want an owned slice.
+/// Existing buffer callers transfer ownership to the writer and back, without
+/// copying the accumulated bytes.
+pub fn escapeAppend(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, comptime target: Target, s: []const u8) !void {
+    var output = std.Io.Writer.Allocating.fromArrayList(gpa, buf);
+    defer buf.* = output.toArrayList();
+    write(&output.writer, target, s) catch return error.OutOfMemory;
+}
+
+pub fn escapeAppendJoined(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, comptime target: Target, parts: []const []const u8) !void {
+    var output = std.Io.Writer.Allocating.fromArrayList(gpa, buf);
+    defer buf.* = output.toArrayList();
+    writeJoined(&output.writer, gpa, target, parts) catch return error.OutOfMemory;
+}
+
 pub fn alloc(gpa: std.mem.Allocator, comptime target: Target, s: []const u8) ![]u8 {
-    var buf: std.ArrayList(u8) = .empty;
-    errdefer buf.deinit(gpa);
-    try escapeAppend(&buf, gpa, target, s);
-    return try buf.toOwnedSlice(gpa);
+    var output = std.Io.Writer.Allocating.init(gpa);
+    errdefer output.deinit();
+    write(&output.writer, target, s) catch return error.OutOfMemory;
+    return try output.toOwnedSlice();
 }
 
 // ---------------------------------------------------------------------------
@@ -202,42 +210,42 @@ fn yamlPlainSafe(s: []const u8, flow: bool) bool {
     return !coercesToNonString(s);
 }
 
-fn appendYaml(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8, flow: bool) !void {
+fn appendYaml(writer: *std.Io.Writer, s: []const u8, flow: bool) !void {
     if (yamlPlainSafe(s, flow)) {
-        try buf.appendSlice(gpa, s);
+        try writer.writeAll(s);
         return;
     }
-    try appendYamlQuoted(buf, gpa, s);
+    try appendYamlQuoted(writer, s);
 }
 
-fn appendYamlQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
-    try buf.append(gpa, '"');
+fn appendYamlQuoted(writer: *std.Io.Writer, s: []const u8) !void {
+    try writer.writeByte('"');
     var i: usize = 0;
     while (i < s.len) {
         if (separatorAt(s[i..])) |sep| {
-            try buf.appendSlice(gpa, sep.escape);
+            try writer.writeAll(sep.escape);
             i += sep.len;
             continue;
         }
         const c = s[i];
         switch (c) {
-            '"' => try buf.appendSlice(gpa, "\\\""),
-            '\\' => try buf.appendSlice(gpa, "\\\\"),
-            '\n' => try buf.appendSlice(gpa, "\\n"),
-            '\r' => try buf.appendSlice(gpa, "\\r"),
-            '\t' => try buf.appendSlice(gpa, "\\t"),
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
             else => {
                 if (c < 0x20 or c == 0x7F) {
                     var tmp: [4]u8 = undefined;
-                    try buf.appendSlice(gpa, try std.fmt.bufPrint(&tmp, "\\x{x:0>2}", .{c}));
+                    try writer.writeAll(std.fmt.bufPrint(&tmp, "\\x{x:0>2}", .{c}) catch unreachable);
                 } else {
-                    try buf.append(gpa, c);
+                    try writer.writeByte(c);
                 }
             },
         }
         i += 1;
     }
-    try buf.append(gpa, '"');
+    try writer.writeByte('"');
 }
 
 // ---------------------------------------------------------------------------
@@ -247,19 +255,19 @@ fn appendYamlQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const 
 /// Collapse anything that would end the emitter's line into a single space.
 /// A markdown cell or heading has no representation for an embedded break, so
 /// substituting a space is lossless in layout terms and closes the breakout.
-fn appendSingleLine(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+fn appendSingleLine(writer: *std.Io.Writer, s: []const u8) !void {
     var i: usize = 0;
     while (i < s.len) {
         if (separatorAt(s[i..])) |sep| {
-            try buf.append(gpa, ' ');
+            try writer.writeByte(' ');
             i += sep.len;
             continue;
         }
         const c = s[i];
         if (c == '\n' or c == '\r' or c < 0x20) {
-            try buf.append(gpa, ' ');
+            try writer.writeByte(' ');
         } else {
-            try buf.append(gpa, c);
+            try writer.writeByte(c);
         }
         i += 1;
     }
@@ -268,23 +276,23 @@ fn appendSingleLine(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const 
 /// A GFM table splits cells on `|` *before* inline parsing, and `\|` is the
 /// only escape it honours. `\` must be escaped first or a trailing backslash
 /// in the value would consume our own escape and re-open the breakout.
-fn appendMdTableCell(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+fn appendMdTableCell(writer: *std.Io.Writer, s: []const u8) !void {
     var i: usize = 0;
     while (i < s.len) {
         if (separatorAt(s[i..])) |sep| {
-            try buf.append(gpa, ' ');
+            try writer.writeByte(' ');
             i += sep.len;
             continue;
         }
         switch (s[i]) {
-            '\\' => try buf.appendSlice(gpa, "\\\\"),
-            '|' => try buf.appendSlice(gpa, "\\|"),
+            '\\' => try writer.writeAll("\\\\"),
+            '|' => try writer.writeAll("\\|"),
             else => {
                 const c = s[i];
                 if (c == '\n' or c == '\r' or c < 0x20) {
-                    try buf.append(gpa, ' ');
+                    try writer.writeByte(' ');
                 } else {
-                    try buf.append(gpa, c);
+                    try writer.writeByte(c);
                 }
             },
         }
@@ -295,15 +303,15 @@ fn appendMdTableCell(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const
 /// ATX heading text. Line breaks would end the heading and let the rest of the
 /// value become arbitrary block markdown; a trailing `#` run would be read as a
 /// closing sequence and silently dropped from the title.
-fn appendMdHeading(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+fn appendMdHeading(writer: *std.Io.Writer, s: []const u8) !void {
     var end = s.len;
     while (end > 0 and s[end - 1] == '#') end -= 1;
     const has_closing_run = end < s.len and (end == 0 or isSpace(s[end - 1]));
     const body_len = if (has_closing_run) end else s.len;
 
-    try appendSingleLine(buf, gpa, s[0..body_len]);
+    try appendSingleLine(writer, s[0..body_len]);
     if (has_closing_run) {
-        for (s[body_len..]) |_| try buf.appendSlice(gpa, "\\#");
+        for (s[body_len..]) |_| try writer.writeAll("\\#");
     }
 }
 
@@ -314,31 +322,31 @@ fn appendMdHeading(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u
 /// XML 1.0 forbids most C0 control characters outright — no escape exists for
 /// them. They are replaced with U+FFFD so the breakage is visible in output
 /// rather than silently dropped.
-fn appendXml(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8, attr: bool) !void {
+fn appendXml(writer: *std.Io.Writer, s: []const u8, attr: bool) !void {
     var i: usize = 0;
     while (i < s.len) : (i += 1) {
         // Legal XML characters, but a consumer that splits on line terminators
         // still splits on them. A numeric reference is lossless and unambiguous.
         if (separatorAt(s[i..])) |sep| {
-            try buf.appendSlice(gpa, sep.xml_ref);
+            try writer.writeAll(sep.xml_ref);
             i += sep.len - 1;
             continue;
         }
         const c = s[i];
         switch (c) {
-            '&' => try buf.appendSlice(gpa, "&amp;"),
-            '<' => try buf.appendSlice(gpa, "&lt;"),
-            '>' => try buf.appendSlice(gpa, "&gt;"),
-            '"' => try buf.appendSlice(gpa, if (attr) "&quot;" else "\""),
-            '\'' => try buf.appendSlice(gpa, if (attr) "&apos;" else "'"),
-            '\t' => try buf.appendSlice(gpa, if (attr) "&#x9;" else "\t"),
-            '\n' => try buf.appendSlice(gpa, if (attr) "&#xA;" else "\n"),
-            '\r' => try buf.appendSlice(gpa, "&#xD;"),
+            '&' => try writer.writeAll("&amp;"),
+            '<' => try writer.writeAll("&lt;"),
+            '>' => try writer.writeAll("&gt;"),
+            '"' => try writer.writeAll(if (attr) "&quot;" else "\""),
+            '\'' => try writer.writeAll(if (attr) "&apos;" else "'"),
+            '\t' => try writer.writeAll(if (attr) "&#x9;" else "\t"),
+            '\n' => try writer.writeAll(if (attr) "&#xA;" else "\n"),
+            '\r' => try writer.writeAll("&#xD;"),
             else => {
                 if (c < 0x20 or c == 0x7F) {
-                    try buf.appendSlice(gpa, "\u{FFFD}");
+                    try writer.writeAll("\u{FFFD}");
                 } else {
-                    try buf.append(gpa, c);
+                    try writer.writeByte(c);
                 }
             },
         }
@@ -356,24 +364,24 @@ fn appendXml(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8, att
 /// HTML label markup. Line terminators flatten to a space: a label has no
 /// representation for an embedded break and splitting one would forge a new
 /// diagram statement.
-fn appendMermaidLabel(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+fn appendMermaidLabel(writer: *std.Io.Writer, s: []const u8) !void {
     var i: usize = 0;
     while (i < s.len) {
         if (separatorAt(s[i..])) |sep| {
-            try buf.append(gpa, ' ');
+            try writer.writeByte(' ');
             i += sep.len;
             continue;
         }
         const c = s[i];
         if (c < 0x20 or c == 0x7F) {
-            try buf.append(gpa, ' ');
+            try writer.writeByte(' ');
         } else switch (c) {
-            '#' => try buf.appendSlice(gpa, "#35;"),
-            '"' => try buf.appendSlice(gpa, "#quot;"),
-            '&' => try buf.appendSlice(gpa, "#38;"),
-            '<' => try buf.appendSlice(gpa, "#60;"),
-            '>' => try buf.appendSlice(gpa, "#62;"),
-            else => try buf.append(gpa, c),
+            '#' => try writer.writeAll("#35;"),
+            '"' => try writer.writeAll("#quot;"),
+            '&' => try writer.writeAll("#38;"),
+            '<' => try writer.writeAll("#60;"),
+            '>' => try writer.writeAll("#62;"),
+            else => try writer.writeByte(c),
         }
         i += 1;
     }
@@ -383,21 +391,21 @@ fn appendMermaidLabel(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []cons
 /// are the only characters that can escape the quotes, so the backslash is
 /// doubled first. Line terminators flatten to a space for the same reason as
 /// Mermaid labels: a raw break would end the attribute statement.
-fn appendDotLabel(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+fn appendDotLabel(writer: *std.Io.Writer, s: []const u8) !void {
     var i: usize = 0;
     while (i < s.len) {
         if (separatorAt(s[i..])) |sep| {
-            try buf.append(gpa, ' ');
+            try writer.writeByte(' ');
             i += sep.len;
             continue;
         }
         const c = s[i];
         if (c < 0x20 or c == 0x7F) {
-            try buf.append(gpa, ' ');
+            try writer.writeByte(' ');
         } else switch (c) {
-            '"' => try buf.appendSlice(gpa, "\\\""),
-            '\\' => try buf.appendSlice(gpa, "\\\\"),
-            else => try buf.append(gpa, c),
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            else => try writer.writeByte(c),
         }
         i += 1;
     }
@@ -411,6 +419,10 @@ fn expectEncoded(comptime target: Target, input: []const u8, want: []const u8) !
     const got = try alloc(std.testing.allocator, target, input);
     defer std.testing.allocator.free(got);
     try std.testing.expectEqualStrings(want, got);
+    var buffer: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try write(&writer, target, input);
+    try std.testing.expectEqualStrings(want, writer.buffered());
 }
 
 test "yaml scalar leaves ordinary values plain" {
@@ -532,6 +544,20 @@ test "joined values are judged as a whole, not part by part" {
     // start; joined, it opens a mapping and must be quoted.
     try escapeAppendJoined(&buf, gpa, .yaml_scalar, &.{ "content/pages/", "evil: x", ".md" });
     try std.testing.expectEqualStrings("\"content/pages/evil: x.md\"", buf.items);
+    var buffer: [128]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    try writeJoined(&writer, gpa, .yaml_scalar, &.{ "content/pages/", "evil: x", ".md" });
+    try std.testing.expectEqualStrings("\"content/pages/evil: x.md\"", writer.buffered());
+}
+
+test "writer encoding reports write failure and buffer adapters preserve allocation failures" {
+    var writer = std.Io.Writer.fixed(&.{});
+    try std.testing.expectError(error.WriteFailed, write(&writer, .xml_text, "&"));
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(failing.allocator());
+    try std.testing.expectError(error.OutOfMemory, escapeAppend(&buf, failing.allocator(), .xml_text, "&"));
+    try std.testing.expectEqual(@as(usize, 0), buf.items.len);
 }
 
 /// Every code point a consumer may treat as a hard line break: ASCII LF and CR

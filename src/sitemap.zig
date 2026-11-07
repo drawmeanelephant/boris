@@ -89,6 +89,20 @@ fn renderWithLimits(
     url_limit: usize,
     byte_limit: usize,
 ) ![]u8 {
+    var out = Sink.init(allocator);
+    errdefer out.deinit();
+    try renderInto(&out, allocator, raw_site_url, page_paths, url_limit, byte_limit);
+    return try out.toOwnedSlice();
+}
+
+fn renderInto(
+    out: *Sink,
+    allocator: std.mem.Allocator,
+    raw_site_url: []const u8,
+    page_paths: []const []const u8,
+    url_limit: usize,
+    byte_limit: usize,
+) !void {
     if (page_paths.len > url_limit) return error.SitemapUrlLimitExceeded;
     const normalized_base = try site_url.normalized(allocator, raw_site_url);
     defer allocator.free(normalized_base);
@@ -110,19 +124,24 @@ fn renderWithLimits(
         }
     }
 
-    var out = Sink.init(allocator);
-    errdefer out.deinit();
+    // Count the exact encoded bytes before emitting, including the closing tag.
+    // The URL list is retained for sorting; the complete XML is not.
+    var count = std.Io.Writer.Discarding.init(&.{});
+    var counter = Sink.initWriter(allocator, &count.writer);
+    try writeUrlset(&counter, urls);
+    if (count.fullCount() > byte_limit) return error.SitemapSizeLimitExceeded;
+    try writeUrlset(out, urls);
+}
+
+fn writeUrlset(out: *Sink, urls: []const []u8) !void {
     try out.lit("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     try out.lit("<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
     for (urls) |url| {
         try out.lit("  <url><loc>");
         try out.field(.xml_text, url);
         try out.lit("</loc></url>\n");
-        if (out.items().len > byte_limit) return error.SitemapSizeLimitExceeded;
     }
     try out.lit("</urlset>\n");
-    if (out.items().len > byte_limit) return error.SitemapSizeLimitExceeded;
-    return try out.toOwnedSlice();
 }
 
 pub fn render(
@@ -186,14 +205,12 @@ pub fn writeOverlay(
     for (page_paths) |path| {
         if (!try overlayContains(io, staged_dir, live_dir, path)) return error.SitemapPageMissing;
     }
-    const bytes = try render(allocator, raw_site_url, page_paths);
-    defer allocator.free(bytes);
-
     var atomic = try staged_dir.createFileAtomic(io, output_path, .{ .replace = true, .make_path = true });
     defer atomic.deinit(io);
     var buffer: [4096]u8 = undefined;
     var writer = atomic.file.writer(io, &buffer);
-    try writer.interface.writeAll(bytes);
+    var out = Sink.initWriter(allocator, &writer.interface);
+    try renderInto(&out, allocator, raw_site_url, page_paths, max_urls, max_uncompressed_bytes);
     try writer.interface.flush();
     try atomic.replace(io);
 }
@@ -236,6 +253,62 @@ test "sitemap rejects duplicate URLs and the protocol URL limit without truncati
         max_urls,
         80,
     ));
+}
+
+test "sitemap streaming counts escaped bytes and closing tag at the exact limit" {
+    const gpa = std.testing.allocator;
+    const base = "https://example.test/a&b";
+    const paths: []const []const u8 = &.{ "café.html", "index.html" };
+    const expected = try render(gpa, base, paths);
+    defer gpa.free(expected);
+    const exact = try renderWithLimits(gpa, base, paths, paths.len, expected.len);
+    defer gpa.free(exact);
+    try std.testing.expectEqualStrings(expected, exact);
+    try std.testing.expectError(error.SitemapSizeLimitExceeded, renderWithLimits(gpa, base, paths, paths.len, expected.len - 1));
+    var buffer: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    var sink = Sink.initWriter(gpa, &writer);
+    try std.testing.expectError(error.SitemapSizeLimitExceeded, renderInto(&sink, gpa, base, paths, paths.len, expected.len - 1));
+    try std.testing.expectEqual(@as(usize, 0), writer.buffered().len);
+    try renderInto(&sink, gpa, base, paths, paths.len, expected.len);
+    try std.testing.expectEqualStrings(expected, writer.buffered());
+    var full = std.Io.Writer.fixed(&.{});
+    var failing_sink = Sink.initWriter(gpa, &full);
+    try std.testing.expectError(error.WriteFailed, renderInto(&failing_sink, gpa, base, paths, paths.len, expected.len));
+}
+
+test "sitemap overlay streams exact bytes and preserves the prior file on invalid input" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var stage = std.testing.tmpDir(.{ .iterate = true });
+    defer stage.cleanup();
+    var live = std.testing.tmpDir(.{});
+    defer live.cleanup();
+    try stage.dir.writeFile(io, .{ .sub_path = "z.html", .data = "<main>Z</main>" });
+    try live.dir.writeFile(io, .{ .sub_path = "a.html", .data = "<main>A</main>" });
+    const paths: []const []const u8 = &.{ "z.html", "a.html" };
+    try writeOverlay(io, gpa, stage.dir, live.dir, default_output_path, "https://example.test", paths);
+    const expected = try render(gpa, "https://example.test", paths);
+    defer gpa.free(expected);
+    try std.testing.expectError(error.SitemapDuplicateUrl, writeOverlay(
+        io,
+        gpa,
+        stage.dir,
+        live.dir,
+        default_output_path,
+        "https://example.test",
+        &.{ "a.html", "a.html" },
+    ));
+    const actual = try stage.dir.readFileAlloc(io, default_output_path, gpa, .unlimited);
+    defer gpa.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
+    var iterator = stage.dir.iterate();
+    var entries: usize = 0;
+    while (try iterator.next(io)) |entry| {
+        entries += 1;
+        try std.testing.expect(std.mem.eql(u8, entry.name, "z.html") or std.mem.eql(u8, entry.name, default_output_path));
+    }
+    try std.testing.expectEqual(@as(usize, 2), entries);
 }
 
 test "sitemap path validation rejects empty absolute escaping and owned paths" {
