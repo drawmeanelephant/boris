@@ -2517,11 +2517,8 @@ fn indexOfString(values: []const []const u8, wanted: []const u8) ?usize {
     return null;
 }
 
-/// One no-follow open per evidence input, read exactly once: the streaming
-/// pass counts and hashes every byte while collecting the payload, which the
-/// streaming JSON parser then replays from memory. A path replaced after the
-/// open can never mix evidence versions, and the bytes counted and hashed are
-/// exactly the bytes parsed.
+/// One no-follow open per evidence input. Count and hash bytes as the JSON
+/// parser consumes them, without a whole-file replay buffer or a second read.
 const EvidenceInput = evidence_mod.EvidenceInput(Error);
 
 pub const NodeKind = enum {
@@ -3286,7 +3283,6 @@ pub fn writeAfterClaims(
     defer claims_input.close(io);
     if (options.after_open) |hook| hook(options.after_open_context);
 
-    try artifacts_input.hashPass(report_gpa, error.InvalidArtifactsReport);
     var inventory = artifact_inventory.parseStream(report_gpa, artifacts_input.parseReader(), target) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.InvalidArtifactsReport,
@@ -3294,11 +3290,9 @@ pub fn writeAfterClaims(
     defer inventory.deinit();
     const artifacts_binding = artifacts_input.finish();
 
-    try checks_input.hashPass(report_gpa, error.InvalidChecksReport);
     const parsed_checks = try parseChecksStream(report_gpa, checks_input.parseReader(), target);
     const checks_binding = checks_input.finish();
 
-    try claims_input.hashPass(report_gpa, error.InvalidClaimsReport);
     const parsed_claims = try parseClaimsStream(report_gpa, claims_input.parseReader(), target);
     const claims_binding = claims_input.finish();
 
@@ -3622,9 +3616,11 @@ pub fn checksVerdictLine(
     defer arena.deinit();
     const a = arena.allocator();
     const path = std.mem.concat(a, u8, &.{ output_dir, "/_boris/proof/checks.json" }) catch return null;
-    const bytes = readPayload(io, Io.Dir.cwd(), a, path) catch return null;
-    var stream: std.Io.Reader = .fixed(bytes);
-    var parsed = parseChecksStream(a, &stream, target_name) catch return null;
+    const file = Io.Dir.cwd().openFile(io, path, .{}) catch return null;
+    defer file.close(io);
+    var buffer: [64 * 1024]u8 = undefined;
+    var stream = file.reader(io, &buffer);
+    var parsed = parseChecksStream(a, &stream.interface, target_name) catch return null;
     return formatChecksVerdict(gpa, &parsed.checks, parsed.findings) catch null;
 }
 
