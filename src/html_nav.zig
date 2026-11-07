@@ -33,9 +33,23 @@ fn isDraft(node: graph_mod.Node) bool {
     return node.status != null and std.mem.eql(u8, node.status.?, "draft");
 }
 
-fn outputPathFor(allocator: std.mem.Allocator, node: graph_mod.Node) ![]u8 {
-    return try std.fmt.allocPrint(allocator, "{s}.html", .{node.id});
-}
+const HrefBuffers = struct {
+    output_path: std.ArrayList(u8) = .empty,
+    href: std.ArrayList(u8) = .empty,
+
+    fn deinit(self: *HrefBuffers, allocator: std.mem.Allocator) void {
+        self.output_path.deinit(allocator);
+        self.href.deinit(allocator);
+    }
+
+    fn appendEscapedHref(self: *HrefBuffers, buf: *std.ArrayList(u8), allocator: std.mem.Allocator, current_output_path: []const u8, node: graph_mod.Node) !void {
+        self.output_path.clearRetainingCapacity();
+        try identity.appendHtmlOutputPath(&self.output_path, allocator, node.id);
+        self.href.clearRetainingCapacity();
+        try identity.appendRelativeHref(&self.href, allocator, current_output_path, self.output_path.items);
+        try appendEscaped(buf, allocator, self.href.items);
+    }
+};
 
 /// Stable site-nav fingerprint material: ordered `(id, title, parent, role, status)` lines.
 pub fn siteNavMaterial(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) ![]u8 {
@@ -68,6 +82,7 @@ fn breadcrumbContains(nav: []const graph_mod.NavEntry, current_index: u32, index
 fn appendNavNode(
     allocator: std.mem.Allocator,
     buf: *std.ArrayList(u8),
+    hrefs: *HrefBuffers,
     nodes: []const graph_mod.Node,
     nav: []const graph_mod.NavEntry,
     index: u32,
@@ -80,10 +95,6 @@ fn appendNavNode(
     strict: bool,
 ) !void {
     const node = nodes[index];
-    const out_path = try outputPathFor(allocator, node);
-    defer allocator.free(out_path);
-    const href = try identity.relativeHref(allocator, current_output_path, out_path);
-    defer allocator.free(href);
     const is_current = index == current_index;
     const is_ancestor = !is_current and breadcrumbContains(nav, current_index, index);
 
@@ -92,7 +103,7 @@ fn appendNavNode(
     if (is_current) try buf.appendSlice(allocator, " is-current");
     if (is_ancestor) try buf.appendSlice(allocator, " is-ancestor");
     try buf.appendSlice(allocator, "\"><a href=\"");
-    try appendEscaped(buf, allocator, href);
+    try hrefs.appendEscapedHref(buf, allocator, current_output_path, node);
     try buf.appendSlice(allocator, "\"");
     if (is_current and !strict) try buf.appendSlice(allocator, " aria-current=\"page\"");
     try buf.appendSlice(allocator, ">");
@@ -120,7 +131,7 @@ fn appendNavNode(
             // below it, so a published satellite under a draft section stays
             // emitted but unadvertised until its parent publishes (#738).
             if (isDraft(nodes[child_index])) continue;
-            try appendNavNode(allocator, buf, nodes, nav, child_index, current_index, current_output_path, false, level + 1, max_depth, strict);
+            try appendNavNode(allocator, buf, hrefs, nodes, nav, child_index, current_index, current_output_path, false, level + 1, max_depth, strict);
         }
         try buf.appendSlice(allocator, "</ul>\n");
     }
@@ -157,6 +168,8 @@ pub fn renderNavProfile(
 ) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
+    var hrefs: HrefBuffers = .{};
+    defer hrefs.deinit(allocator);
 
     try buf.appendSlice(allocator, if (strict) "<div class=\"site-nav\">\n" else "<nav class=\"site-nav\" aria-label=\"Site\">\n<ul>\n");
     var any_trunk = false;
@@ -166,7 +179,7 @@ pub fn renderNavProfile(
         if (isDraft(node)) continue; // draft trunks are not advertised (#738)
         if (strict and !any_trunk) try buf.appendSlice(allocator, "<ul>\n");
         any_trunk = true;
-        try appendNavNode(allocator, &buf, nodes, nav, @intCast(i), current_index, current_output_path, true, 1, max_depth, strict);
+        try appendNavNode(allocator, &buf, &hrefs, nodes, nav, @intCast(i), current_index, current_output_path, true, 1, max_depth, strict);
     }
 
     if (!strict or any_trunk) try buf.appendSlice(allocator, "</ul>\n");
@@ -206,16 +219,14 @@ pub fn renderChildrenProfile(
 
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
+    var hrefs: HrefBuffers = .{};
+    defer hrefs.deinit(allocator);
     try buf.appendSlice(allocator, if (strict) "<div class=\"page-children\">\n<ul>\n" else "<nav class=\"page-children\" aria-label=\"Children\">\n<ul>\n");
     for (children) |ci| {
         if (isDraft(nodes[ci])) continue;
         const child = nodes[ci];
-        const output_path = try outputPathFor(allocator, child);
-        defer allocator.free(output_path);
-        const href = try identity.relativeHref(allocator, current_output_path, output_path);
-        defer allocator.free(href);
         try buf.appendSlice(allocator, "<li><a href=\"");
-        try appendEscaped(&buf, allocator, href);
+        try hrefs.appendEscapedHref(&buf, allocator, current_output_path, child);
         try buf.appendSlice(allocator, "\">");
         try appendEscaped(&buf, allocator, displayTitle(child));
         try buf.appendSlice(allocator, "</a></li>\n");
@@ -246,14 +257,12 @@ pub fn renderParentProfile(
 ) ![]u8 {
     const parent_index = nodes[current_index].parent_index orelse return "";
     const parent = nodes[parent_index];
-    const out_path = try outputPathFor(allocator, parent);
-    defer allocator.free(out_path);
-    const href = try identity.relativeHref(allocator, current_output_path, out_path);
-    defer allocator.free(href);
+    var hrefs: HrefBuffers = .{};
+    defer hrefs.deinit(allocator);
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
     try buf.appendSlice(allocator, if (strict) "<div class=\"page-parent\"><a href=\"" else "<nav class=\"page-parent\" aria-label=\"Parent\"><a href=\"");
-    try appendEscaped(&buf, allocator, href);
+    try hrefs.appendEscapedHref(&buf, allocator, current_output_path, parent);
     try buf.appendSlice(allocator, "\">");
     try appendEscaped(&buf, allocator, displayTitle(parent));
     try buf.appendSlice(allocator, if (strict) "</a></div>" else "</a></nav>");
@@ -281,6 +290,8 @@ pub fn renderBreadcrumbProfile(
 ) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
+    var hrefs: HrefBuffers = .{};
+    defer hrefs.deinit(allocator);
 
     try buf.appendSlice(allocator, if (strict) "<div class=\"breadcrumb\">\n<ol>\n" else "<nav class=\"breadcrumb\" aria-label=\"Breadcrumb\">\n<ol>\n");
 
@@ -293,12 +304,8 @@ pub fn renderBreadcrumbProfile(
             try appendEscaped(&buf, allocator, displayTitle(node));
             try buf.appendSlice(allocator, "</li>\n");
         } else {
-            const out_path = try outputPathFor(allocator, node);
-            defer allocator.free(out_path);
-            const href = try identity.relativeHref(allocator, current_output_path, out_path);
-            defer allocator.free(href);
             try buf.appendSlice(allocator, "<li><a href=\"");
-            try appendEscaped(&buf, allocator, href);
+            try hrefs.appendEscapedHref(&buf, allocator, current_output_path, node);
             try buf.appendSlice(allocator, "\">");
             try appendEscaped(&buf, allocator, displayTitle(node));
             try buf.appendSlice(allocator, "</a></li>\n");
@@ -617,4 +624,45 @@ test "navigation chrome has deterministic landmarks, lists, current state, and e
     const title = try renderTitle(gpa, g.nodes[current]);
     defer gpa.free(title);
     try std.testing.expectEqualStrings("Home &amp; &lt;Start&gt; &quot;quoted&quot;", title);
+}
+
+test "navigation buffers preserve full escaped nested href bytes across recursion" {
+    const gpa = std.testing.allocator;
+    var nodes = [_]graph_mod.Node{
+        .{ .id = "guide&\"/root", .source_path = "guide&\"/root.md", .title = "Root & <start>" },
+        .{ .id = "guide&\"/root/child", .source_path = "guide&\"/root/child.md", .title = "Child", .parent = "guide&\"/root" },
+        .{ .id = "z/é", .source_path = "z/é.md", .title = "Last", .parent = "guide&\"/root" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try graph_mod.validate(gpa, gpa, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
+    const graph = try graph_mod.freeze(gpa, &nodes, null);
+    defer gpa.free(graph.edges);
+    const nav = try graph_mod.buildNav(gpa, graph.nodes);
+    defer graph_mod.freeNav(gpa, nav);
+    const inner =
+        "<li class=\"site-nav__trunk is-ancestor\"><a href=\"../../../guide&amp;&quot;/root.html\">Root &amp; &lt;start&gt;</a>\n<ul>\n" ++
+        "<li class=\"site-nav__satellite is-current\"><a href=\"../../../guide&amp;&quot;/root/child.html\"";
+    const tail =
+        ">Child</a></li>\n" ++
+        "<li class=\"site-nav__satellite\"><a href=\"../../../z/é.html\">Last</a></li>\n</ul>\n</li>\n</ul>\n";
+    const site = try renderNav(gpa, graph.nodes, nav, 1, "outside/a/b/page.html", null);
+    defer gpa.free(site);
+    try std.testing.expectEqualStrings("<nav class=\"site-nav\" aria-label=\"Site\">\n<ul>\n" ++ inner ++ " aria-current=\"page\"" ++ tail ++ "</nav>", site);
+    const strict = try renderNavProfile(gpa, graph.nodes, nav, 1, "outside/a/b/page.html", null, true);
+    defer gpa.free(strict);
+    try std.testing.expectEqualStrings("<div class=\"site-nav\">\n<ul>\n" ++ inner ++ tail ++ "</div>", strict);
+    const children = try renderChildren(gpa, graph.nodes, nav, 0, "guide&\"/root.html");
+    defer gpa.free(children);
+    try std.testing.expectEqualStrings(
+        "<nav class=\"page-children\" aria-label=\"Children\">\n<ul>\n<li><a href=\"root/child.html\">Child</a></li>\n<li><a href=\"../z/é.html\">Last</a></li>\n</ul>\n</nav>",
+        children,
+    );
+    const crumb = try renderBreadcrumb(gpa, graph.nodes, nav, 1, "guide&\"/root/child.html");
+    defer gpa.free(crumb);
+    try std.testing.expectEqualStrings(
+        "<nav class=\"breadcrumb\" aria-label=\"Breadcrumb\">\n<ol>\n<li><a href=\"../root.html\">Root &amp; &lt;start&gt;</a></li>\n<li aria-current=\"page\">Child</li>\n</ol>\n</nav>",
+        crumb,
+    );
 }

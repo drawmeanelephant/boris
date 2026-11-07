@@ -274,13 +274,22 @@ pub fn canonicalEntityId(allocator: std.mem.Allocator, source_path: []const u8) 
 ///
 /// Result: `{entity_id}.html` — safe to join under any output root.
 pub fn safeOutputRelativePath(allocator: std.mem.Allocator, entity_id: []const u8) PathError![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try appendHtmlOutputPath(&out, allocator, entity_id);
+    return try out.toOwnedSlice(allocator);
+}
+
+/// Append a validated HTML output path to caller-owned storage.
+pub fn appendHtmlOutputPath(out: *std.ArrayList(u8), allocator: std.mem.Allocator, entity_id: []const u8) PathError!void {
     if (!validateEntityId(entity_id)) {
         if (entity_id.len == 0) return error.EmptyId;
         if (entity_id.len > max_entity_id_bytes) return error.IdTooLong;
         if (entity_id[0] == '/' or entity_id[0] == '\\') return error.AbsolutePath;
         return error.IllegalSegment;
     }
-    return try std.fmt.allocPrint(allocator, "{s}.html", .{entity_id});
+    try out.appendSlice(allocator, entity_id);
+    try out.appendSlice(allocator, ".html");
 }
 
 /// Alias for HTML path derivation (historical name).
@@ -315,68 +324,46 @@ pub fn pathsDifferOnlyInCase(a: []const u8, b: []const u8) bool {
 /// - `index.html` → `guides/intro.html` ⇒ `guides/intro.html`
 /// - `guides/a.html` → `guides/b.html` ⇒ `b.html`
 pub fn relativeHref(allocator: std.mem.Allocator, from_output: []const u8, to_output: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try appendRelativeHref(&out, allocator, from_output, to_output);
+    return try out.toOwnedSlice(allocator);
+}
+
+/// Append a relative href without allocating intermediate path components.
+/// Inputs must not alias `out`; directory depth is not bounded.
+pub fn appendRelativeHref(
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    from_output: []const u8,
+    to_output: []const u8,
+) !void {
     const from_dir = std.fs.path.dirnamePosix(from_output) orelse "";
     const to_dir = std.fs.path.dirnamePosix(to_output) orelse "";
     const to_base = std.fs.path.basenamePosix(to_output);
 
-    // Split directory paths into allocator-owned component tables. Do not
-    // truncate deep site paths; relative links must remain exact at any depth.
-    var from_parts: std.ArrayList([]const u8) = .empty;
-    defer from_parts.deinit(allocator);
-    var to_parts: std.ArrayList([]const u8) = .empty;
-    defer to_parts.deinit(allocator);
-    try splitPathComponents(from_dir, &from_parts, allocator);
-    try splitPathComponents(to_dir, &to_parts, allocator);
+    var from_parts = std.mem.tokenizeScalar(u8, from_dir, '/');
+    var to_parts = std.mem.tokenizeScalar(u8, to_dir, '/');
+    const start = out.items.len;
+    while (true) {
+        const from = from_parts.next();
+        const to = to_parts.next();
+        if (from != null and to != null and std.mem.eql(u8, from.?, to.?)) continue;
 
-    var common: usize = 0;
-    while (common < from_parts.items.len and common < to_parts.items.len) : (common += 1) {
-        if (!std.mem.eql(u8, from_parts.items[common], to_parts.items[common])) break;
-    }
-
-    var up = from_parts.items.len - common;
-    // Build: (../)* + remaining to_dir components + basename
-    var total: usize = 0;
-    total += up * 3; // "../"
-    var i = common;
-    while (i < to_parts.items.len) : (i += 1) {
-        total += to_parts.items[i].len + 1; // component + '/'
-    }
-    total += to_base.len;
-
-    if (total == 0) return try allocator.dupe(u8, ".");
-
-    const out = try allocator.alloc(u8, total);
-    errdefer allocator.free(out);
-    var off: usize = 0;
-    while (up > 0) : (up -= 1) {
-        @memcpy(out[off .. off + 3], "../");
-        off += 3;
-    }
-    i = common;
-    while (i < to_parts.items.len) : (i += 1) {
-        @memcpy(out[off .. off + to_parts.items[i].len], to_parts.items[i]);
-        off += to_parts.items[i].len;
-        out[off] = '/';
-        off += 1;
-    }
-    @memcpy(out[off .. off + to_base.len], to_base);
-    off += to_base.len;
-    std.debug.assert(off == total);
-    return out;
-}
-
-fn splitPathComponents(dir: []const u8, out: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
-    if (dir.len == 0) return;
-    var start: usize = 0;
-    var i: usize = 0;
-    while (i <= dir.len) : (i += 1) {
-        if (i == dir.len or dir[i] == '/') {
-            if (i > start) {
-                try out.append(allocator, dir[start..i]);
-            }
-            start = i + 1;
+        if (from != null) try out.appendSlice(allocator, "../");
+        while (from_parts.next() != null) try out.appendSlice(allocator, "../");
+        if (to) |part| {
+            try out.appendSlice(allocator, part);
+            try out.append(allocator, '/');
         }
+        while (to_parts.next()) |part| {
+            try out.appendSlice(allocator, part);
+            try out.append(allocator, '/');
+        }
+        break;
     }
+    try out.appendSlice(allocator, to_base);
+    if (out.items.len == start) try out.append(allocator, '.');
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +392,71 @@ test "relativeHref same dir one level up and root to nested" {
     const self = try relativeHref(gpa, "guides/intro.html", "guides/intro.html");
     defer gpa.free(self);
     try std.testing.expectEqualStrings("intro.html", self);
+}
+
+test "relative href appends preserve prefixes and reuse storage at arbitrary depth" {
+    const gpa = std.testing.allocator;
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    var from: std.ArrayList(u8) = .empty;
+    defer from.deinit(gpa);
+    var to: std.ArrayList(u8) = .empty;
+    defer to.deinit(gpa);
+    for (0..1024) |_| {
+        try from.appendSlice(gpa, "common/");
+        try to.appendSlice(gpa, "common/");
+    }
+    for (0..1024) |_| {
+        try from.appendSlice(gpa, "from/");
+        try to.appendSlice(gpa, "to/");
+    }
+    try from.appendSlice(gpa, "page.html");
+    try to.appendSlice(gpa, "é.html");
+    try out.ensureTotalCapacity(gpa, 12 * 1024);
+    var no_alloc = std.testing.FailingAllocator.init(gpa, .{ .fail_index = 0 });
+    const allocator = no_alloc.allocator();
+    try out.appendSlice(allocator, "href=\"");
+    try appendRelativeHref(&out, allocator, from.items, to.items);
+    try std.testing.expectEqualStrings("href=\"", out.items[0..6]);
+    try std.testing.expectEqual(@as(usize, 1024), std.mem.count(u8, out.items, "../"));
+    try std.testing.expectEqual(@as(usize, 1024), std.mem.count(u8, out.items, "to/"));
+    try std.testing.expect(std.mem.endsWith(u8, out.items, "to/é.html"));
+
+    out.clearRetainingCapacity();
+    try out.appendSlice(allocator, "prefix:");
+    try appendRelativeHref(&out, allocator, "", "");
+    try std.testing.expectEqualStrings("prefix:.", out.items);
+    out.clearRetainingCapacity();
+    try appendRelativeHref(&out, allocator, "a//b/page.html", "a///c//target.html");
+    try std.testing.expectEqualStrings("../c/target.html", out.items);
+    out.clearRetainingCapacity();
+    try appendRelativeHref(&out, allocator, "a/b/page.html", "a/b/page.html");
+    try std.testing.expectEqualStrings("page.html", out.items);
+}
+
+test "HTML output path appends retain validation and the full entity id byte limit" {
+    const gpa = std.testing.allocator;
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    var id: [max_entity_id_bytes]u8 = undefined;
+    for (id[0..252], 0..) |*byte, i| byte.* = if (i % 2 == 0) 'a' else '/';
+    @memcpy(id[252..], "éx");
+    try std.testing.expectEqual(max_entity_id_bytes, id.len);
+    try out.appendSlice(gpa, "prefix:");
+    try appendHtmlOutputPath(&out, gpa, &id);
+    try std.testing.expectEqualStrings("prefix:", out.items[0..7]);
+    try std.testing.expectEqualStrings(&id, out.items[7..262]);
+    try std.testing.expectEqualStrings(".html", out.items[262..]);
+    const before = out.items.len;
+    var too_long: [max_entity_id_bytes + 1]u8 = undefined;
+    @memcpy(too_long[0..id.len], &id);
+    too_long[id.len] = 'z';
+    try std.testing.expectError(error.IdTooLong, appendHtmlOutputPath(&out, gpa, &too_long));
+    try std.testing.expectError(error.EmptyId, appendHtmlOutputPath(&out, gpa, ""));
+    try std.testing.expectError(error.AbsolutePath, appendHtmlOutputPath(&out, gpa, "/escape"));
+    try std.testing.expectError(error.IllegalSegment, appendHtmlOutputPath(&out, gpa, "../escape"));
+    try std.testing.expectError(error.IllegalSegment, appendHtmlOutputPath(&out, gpa, "a.md"));
+    try std.testing.expectEqual(before, out.items.len);
 }
 
 test "canonicalize basic and nested" {
