@@ -376,9 +376,28 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, gpa: std.mem.Allocator) 
 const ParsedReport = struct {
     compiler_id: ?[]const u8,
     diagnostics: []Diagnostic,
+
+    fn deinit(self: ParsedReport, gpa: std.mem.Allocator) void {
+        if (self.compiler_id) |s| gpa.free(s);
+        for (self.diagnostics) |d| {
+            gpa.free(d.severity);
+            gpa.free(d.code);
+            gpa.free(d.message);
+            gpa.free(d.remediation);
+            if (d.source_path) |s| gpa.free(s);
+            if (d.id) |s| gpa.free(s);
+        }
+        gpa.free(self.diagnostics);
+    }
 };
 
-fn parseReport(gpa: std.mem.Allocator, bytes: []const u8) !ParsedReport {
+fn readReport(io: Io, dir: Io.Dir, path: []const u8, gpa: std.mem.Allocator) !ParsedReport {
+    const file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    var buffer: [64 * 1024]u8 = undefined;
+    var input = file.reader(io, &buffer);
+    var json = std.json.Reader.init(gpa, &input.interface);
+    defer json.deinit();
     const ReportDiag = struct {
         severity: []const u8 = "",
         code: []const u8 = "",
@@ -394,9 +413,12 @@ fn parseReport(gpa: std.mem.Allocator, bytes: []const u8) !ParsedReport {
         diagnostics: []ReportDiag = &.{},
     };
 
-    const parsed = std.json.parseFromSlice(Report, gpa, bytes, .{
+    const parsed = std.json.parseFromTokenSource(Report, gpa, &json, .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
+        // The former slice parser imposed no per-value limit. In particular,
+        // do not introduce Reader's default limit for long diagnostics.
+        .max_value_len = std.math.maxInt(usize),
     }) catch return .{
         .compiler_id = null,
         .diagnostics = try gpa.alloc(Diagnostic, 0),
@@ -550,9 +572,7 @@ pub fn runJob(io: Io, gpa: std.mem.Allocator, opts: RunOpts) !JobResult {
     };
     var class: RunnerClass = if (exit_code) |c| classFromExit(c) else .process;
 
-    const report_bytes = readFileAlloc(io, cwd, report_rel, gpa) catch null;
-    defer if (report_bytes) |b| gpa.free(b);
-    const parsed = parseReport(gpa, report_bytes orelse "") catch
+    const parsed = readReport(io, cwd, report_rel, gpa) catch
         ParsedReport{ .compiler_id = null, .diagnostics = try gpa.alloc(Diagnostic, 0) };
 
     var artifacts: []Artifact = try gpa.alloc(Artifact, 0);
@@ -1233,6 +1253,71 @@ pub fn main(init: std.process.Init) u8 {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+test "file-backed report retains long diagnostic strings after its reader closes" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const message_len = 5 * 1024 * 1024 + 17;
+    {
+        const file = try tmp.dir.createFile(io, "report.json", .{});
+        defer file.close(io);
+        var buffer: [4096]u8 = undefined;
+        var writer = file.writer(io, &buffer);
+        try writer.interface.writeAll(
+            \\{"compilerId":"boris/test","unknown":{"nested":[true,{"x":null}]},"diagnostics":[{"severity":"error","code":"ELONG","message":"
+        );
+        try writer.interface.splatByteAll('x', message_len);
+        try writer.interface.writeAll(
+            \\","remediation":"fix\nit","sourcePath":"content/é.md","line":12,"column":3,"id":"page"}]}
+        );
+        try writer.interface.flush();
+    }
+    const parsed = try readReport(io, tmp.dir, "report.json", gpa);
+    defer parsed.deinit(gpa);
+    // No result string may borrow the file buffer or the temporary parse arena.
+    try tmp.dir.writeFile(io, .{ .sub_path = "report.json", .data = "overwritten" });
+    try std.testing.expectEqualStrings("boris/test", parsed.compiler_id.?);
+    try std.testing.expectEqual(@as(usize, 1), parsed.diagnostics.len);
+    const d = parsed.diagnostics[0];
+    try std.testing.expectEqual(message_len, d.message.len);
+    try std.testing.expect(std.mem.allEqual(u8, d.message, 'x'));
+    try std.testing.expectEqualStrings("error", d.severity);
+    try std.testing.expectEqualStrings("ELONG", d.code);
+    try std.testing.expectEqualStrings("fix\nit", d.remediation);
+    try std.testing.expectEqualStrings("content/é.md", d.source_path.?);
+    try std.testing.expectEqual(@as(?u32, 12), d.line);
+    try std.testing.expectEqual(@as(?u32, 3), d.column);
+    try std.testing.expectEqualStrings("page", d.id.?);
+}
+
+test "file-backed reports reject truncation malformed values and trailing documents without partial diagnostics" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const valid =
+        \\{"compilerId":"boris/test","diagnostics":[{"code":"EFIRST"}]}
+    ;
+    for ([_][]const u8{
+        "",
+        valid[0 .. valid.len - 1],
+        valid ++ " {}",
+        valid ++ " garbage",
+        \\{"compilerId":"boris/test","diagnostics":[{"code":"EFIRST"},{"line":"bad"}]}
+        ,
+        \\{"compilerId":"boris/test","diagnostics":[{"message":"bad\q"}]}
+        ,
+    }) |bytes| {
+        try tmp.dir.writeFile(io, .{ .sub_path = "report.json", .data = bytes });
+        const parsed = try readReport(io, tmp.dir, "report.json", gpa);
+        defer parsed.deinit(gpa);
+        try std.testing.expectEqual(@as(?[]const u8, null), parsed.compiler_id);
+        try std.testing.expectEqual(@as(usize, 0), parsed.diagnostics.len);
+    }
+    try std.testing.expectError(error.FileNotFound, readReport(io, tmp.dir, "missing.json", gpa));
+}
 
 test "validateArchivePath rejects traversal and accepts fixture paths" {
     try std.testing.expectError(error.PathTraversal, validateArchivePath("../etc/passwd"));

@@ -117,10 +117,8 @@ const Node = publication_touches.Node;
 const Edge = publication_touches.Edge;
 const EdgeKind = publication_touches.EdgeKind;
 
-/// One no-follow open per evidence input, mirroring the touches layer: the
-/// opened regular-file handle is read exactly once (the hash pass also
-/// collects the payload), and the parse pass replays those bytes from
-/// memory, so a path replaced after the open can never mix evidence versions.
+/// One no-follow open per evidence input, mirroring the touches layer. Hash
+/// and parse the same stream, so path replacement cannot mix evidence versions.
 const EvidenceInput = evidence_mod.EvidenceInput(Error);
 
 fn bindingEqual(a: FileBinding, b: FileBinding) bool {
@@ -464,22 +462,18 @@ pub fn writeAfterTouches(
     defer touches_input.close(io);
     if (options.after_open) |hook| hook(options.after_open_context);
 
-    try artifacts_input.hashPass(arena_gpa, error.InvalidArtifactsReport);
     var inventory = artifact_inventory.parseStream(arena_gpa, artifacts_input.parseReader(), target) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.InvalidArtifactsReport,
     };
     const artifacts_binding = artifacts_input.finish();
 
-    try checks_input.hashPass(arena_gpa, error.InvalidChecksReport);
     const parsed_checks = try publication_touches.parseChecksStream(arena_gpa, checks_input.parseReader(), target);
     const checks_binding = checks_input.finish();
 
-    try claims_input.hashPass(arena_gpa, error.InvalidClaimsReport);
     const parsed_claims = try publication_touches.parseClaimsStream(arena_gpa, claims_input.parseReader(), target);
     const claims_binding = claims_input.finish();
 
-    try touches_input.hashPass(arena_gpa, error.InvalidTouchesReport);
     const parsed_touches = try publication_touches.parseTouchesStream(
         arena_gpa,
         touches_input.parseReader(),
@@ -3006,7 +3000,7 @@ test "stale and malformed evidence is rejected without replacing the prior pair"
     try std.testing.expectEqualSlices(u8, prior.json, json2);
 }
 
-test "oversized evidence report is rejected as malformed and the prior pair is preserved" {
+test "file-backed evidence rejects truncation malformed tails and oversized valid prefixes without replacing reports" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -3018,23 +3012,120 @@ test "oversized evidence report is rejected as malformed and the prior pair is p
     var dir = try publication_touches.openSubdir(io, tmp.dir, "target");
     defer dir.close(io);
 
-    // The single read pass buffers each committed report so the parser can
-    // replay it; a report past `EvidenceInput.max_bytes` fails closed with
-    // the report's own error — not OutOfMemory — like any other malformed
-    // report, and the committed pair stays byte-identical.
-    var oversized = try dir.createFile(io, artifact_inventory.output_path, .{});
-    try oversized.setLength(io, EvidenceInput.max_bytes + 1);
-    oversized.close(io);
-    try std.testing.expectError(
-        error.InvalidArtifactsReport,
-        writeAfterTouches(io, gpa, dir, "default", .{}),
-    );
-    const json = try readFileAlloc(io, dir, gpa, output_path);
-    defer gpa.free(json);
+    const prior_touches = try readFileAlloc(io, dir, gpa, publication_touches.output_path);
+    defer gpa.free(prior_touches);
+    const cases = [_]struct { path: []const u8, err: Error }{
+        .{ .path = artifact_inventory.output_path, .err = error.InvalidArtifactsReport },
+        .{ .path = publication_checks.output_path, .err = error.InvalidChecksReport },
+        .{ .path = publication_claims.output_path, .err = error.InvalidClaimsReport },
+        .{ .path = publication_touches.output_path, .err = error.InvalidTouchesReport },
+    };
+    for (cases, 0..) |case, i| {
+        const original = try readFileAlloc(io, dir, gpa, case.path);
+        defer gpa.free(original);
+        const Damage = enum { truncated, malformed, trailing_document, oversized };
+        for (std.enums.values(Damage)) |damage| {
+            {
+                const file = try dir.createFile(io, case.path, .{});
+                defer file.close(io);
+                var buffer: [4096]u8 = undefined;
+                var writer = file.writer(io, &buffer);
+                switch (damage) {
+                    .truncated => try writer.interface.writeAll(original[0 .. original.len / 2]),
+                    .malformed, .trailing_document, .oversized => {
+                        try writer.interface.writeAll(original);
+                        // Put the invalid tail past the first reader buffer,
+                        // so validating only the buffered prefix cannot pass.
+                        if (damage == .oversized) {
+                            try writer.interface.splatByteAll(' ', EvidenceInput.max_bytes + 1 - original.len);
+                        } else {
+                            try writer.interface.splatByteAll(' ', 64 * 1024);
+                            try writer.interface.writeAll(if (damage == .malformed) "garbage" else "{}");
+                        }
+                    },
+                }
+                try writer.interface.flush();
+            }
+            try std.testing.expectError(case.err, writeAfterTouches(io, gpa, dir, "default", .{}));
+            if (i < 3) {
+                try std.testing.expectError(case.err, publication_touches.writeAfterClaims(io, gpa, dir, "default", .{}));
+                const touches = try readFileAlloc(io, dir, gpa, publication_touches.output_path);
+                defer gpa.free(touches);
+                try std.testing.expectEqualSlices(u8, prior_touches, touches);
+            }
+            const json = try readFileAlloc(io, dir, gpa, output_path);
+            defer gpa.free(json);
+            const html = try readFileAlloc(io, dir, gpa, index_output_path);
+            defer gpa.free(html);
+            try std.testing.expectEqualSlices(u8, prior.json, json);
+            try std.testing.expectEqualSlices(u8, prior.html, html);
+        }
+        try dir.writeFile(io, .{ .sub_path = case.path, .data = original });
+    }
+}
+
+test "large file-backed inventory touches and proof pack preserve paths bindings and output bytes" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var fixture_arena = std.heap.ArenaAllocator.init(gpa);
+    defer fixture_arena.deinit();
+    const a = fixture_arena.allocator();
+    const records = try a.alloc(artifact_inventory.Record, 1024);
+    const segment = "long-路径/";
+    const prefix = try a.alloc(u8, segment.len * 40);
+    for (0..40) |i| @memcpy(prefix[i * segment.len ..][0..segment.len], segment);
+    for (records, 0..) |*record, i| {
+        var number: [4]u8 = undefined;
+        var value = i;
+        for (0..number.len) |digit| {
+            number[number.len - digit - 1] = '0' + @as(u8, @intCast(value % 10));
+            value /= 10;
+        }
+        const path = try std.mem.concat(a, u8, &.{ "pages/", &number, "/", prefix, "index.html" });
+        record.* = publication_touches.recordFor(path, .html_page, "<main></main>");
+    }
+    var spec = notApplicableSpec();
+    spec.artifact_count = records.len;
+    var first = try runProofPack(io, gpa, tmp.dir, "target", "default", records, spec, .{});
+    defer first.deinit(gpa);
+    var dir = try publication_touches.openSubdir(io, tmp.dir, "target");
+    defer dir.close(io);
+    const touches = try readFileAlloc(io, dir, gpa, publication_touches.output_path);
+    defer gpa.free(touches);
+    try std.testing.expect(touches.len > 1024 * 1024);
+    try std.testing.expect(first.json.len > 1024 * 1024);
+
+    // Parse the real on-disk presentation, including strings crossing refills.
+    const parsed = blk: {
+        const file = try dir.openFile(io, output_path, .{});
+        defer file.close(io);
+        var buffer: [4096]u8 = undefined;
+        var input = file.reader(io, &buffer);
+        var json = std.json.Reader.init(gpa, &input.interface);
+        defer json.deinit();
+        break :blk try std.json.parseFromTokenSource(std.json.Value, gpa, &json, .{});
+    };
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    const rows = root.get("artifacts").?.array.items;
+    try std.testing.expectEqual(records.len, rows.len);
+    for (rows, records) |row, record| {
+        try std.testing.expectEqualStrings(record.path, row.object.get("path").?.string);
+    }
+    const binding = root.get("inputs").?.object.get("touches").?.object;
+    try std.testing.expectEqual(@as(i64, @intCast(touches.len)), binding.get("bytes").?.integer);
+    try std.testing.expectEqualStrings(&cache.hexDigest(cache.hashBytes(touches)), binding.get("sha256").?.string);
+
+    try publication_touches.writeAfterClaims(io, gpa, dir, "default", .{});
+    try writeAfterTouches(io, gpa, dir, "default", .{});
+    const again = try readFileAlloc(io, dir, gpa, output_path);
+    defer gpa.free(again);
     const html = try readFileAlloc(io, dir, gpa, index_output_path);
     defer gpa.free(html);
-    try std.testing.expectEqualSlices(u8, prior.json, json);
-    try std.testing.expectEqualSlices(u8, prior.html, html);
+    try std.testing.expectEqualSlices(u8, first.json, again);
+    try std.testing.expectEqualSlices(u8, first.html, html);
 }
 
 // ---------------------------------------------------------------------------
