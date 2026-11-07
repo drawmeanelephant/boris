@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-layout="home">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Blueprint</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/blueprint.css}}">
+  {{head}}
+</head>
+<body data-status="{{page-status}}">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="bp-topbar">
+    <div class="bp-topbar__inner">
+      <p class="bp-brand"><span class="bp-brand__mark" aria-hidden="true">◧</span> Blueprint</p>
+      <p class="bp-topbar__note">A token-driven shell</p>
+    </div>
+  </header>
+  <div class="bp-shell">
+    <details class="bp-nav" open data-boris-search-exclude>
+      <summary>Site</summary>
+      <div class="bp-nav__body">{{nav}}</div>
+    </details>
+    <main id="main-content" class="bp-main bp-main--hero" tabindex="-1" data-boris-search-root>
+      <header class="bp-main__head" data-boris-search-exclude>
+        {{breadcrumb}}
+        {{metadata}}{{tags}}
+      </header>
+      <article class="prose bp-hero">{{content}}</article>
+      <section class="bp-deck" aria-label="Sections" data-boris-search-exclude>{{children}}</section>
+      {{parent}}
+      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+    </main>
+    <aside class="bp-toc" data-boris-search-exclude>
+      <p class="bp-rail-label">On this page</p>
+      {{toc}}
+    </aside>
+  </div>
+  <footer class="bp-footer">{{footer}}</footer>
+</body>
+</html>
