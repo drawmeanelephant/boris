@@ -5,9 +5,14 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 
 - **Skip link.** Every layout opens with "Skip to content" targeting
   `#main-content`, a `main` with `tabindex="-1"`.
-- **Landmarks.** A body-level `header` (banner), one `main`, a body-level
+- **Generic landmarks.** A body-level `header` (banner), one `main`, a body-level
   `footer` (contentinfo), and labelled side rails ("Site navigation",
   "All pages", "Section navigation").
+- **Portfolio front.** `portfolio.html` keeps the skip target and one main
+  landmark, with an authored H1 followed by the "Work & about" H2 collection.
+  It intentionally omits the generic banner, footer, metadata and rails.
+  Child links stay compiler-owned, keyboard-operable and large enough for
+  touch; the collection disappears when no children are advertised.
 - **Focus.** `:focus-visible` draws a 3px solid outline in the primary
   colour with a 3px offset: `#6419e6` is 7.44:1 on white cards and 6.64:1
   on the page background; dark `#a78bfa` is 6.53:1 on dark cards. The skip

@@ -109,6 +109,7 @@ fn hasClass(txt: []const u8, class_name: []const u8) bool {
 /// links, sidebars) is not listed: themes mark it `data-boris-search-exclude`.
 const compiler_chrome = [_]struct { []const u8, []const u8 }{
     .{ "dl", "page-metadata" },
+    .{ "p", "table-entry" },
     .{ "ul", "page-tags" }, // #1007
     .{ "div", "page-parent" },
     .{ "div", "site-nav" },
@@ -820,6 +821,20 @@ test "compiler metadata is excluded without hiding authored definition lists" {
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expectEqual(@as(usize, 1), d.sections.len);
     try std.testing.expectEqualStrings("Status published", d.sections[0].text);
+}
+
+test "table keyboard-entry chrome is excluded without dropping table data" {
+    const html =
+        \\<main data-boris-search-root><h1>Data</h1>
+        \\<div class="table-viewport"><p class="table-entry"><a tabindex="0">Table data. Scroll horizontally when needed.</a></p>
+        \\<table><tbody><tr><td>Actual cell value</td></tr></tbody></table></div></main>
+    ;
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Actual cell value") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Scroll horizontally") == null);
 }
 
 test "compiler tag list and strict parent chrome are excluded (#1007)" {

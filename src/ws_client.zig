@@ -179,7 +179,7 @@ pub const Message = union(enum) {
 
 const rfc_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-/// Parse every PEM certificate block in `pem` into `bundle`. std 0.16 only
+/// Parse every PEM certificate block in `pem` into `bundle`. std 0.17 only
 /// loads bundles from the system or a file path, so this mirrors
 /// `Certificate.Bundle.addCertsFromFile` for an in-memory buffer: base64-
 /// decode each `BEGIN CERTIFICATE` block into `bundle.bytes` and index it
@@ -426,7 +426,7 @@ fn flushFn(writer: *Io.Writer) Io.Writer.Error!void {
 
 /// Write `bytes` through the plaintext layer and flush it all the way to
 /// the socket. For `wss://`, the TLS writer's `flush` only encrypts the
-/// records into the underlying socket writer's buffer (std 0.16 never
+/// records into the underlying socket writer's buffer (std 0.17 never
 /// drains it), so the socket writer must be drained explicitly.
 fn sendAllAndFlush(self: *Client, bytes: []const u8) Error!void {
     errdefer self.failed_write = true;
@@ -636,7 +636,7 @@ pub const Client = struct {
         // The relay contract guarantees normalized URLs, but the client still
         // parses them so a future caller cannot smuggle an odd target through.
         //
-        // Zig 0.16 `IpAddress.resolve` parses IP *literals* only (IPv4, then
+        // Zig 0.17 `IpAddress.resolve` parses IP *literals* only (IPv4, then
         // IPv6 with OS scope lookup). It is not a hostname resolver. Named
         // relays (`wss://relay.example.org`, `ws://localhost`) must go
         // through `HostName.connect` (DNS lookup + try addresses). #545.
@@ -1266,7 +1266,7 @@ test "target: ws is refused for a non-loopback host" {
 }
 
 test "connect: a hostname is not an IP literal (#545)" {
-    // Documents the Zig 0.16 trap: IpAddress.resolve parses literals only.
+    // Documents the Zig 0.17 trap: IpAddress.resolve parses literals only.
     try testing.expectError(error.ParseFailed, Io.net.IpAddress.resolve(testing.io, "relay.example.org", 443));
     _ = try Io.net.HostName.init("relay.example.org");
     _ = try Io.net.HostName.init("localhost");

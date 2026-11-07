@@ -39,7 +39,7 @@ pub const WikiHit = struct {
 /// Per-entity set of Oliver-rendered heading ids (views or owned — caller owns lifetime).
 pub const HeadingIndex = struct {
     /// entity_id → list of unique heading id strings for that page.
-    map: std.StringHashMapUnmanaged([]const []const u8) = .{},
+    map: std.StringHashMapUnmanaged([]const []const u8) = .empty,
 
     pub fn deinit(self: *HeadingIndex, allocator: std.mem.Allocator) void {
         var it = self.map.iterator();
@@ -787,7 +787,7 @@ pub fn referenceMaterialMultiWithMap(
     }
     var locs: std.ArrayList(IdLoc) = .empty;
     defer locs.deinit(allocator);
-    var seen: std.StringHashMapUnmanaged(void) = .{};
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
     defer seen.deinit(allocator);
     for (bodies, 0..) |body, i| {
         const path = if (body_paths) |paths| paths[i] else "";
@@ -1403,7 +1403,7 @@ test "collectFragmentTargetIds ignores inline code spans" {
     const gpa = std.testing.allocator;
     var ids: std.ArrayList([]const u8) = .empty;
     defer ids.deinit(gpa);
-    var seen: std.StringHashMapUnmanaged(void) = .{};
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
     defer seen.deinit(gpa);
 
     try collectFragmentTargetIds(

@@ -1,3 +1,9 @@
+//! Bind and present committed publication evidence as a JSON/HTML Proof Pack.
+//! Artifact inventories, checks, claims, and Touch Atlas reports remain the
+//! evidence authorities; this layer neither reruns checks nor reads payloads
+//! to invent new claims. The transaction helper preserves the output pair.
+//! Normative behavior: docs/contracts/publication-proof-pack.md.
+
 const std = @import("std");
 const Io = std.Io;
 const cache = @import("cache.zig");

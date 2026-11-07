@@ -288,7 +288,7 @@ pub const Options = struct {
     /// single-target compile path. Null → `.html`.
     html_profile: ?render.OutputProfile = null,
     /// Dynamic target list.
-    targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .empty,
+    targets: std.ArrayList(target_mod.TargetSpec) = .empty,
     /// `nostr sign` inputs: the plan artifact path, whether the secret key is
     /// read from stdin, the signed-bundle output path, an optional prior
     /// signed bundle, and an optional explicit signing-time override.
@@ -742,12 +742,12 @@ const ParseState = struct {
     saw_graph_out: bool = false,
 
     // Heap-backed accumulators and moved-ownership results.
-    targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .empty,
+    targets: std.ArrayList(target_mod.TargetSpec) = .empty,
     publication_location: ?github_pages.Location = null,
     allow_markdown_links: bool = false,
-    target_layouts: std.ArrayListUnmanaged(PendingTargetLayout) = .empty,
-    target_profiles: std.ArrayListUnmanaged(PendingTargetProfile) = .empty,
-    pending_rules: std.ArrayListUnmanaged(PendingLayoutRule) = .empty,
+    target_layouts: std.ArrayList(PendingTargetLayout) = .empty,
+    target_profiles: std.ArrayList(PendingTargetProfile) = .empty,
+    pending_rules: std.ArrayList(PendingLayoutRule) = .empty,
 
     /// Diagnostic detail recorded by failing paths that know more than the
     /// argv scan can guess (#761, #764). Copied out by
@@ -1013,7 +1013,7 @@ fn applyModeBoolFlag(st: *ParseState, entry: ModeBoolFlag) ParseError!void {
 }
 
 /// Free one accumulated target list, including per-target rule allocations.
-fn freeTargetList(gpa: std.mem.Allocator, targets: *std.ArrayListUnmanaged(target_mod.TargetSpec)) void {
+fn freeTargetList(gpa: std.mem.Allocator, targets: *std.ArrayList(target_mod.TargetSpec)) void {
     for (targets.items) |t| {
         if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
     }

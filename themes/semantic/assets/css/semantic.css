@@ -24,6 +24,10 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+/* Emergency breaks for author text and graph labels, not tabular data. */
+body { overflow-wrap: anywhere; }
+table { overflow-wrap: normal; }
+
 body { margin: 0; background: var(--paper); color: var(--ink); line-height: 1.7; }
 a { color: var(--accent); text-decoration-thickness: 0.11em; text-underline-offset: 0.16em; }
 a:hover { color: var(--ink); }
@@ -182,7 +186,7 @@ img { max-width: 100%; height: auto; }
   background: var(--accent-soft);
 }
 
-.prose table { width: 100%; margin-block: 1.4rem; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.prose table { display: block; max-width: 100%; overflow-x: auto; width: 100%; margin-block: 1.4rem; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .prose caption { margin-block-end: 0.5rem; color: var(--muted); font-size: 0.86rem; text-align: start; }
 .prose thead th { border-block-end: 2px solid var(--ink); text-align: start; }
 .prose th, .prose td { padding: 0.6rem 0.7rem; border-block-end: 1px solid var(--rule); vertical-align: top; }
@@ -370,4 +374,22 @@ img { max-width: 100%; height: auto; }
   body { background: #fff; color: #000; }
   a { color: inherit; }
   pre { white-space: pre-wrap; }
+}
+
+/* Paper has no scrollbars: retain columns and wrap only when necessary. */
+@media print {
+  .prose table { display: table; width: 100%; max-width: none; table-layout: fixed; overflow: visible; }
+  .prose th, .prose td { overflow-wrap: anywhere; }
+  .prose pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+}
+
+/* Keep the native grid inside its keyboard-accessible scroll surface. */
+.table-viewport { max-width: 100%; overflow-x: auto; }
+.table-viewport > table { display: table; max-width: none; overflow: visible; }
+.table-viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.table-entry { margin: 0; font-size: 0.85em; }
+.table-entry a { display: inline-block; color: inherit; text-decoration: none; }
+@media print {
+  .table-viewport { overflow: visible; }
+  .table-entry { display: none; }
 }

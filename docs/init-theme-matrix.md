@@ -24,11 +24,11 @@ behavior are normative in
 | cookbook | `cookbook` | Cooklang `.cook` pages, `servings`, `{{children}}` recipe deck | `cards` (home) | `reading`, `cozy` | Thin second option: no other card-shaped recipe theme. Both alternates build but are generic reading shells. |
 | blog | `blog` | `published_at` posts on a parent chain | `cozy` | `journal`, `showcase` | — |
 | textile | `textile` | `input_format: textile` | `press` | `reading` | — |
-| portfolio | `portfolio` ([#1053](https://github.com/drawmeanelephant/boris/issues/1053)) | `layout_rules` named layouts, `{{children}}` | `showcase` (home) | `minimal` | — (resolved: `showcase/layouts/home.html` renders `{{children}}`, so the index lists the work with no hand-kept list) |
+| portfolio | `portfolio` ([#1053](https://github.com/drawmeanelephant/boris/issues/1053)) | `layout_rules` named layouts, `{{children}}` | `showcase` (portfolio) | `minimal` | The purpose-fit `portfolio.html` lists work and About via `{{children}}`; no hand-kept list or filtered taxonomy. Generic `home.html` remains available. |
 | landing | `landing` ([#1054](https://github.com/drawmeanelephant/boris/issues/1054)) | single-Trunk graph, `{{include}}` sections, `layout_rules` | `service` (home) | `civic` (home), `corporate` | No marketing-hero theme exists. `service`'s public-information home is the honest fit. |
 | wiki | `wiki` ([#1055](https://github.com/drawmeanelephant/boris/issues/1055)) | deep parent chains, `{{toc}}`, `{{breadcrumb}}` | `reference` (home + section) | `engineering` (home), `semantic` (home) | — |
 | changelog | `changelog` ([#1056](https://github.com/drawmeanelephant/boris/issues/1056)) | `published_at` entries, `status: draft`, `{{children}}` hub listing | `journal` (archive on `changes`) | `compact`, `press` | — |
-| link-in-bio | `link-in-bio` ([#1057](https://github.com/drawmeanelephant/boris/issues/1057)) | a one-page site | `minimal` | `cards` | — |
+| link-in-bio | `link-in-bio` ([#1057](https://github.com/drawmeanelephant/boris/issues/1057)) | a one-page site | `minimal` (links) | `cards` | `links.html` leads with identity and link rows; generic `main.html` remains available. |
 | resume | `resume` ([#1058](https://github.com/drawmeanelephant/boris/issues/1058)) | `{{metadata}}` / tags, print stylesheet | `corporate` | `compact`, `minimal` | — (resolved: print hides the page furniture the CV used to carry. See [Theme gaps](#theme-gaps).) |
 | archive | `archive` ([#1059](https://github.com/drawmeanelephant/boris/issues/1059)) | `tags` + `relations` taxonomy, `{{backlinks}}`, `status: archived` | `archive` (archive) | `ledger`, `field-notes` | `archive` hardcodes its masthead copy. See [Theme gaps](#theme-gaps). |
 | newsletter | `newsletter` ([#1060](https://github.com/drawmeanelephant/boris/issues/1060)) | `published_at` issues, profile `rss` / `sitemap` | `press` (home, archive, blog) | `journal`, `cozy` | — (resolved: press layouts carry `{{head}}`, so the starter's profile ships `rss` on an enabled `head`) |
@@ -38,6 +38,7 @@ behavior are normative in
 "(home)" means the pairing was also built with
 `--layout-rule default id:index themes/NAME/layouts/home.html`.
 "(archive)" is the same rule pointing at `layouts/archive.html`, and
+"(links)" / "(portfolio)" send `id:index` to those focused named layouts.
 "(archive on `changes`)" sends `id:changes` there instead. `wiki`'s
 "(home + section)" adds `glob:wiki/*` → `layouts/section.html`. The
 starter's own `layout_rules` are listed in
@@ -98,7 +99,8 @@ test-boris-init`.
 
 ## Theme slot coverage
 
-The teaching slots per starter theme at `516840d5`, after the slot
+The current teaching slots per starter theme, including the focused `links`
+and `portfolio` layouts. The original `516840d5` baseline followed the slot
 adoption passes
 ([#1047](https://github.com/drawmeanelephant/boris/issues/1047),
 [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), the new
@@ -119,11 +121,11 @@ Each cell lists the layouts that carry the slot; `-` means none:
 | `gallery` | home, main | - | main | home, main | home, main | home, main | home, main |
 | `journal` | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main |
 | `ledger` | main | main | main | main | main | main | main |
-| `minimal` | main | main | main | main | main | main | - |
+| `minimal` | main, links | main | main | main, links | main, links | main, links | - |
 | `press` | all five | all five | archive, blog, main, section | all five | all five | all five | all five |
 | `reference` | section | main | main, section | home, main, section | home, main, section | home, main, section | - |
 | `service` | home, main, section | home, main, section | main, section | home, main, section | home, main, section | home, main, section | home, main, section |
-| `showcase` | all four | all four | blog, main, section | all four | all four | all four | all four |
+| `showcase` | all five | home, section, blog, main | blog, main, section | all five | all five | all five | all five |
 
 ## Theme gaps
 
@@ -140,9 +142,9 @@ and [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), not to
   Its first build writes a three-item `dist/feed.xml` and an autodiscovery
   link in every non-draft head.
 - ~~**`showcase/layouts/home.html` has no `{{children}}`.**~~ Resolved:
-  the showcase home renders `{{children}}` as its project grid, so the
-  `portfolio` index keeps only a short intro, and the about page and the
-  three projects are listed by the layout.
+  the showcase home still renders `{{children}}`. Fresh `portfolio` starters
+  now select the dedicated `portfolio.html` front, where the short studio
+  intro precedes the automatically listed work and About page.
 - ~~**`corporate` print leaves page furniture in the CV.**~~ Resolved by
   the corporate print pass
   ([#1048](https://github.com/drawmeanelephant/boris/issues/1048),

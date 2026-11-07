@@ -3,4 +3,5 @@ guides/components.html
 guides/getting-started.html
 index.html
 reference.html
+reference/content-resilience.html
 reference/slots-and-rules.html

@@ -2,16 +2,19 @@
   import type { Problem } from '../lib/types';
   import { problemLocationLabel } from '../lib/utils';
   import { buffer } from '../lib/state/buffer.svelte';
-  import { authoring, closedLayoutSlots } from '../lib/state/authoring.svelte';
+  import { authoring, closedLayoutSlots, refreshAuthoring } from '../lib/state/authoring.svelte';
+  import { connection } from '../lib/state/connection.svelte';
   import { project, themeAssets } from '../lib/state/project.svelte';
-  import { layoutSelections } from '../lib/state/problems.svelte';
+  import { problems, layoutSelections } from '../lib/state/problems.svelte';
 
   let {
     onOpenFile,
-    onNavigate
+    onNavigate,
+    onBuildDiagnostics
   }: {
     onOpenFile: (path: string) => void;
     onNavigate: (problem: Problem) => void;
+    onBuildDiagnostics: () => void;
   } = $props();
 
   const themeLayoutOpen = $derived(buffer.activePath.startsWith('themes/') && buffer.activePath.endsWith('.html'));
@@ -28,26 +31,46 @@
       </div>
     </div>
     <p class="notice">Layout winners appear as <code>ILAYOUTSELECTED</code> after Build HTML or Validate. Fallback winners appear when the target has layout rules.</p>
-    {#if closedLayoutSlots().length === 0}
-      <p class="empty-state">Build diagnostics to load the closed layout-slot vocabulary.</p>
-    {:else}
-      <h4 class="group-label">Slots in this layout</h4>
-      {#if layoutSlotsInBuffer.length === 0}
-        <p class="empty-state">None of the closed slots appear in this file yet.</p>
+    {#if !authoring.payload && connection.phase === 'connecting'}
+      <p class="empty-state is-loading">Loading layout hints…</p>
+    {:else if !authoring.payload || authoring.failed}
+      <div class="notice" data-tone="danger">
+        <p>Layout hints could not be loaded or refreshed. Previous hints, if any, remain unchanged.</p>
+        <button type="button" onclick={refreshAuthoring}>Refresh layout hints</button>
+      </div>
+    {:else if authoring.payload.completion_status !== 'ready'}
+      <div class="notice" data-tone={authoring.payload.completion_status === 'unsupported' ? 'warn' : 'neutral'}>
+        <p>{authoring.payload.completion_status === 'unsupported' ? 'The saved layout hints are stale or unsupported.' : 'Layout hints have not been built yet.'} Build diagnostics to load the slots Boris supports. Results open in Problems.</p>
+        <button
+          type="button"
+          class:is-running={problems.running && problems.runningMode === 'ir_build'}
+          aria-busy={problems.running && problems.runningMode === 'ir_build'}
+          disabled={problems.running}
+          onclick={onBuildDiagnostics}>Build diagnostics for layout slots</button>
+      </div>
+    {/if}
+    {#if authoring.payload?.completion_status === 'ready'}
+      {#if closedLayoutSlots().length === 0}
+        <p class="empty-state">Boris reported no layout slots in the current completion index.</p>
       {:else}
-        <ul class="graph-links row-list">
-          {#each layoutSlotsInBuffer as slot (slot)}
-            <li>Present: <code>{'{{' + slot + '}}'}</code></li>
-          {/each}
-        </ul>
-      {/if}
-      {#if layoutSlotsMissing.length > 0}
-        <h4 class="group-label">Closed slots not in this file</h4>
-        <ul class="graph-links row-list">
-          {#each layoutSlotsMissing as slot (slot)}
-            <li>Absent: <code>{'{{' + slot + '}}'}</code></li>
-          {/each}
-        </ul>
+        <h4 class="group-label">Slots in this layout</h4>
+        {#if layoutSlotsInBuffer.length === 0}
+          <p class="empty-state">None of the closed slots appear in this file yet.</p>
+        {:else}
+          <ul class="graph-links row-list">
+            {#each layoutSlotsInBuffer as slot (slot)}
+              <li>Present: <code>{'{{' + slot + '}}'}</code></li>
+            {/each}
+          </ul>
+        {/if}
+        {#if layoutSlotsMissing.length > 0}
+          <h4 class="group-label">Closed slots not in this file</h4>
+          <ul class="graph-links row-list">
+            {#each layoutSlotsMissing as slot (slot)}
+              <li>Absent: <code>{'{{' + slot + '}}'}</code></li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     {/if}
     {#if themeAssets().length > 0}

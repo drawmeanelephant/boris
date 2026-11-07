@@ -19,6 +19,7 @@ const diag = @import("diag.zig");
 const content_asset = @import("content_asset.zig");
 const doclink = @import("doclink.zig");
 const source_provider = @import("source_provider.zig");
+const html_scan = @import("html_scan.zig");
 
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
@@ -480,7 +481,51 @@ pub fn renderSource(
             },
         }
     }
-    return html_buf.items;
+    return presentTables(arena, html_buf.items, options.output_profile);
+}
+
+fn presentTables(arena: std.mem.Allocator, html: []const u8, profile: render.OutputProfile) ![]const u8 {
+    if (html_scan.validate(html) != null) return html;
+    const Insertion = struct { offset: usize, closing: bool };
+    var insertions: std.ArrayList(Insertion) = .empty;
+    var depth: usize = 0;
+    var position: usize = 0;
+    while (std.mem.indexOfScalarPos(u8, html, position, '<')) |start| {
+        const tag = html_scan.tagAt(html, start) orelse {
+            position = start + 1;
+            continue;
+        };
+        position = tag.end + 1;
+        if (!tag.closing and !tag.self_closing and html_scan.isRawTextElement(tag.name)) {
+            position = html_scan.rawTextEnd(html, position, tag.name) orelse return html;
+            continue;
+        }
+        if (!std.ascii.eqlIgnoreCase(tag.name, "table") or tag.self_closing) continue;
+        if (tag.closing) {
+            if (depth == 0) return html;
+            depth -= 1;
+            try insertions.append(arena, .{ .offset = position, .closing = true });
+        } else {
+            depth += 1;
+            try insertions.append(arena, .{ .offset = start, .closing = false });
+        }
+    }
+    if (depth != 0 or insertions.items.len == 0) return html;
+
+    var out: std.ArrayList(u8) = .empty;
+    var copied: usize = 0;
+    for (insertions.items) |insertion| {
+        try out.appendSlice(arena, html[copied..insertion.offset]);
+        try out.appendSlice(arena, if (insertion.closing)
+            "</div>"
+        else if (profile == .html4_strict)
+            "<div class=\"table-viewport\"><p class=\"table-entry\"><a tabindex=\"0\">Table data. Scroll horizontally when needed.</a></p>"
+        else
+            "<div class=\"table-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Table data\">");
+        copied = insertion.offset;
+    }
+    try out.appendSlice(arena, html[copied..]);
+    return out.items;
 }
 
 /// Render one already-read page source through the same ordered preprocessing
@@ -649,6 +694,61 @@ fn writeTestFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !v
     var file = try cwd.createFile(io, path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, data);
+}
+
+test "published tables keep native grids inside keyboard-accessible presentation" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/html-body-tables", .{tmp.sub_path});
+    defer gpa.free(root);
+    try writeTestFile(io, root, "content/index.md", "placeholder\n");
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{root});
+    defer gpa.free(content_path);
+    var content_dir = try Io.Dir.cwd().openDir(io, content_path, .{});
+    defer content_dir.close(io);
+    var whiteboard = std.heap.ArenaAllocator.init(gpa);
+    defer whiteboard.deinit();
+    const markdown = "| Name | State |\n| --- | --- |\n| Entry | Ready |\n";
+    for ([_]render.OutputProfile{ .html, .xhtml, .html4_strict }) |profile| {
+        const html = try renderSource(io, gpa, content_dir, &whiteboard, markdown, "index.md", "index.html", .{ .output_profile = profile });
+        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, html, "class=\"table-viewport\""));
+        try std.testing.expect(std.mem.indexOf(u8, html, "<table>\n<thead>") != null);
+        try std.testing.expect(std.mem.indexOf(u8, html, "<td>Entry</td>") != null);
+        if (profile == .html4_strict) {
+            try std.testing.expect(std.mem.indexOf(u8, html, "<a tabindex=\"0\">Table data.") != null);
+            try std.testing.expect(std.mem.indexOf(u8, html, "role=") == null);
+        } else {
+            try std.testing.expect(std.mem.indexOf(u8, html, "tabindex=\"0\" role=\"region\" aria-label=\"Table data\"") != null);
+        }
+    }
+    const raw = "<!-- <table>not markup</table> -->\n<script>const x = '<table>not markup</table>';</script>\n<pre><table>literal</table></pre>\n<table title=\"x > y\"><tbody><tr><td>Actual</td></tr></tbody></table>\n";
+    const html = try renderSource(io, gpa, content_dir, &whiteboard, raw, "index.md", "index.html", .{});
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, html, "class=\"table-viewport\""));
+    try std.testing.expect(std.mem.indexOf(u8, html, "<table title=\"x > y\"><tbody><tr><td>Actual</td></tr></tbody></table>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<script>const x = '<table>not markup</table>';</script>") != null);
+    const with_aside = try std.fmt.allocPrint(gpa, "{s}\n<Aside kind=\"note\">\n\n{s}\n</Aside>\n", .{ markdown, markdown });
+    defer gpa.free(with_aside);
+    const composed = try renderSource(io, gpa, content_dir, &whiteboard, with_aside, "index.md", "index.html", .{});
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, composed, "class=\"table-viewport\""));
+}
+
+test "table presentation preserves malformed authored markup and balances nested tables" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for ([_][]const u8{
+        "<table><tbody><tr><td>unclosed",
+        "<script>const text = '<table>unclosed';",
+        "<table title=\"unterminated <table>",
+        "</table>",
+    }) |html| {
+        try std.testing.expectEqualStrings(html, try presentTables(arena.allocator(), html, .html));
+    }
+    const nested = "<table><tbody><tr><td><table><tbody><tr><td>Nested</td></tr></tbody></table></td></tr></tbody></table>";
+    const html = try presentTables(arena.allocator(), nested, .html);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, html, "class=\"table-viewport\""));
+    try std.testing.expect(std.mem.indexOf(u8, html, "</table></div></td>") != null);
 }
 
 test "footnote definition split by an Aside reconciles (#860)" {

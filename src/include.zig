@@ -467,7 +467,7 @@ pub fn collectTransitiveIncludes(
 ) IncludeError!void {
     var stack: std.ArrayList([]const u8) = .empty;
     defer stack.deinit(allocator);
-    var seen: std.StringHashMapUnmanaged(void) = .{};
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
     defer seen.deinit(allocator);
 
     // Root body locus is empty: caller supplies the page source_path when printing.

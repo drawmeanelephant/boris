@@ -5,10 +5,10 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 
 /// Fixed renderer/cache format version constant.
 ///
-/// Bumped only when fingerprint inputs or manifest discriminator semantics
-/// change. Layout-rule selection records the effective selected layout per
-/// page (`boris-cache-v3-nav-digest`); older manifests force a cold rebuild.
-pub const CACHE_FORMAT_VERSION = "boris-cache-v3-nav-digest";
+/// Bumped when rendered bytes, fingerprint inputs or manifest semantics
+/// change. Table presentation is part of the published body; older
+/// manifests force a cold rebuild so they cannot reuse unwrapped tables.
+pub const CACHE_FORMAT_VERSION = "boris-cache-v4-table-viewport";
 
 /// Hash a u64 length prefix in fixed little-endian (host-independent).
 fn updateLen(hasher: *Sha256, len: u64) void {
@@ -226,7 +226,7 @@ pub fn computePageFingerprintThemeInputCounted(
 /// visited in order, and within a node `id` is registered before `sourcePath`,
 /// so the first node matching a key still wins.
 pub const NodeLookup = struct {
-    map: std.StringHashMapUnmanaged([]const u8) = .{},
+    map: std.StringHashMapUnmanaged([]const u8) = .empty,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !NodeLookup {
@@ -274,10 +274,10 @@ pub fn getAffectedPagesIndexed(
     lookup: *const NodeLookup,
     dep_index: *const dependency.DependencyIndex,
 ) ![]const []const u8 {
-    var affected_ids: std.StringHashMapUnmanaged(void) = .{};
+    var affected_ids: std.StringHashMapUnmanaged(void) = .empty;
     defer affected_ids.deinit(allocator);
 
-    var visited: std.StringHashMapUnmanaged(void) = .{};
+    var visited: std.StringHashMapUnmanaged(void) = .empty;
     defer visited.deinit(allocator);
 
     var stack: std.ArrayList([]const u8) = .empty;

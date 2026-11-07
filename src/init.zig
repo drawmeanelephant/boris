@@ -48,8 +48,8 @@
 //!   with autodiscovery links in every issue's head.
 //! - `portfolio` — a studio front (`index`, an `about` satellite, three
 //!   dated `projects/` satellites) under `showcase`; `layout_rules` send
-//!   `id:index` to `home.html`, whose `{{children}}` lists the work, and
-//!   every other page uses `main.html`.
+//!   `id:index` to `portfolio.html`, whose `{{children}}` lists work and
+//!   about; every other page uses `main.html`.
 //! - `archive` — a long-lived archive under `archive`: four tagged
 //!   entries joined by `relates_to` / `supersedes` relations (so entries
 //!   render `{{relations}}` and `{{backlinks}}`), one `status: archived`
@@ -1067,9 +1067,7 @@ const link_in_bio_index_md =
     \\
     \\# Robin Vale
     \\
-    \\Letterpress printer and occasional bookbinder. This whole site is one
-    \\page: the smallest graph Boris builds, still parsed, validated, and
-    \\published through the same profile as any larger site.
+    \\Letterpress printer and occasional bookbinder.
     \\
     \\## Elsewhere
     \\
@@ -1078,7 +1076,32 @@ const link_in_bio_index_md =
     \\- [Newsletter](https://example.com/newsletter)
     \\- [Email](mailto:robin@example.com)
     \\
-    \\Replace these links with yours. Add a second page only when you need one.
+;
+
+const link_in_bio_readme =
+    \\# Your link page
+    \\
+    \\Edit your name, introduction, and links in `content/index.md`. Replace
+    \\the example.com URLs and email address before publishing. Keep the
+    \\frontmatter title and first heading in sync. Use top-level Markdown
+    \\lists for link rows, with one link per item; blank lines between items
+    \\are fine. Put contextual inline links in paragraphs outside those lists.
+    \\
+    \\This whole site is one page: the smallest graph Boris builds, still
+    \\parsed, validated, and published through the same profile as a larger
+    \\site. Add a second page only when you need one.
+    \\
+    \\`boris.json` selects `themes/minimal/layouts/links.html` for `id:index`.
+    \\Other pages use Minimal's ordinary `main.html` documentation layout.
+    \\Layout choice is profile configuration, not page frontmatter.
+    \\
+    \\```sh
+    \\boris build --profile boris.json
+    \\boris watch --profile boris.json --serve
+    \\```
+    \\
+    \\The watch command serves `dist/` on loopback with browser reload.
+    \\The copied theme's README describes its layouts and accessibility.
     \\
 ;
 
@@ -1090,7 +1113,15 @@ const link_in_bio_profile =
     \\  "input_format": "markdown",
     \\  "site": { "title": "Robin Vale" },
     \\  "targets": [
-    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/minimal" }
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/minimal",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/minimal/layouts/links.html" }
+    \\      ]
+    \\    }
     \\  ]
     \\}
     \\
@@ -1460,11 +1491,44 @@ const portfolio_index_md =
     \\
     \\Wayfinding, print, and type for public places.
     \\
-    \\Each project under `content/projects/` is a satellite of this page
-    \\(`parent: index`) with a `published_at` date and a one-line `summary`.
-    \\The showcase home layout's `{{children}}` slot lists this page's direct
-    \\satellites under "Explore", so a new project file joins that list on
-    \\the next build without an edit here.
+;
+
+const portfolio_readme =
+    \\# Your studio portfolio
+    \\
+    \\Edit the studio introduction in `content/index.md`, the studio details
+    \\in `content/about.md`, and the work under `content/projects/`. Keep the
+    \\index's frontmatter title and first heading in sync.
+    \\
+    \\## Add work
+    \\
+    \\Each project is a satellite of the index (`parent: index`) with a
+    \\`published_at` date and a one-line `summary`. Add another Markdown file
+    \\under `content/projects/` with those fields to add work on the next build.
+    \\The portfolio layout's compiler-owned `{{children}}` slot lists all
+    \\direct satellites, including About, under "Work & about". It is not a
+    \\filtered project taxonomy; keep no second hand-written collection.
+    \\A `status: draft` page renders at its route but is not advertised.
+    \\
+    \\The Field Almanac's `relations: [relates_to=projects/harbor-signage]`
+    \\records its grid's lineage as a typed edge. Project pages render both
+    \\relations and their derived backlinks.
+    \\
+    \\## Build and preview
+    \\
+    \\`boris.json` sends `id:index` to
+    \\`themes/showcase/layouts/portfolio.html`. Every other page, including
+    \\About and each project, falls back to the theme's `main.html`.
+    \\Layout choice is build configuration, never page frontmatter.
+    \\
+    \\```sh
+    \\boris build --profile boris.json
+    \\boris watch --profile boris.json --serve
+    \\```
+    \\
+    \\The watch command serves `dist/` on loopback with browser reload.
+    \\Showcase's generic home, section, and blog layouts remain available;
+    \\see the copied theme's README for their layout rules.
     \\
 ;
 
@@ -1478,13 +1542,6 @@ const portfolio_about_md =
     \\# About
     \\
     \\A two-person studio working with towns, museums, and small publishers.
-    \\
-    \\## How this starter is wired
-    \\
-    \\`boris.json` declares a `layout_rules` entry that sends `id:index` to
-    \\`themes/showcase/layouts/home.html`. Every other page, including this
-    \\one and each project, falls back to the theme's `main.html`. Layout
-    \\choice is build configuration in the profile, never page frontmatter.
     \\
     \\Back to the [[index]].
     \\
@@ -1531,8 +1588,7 @@ const portfolio_field_almanac_md =
     \\
     \\## Approach
     \\
-    \\The layout grid comes from [[projects/harbor-signage]]; the `relations:`
-    \\frontmatter records that lineage as a typed `relates_to` edge.
+    \\The layout grid comes from [[projects/harbor-signage]].
     \\
 ;
 
@@ -1567,7 +1623,7 @@ const portfolio_profile =
     \\      "public": true,
     \\      "theme": "themes/showcase",
     \\      "layout_rules": [
-    \\        { "selector": "id:index", "layout": "themes/showcase/layouts/home.html" }
+    \\        { "selector": "id:index", "layout": "themes/showcase/layouts/portfolio.html" }
     \\      ]
     \\    }
     \\  ]
@@ -2137,10 +2193,13 @@ const wiki_files = [_]FileToWrite{
 };
 
 const link_in_bio_files = [_]FileToWrite{
+    .{ .path = "README.md", .data = link_in_bio_readme },
     .{ .path = "content/index.md", .data = link_in_bio_index_md },
     .{ .path = "themes/minimal/layouts/main.html", .data = archetype_themes.minimal_layout_main },
+    .{ .path = "themes/minimal/layouts/links.html", .data = archetype_themes.minimal_layout_links },
     .{ .path = "themes/minimal/footer.html", .data = archetype_themes.minimal_footer },
     .{ .path = "themes/minimal/assets/minimal.css", .data = archetype_themes.minimal_css },
+    .{ .path = "themes/minimal/assets/links.css", .data = archetype_themes.minimal_links_css },
     .{ .path = "themes/minimal/README.md", .data = archetype_themes.minimal_readme },
     .{ .path = "themes/minimal/ACCESSIBILITY.md", .data = archetype_themes.minimal_accessibility },
     .{ .path = "boris.json", .data = link_in_bio_profile },
@@ -2193,6 +2252,7 @@ const newsletter_files = [_]FileToWrite{
 };
 
 const portfolio_files = [_]FileToWrite{
+    .{ .path = "README.md", .data = portfolio_readme },
     .{ .path = "content/index.md", .data = portfolio_index_md },
     .{ .path = "content/about.md", .data = portfolio_about_md },
     .{ .path = "content/projects/harbor-signage.md", .data = portfolio_harbor_signage_md },
@@ -2200,10 +2260,12 @@ const portfolio_files = [_]FileToWrite{
     .{ .path = "content/projects/specimen-book.md", .data = portfolio_specimen_book_md },
     .{ .path = "themes/showcase/layouts/main.html", .data = archetype_themes.showcase_layout_main },
     .{ .path = "themes/showcase/layouts/home.html", .data = archetype_themes.showcase_layout_home },
+    .{ .path = "themes/showcase/layouts/portfolio.html", .data = archetype_themes.showcase_layout_portfolio },
     .{ .path = "themes/showcase/layouts/section.html", .data = archetype_themes.showcase_layout_section },
     .{ .path = "themes/showcase/layouts/blog.html", .data = archetype_themes.showcase_layout_blog },
     .{ .path = "themes/showcase/footer.html", .data = archetype_themes.showcase_footer },
     .{ .path = "themes/showcase/assets/css/showcase.css", .data = archetype_themes.showcase_css },
+    .{ .path = "themes/showcase/assets/css/portfolio.css", .data = archetype_themes.showcase_portfolio_css },
     .{ .path = "themes/showcase/assets/img/mark.svg", .data = archetype_themes.showcase_mark_svg },
     .{ .path = "themes/showcase/README.md", .data = archetype_themes.showcase_readme },
     .{ .path = "themes/showcase/ACCESSIBILITY.md", .data = archetype_themes.showcase_accessibility },
@@ -2434,13 +2496,14 @@ const link_in_bio_spec = ArchetypeSpec{
     .files = &link_in_bio_files,
     .tree_report =
     \\  content/index.md                  the only page — a trunk with your links
-    \\  themes/minimal/                   shipped "minimal" theme — same shell, no search
+    \\  themes/minimal/                   shipped "minimal" theme — focused links + docs layouts
+    \\  README.md                         edit your links; build and preview instructions
     \\  boris.json                        profile (input_format: markdown, theme: minimal)
     ,
     .next_steps =
     \\  boris --profile boris.json            build the one-page site
     \\  boris check                           graph-health report (still runs on one page)
-    \\  boris watch --profile boris.json      rebuild on change
+    \\  boris watch --profile boris.json --serve   rebuild and preview on loopback
     ,
     .conventions =
     \\  a single trunk page is a valid site; graph, validation, and profile still apply
@@ -2520,22 +2583,23 @@ const portfolio_spec = ArchetypeSpec{
     .layout_path = "themes/showcase/layouts/main.html",
     .files = &portfolio_files,
     .tree_report =
-    \\  content/index.md                  trunk page — the studio front (home layout lists the work)
+    \\  content/index.md                  trunk page — studio front (portfolio layout lists work + about)
     \\  content/about.md                  satellite page
     \\  content/projects/                 three project satellites (published_at + summary)
     \\  themes/showcase/                  shipped "showcase" theme — soft docs + blog shell
-    \\  boris.json                        profile (theme: showcase, layout_rules id:index → home)
+    \\  README.md                         author-facing layout and project wiring instructions
+    \\  boris.json                        profile (theme: showcase, layout_rules id:index → portfolio)
     ,
     .next_steps =
-    \\  boris --profile boris.json            build the portfolio (index renders through home.html)
+    \\  boris --profile boris.json            build the portfolio (index uses portfolio.html)
     \\  boris plan --profile boris.json       inspect the normalized layout rules
     \\  boris check                           graph-health report
-    \\  boris watch --profile boris.json      rebuild on change
+    \\  boris watch --profile boris.json --serve   rebuild and preview on loopback
     ,
     .conventions =
     \\  a project is a satellite of index with published_at + summary; add one per piece of work
     \\  layout_rules pick named layouts by id:, glob:, or role:; every other page uses main.html
-    \\  {{children}} lists a page's direct satellites; the home page's project list is never hand-kept
+    \\  {{children}} lists direct satellites (work + about); keep no second hand-written list
     ,
 };
 
@@ -3056,6 +3120,8 @@ test "link-in-bio is exactly one trunk page" {
     try std.testing.expectEqual(@as(usize, 1), pages);
     try std.testing.expect(std.mem.indexOf(u8, link_in_bio_index_md, "\nparent:") == null);
     try std.testing.expect(std.mem.indexOf(u8, link_in_bio_index_md, "\ntags: [links]\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, link_in_bio_profile, "\"selector\": \"id:index\", \"layout\": \"themes/minimal/layouts/links.html\"") != null);
+    try std.testing.expect(writesFile(&link_in_bio_spec, "README.md"));
 }
 
 test "changelog entries are dated and exactly one is a draft" {
@@ -3123,10 +3189,11 @@ test "portfolio projects are dated satellites of index and one carries a relatio
     }
     try std.testing.expectEqual(@as(usize, 3), projects);
     try std.testing.expectEqual(@as(usize, 1), related);
-    try std.testing.expect(std.mem.indexOf(u8, portfolio_profile, "\"selector\": \"id:index\", \"layout\": \"themes/showcase/layouts/home.html\"") != null);
-    // The home layout lists the work; the index keeps no hand-written copy.
-    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.showcase_layout_home, "{{children}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, portfolio_profile, "\"selector\": \"id:index\", \"layout\": \"themes/showcase/layouts/portfolio.html\"") != null);
+    // The portfolio layout lists every direct child; no hand-written copy.
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.showcase_layout_portfolio, "{{children}}") != null);
     try std.testing.expect(std.mem.indexOf(u8, portfolio_index_md, "[[projects/") == null);
+    try std.testing.expect(writesFile(&portfolio_spec, "README.md"));
 }
 
 test "archive entries share tags and relations give every entry backlinks or relations" {

@@ -41,7 +41,7 @@ Expected `data-layout` markers:
 
 Rule order permutations must produce byte-identical HTML. Full vs
 `--incremental` repeated runs must match (cache format
-`boris-cache-v3-nav-digest`).
+`boris-cache-v4-table-viewport`).
 
 ## Failure cases
 

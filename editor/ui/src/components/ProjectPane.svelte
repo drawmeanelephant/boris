@@ -58,7 +58,18 @@
   {#if project.files.length > 0}
     <div class="file-filter">
       <label for="file-filter">Filter project files</label>
-      <input id="file-filter" value={project.fileQuery} oninput={(e) => (project.fileQuery = (e.currentTarget as HTMLInputElement).value)} />
+      <div class="field-row">
+        <input id="file-filter" value={project.fileQuery} oninput={(e) => (project.fileQuery = (e.currentTarget as HTMLInputElement).value)} />
+        {#if project.fileQuery}
+          <button
+            type="button"
+            class="compact"
+            onclick={() => {
+              project.fileQuery = '';
+              document.getElementById('file-filter')?.focus();
+            }}>Clear file filter</button>
+        {/if}
+      </div>
       {#if fileTreeStatus()}
         <p role="status" aria-label="Project files status" aria-live="polite">{fileTreeStatus()}</p>
       {/if}
