@@ -151,6 +151,8 @@ pub const Server = struct {
 
     /// Open the served root on first use (cached for the server lifetime).
     fn rootDir(self: *Server) !Io.Dir {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
         if (self.root_dir) |d| return d;
         const d = try Io.Dir.cwd().openDir(self.io, self.root_path, .{});
         self.root_dir = d;
@@ -680,6 +682,70 @@ test "stripQueryFragment trims ? and # suffixes" {
     try std.testing.expectEqualStrings("index.html", stripQueryFragment("index.html"));
     try std.testing.expectEqualStrings("index.html", stripQueryFragment("index.html?v=2"));
     try std.testing.expectEqualStrings("a/b.css", stripQueryFragment("a/b.css#x"));
+}
+
+test "preview root first use shares one handle after a missing output directory" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/output", .{tmp.sub_path});
+    defer gpa.free(root);
+    var server = try Server.init(gpa, io, root, 0);
+    defer server.deinit();
+    try std.testing.expectError(error.FileNotFound, server.rootDir());
+    try tmp.dir.createDir(io, "output", .default_dir);
+    const Gate = struct {
+        mutex: Io.Mutex = .init,
+        condition: Io.Condition = .init,
+        arrived: usize = 0,
+        open: bool = false,
+    };
+    const Worker = struct {
+        server: *Server,
+        gate: *Gate,
+        dir: ?Io.Dir = null,
+        failure: ?anyerror = null,
+
+        fn run(self: *@This()) void {
+            self.gate.mutex.lockUncancelable(self.server.io);
+            self.gate.arrived += 1;
+            self.gate.condition.broadcast(self.server.io);
+            while (!self.gate.open) self.gate.condition.waitUncancelable(self.server.io, &self.gate.mutex);
+            self.gate.mutex.unlock(self.server.io);
+            self.dir = self.server.rootDir() catch |err| {
+                self.failure = err;
+                return;
+            };
+        }
+    };
+    var gate: Gate = .{};
+    var workers: [16]Worker = undefined;
+    var threads: [workers.len]std.Thread = undefined;
+    var started: usize = 0;
+    defer {
+        gate.mutex.lockUncancelable(io);
+        gate.open = true;
+        gate.condition.broadcast(io);
+        gate.mutex.unlock(io);
+        for (threads[0..started]) |thread| thread.join();
+    }
+    for (&workers, &threads) |*worker, *thread| {
+        worker.* = .{ .server = &server, .gate = &gate };
+        thread.* = try std.Thread.spawn(.{}, Worker.run, .{worker});
+        started += 1;
+    }
+    gate.mutex.lockUncancelable(io);
+    while (gate.arrived < workers.len) gate.condition.waitUncancelable(io, &gate.mutex);
+    gate.open = true;
+    gate.condition.broadcast(io);
+    gate.mutex.unlock(io);
+    for (threads) |thread| thread.join();
+    started = 0;
+    for (workers) |worker| {
+        try std.testing.expect(worker.failure == null);
+        try std.testing.expectEqual(server.root_dir.?.handle, worker.dir.?.handle);
+    }
 }
 
 test "renderStaleBanner escapes HTML in the diagnostic summary" {
