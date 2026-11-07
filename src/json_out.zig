@@ -67,6 +67,13 @@ pub fn indent(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, level: usize) !vo
     }
 }
 
+/// Write the same JSON string bytes directly to any writer.
+pub fn writeStringTo(writer: *std.Io.Writer, s: []const u8) std.Io.Writer.Error!void {
+    try writer.writeByte('"');
+    try escapeWrite(writer, s);
+    try writer.writeByte('"');
+}
+
 pub fn writeString(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
     try buf.append(gpa, '"');
     try escapeAppend(buf, gpa, s);

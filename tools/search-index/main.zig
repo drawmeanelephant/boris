@@ -295,11 +295,11 @@ fn runInner(allocator: std.mem.Allocator, io: Io, options: Options) !void {
         };
         try documents.append(allocator, document);
     }
-    const json = try search.writeJson(allocator, documents.items);
-    defer allocator.free(json);
     const output_file = try std.fmt.allocPrint(allocator, "{s}/search-index.json", .{options.out});
     defer allocator.free(output_file);
     if (options.check) {
+        const json = try search.writeJson(allocator, documents.items);
+        defer allocator.free(json);
         const existing = readFile(io, Io.Dir.cwd(), output_file, allocator) catch return error.CheckMismatch;
         defer allocator.free(existing);
         if (!std.mem.eql(u8, existing, json)) return error.CheckMismatch;
@@ -308,7 +308,7 @@ fn runInner(allocator: std.mem.Allocator, io: Io, options: Options) !void {
         defer atomic.deinit(io);
         var buffer: [4096]u8 = undefined;
         var writer = atomic.file.writer(io, &buffer);
-        try writer.interface.writeAll(json);
+        try search.writeJsonTo(&writer.interface, documents.items);
         try writer.interface.flush();
         try atomic.replace(io);
     }
