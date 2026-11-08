@@ -5,7 +5,8 @@
  * execs native boris. This file is host glue, not a compiler.
  *
  * Optional R2 binding name: JOBS. Without it the Worker still returns
- * the result JSON. Secrets stay in the Worker; enableInternet is false.
+ * the result JSON. Only the runner bearer token enters the container;
+ * enableInternet is false.
  */
 import { Container } from "@cloudflare/containers";
 
@@ -13,6 +14,7 @@ export class BorisJobRunner extends Container {
   defaultPort = 8080;
   sleepAfter = "15s";
   enableInternet = false;
+  envVars = { BORIS_JOB_TOKEN: this.env.BORIS_JOB_TOKEN };
 }
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" };

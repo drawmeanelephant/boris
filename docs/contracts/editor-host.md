@@ -672,12 +672,15 @@ that serves **only** the committed `dist/` bytes.
 - `GET`/`HEAD` only; any other method is `405`.
 - `Host` must be `127.0.0.1:<preview port>` or `localhost:<preview port>`; a
   supplied `Origin` must be the matching `http://` origin.
-- Authorization: a `?token=<session token>` query on any path, or the
+- Authorization: a `?token=<preview token>` query on any path, or the
   `BorisPreview_<preview port>=<token>` cookie that such a request sets
   (`Path=/; HttpOnly; SameSite=Strict`). Comparison is constant-time. Anything
   else is `403`.
-  The token is the **same** session token as the host's, and the query form
-  exists because iframe subresources cannot carry the launch fragment.
+  The preview token is generated independently of the host API token and
+  authorizes only preview reads. Neither token authorizes the other's
+  origin. The query form exists because iframe subresources cannot carry
+  the launch fragment. Every preview response, including refusals, sets
+  `Referrer-Policy: no-referrer`.
 - Paths are guarded exactly as the shell's static paths are (no leading `/`, no
   `\`, `%`, NUL, `.`, `..`), `dist/` is opened without following symlinks, and
   files are read with a 32 MiB ceiling. Missing files are `404`; there is no

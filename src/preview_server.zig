@@ -273,6 +273,14 @@ fn handleConnection(self: *Server, stream: Io.net.Stream) void {
     var server = http.Server.init(&io_reader.interface, &io_writer.interface);
 
     var request = server.receiveHead() catch return;
+    if (!validAuthority(&request, self.bound_port)) {
+        request.respond("forbidden", .{
+            .status = .forbidden,
+            .keep_alive = false,
+            .extra_headers = &plain_headers,
+        }) catch {};
+        return;
+    }
     if (request.head.method != .GET and request.head.method != .HEAD) {
         request.respond("method not allowed", .{
             .status = .method_not_allowed,
@@ -303,6 +311,35 @@ fn handleConnection(self: *Server, stream: Io.net.Stream) void {
 }
 
 const plain_headers = [_]http.Header{.{ .name = "content-type", .value = "text/plain; charset=utf-8" }};
+
+fn validAuthority(request: *const http.Server.Request, port: u16) bool {
+    var host: ?[]const u8 = null;
+    var origin: ?[]const u8 = null;
+    var headers = request.iterateHeaders();
+    while (headers.next()) |header| {
+        if (std.ascii.eqlIgnoreCase(header.name, "host")) {
+            if (host != null) return false;
+            host = header.value;
+        } else if (std.ascii.eqlIgnoreCase(header.name, "origin")) {
+            if (origin != null) return false;
+            origin = header.value;
+        }
+    }
+    const actual_host = host orelse return false;
+    var ip_buf: [64]u8 = undefined;
+    var localhost_buf: [64]u8 = undefined;
+    const ip = std.fmt.bufPrint(&ip_buf, "127.0.0.1:{d}", .{port}) catch unreachable;
+    const localhost = std.fmt.bufPrint(&localhost_buf, "localhost:{d}", .{port}) catch unreachable;
+    if (!std.ascii.eqlIgnoreCase(actual_host, ip) and !std.ascii.eqlIgnoreCase(actual_host, localhost)) return false;
+    if (origin) |value| {
+        var ip_origin_buf: [80]u8 = undefined;
+        var localhost_origin_buf: [80]u8 = undefined;
+        const ip_origin = std.fmt.bufPrint(&ip_origin_buf, "http://{s}", .{ip}) catch unreachable;
+        const localhost_origin = std.fmt.bufPrint(&localhost_origin_buf, "http://{s}", .{localhost}) catch unreachable;
+        if (!std.ascii.eqlIgnoreCase(value, ip_origin) and !std.ascii.eqlIgnoreCase(value, localhost_origin)) return false;
+    }
+    return true;
+}
 
 /// `GET /__boris/status` (#1114): machine-readable build state for the
 /// served tree, so external tooling (and authors) can tell the preview is
@@ -678,6 +715,76 @@ test "isSafeTarget rejects traversal and escapes" {
     try std.testing.expect(!isSafeTarget("h\xc3\xa9llo.html"));
 }
 
+test "preview server rejects non-loopback request authorities on every route" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try tmp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root);
+    try tmp.dir.writeFile(io, .{ .sub_path = "index.html", .data = "private preview" });
+    var server = try Server.init(gpa, io, root, 0);
+    defer server.deinit();
+    try server.start();
+    server.notifyBuildFailed("private diagnostic", 1);
+    const port = server.boundPort();
+    var host_buf: [64]u8 = undefined;
+    const host = try std.fmt.bufPrint(&host_buf, "127.0.0.1:{d}", .{port});
+    const address = try Io.net.IpAddress.parseIp4("127.0.0.1", port);
+    for ([_][]const u8{ "127.0.0.1", "LOCALHOST" }) |alias| {
+        var conn = try address.connect(io, .{ .mode = .stream });
+        defer conn.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var writer = conn.writer(io, &wbuf);
+        try writer.interface.print("GET /__boris/status HTTP/1.1\r\nHost: {s}:{d}\r\nOrigin: http://{s}:{d}\r\nConnection: close\r\n\r\n", .{ alias, port, alias, port });
+        try writer.interface.flush();
+        var rbuf: [4096]u8 = undefined;
+        var reader = conn.reader(io, &rbuf);
+        var response: std.ArrayList(u8) = .empty;
+        defer response.deinit(gpa);
+        try slurpToEof(&reader.interface, gpa, &response);
+        try std.testing.expect(std.mem.indexOf(u8, response.items, "200 OK") != null);
+        try std.testing.expect(std.mem.indexOf(u8, response.items, "private diagnostic") != null);
+    }
+    const Case = struct { host: ?[]const u8, origin: ?[]const u8 = null, duplicate: bool = false };
+    for ([_]Case{
+        .{ .host = "attacker.test" },
+        .{ .host = "localhost" },
+        .{ .host = null },
+        .{ .host = host, .origin = "null" },
+        .{ .host = host, .origin = "https://attacker.test" },
+        .{ .host = host, .origin = "http://localhost:1" },
+        .{ .host = host, .duplicate = true },
+        .{ .host = host, .origin = "https://attacker.test", .duplicate = true },
+    }) |case| {
+        for ([_][]const u8{ "/", "/__boris/", "/__boris/status", "/__boris/events" }) |path| {
+            var conn = try address.connect(io, .{ .mode = .stream });
+            defer conn.close(io);
+            var wbuf: [4096]u8 = undefined;
+            var writer = conn.writer(io, &wbuf);
+            try writer.interface.print("GET {s} HTTP/1.1\r\n", .{path});
+            if (case.host) |value| try writer.interface.print("Host: {s}\r\n", .{value});
+            if (case.origin) |value| try writer.interface.print("Origin: {s}\r\n", .{value});
+            if (case.duplicate) {
+                if (case.origin != null) {
+                    try writer.interface.print("Origin: http://{s}\r\n", .{host});
+                } else {
+                    try writer.interface.print("Host: {s}\r\n", .{host});
+                }
+            }
+            try writer.interface.writeAll("Connection: close\r\n\r\n");
+            try writer.interface.flush();
+            var rbuf: [4096]u8 = undefined;
+            var reader = conn.reader(io, &rbuf);
+            var response: std.ArrayList(u8) = .empty;
+            defer response.deinit(gpa);
+            try slurpToEof(&reader.interface, gpa, &response);
+            try std.testing.expect(std.mem.indexOf(u8, response.items, "403 Forbidden") != null);
+            try std.testing.expect(std.mem.indexOf(u8, response.items, "private") == null);
+        }
+    }
+}
+
 test "stripQueryFragment trims ? and # suffixes" {
     try std.testing.expectEqualStrings("index.html", stripQueryFragment("index.html"));
     try std.testing.expectEqualStrings("index.html", stripQueryFragment("index.html?v=2"));
@@ -807,7 +914,7 @@ test "preview server reports failed build via status, banner, and stale event" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /__boris/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /__boris/status HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -828,7 +935,7 @@ test "preview server reports failed build via status, banner, and stale event" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /__boris/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /__boris/status HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -847,7 +954,7 @@ test "preview server reports failed build via status, banner, and stale event" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /index.html HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -864,7 +971,7 @@ test "preview server reports failed build via status, banner, and stale event" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /assets/site.css HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /assets/site.css HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -880,7 +987,7 @@ test "preview server reports failed build via status, banner, and stale event" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /__boris/events HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        try writer.interface.print("GET /__boris/events HTTP/1.1\r\nHost: localhost:{d}\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -899,7 +1006,7 @@ test "preview server reports failed build via status, banner, and stale event" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /__boris/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /__boris/status HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -915,7 +1022,7 @@ test "preview server reports failed build via status, banner, and stale event" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /index.html HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -986,7 +1093,7 @@ test "preview server serves files and pushes reload events" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /index.html HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -1003,7 +1110,7 @@ test "preview server serves files and pushes reload events" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /nope.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /nope.html HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -1019,7 +1126,7 @@ test "preview server serves files and pushes reload events" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /../secret HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        try writer.interface.print("GET /../secret HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -1035,7 +1142,7 @@ test "preview server serves files and pushes reload events" {
         defer conn.close(io);
         var wbuf: [4096]u8 = undefined;
         var writer = conn.writer(io, &wbuf);
-        try writer.interface.writeAll("GET /__boris/events HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        try writer.interface.print("GET /__boris/events HTTP/1.1\r\nHost: localhost:{d}\r\n\r\n", .{port});
         try writer.interface.flush();
         var rbuf: [8192]u8 = undefined;
         var reader = conn.reader(io, &rbuf);
@@ -1083,7 +1190,7 @@ test "preview server: repeated start/stop cycles tear down cleanly" {
             defer conn.close(io);
             var wbuf: [4096]u8 = undefined;
             var writer = conn.writer(io, &wbuf);
-            try writer.interface.writeAll("GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+            try writer.interface.print("GET /index.html HTTP/1.1\r\nHost: localhost:{d}\r\nConnection: close\r\n\r\n", .{port});
             try writer.interface.flush();
             var rbuf: [8192]u8 = undefined;
             var reader = conn.reader(io, &rbuf);
@@ -1101,7 +1208,7 @@ test "preview server: repeated start/stop cycles tear down cleanly" {
             defer conn.close(io);
             var wbuf: [4096]u8 = undefined;
             var writer = conn.writer(io, &wbuf);
-            try writer.interface.writeAll("GET /__boris/events HTTP/1.1\r\nHost: localhost\r\n\r\n");
+            try writer.interface.print("GET /__boris/events HTTP/1.1\r\nHost: localhost:{d}\r\n\r\n", .{port});
             try writer.interface.flush();
             var rbuf: [8192]u8 = undefined;
             var reader = conn.reader(io, &rbuf);

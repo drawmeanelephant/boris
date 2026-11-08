@@ -70,6 +70,13 @@ on `127.0.0.1` (default port `8090`; `--port 0` selects an ephemeral port). It
 reuses the watch coordinator — the same debounced rebuild cycle — and pushes an
 SSE `reload` event to connected clients after every successful rebuild.
 
+Every route requires exactly one `Host` header naming `127.0.0.1:<bound port>`
+or `localhost:<bound port>`. When supplied, exactly one `Origin` header must
+name either loopback alias at that same port over HTTP. Invalid, missing, or
+duplicate authorities and foreign, opaque, or duplicate origins receive `403`
+before any route is served. An absent `Origin` remains valid for same-origin
+navigations and non-browser clients.
+
 Served routes:
 
 | Route | Behavior |

@@ -204,11 +204,12 @@ fn staticResponse(request: *http.Server.Request, status: http.Status, body: []co
         .{ .name = "content-type", .value = content_type },
         .{ .name = "cache-control", .value = "no-store" },
         .{ .name = "x-content-type-options", .value = "nosniff" },
+        .{ .name = "referrer-policy", .value = "no-referrer" },
     };
-    var with_cookie: [4]http.Header = undefined;
-    @memcpy(with_cookie[0..3], &base);
+    var with_cookie: [5]http.Header = undefined;
+    @memcpy(with_cookie[0..base.len], &base);
     if (set_cookie) |value| {
-        with_cookie[3] = .{ .name = "set-cookie", .value = value };
+        with_cookie[base.len] = .{ .name = "set-cookie", .value = value };
         return request.respond(body, .{ .status = status, .keep_alive = false, .extra_headers = &with_cookie });
     }
     return request.respond(body, .{ .status = status, .keep_alive = false, .extra_headers = &base });

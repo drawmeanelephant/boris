@@ -25,6 +25,7 @@ pub const Config = struct {
     state_root: []const u8,
     port: u16 = 0,
     token: [32]u8,
+    preview_token: [32]u8,
     preview: *preview.Manager,
     daemon: *validation_daemon.Daemon,
     watch: *watch_daemon.Daemon,
@@ -247,7 +248,7 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
 }
 
 fn servePreviewState(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
-    const bytes = try config.preview.renderState(allocator, &config.token, config.watch.distOwned());
+    const bytes = try config.preview.renderState(allocator, &config.preview_token, config.watch.distOwned());
     defer allocator.free(bytes);
     return respondJson(request, .ok, bytes);
 }
