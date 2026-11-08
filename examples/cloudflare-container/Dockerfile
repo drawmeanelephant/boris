@@ -22,4 +22,4 @@ ENV BORIS_BIN=/usr/local/bin/boris
 ENV BORIS_WORK_ROOT=/tmp/boris-jobs
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/boris-job-runner"]
-CMD ["--listen", "0.0.0.0:8080", "--allow-unauthenticated"]
+CMD ["--listen", "0.0.0.0:8080"]

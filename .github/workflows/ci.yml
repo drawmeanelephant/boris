@@ -286,7 +286,12 @@ jobs:
         with:
           version: 0.17.0
 
-      - name: Native --once smoke
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Native runner and host authentication smoke
         run: bash scripts/test-job-runner-image.sh
 
   # Optional, manual-only parity lane: builds the example container image and

@@ -31,6 +31,9 @@ npx wrangler deploy
 ```
 
 `bin/` is gitignored. The Dockerfile copies those two binaries.
+The Worker passes `BORIS_JOB_TOKEN` into the container at runtime, and both
+layers require it for job requests. Direct Docker launches must supply the
+same nonempty environment variable; never put its value in the image.
 
 ## Call
 

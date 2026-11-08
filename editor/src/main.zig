@@ -65,15 +65,17 @@ pub fn main(init: std.process.Init) u8 {
     };
     defer allocator.free(cache_path);
 
-    var random_bytes: [16]u8 = undefined;
+    var random_bytes: [32]u8 = undefined;
     init.io.randomSecure(&random_bytes) catch |err| {
         std.debug.print("boris-editor: secure session token unavailable: {s}\n", .{@errorName(err)});
         return 3;
     };
     var token: [32]u8 = undefined;
-    _ = std.fmt.bufPrint(&token, "{x}", .{random_bytes}) catch unreachable;
+    _ = std.fmt.bufPrint(&token, "{x}", .{random_bytes[0..16]}) catch unreachable;
+    var preview_token: [32]u8 = undefined;
+    _ = std.fmt.bufPrint(&preview_token, "{x}", .{random_bytes[16..32]}) catch unreachable;
 
-    const preview_port = preview.startStatic(init.io, canonical_project, token) catch |err| {
+    const preview_port = preview.startStatic(init.io, canonical_project, preview_token) catch |err| {
         std.debug.print("boris-editor: preview server failed: {s}\n", .{@errorName(err)});
         return 3;
     };
@@ -107,6 +109,7 @@ pub fn main(init: std.process.Init) u8 {
         .state_root = cache_path,
         .port = options.port,
         .token = token,
+        .preview_token = preview_token,
         .preview = &preview_manager,
         .daemon = &validation,
         .watch = &watch,
