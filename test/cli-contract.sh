@@ -78,10 +78,26 @@ done
 # Flags are scoped to their own class: the linked fixture trips none of the
 # advisory flags, and a single page stays below the flat_graph minimum.
 expect_exit 0 "${BORIS}" check --input="${FIXTURE}" --format=json --report="${TMP}/check-advisory-strict.json" \
-  --fail-on-unlinked --fail-on-flat-graph --fail-on-zero-includes --fail-on-zero-relations --quiet
+  --fail-on-unlinked --fail-on-flat-graph --fail-on-zero-includes --fail-on-zero-relations --fail-on-draft --quiet
 cmp "${EXPECTED}/check.json" "${TMP}/check-advisory-strict.json"
 expect_exit 0 "${BORIS}" check --input="${SINGLE}" --format=json --report="${TMP}/check-single-flat.json" --fail-on-flat-graph --quiet
 expect_exit 1 "${BORIS}" check --input="${SINGLE}" --format=json --report="${TMP}/check-single-unlinked.json" --fail-on-unlinked --quiet
+
+# Freshness advisory (#1163): a corpus with one status: draft page reports
+# draft_page (exit 0 by default, exit 1 with --fail-on-draft) with byte-identical
+# JSON and human reports; published, archived, and unset status do not emit it;
+# impact rejects --fail-on-draft with usage exit 2.
+DRAFT="docs/contracts/fixtures/documentation-intelligence/edge-cases/draft/content"
+DRAFT_EXPECTED="docs/contracts/fixtures/documentation-intelligence/edge-cases/draft/expected"
+expect_exit 0 "${BORIS}" check --input="${DRAFT}" --format=json --report="${TMP}/check-draft.json" --quiet
+cmp "${DRAFT_EXPECTED}/check.json" "${TMP}/check-draft.json"
+expect_exit 1 "${BORIS}" check --input="${DRAFT}" --format=json --report="${TMP}/check-draft-strict.json" --fail-on-draft --quiet
+cmp "${TMP}/check-draft.json" "${TMP}/check-draft-strict.json"
+expect_exit 0 "${BORIS}" check --input="${DRAFT}" --format=human --report="${TMP}/check-draft.txt" --quiet
+cmp "${DRAFT_EXPECTED}/check.txt" "${TMP}/check-draft.txt"
+expect_exit 1 "${BORIS}" check --input="${DRAFT}" --format=human --report="${TMP}/check-draft-strict.txt" --fail-on-draft --quiet
+cmp "${TMP}/check-draft.txt" "${TMP}/check-draft-strict.txt"
+expect_exit 2 "${BORIS}" impact guides/reference --input="${FIXTURE}" --fail-on-draft --quiet
 
 # Content, usage, and I/O failures stay distinct and do not create an analysis
 # report when no valid frozen graph exists.

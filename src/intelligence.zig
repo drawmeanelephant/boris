@@ -35,6 +35,8 @@ pub const Page = struct {
     /// edges name this path, so pages without it can never be
     /// include-consumed (#739). Optional for graph-only callers.
     source_path: ?[]const u8 = null,
+    /// Frontmatter `status` (`"draft"`, `"published"`, `"archived"`), if set.
+    status: ?[]const u8 = null,
 };
 
 pub const Edge = struct {
@@ -50,6 +52,7 @@ pub const FindingCode = enum {
     flat_graph,
     zero_includes,
     zero_relations,
+    draft_page,
 };
 
 /// `flat_graph` fires only once a corpus is large enough for the missing
@@ -248,6 +251,19 @@ pub fn analyze(
                 .endpoint = corpus_endpoint,
                 .count = pages.len,
             });
+        }
+    }
+
+    // Freshness advisory (#1163): surface pages still marked `status: draft`
+    // without flagging published, archived, or unset status.
+    for (pages) |page| {
+        if (page.status) |status| {
+            if (std.mem.eql(u8, status, "draft")) {
+                try report.findings.append(allocator, .{
+                    .code = .draft_page,
+                    .endpoint = .{ .type = .page, .value = page.id },
+                });
+            }
         }
     }
 
@@ -511,4 +527,44 @@ test "advisory findings: include consumption links a page without a wiki-link" {
     try std.testing.expectEqual(@as(usize, 0), countFindings(&report, .unlinked_page));
     try std.testing.expectEqual(@as(usize, 0), countFindings(&report, .zero_includes));
     try std.testing.expectEqual(@as(usize, 1), countFindings(&report, .zero_relations));
+}
+
+test "advisory findings: draft_page fires only for status draft and sorts deterministically (#1163)" {
+    const pages = [_]Page{
+        .{ .id = "zeta", .status = "draft" },
+        .{ .id = "alpha", .status = "published" },
+        .{ .id = "beta", .status = "archived" },
+        .{ .id = "gamma", .status = null },
+        .{ .id = "delta", .status = "draft" },
+    };
+    const edges = [_]Edge{
+        .{ .from = .{ .type = .page, .value = "alpha" }, .to = .{ .type = .page, .value = "beta" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "alpha" }, .to = .{ .type = .page, .value = "gamma" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "alpha" }, .to = .{ .type = .page, .value = "delta" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "alpha" }, .to = .{ .type = .source, .value = "includes/s.md" }, .kind = "include" },
+    };
+    var report = try analyze(std.testing.allocator, &pages, &edges, .{});
+    defer report.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), countFindings(&report, .draft_page));
+    // Expected deterministic order:
+    // 0: alpha -> unreferenced_page
+    // 1: delta -> draft_page (referenced by alpha, so only draft_page)
+    // 2: zeta  -> unreferenced_page
+    // 3: zeta  -> unlinked_page
+    // 4: zeta  -> draft_page
+    try std.testing.expectEqual(@as(usize, 5), report.findings.items.len);
+    try std.testing.expectEqual(FindingCode.unreferenced_page, report.findings.items[0].code);
+    try std.testing.expectEqualStrings("alpha", report.findings.items[0].endpoint.value);
+    try std.testing.expectEqual(FindingCode.draft_page, report.findings.items[1].code);
+    try std.testing.expectEqual(EndpointType.page, report.findings.items[1].endpoint.type);
+    try std.testing.expectEqualStrings("delta", report.findings.items[1].endpoint.value);
+    try std.testing.expectEqual(@as(usize, 0), report.findings.items[1].count);
+    try std.testing.expectEqual(FindingCode.unreferenced_page, report.findings.items[2].code);
+    try std.testing.expectEqualStrings("zeta", report.findings.items[2].endpoint.value);
+    try std.testing.expectEqual(FindingCode.unlinked_page, report.findings.items[3].code);
+    try std.testing.expectEqualStrings("zeta", report.findings.items[3].endpoint.value);
+    try std.testing.expectEqual(FindingCode.draft_page, report.findings.items[4].code);
+    try std.testing.expectEqualStrings("zeta", report.findings.items[4].endpoint.value);
+    try std.testing.expectEqual(@as(usize, 0), report.findings.items[4].count);
 }

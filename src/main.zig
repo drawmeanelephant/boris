@@ -2422,7 +2422,7 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
     defer pages.deinit(gpa);
     pages.ensureTotalCapacity(gpa, result.pages.items.len) catch return .io_error;
     for (result.pages.items) |page| {
-        pages.appendAssumeCapacity(.{ .id = page.id, .parent = page.parent, .source_path = page.source_path });
+        pages.appendAssumeCapacity(.{ .id = page.id, .parent = page.parent, .source_path = page.source_path, .status = page.status });
     }
 
     var edges: std.ArrayList(intelligence.Edge) = .empty;
@@ -2508,6 +2508,7 @@ fn checkPolicyFailed(opts: Options, findings: []const intelligence.Finding) bool
             .flat_graph => opts.fail_on_flat_graph,
             .zero_includes => opts.fail_on_zero_includes,
             .zero_relations => opts.fail_on_zero_relations,
+            .draft_page => opts.fail_on_draft,
             .fan_in_hotspot => false,
         };
         if (fatal) return true;
@@ -3923,6 +3924,7 @@ test "runPipeline: advisory check findings are exit 0 unless their flag opts in"
         .fail_on_flat_graph = true,
         .fail_on_zero_includes = true,
         .fail_on_zero_relations = true,
+        .fail_on_draft = true,
     };
     try std.testing.expectEqual(ExitCode.success, runPipeline(io, gpa, linked));
     const linked_bytes = try cwd.readFileAlloc(io, linked_report, gpa, .unlimited);
@@ -3930,6 +3932,63 @@ test "runPipeline: advisory check findings are exit 0 unless their flag opts in"
     const golden = try cwd.readFileAlloc(io, "docs/contracts/fixtures/documentation-intelligence/expected/check.json", gpa, .unlimited);
     defer gpa.free(golden);
     try std.testing.expectEqualStrings(golden, linked_bytes);
+}
+
+test "runPipeline: draft_page advisory is exit 0 unless --fail-on-draft opts in (#1163)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const cwd = Io.Dir.cwd();
+    const draft_input = "docs/contracts/fixtures/documentation-intelligence/edge-cases/draft/content";
+
+    const cases = [_]struct {
+        format: cli.AnalysisFormat,
+        golden: []const u8,
+        ext: []const u8,
+    }{
+        .{
+            .format = .json,
+            .golden = "docs/contracts/fixtures/documentation-intelligence/edge-cases/draft/expected/check.json",
+            .ext = "json",
+        },
+        .{
+            .format = .human,
+            .golden = "docs/contracts/fixtures/documentation-intelligence/edge-cases/draft/expected/check.txt",
+            .ext = "txt",
+        },
+    };
+
+    for (cases) |case| {
+        const default_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-draft.{s}", .{ tmp.sub_path, case.ext });
+        defer gpa.free(default_report);
+        const strict_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-draft-strict.{s}", .{ tmp.sub_path, case.ext });
+        defer gpa.free(strict_report);
+
+        const base = Options{
+            .command = .check,
+            .input_dir = draft_input,
+            .analysis_format = case.format,
+            .analysis_report = default_report,
+            .quiet = true,
+        };
+        try std.testing.expectEqual(ExitCode.success, runPipeline(io, gpa, base));
+
+        var strict = base;
+        strict.analysis_report = strict_report;
+        strict.fail_on_draft = true;
+        try std.testing.expectEqual(ExitCode.content_error, runPipeline(io, gpa, strict));
+
+        const default_bytes = try cwd.readFileAlloc(io, default_report, gpa, .unlimited);
+        defer gpa.free(default_bytes);
+        const strict_bytes = try cwd.readFileAlloc(io, strict_report, gpa, .unlimited);
+        defer gpa.free(strict_bytes);
+        const golden_bytes = try cwd.readFileAlloc(io, case.golden, gpa, .unlimited);
+        defer gpa.free(golden_bytes);
+
+        try std.testing.expectEqualStrings(golden_bytes, default_bytes);
+        try std.testing.expectEqualStrings(default_bytes, strict_bytes);
+    }
 }
 
 test "runPipeline: graph renders pin the documentation-intelligence goldens" {

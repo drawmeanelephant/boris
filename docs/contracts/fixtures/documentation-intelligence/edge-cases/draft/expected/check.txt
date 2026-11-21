@@ -1,0 +1,9 @@
+Documentation Intelligence (check)
+pages: 5 (roots 1, satellites 4)
+source endpoints: 1
+edge counts (incoming/outgoing): pages parent 4/4, include 0/1, reference 4/4; sources parent 0/0, include 1/0, reference 0/0
+unreferenced pages: 1
+hotspots: 0
+findings:
+  draft_page: guides/wip
+  unreferenced_page: index

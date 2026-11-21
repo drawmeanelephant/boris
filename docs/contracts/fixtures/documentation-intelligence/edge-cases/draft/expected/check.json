@@ -1,0 +1,32 @@
+{
+  "format": "boris-documentation-intelligence",
+  "schemaVersion": "0.2.0",
+  "compiler": "boris/0.9.0",
+  "input": "docs/contracts/fixtures/documentation-intelligence/edge-cases/draft/content",
+  "summary": {
+    "pages": 5,
+    "roots": 1,
+    "satellites": 4,
+    "sourceEndpoints": 1,
+    "edgeCounts": {
+      "incoming": {
+        "pages": {"parent": 4, "include": 0, "reference": 4},
+        "sources": {"parent": 0, "include": 1, "reference": 0}
+      },
+      "outgoing": {
+        "pages": {"parent": 4, "include": 1, "reference": 4},
+        "sources": {"parent": 0, "include": 0, "reference": 0}
+      }
+    },
+    "unreferencedPages": 1,
+    "hotspots": 0
+  },
+  "nodes": [{"type":"page","id":"guides/plain","sourcePath":"guides/plain.md","parent":"index"},{"type":"page","id":"guides/ready","sourcePath":"guides/ready.md","parent":"index"},{"type":"page","id":"guides/retired","sourcePath":"guides/retired.md","parent":"index"},{"type":"page","id":"guides/wip","sourcePath":"guides/wip.md","parent":"index"},{"type":"page","id":"index","sourcePath":"index.md","parent":null}],
+  "edges": [{"from":{"type":"page","value":"guides/plain"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"guides/ready"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"guides/retired"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"guides/wip"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/plain"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/ready"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/retired"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/wip"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"source","value":"includes/shared.md"},"kind":"include"}],
+  "sourceLocations": [{"type":"page","value":"guides/plain","sourcePath":"guides/plain.md","line":1,"column":1},{"type":"page","value":"guides/ready","sourcePath":"guides/ready.md","line":1,"column":1},{"type":"page","value":"guides/retired","sourcePath":"guides/retired.md","line":1,"column":1},{"type":"page","value":"guides/wip","sourcePath":"guides/wip.md","line":1,"column":1},{"type":"page","value":"index","sourcePath":"index.md","line":1,"column":1}],
+  "pages": [{"id":"guides/plain","parent":"index"},{"id":"guides/ready","parent":"index"},{"id":"guides/retired","parent":"index"},{"id":"guides/wip","parent":"index"},{"id":"index","parent":null}],
+  "sources": ["includes/shared.md"],
+  "findings": [{"code":"draft_page","type":"page","value":"guides/wip","count":0,"sourcePath":"guides/wip.md","line":1,"column":1},{"code":"unreferenced_page","type":"page","value":"index","count":0,"sourcePath":"index.md","line":1,"column":1}],
+  "impact": null,
+  "diagnostics": []
+}

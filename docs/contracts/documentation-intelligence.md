@@ -54,11 +54,11 @@ uses these precise categories:
 
 ### Advisory findings
 
-Advisory findings describe a valid-but-flat corpus: legal content whose
-missing structure is worth surfacing, not failing. They ride the same
-findings array and sorting rules as `unreferenced_page` and are
+Advisory findings surface valid-but-flat graph structure and draft-status
+pages: legal content worth reporting, not failing by default. They ride the
+same findings array and sorting rules as `unreferenced_page` and are
 informational unless a matching `--fail-on-*` flag opts into exit `1`
-(#1023). The closed advisory code set:
+(#1023, #1163). The closed advisory code set:
 
 - **flat_graph** — the corpus holds at least two pages and the frozen graph
   carries no `parent`, `include`, or `reference` edges at all. The finding's
@@ -69,6 +69,10 @@ informational unless a matching `--fail-on-*` flag opts into exit `1`
   outward is unreferenced but not unlinked.
 - **zero_includes** — a non-empty corpus with no `include` edges.
 - **zero_relations** — a non-empty corpus with no `reference` edges.
+- **draft_page** — a page whose frontmatter declares `status: draft` (#1163).
+  Pages with `status: published`, `status: archived`, or unset `status` do not
+  emit this finding. Its finding endpoint is `{"type": "page", "value": "<id>"}`
+  with `count: 0`.
 
 Corpus-level advisories (`flat_graph`, `zero_includes`, `zero_relations`)
 name the whole graph rather than a node: their finding endpoint is
@@ -85,8 +89,9 @@ The first slice reports facts already represented by the frozen graph:
 - incoming and outgoing edge counts by existing edge kind (`parent`, `include`,
   `reference`);
 - unreferenced pages, excluding the page's own `parent` relationship;
-- advisory findings for valid-but-flat corpora (`unlinked_page`,
-  `flat_graph`, `zero_includes`, `zero_relations`); see below;
+- advisory findings for valid-but-flat corpora and draft-status pages
+  (`unlinked_page`, `flat_graph`, `zero_includes`, `zero_relations`,
+  `draft_page`); see above;
 - dependency fan-in hotspots using a declared threshold, not an arbitrary
   severity claim;
 - transitive impact for a requested page or source endpoint.
@@ -135,7 +140,7 @@ The eventual CLI surface is:
 boris check [--input DIR] [--format human|json] [--report PATH]
             [--fail-on-unreferenced] [--fail-on-unlinked]
             [--fail-on-flat-graph] [--fail-on-zero-includes]
-            [--fail-on-zero-relations]
+            [--fail-on-zero-relations] [--fail-on-draft]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 ```
 
@@ -153,8 +158,8 @@ findings above without failing by default. Each `--fail-on-*` flag opts into
 exit `1` when one or more findings of its class are present:
 `--fail-on-unreferenced` for `unreferenced_page`, `--fail-on-unlinked` for
 `unlinked_page`, `--fail-on-flat-graph` for `flat_graph`,
-`--fail-on-zero-includes` for `zero_includes`, and `--fail-on-zero-relations`
-for `zero_relations`. The flags are check-only — `impact` and every other
+`--fail-on-zero-includes` for `zero_includes`, `--fail-on-zero-relations`
+for `zero_relations`, and `--fail-on-draft` for `draft_page`. The flags are check-only — `impact` and every other
 command rejects them — and `impact` returns exit `0` when the requested page
 or source endpoint exists and the graph is valid. Parse, graph, and I/O
 failures retain their existing exit classes. The report schema and bytes do
@@ -169,8 +174,10 @@ unreferenced; a multi-hop
 include/reference impact chain; shuffled source creation order; invalid graph
 cases proving analysis does not run on an unfrozen graph; requested page/source,
 missing ID, invalid ID grammar; a flat multi-page corpus (no `parent`,
-`include`, or `reference` edges) covering every advisory finding and each
-`--fail-on-*` opt-in; and empty/single-page sites.
+`include`, or `reference` edges) covering every flat-graph advisory finding
+and each `--fail-on-*` opt-in; a draft-status corpus covering `draft_page`
+(draft vs published, archived, and unset status) and `--fail-on-draft`; and
+empty/single-page sites.
 
 Acceptance requires fixture goldens for JSON and human summaries, plus proof
 that `check` and `impact` do not modify HTML, IR, RAG, or cache outputs.
