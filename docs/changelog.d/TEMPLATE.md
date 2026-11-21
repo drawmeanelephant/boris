@@ -1,5 +1,5 @@
 <!--
-Filename: <pr-number>-<short-kebab-case-summary>.md
+Filename: <short-kebab-slug>.md (no PR number)
 Keep exactly one category heading. Replace this example link with a relevant
 repository-root-relative link; contract-visible work links its updated contract.
 -->

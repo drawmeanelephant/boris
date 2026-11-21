@@ -71,9 +71,9 @@ are not negotiable. Skim it before a big change; it will save you time.
   [`docs/contracts/README.md`](docs/contracts/README.md).
 - **Changelogged.** Feature and fix PRs add a fragment under
   `docs/changelog.d/` — see its
-  [README](docs/changelog.d/README.md). The filename starts with the PR
-  number, so you can open the PR first and add it after. Docs-only PRs
-  don't need one.
+  [README](docs/changelog.d/README.md). Name it with a short kebab-case
+  slug and no PR number, so it never needs a rename after the PR opens.
+  Docs-only PRs don't need one.
 
 It's fine to open a draft PR early. Feedback on direction is much cheaper
 than feedback on a finished diff. Reviews are best-effort on response time;
