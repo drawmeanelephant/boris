@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Boris release gate — mechanical checks for reviewers and CI.
+# Boris release gate — manual mechanical checks for reviewers; no CI workflow
+# runs this script.
 # See docs/RELEASE-GATE.md.
 set -euo pipefail
 
@@ -268,7 +269,7 @@ else
   fail "graph-native graph.json golden mismatch"
 fi
 
-note "4a. Semantic relations IR 0.3 fixture"
+note "4a1. Semantic relations IR 0.3 fixture"
 SEMANTIC_CONTENT="docs/contracts/fixtures/semantic-relations/content"
 SEMANTIC_OUT="${GATE_DIR}/ir-semantic-relations"
 rm -rf "${SEMANTIC_OUT}"
@@ -306,7 +307,7 @@ else
   fail "semantic relation invalid-target diagnostics mismatch"
 fi
 
-note "4a. AI Context Bundle determinism and provenance"
+note "4a2. AI Context Bundle determinism and provenance"
 CONTEXT_A="${GATE_DIR}/context-a"
 CONTEXT_B="${GATE_DIR}/context-b"
 rm -rf "${CONTEXT_A}" "${CONTEXT_B}"

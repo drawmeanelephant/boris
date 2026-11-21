@@ -4,6 +4,13 @@
 # orphan issues at merge time and a parent/umbrella issue is never force-closed
 # by a lint that cannot tell the two intents apart.
 #
+# This header is the single full statement of the issue-close rules. The PR
+# template, docs/COMPLETION-REPORT-TEMPLATE.md, and the completion-report issue
+# template carry only a short summary and point here. Check a body locally
+# before opening or editing a PR:
+#
+#   scripts/check-pr-issue-close.sh --body-file <path>
+#
 # Background (the 2026-09-05 paperwork incident): the morning batch of audit
 # PRs (#915-#932) landed while their referenced issues stayed open, because
 # GitHub's merge-time auto-close only fires on the exact "keyword #N" form in
@@ -14,7 +21,9 @@
 #
 #   COVERED    "Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve
 #               #N" (case-insensitive, optional colon) — one issue per
-#              occurrence, the keyword immediately preceding the number.
+#              occurrence, the keyword immediately preceding the number. In a
+#              comma list ("Closes #N, #M") only #N is covered; #M is a bare
+#              mention.
 #   KEPT OPEN  "Refs #N" / "Related to #N" (optional colon) — an explicit
 #              declaration that the merge does NOT close the issue. This is
 #              valid intent, not a violation: it is how a parent/umbrella

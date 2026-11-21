@@ -96,7 +96,7 @@ retires it.
 - [`docs/contracts/`](contracts/): normative IR, frontmatter, graph,
   diagnostics, and fixtures.
 - [`docs/RELEASE-GATE.md`](RELEASE-GATE.md): mechanical ship checks.
-- [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md): canonical completion-report evidence format.
+- [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md): canonical completion-report evidence format. Before you open or edit a PR, check its body with `scripts/check-pr-issue-close.sh --body-file <path>`.
 - [`docs/COMPLETION-REPORT-TEMPLATE.md`](COMPLETION-REPORT-TEMPLATE.md): pointer to canonical template.
 - [`.github/ISSUE_TEMPLATE/completion-report.md`](../.github/ISSUE_TEMPLATE/completion-report.md): non-PR completion reports.
 - [`CHANGELOG.md`](../CHANGELOG.md) (`[Unreleased]` + `[0.8.0]`; pre-0.8 at
