@@ -28,11 +28,10 @@ skip cleanliness there. The approved/generated path policy is unchanged.
 `./scripts/test-release-gate-git-detection.sh` creates a temporary linked
 worktree and asserts the Git-native predicate still enables the check.
 
-CI (`.github/workflows/ci.yml`) pins **Zig 0.17.0** and runs `zig build`,
-`zig build test`, and `zig build test-render` on `ubuntu-latest` and
-`macos-latest`. The root aggregate deliberately excludes standalone tools;
-changes under `tools/search-index/`, `tools/docs-maintenance/`, or the shared
-`src/search_index.zig` run both standalone tool gates on Ubuntu and macOS:
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) is the source of
+truth for what CI runs, on which hosts, and with which Zig pin. This page does
+not restate it. The root aggregate deliberately excludes standalone tools. To
+run their gates locally:
 
 ```bash
 zig build --build-file tools/search-index/build.zig test
@@ -102,7 +101,8 @@ verified. Do not check an item because a design doc exists.
       commit; selective watch fan-out;
       contract [`multi-target-isolated-output.md`](contracts/multi-target-isolated-output.md)
 - [x] **CI coverage** — continuous integration exercises release-critical
-      steps (`zig build` + `zig build test` + `test-render` on Linux + macOS)
+      steps; see [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+      for the jobs and hosts
 
 ## Current phase notes
 
@@ -133,8 +133,7 @@ m7–m10 / Feature 1–2 campaign detail lives in `CHANGELOG.md` and optional
 Historical campaign notes formerly under `archive/` were removed from the tree;
 living contracts + STATUS are authoritative.
 
-**Still deferred:** mmap, child-process markdown (forbidden), embedded HTTP
-dev server.
+**Still deferred:** mmap, child-process markdown (forbidden).
 
 ## Failure policy
 
