@@ -34,13 +34,16 @@ behavior are normative in
 | newsletter | `newsletter` ([#1060](https://github.com/drawmeanelephant/boris/issues/1060)) | `published_at` issues, profile `rss` / `sitemap` | `press` (home, archive, blog) | `journal`, `cozy` | — (resolved: press layouts carry `{{head}}`, so the starter's profile ships `rss` on an enabled `head`) |
 | photo-gallery | `photo-gallery` ([#1061](https://github.com/drawmeanelephant/boris/issues/1061)) | `{stem}.assets/` content-local images, `<figure>` captions | `gallery` (home) | `showcase` (partial), `cards` (partial) | Both alternates publish every image but do not style `gallery-grid`, so figures stack in one column. |
 | dashboard | `dashboard` ([#1062](https://github.com/drawmeanelephant/boris/issues/1062)) | `status:` as visible page state, dense tables, relations | `engineering` (home) | `ledger`, `corporate` (partial) | `corporate` shows status only as plain `{{metadata}}` text; it has no `{{page-status}}` hook. |
+| blueprint | `blueprint` | documentation site: section pages, `{{nav}}` / `{{toc}}` rails, every Aside kind, `status: draft` gating, relations | `blueprint` (home + section) | `tokens`, `cards`, `engineering` (home) | `{{children}}` lists titles only, so section cards carry no summary; prev/next links are absent. See [Theme gaps](#theme-gaps). |
 
 "(home)" means the pairing was also built with
 `--layout-rule default id:index themes/NAME/layouts/home.html`.
 "(archive)" is the same rule pointing at `layouts/archive.html`, and
 "(links)" / "(portfolio)" send `id:index` to those focused named layouts.
 "(archive on `changes`)" sends `id:changes` there instead. `wiki`'s
-"(home + section)" adds `glob:wiki/*` → `layouts/section.html`. The
+"(home + section)" adds `glob:wiki/*` → `layouts/section.html`;
+`blueprint`'s adds `id:getting-started`, `id:guides`, and `id:reference`
+→ `layouts/section.html`. The
 starter's own `layout_rules` are listed in
 [the CLI contract](contracts/cli.md#init-deterministic-starter-scaffold-with-self-verification).
 
@@ -93,6 +96,13 @@ links and assets. Field Notes now renders pages as grid-paper leaves behind
 a punched binding, with the graph in a logbook-index margin column instead
 of navigation rails.
 
+The `blueprint` row was re-verified after the documentation-site pass
+(2026-11-21): the ten-page `boris init --type blueprint` tree builds under
+its own profile (home, section, and main layouts), and under `tokens`,
+`cards`, and `engineering` with the `id:index` home rule. All ten pages
+built each time, with exit 0. The alternates render the section pages on
+their generic `main.html`.
+
 Re-verify a row after a theme changes by rebuilding the scenario tree with
 the named theme. A starter archetype is also re-verified by `zig build
 test-boris-init`.
@@ -113,6 +123,7 @@ Each cell lists the layouts that carry the slot; `-` means none:
 | Theme | `{{children}}` | `{{toc}}` | `{{breadcrumb}}` | `{{relations}}` | `{{backlinks}}` | `{{head}}` | `{{page-status}}` |
 |---|---|---|---|---|---|---|---|
 | `archive` | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main | archive, main |
+| `blueprint` | home, main, section | main, section | main, section | home, main, section | home, main, section | home, main, section | home, main, section |
 | `boris` | main | main | main | main | main | main | - |
 | `cards` | home, main | home, main | home, main | home, main | home, main | home, main | home, main |
 | `corporate` | main | main | main | main | main | main | - |
@@ -173,6 +184,13 @@ and [#1048](https://github.com/drawmeanelephant/boris/issues/1048)), not to
   static word "Engineering" (a known limitation in the theme README), and
   `home.html` labels the index "Theme study". The `dashboard` board shows
   that label above its own title.
+- **`blueprint` hardcodes its brand, and its section cards are title-only.**
+  The header brand, `<title>` suffix, and footer say "Blueprint", because
+  no slot carries the profile's `site.title`. The brand links home only
+  through the search script, because no helper emits a page-relative site
+  root. `{{children}}` emits titles without each child's `summary`, so the
+  section step cards and the home deck cannot show a description. The
+  starter's conventions report says to edit the brand copy.
 - **Theme READMEs link to `../../examples/…`.** Every starter copies its
   theme README byte for byte. That README links to the repository's
   sample site, and the link is dead in a fresh starter tree. The sibling

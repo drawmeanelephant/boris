@@ -67,6 +67,14 @@
 //!   send `id:index` to `home.html`, whose `{{children}}` is the album grid.
 //!   The images are content, so they embed straight from the
 //!   `examples/gallery-site` specimen via the `init_example_assets` module.
+//! - `blueprint` — a ten-page documentation site for a fictional task
+//!   runner under `blueprint`, the docs theme in the Bootstrap 6 token
+//!   grammar (`:root` tokens, `.theme-*` surfaces, `light-dark()`): a
+//!   landing page on `home.html`, Getting started / Guides / Reference
+//!   section pages on `section.html` with their satellites on `main.html`,
+//!   every Aside kind, `<Details>`, tables, code, relations, and a
+//!   `status: draft` guide; `layout_rules` send `id:index` to `home.html`
+//!   and the three section ids to `section.html`.
 //!
 //! Type selection lives entirely in this file's archetype table — the
 //! compiler gains no per-archetype branches. Each archetype's `boris.json`
@@ -97,7 +105,7 @@ const Io = std.Io;
 const ExitCode = diagnostic.ExitCode;
 
 /// Starter archetypes accepted by `--type`. `docs` is the default.
-pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard, @"photo-gallery" };
+pub const Archetype = enum { docs, garden, cookbook, blog, textile, landing, wiki, @"link-in-bio", changelog, @"resume", newsletter, portfolio, archive, dashboard, @"photo-gallery", blueprint };
 
 /// Comptime-joined `docs, garden, cookbook, …` for diagnostics and help
 /// text — the table below is the single source of truth.
@@ -2057,6 +2065,530 @@ const photo_gallery_profile =
     \\
 ;
 
+// --- blueprint ---------------------------------------------------------------
+
+const blueprint_index_md =
+    \\---
+    \\title: Kiln
+    \\summary: Kiln runs every task in your repository once, in the right order.
+    \\---
+    \\
+    \\<div class="hero">
+    \\
+    \\<p><a class="badge theme-primary" href="guides/caching.html">New in 2.4 · content-addressed cache</a></p>
+    \\
+    \\# Build less. Ship sooner.
+    \\
+    \\Kiln is a task runner for monorepos. It reads one `kiln.toml`, works out
+    \\what depends on what, and runs only the tasks whose inputs changed.
+    \\
+    \\<p class="actions"><a class="btn" href="getting-started.html">Get started</a> <a class="btn theme-secondary" href="reference/cli.html">CLI reference</a></p>
+    \\
+    \\```console
+    \\$ kiln run build
+    \\  lint      cached   0.0s
+    \\  compile   ran      4.1s
+    \\  bundle    ran      1.3s
+    \\3 tasks · 1 from cache · 5.4s
+    \\```
+    \\
+    \\</div>
+    \\
+    \\## Why teams switch to Kiln
+    \\
+    \\<div class="features">
+    \\
+    \\<div class="feature">
+    \\<span class="feature__icon" aria-hidden="true">#</span>
+    \\
+    \\### Never run a task twice
+    \\
+    \\Kiln hashes each task's inputs. If nothing changed, it restores the
+    \\outputs from the cache instead of running the task.
+    \\
+    \\</div>
+    \\
+    \\<div class="feature theme-success">
+    \\<span class="feature__icon" aria-hidden="true">→</span>
+    \\
+    \\### The right order, in parallel
+    \\
+    \\Declare what a task `needs`. Kiln builds the graph and runs every task
+    \\whose dependencies are done, across all your cores.
+    \\
+    \\</div>
+    \\
+    \\<div class="feature theme-info">
+    \\<span class="feature__icon" aria-hidden="true">{}</span>
+    \\
+    \\### One small file
+    \\
+    \\Tasks, inputs, and outputs live in `kiln.toml` at the repository root.
+    \\No plugins and no daemon.
+    \\
+    \\</div>
+    \\
+    \\<div class="feature theme-warning">
+    \\<span class="feature__icon" aria-hidden="true">$</span>
+    \\
+    \\### Wraps what you have
+    \\
+    \\A task is a shell command. Keep your Makefile or npm scripts and let
+    \\Kiln decide when they need to run.
+    \\
+    \\</div>
+    \\
+    \\</div>
+    \\
+;
+
+const blueprint_getting_started_md =
+    \\---
+    \\title: Getting started
+    \\parent: index
+    \\summary: Install Kiln and run your first cached build.
+    \\tags: [basics]
+    \\---
+    \\
+    \\# Getting started
+    \\
+    \\Two short pages take you from an empty terminal to a cached build:
+    \\install the `kiln` binary, then write a three-task `kiln.toml` and run it
+    \\twice.
+    \\
+    \\<Aside kind="tip">
+    \\
+    \\Already have a Makefile or npm scripts? Keep them. A Kiln task is any
+    \\shell command, so your first `kiln.toml` can call `make test` or
+    \\`npm run build` unchanged.
+    \\
+    \\</Aside>
+    \\
+;
+
+const blueprint_installation_md =
+    \\---
+    \\title: Installation
+    \\parent: getting-started
+    \\summary: Install the kiln binary on macOS, Linux, or Windows.
+    \\tags: [basics, setup]
+    \\---
+    \\
+    \\# Installation
+    \\
+    \\Kiln ships as one static binary with no runtime dependencies. Install
+    \\it with your package manager, then check that your shell can find it.
+    \\
+    \\## Supported platforms
+    \\
+    \\| Platform | Architectures | Package | Status |
+    \\|---|---|---|---|
+    \\| macOS 13+ | arm64, x86_64 | Homebrew | Supported |
+    \\| Linux (glibc 2.31+ or musl) | arm64, x86_64 | `.tar.gz`, `.deb` | Supported |
+    \\| Windows 10+ | x86_64 | Scoop, `.zip` | Supported |
+    \\| FreeBSD 14 | x86_64 | `.tar.gz` | Community |
+    \\
+    \\## Install the binary
+    \\
+    \\On macOS or Linux with Homebrew:
+    \\
+    \\```sh
+    \\brew install kiln-build/tap/kiln
+    \\```
+    \\
+    \\On Windows with Scoop:
+    \\
+    \\```powershell
+    \\scoop bucket add kiln-build kiln-build/scoop-bucket
+    \\scoop install kiln
+    \\```
+    \\
+    \\On any other Linux, unpack the release archive somewhere on your `PATH`:
+    \\
+    \\```sh
+    \\tar -xzf kiln-2.4.0-x86_64-unknown-linux-musl.tar.gz -C ~/.local/bin --strip-components=1 kiln-2.4.0/kiln
+    \\```
+    \\
+    \\<Aside kind="warning">
+    \\
+    \\If `kiln --version` prints `command not found`, the install directory is
+    \\not on your `PATH`. Add `~/.local/bin` to `PATH` in your shell profile,
+    \\then open a new terminal.
+    \\
+    \\</Aside>
+    \\
+    \\## Check the install
+    \\
+    \\```console
+    \\$ kiln --version
+    \\kiln 2.4.0 (cache format 3)
+    \\```
+    \\
+    \\<Details summary="Turn on shell completion">
+    \\
+    \\Kiln prints a completion script for your shell. Load it from your
+    \\profile so that <kbd>Tab</kbd> completes task names:
+    \\
+    \\```sh
+    \\kiln completions zsh > "${fpath[1]}/_kiln"
+    \\kiln completions bash > ~/.local/share/bash-completion/completions/kiln
+    \\```
+    \\
+    \\</Details>
+    \\
+    \\Next: [[getting-started/quick-start]].
+    \\
+;
+
+const blueprint_quick_start_md =
+    \\---
+    \\title: Quick start
+    \\parent: getting-started
+    \\summary: Write a kiln.toml, run it, and watch the cache take over.
+    \\tags: [basics]
+    \\relations: [depends_on=getting-started/installation, relates_to=reference/cli]
+    \\---
+    \\
+    \\# Quick start
+    \\
+    \\This page builds a small project with three tasks. It takes about five
+    \\minutes and assumes `kiln --version` already works.
+    \\
+    \\## Describe your tasks
+    \\
+    \\Create `kiln.toml` at the root of your repository:
+    \\
+    \\```toml
+    \\[tasks.lint]
+    \\run = "eslint src"
+    \\inputs = ["src/**/*.ts", ".eslintrc.json"]
+    \\
+    \\[tasks.compile]
+    \\run = "tsc -p tsconfig.json"
+    \\inputs = ["src/**/*.ts", "tsconfig.json"]
+    \\outputs = ["build/"]
+    \\
+    \\[tasks.build]
+    \\run = "esbuild build/index.js --bundle --outfile=dist/app.js"
+    \\needs = ["lint", "compile"]
+    \\outputs = ["dist/"]
+    \\```
+    \\
+    \\Each task has a `run` command. `inputs` and `outputs` tell Kiln what to
+    \\hash and what to restore. `needs` lists the tasks that must finish first.
+    \\
+    \\## Run it twice
+    \\
+    \\```console
+    \\$ kiln run build
+    \\  lint      ran      1.9s
+    \\  compile   ran      4.1s
+    \\  build     ran      1.3s
+    \\3 tasks · 0 from cache · 5.6s
+    \\
+    \\$ kiln run build
+    \\  lint      cached   0.0s
+    \\  compile   cached   0.0s
+    \\  build     cached   0.0s
+    \\3 tasks · 3 from cache · 0.1s
+    \\```
+    \\
+    \\The second run restores `build/` and `dist/` from the cache. Edit a file
+    \\under `src/` and only the tasks that read it run again.
+    \\
+    \\<Aside kind="note">
+    \\
+    \\Kiln runs `lint` and `compile` at the same time because neither needs
+    \\the other. `build` waits for both.
+    \\
+    \\</Aside>
+    \\
+    \\## Keep it running
+    \\
+    \\`kiln run build --watch` reruns the graph when an input changes. Press
+    \\<kbd>Ctrl</kbd> + <kbd>C</kbd> to stop.
+    \\
+;
+
+const blueprint_guides_md =
+    \\---
+    \\title: Guides
+    \\parent: index
+    \\summary: Task-oriented guides for everyday Kiln work.
+    \\tags: [guides]
+    \\---
+    \\
+    \\# Guides
+    \\
+    \\Each guide solves one problem end to end. Read them in any order once
+    \\your first build works.
+    \\
+;
+
+const blueprint_task_graphs_md =
+    \\---
+    \\title: Task graphs
+    \\parent: guides
+    \\summary: How needs edges order tasks and how Kiln runs them in parallel.
+    \\tags: [guides, scheduling]
+    \\relations: [relates_to=guides/caching]
+    \\---
+    \\
+    \\# Task graphs
+    \\
+    \\Kiln turns the `needs` lists in `kiln.toml` into a directed graph, then
+    \\runs each task as soon as everything it needs has finished.
+    \\
+    \\## Declare dependencies
+    \\
+    \\```toml
+    \\[tasks.test]
+    \\run = "vitest run"
+    \\needs = ["compile"]
+    \\
+    \\[tasks.deploy]
+    \\run = "./scripts/deploy.sh"
+    \\needs = ["build", "test"]
+    \\cache = false
+    \\```
+    \\
+    \\## Inspect the graph
+    \\
+    \\`kiln graph` prints the order Kiln would use, one wave per line. Tasks in
+    \\the same wave run in parallel:
+    \\
+    \\```console
+    \\$ kiln graph deploy
+    \\wave 1  lint  compile
+    \\wave 2  test  build
+    \\wave 3  deploy
+    \\```
+    \\
+    \\<Aside kind="info">
+    \\
+    \\Kiln uses one worker per CPU core by default. Set `--jobs 1` to run the
+    \\graph one task at a time when you debug ordering problems.
+    \\
+    \\</Aside>
+    \\
+    \\## Edge kinds
+    \\
+    \\| Field | Meaning | Example |
+    \\|---|---|---|
+    \\| `needs` | Run after these tasks, and rerun when their outputs change | `needs = ["compile"]` |
+    \\| `after` | Run after these tasks only if they are scheduled too | `after = ["lint"]` |
+    \\| `inputs` | Files that make up the task's cache key | `inputs = ["src/**"]` |
+    \\
+    \\<Aside kind="danger">
+    \\
+    \\A cycle such as `a needs b` and `b needs a` stops the run before any
+    \\task starts. Kiln names every task in the cycle so you can break it.
+    \\
+    \\</Aside>
+    \\
+;
+
+const blueprint_caching_md =
+    \\---
+    \\title: Caching
+    \\parent: guides
+    \\summary: What goes into a cache key, and when to turn caching off.
+    \\tags: [guides, cache]
+    \\---
+    \\
+    \\# Caching
+    \\
+    \\Before Kiln runs a task, it computes a cache key. If the local cache has
+    \\an entry for that key, Kiln restores the task's `outputs` and skips the
+    \\command.
+    \\
+    \\## What makes up the key
+    \\
+    \\| Part | Source | Changes when |
+    \\|---|---|---|
+    \\| Command | `run` | You edit the command string |
+    \\| Inputs | `inputs` globs, hashed by content | A matching file changes |
+    \\| Upstream | Keys of every task in `needs` | An upstream task's key changes |
+    \\| Environment | Variables listed in `env` | One of those values changes |
+    \\
+    \\<div class="card theme-primary">
+    \\
+    \\**Rule of thumb:** if a task reads a file, list it in `inputs`. If a task
+    \\writes a file that another task reads, list it in `outputs`.
+    \\
+    \\</div>
+    \\
+    \\<Details summary="Why file contents and not modification times?" open="true">
+    \\
+    \\Checkouts, branch switches, and CI restores all rewrite modification
+    \\times. Content hashes stay stable across machines, so a key computed on
+    \\a laptop matches the same key computed in CI.
+    \\
+    \\</Details>
+    \\
+    \\## Turn caching off for side effects
+    \\
+    \\<Aside kind="warning">
+    \\
+    \\A task that reads the network, the clock, or files outside `inputs` can
+    \\restore stale output from the cache. Add those files to `inputs`, or set
+    \\`cache = false` on the task.
+    \\
+    \\</Aside>
+    \\
+    \\Deploys, database migrations, and notifications should always set
+    \\`cache = false`. Kiln still orders them in the graph; it just never skips
+    \\them.
+    \\
+    \\## Clear the cache
+    \\
+    \\```console
+    \\$ kiln cache clean --older-than 14d
+    \\removed 212 entries (1.8 GB)
+    \\```
+    \\
+    \\Sharing a cache between machines is in preview: see
+    \\[[guides/remote-cache]].
+    \\
+;
+
+const blueprint_remote_cache_md =
+    \\---
+    \\title: Remote cache (preview)
+    \\parent: guides
+    \\status: draft
+    \\summary: Share cache entries between laptops and CI.
+    \\tags: [guides, cache]
+    \\---
+    \\
+    \\# Remote cache (preview)
+    \\
+    \\This page is `status: draft`. Boris renders it at its address, but it
+    \\stays out of the sidebar, the Guides section listing, search, and feeds
+    \\until you change the status to `published`.
+    \\
+    \\## Planned configuration
+    \\
+    \\```toml
+    \\[cache.remote]
+    \\url = "s3://example-kiln-cache"
+    \\read_only = true
+    \\```
+    \\
+;
+
+const blueprint_reference_md =
+    \\---
+    \\title: Reference
+    \\parent: index
+    \\summary: Exact syntax for every command, flag, and kiln.toml key.
+    \\tags: [reference]
+    \\---
+    \\
+    \\# Reference
+    \\
+    \\Look things up here. The guides explain why; the reference says exactly
+    \\what each command and key accepts.
+    \\
+;
+
+const blueprint_cli_md =
+    \\---
+    \\title: CLI and configuration
+    \\parent: reference
+    \\summary: Commands, global flags, kiln.toml keys, environment variables, and exit codes.
+    \\tags: [reference, cli]
+    \\---
+    \\
+    \\# CLI and configuration
+    \\
+    \\## Commands
+    \\
+    \\| Command | Description |
+    \\|---|---|
+    \\| `kiln run <task>...` | Run tasks and everything they need |
+    \\| `kiln graph [task]` | Print the execution waves without running anything |
+    \\| `kiln list` | List every task in `kiln.toml` with its description |
+    \\| `kiln cache clean` | Delete cache entries; `--older-than 14d` keeps recent ones |
+    \\| `kiln completions <shell>` | Print a completion script for bash, zsh, or fish |
+    \\
+    \\## Global flags
+    \\
+    \\| Flag | Default | Description |
+    \\|---|---|---|
+    \\| `--jobs <n>`, `-j` | CPU cores | Maximum tasks running at once |
+    \\| `--config <path>` | `./kiln.toml` | Use another configuration file |
+    \\| `--no-cache` | off | Run every task even when a cache entry exists |
+    \\| `--watch` | off | Rerun when an input changes |
+    \\| `--output <mode>` | `auto` | `auto`, `plain`, or `json` |
+    \\
+    \\A long invocation scrolls inside its block instead of widening the page:
+    \\
+    \\```sh
+    \\kiln run build test --jobs 8 --config ci/kiln.toml --output json --no-cache > reports/kiln-run.json
+    \\```
+    \\
+    \\## `kiln.toml` keys
+    \\
+    \\Every key lives under `[tasks.<name>]`.
+    \\
+    \\| Key | Type | Required | Description |
+    \\|---|---|---|---|
+    \\| `run` | string | yes | Shell command to execute |
+    \\| `needs` | array of task names | no | Tasks that must finish first |
+    \\| `inputs` | array of globs | no | Files hashed into the cache key |
+    \\| `outputs` | array of paths | no | Files and directories restored on a cache hit |
+    \\| `env` | array of names | no | Environment variables hashed into the key |
+    \\| `cache` | boolean | no | `false` always runs the task; defaults to `true` |
+    \\| `description` | string | no | Shown by `kiln list` |
+    \\
+    \\## Environment variables
+    \\
+    \\`KILN_CACHE_DIR`
+    \\: Cache location. Defaults to `.kiln/cache` in the repository.
+    \\
+    \\`KILN_JOBS`
+    \\: Same as `--jobs`. The flag wins when both are set.
+    \\
+    \\`NO_COLOR`
+    \\: Any value turns off colored output.
+    \\
+    \\## Exit codes
+    \\
+    \\| Code | Meaning |
+    \\|---|---|
+    \\| `0` | Every task succeeded or came from the cache |
+    \\| `1` | A task command failed |
+    \\| `2` | `kiln.toml` is invalid or a task name is unknown |
+    \\| `3` | The graph has a cycle |
+    \\
+;
+
+const blueprint_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "input_format": "markdown",
+    \\  "site": { "title": "Kiln" },
+    \\  "targets": [
+    \\    {
+    \\      "name": "public",
+    \\      "output": "dist",
+    \\      "public": true,
+    \\      "theme": "themes/blueprint",
+    \\      "layout_rules": [
+    \\        { "selector": "id:index", "layout": "themes/blueprint/layouts/home.html" },
+    \\        { "selector": "id:getting-started", "layout": "themes/blueprint/layouts/section.html" },
+    \\        { "selector": "id:guides", "layout": "themes/blueprint/layouts/section.html" },
+    \\        { "selector": "id:reference", "layout": "themes/blueprint/layouts/section.html" }
+    \\      ]
+    \\    }
+    \\  ]
+    \\}
+    \\
+;
+
 // --- archetype table ---------------------------------------------------------
 
 const FileToWrite = struct {
@@ -2319,6 +2851,27 @@ const photo_gallery_files = [_]FileToWrite{
     .{ .path = "themes/gallery/README.md", .data = archetype_themes.gallery_readme },
     .{ .path = "themes/gallery/ACCESSIBILITY.md", .data = archetype_themes.gallery_accessibility },
     .{ .path = "boris.json", .data = photo_gallery_profile },
+};
+
+const blueprint_files = [_]FileToWrite{
+    .{ .path = "content/index.md", .data = blueprint_index_md },
+    .{ .path = "content/getting-started.md", .data = blueprint_getting_started_md },
+    .{ .path = "content/getting-started/installation.md", .data = blueprint_installation_md },
+    .{ .path = "content/getting-started/quick-start.md", .data = blueprint_quick_start_md },
+    .{ .path = "content/guides.md", .data = blueprint_guides_md },
+    .{ .path = "content/guides/task-graphs.md", .data = blueprint_task_graphs_md },
+    .{ .path = "content/guides/caching.md", .data = blueprint_caching_md },
+    .{ .path = "content/guides/remote-cache.md", .data = blueprint_remote_cache_md },
+    .{ .path = "content/reference.md", .data = blueprint_reference_md },
+    .{ .path = "content/reference/cli.md", .data = blueprint_cli_md },
+    .{ .path = "themes/blueprint/layouts/main.html", .data = archetype_themes.blueprint_layout_main },
+    .{ .path = "themes/blueprint/layouts/home.html", .data = archetype_themes.blueprint_layout_home },
+    .{ .path = "themes/blueprint/layouts/section.html", .data = archetype_themes.blueprint_layout_section },
+    .{ .path = "themes/blueprint/footer.html", .data = archetype_themes.blueprint_footer },
+    .{ .path = "themes/blueprint/assets/css/blueprint.css", .data = archetype_themes.blueprint_css },
+    .{ .path = "themes/blueprint/README.md", .data = archetype_themes.blueprint_readme },
+    .{ .path = "themes/blueprint/ACCESSIBILITY.md", .data = archetype_themes.blueprint_accessibility },
+    .{ .path = "boris.json", .data = blueprint_profile },
 };
 
 const docs_spec = ArchetypeSpec{
@@ -2671,6 +3224,32 @@ const photo_gallery_spec = ArchetypeSpec{
     ,
 };
 
+const blueprint_spec = ArchetypeSpec{
+    .layout_path = "themes/blueprint/layouts/main.html",
+    .files = &blueprint_files,
+    .tree_report =
+    \\  content/index.md                  landing page — hero, calls to action, feature deck (home layout)
+    \\  content/getting-started.md        section — numbered {{children}} steps (section layout)
+    \\  content/getting-started/*.md      installation, quick start — tables, code, <Details>, relations
+    \\  content/guides.md                 section — task graphs and caching guides, every Aside kind
+    \\  content/guides/remote-cache.md    status: draft — renders with a banner, stays unadvertised
+    \\  content/reference.md              section — reference/cli.md: commands, flags, keys, exit codes
+    \\  themes/blueprint/                 shipped "blueprint" docs theme — sidebar, outline, search, drawer
+    \\  boris.json                        profile (theme: blueprint, home + section layout_rules)
+    ,
+    .next_steps =
+    \\  boris --profile boris.json                 build the site into dist/
+    \\  boris watch --profile boris.json --serve   rebuild on change and serve with live reload
+    \\  boris check                                graph-health report
+    ,
+    .conventions =
+    \\  the header brand and footer say "Blueprint": edit themes/blueprint/layouts/*.html and footer.html
+    \\  retheme by changing --accent-h (one hue angle) in themes/blueprint/assets/css/blueprint.css
+    \\  a page with children gets layouts/section.html through an id: rule in boris.json
+    \\  status: draft renders at its route but stays out of the sidebar, section lists, search, and feeds
+    ,
+};
+
 fn specFor(archetype: Archetype) *const ArchetypeSpec {
     return switch (archetype) {
         .docs => &docs_spec,
@@ -2688,6 +3267,7 @@ fn specFor(archetype: Archetype) *const ArchetypeSpec {
         .archive => &archive_spec,
         .dashboard => &dashboard_spec,
         .@"photo-gallery" => &photo_gallery_spec,
+        .blueprint => &blueprint_spec,
     };
 }
 
@@ -2912,7 +3492,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, type_name: ?[
 }
 
 test "archetype names cover the CLI surface" {
-    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive, dashboard, photo-gallery", archetype_names);
+    try std.testing.expectEqualStrings("docs, garden, cookbook, blog, textile, landing, wiki, link-in-bio, changelog, resume, newsletter, portfolio, archive, dashboard, photo-gallery, blueprint", archetype_names);
     inline for (@typeInfo(Archetype).@"enum".field_values) |value| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         // Every archetype writes a profile and content, and its probe layout
@@ -2970,8 +3550,8 @@ test "each archetype profile declares the format and theme its spec uses" {
     // materialized tree must select the same input_format and theme the
     // probe compiled with. Assert the agreement by construction here so a
     // spec/profile edit can never drift the two apart.
-    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
-    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive", "themes/engineering", "themes/gallery" };
+    const expect_format = [_][]const u8{ "markdown", "markdown", "cook", "markdown", "textile", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown", "markdown" };
+    const expect_theme = [_][]const u8{ "themes/boris", "themes/ledger", "themes/cards", "themes/cozy", "themes/press", "themes/service", "themes/reference", "themes/minimal", "themes/journal", "themes/corporate", "themes/press", "themes/showcase", "themes/archive", "themes/engineering", "themes/gallery", "themes/blueprint" };
     inline for (@typeInfo(Archetype).@"enum".field_values, 0..) |value, i| {
         const spec = specFor(@fromBackingInt(@intCast(value)));
         var profile: []const u8 = "";

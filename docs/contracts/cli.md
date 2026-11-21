@@ -258,6 +258,22 @@ catalog themes that fit each one.
   beside its page. Boris does no resizing or thumbnailing. Its profile's
   `layout_rules` send `id:index` to `themes/gallery/layouts/home.html`,
   whose `{{children}}` is the album grid.
+- `blueprint` — a ten-page documentation site for a fictional task
+  runner, under `blueprint`: a docs theme in the Bootstrap 6 token grammar
+  (`:root` custom properties, `.theme-*` surface classes, `light-dark()`
+  color modes; no vendored code) with a sticky search header, a `{{nav}}`
+  sidebar that becomes a CSS-only drawer on narrow screens, and a
+  collapsible `{{toc}}` rail. Trunk `index` is a landing page (hero, two
+  calls to action, a feature deck); satellites `getting-started`,
+  `guides`, and `reference` are section pages whose `{{children}}` render
+  as numbered steps, with their own satellites (installation, quick start,
+  task graphs, caching, a CLI and configuration reference) carrying every
+  Aside kind, `<Details>`, tables, code, `kbd`, `tags`, and `depends_on` /
+  `relates_to` edges. `guides/remote-cache` is `status: draft`, so it
+  renders with a draft banner but stays out of `{{nav}}`, `{{children}}`,
+  and search. Its profile's `layout_rules` send `id:index` to
+  `themes/blueprint/layouts/home.html` and the three section ids to
+  `themes/blueprint/layouts/section.html`.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format

@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive dashboard photo-gallery)
+ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive dashboard photo-gallery blueprint)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -467,6 +467,61 @@ done
 [[ "$images" == 5 ]] || fail "photo-gallery rendered $images images, expected 5"
 grep -q '<figcaption><strong>Dawn.</strong>' "$G/dist/photos/coast.html" || fail "photo-gallery figure caption did not render"
 pass "photo-gallery: home grid; 5 images at depths 0 and 1 resolve page-relative and publish byte-identical"
+
+note "blueprint: docs shell, section layouts, draft gating, relations, search, no remote URLs"
+B="$OUT/arch-blueprint"
+grep -q 'data-layout="home"' "$B/dist/index.html" || fail "blueprint index does not use the home layout"
+for page in getting-started guides reference; do
+    grep -q 'data-layout="section"' "$B/dist/$page.html" || fail "blueprint $page is not on the section layout"
+done
+for page in getting-started/installation getting-started/quick-start guides/task-graphs guides/caching guides/remote-cache reference/cli; do
+    grep -q 'data-layout="main"' "$B/dist/$page.html" || fail "blueprint $page is not on the main layout"
+done
+# Every layout carries the shell: skip link, header search, CSS-only drawer toggle.
+for page in index guides guides/caching; do
+    grep -q 'class="skip-link" href="#main-content"' "$B/dist/$page.html" || fail "blueprint $page has no skip link"
+    grep -q 'data-boris-search-ui' "$B/dist/$page.html" || fail "blueprint $page has no search UI"
+    grep -q 'id="bp-nav-toggle" type="checkbox"' "$B/dist/$page.html" || fail "blueprint $page has no CSS-only drawer toggle"
+done
+[[ -f "$B/dist/_boris/search/search-index.json" ]] || fail "blueprint published no search index"
+deck="$(sed -n '/<section class="bp-home__deck"/,/<\/section>/p' "$B/dist/index.html")"
+for page in getting-started guides reference; do
+    grep -q "href=\"$page.html\"" <<<"$deck" || fail "blueprint home deck does not list $page"
+done
+steps="$(sed -n '/<section class="bp-steps"/,/<\/section>/p' "$B/dist/guides.html")"
+for page in caching task-graphs; do
+    grep -q "href=\"guides/$page.html\"" <<<"$steps" || fail "blueprint Guides section does not list $page"
+done
+grep -q 'remote-cache' <<<"$steps" && fail "blueprint draft guide leaked into the Guides section listing"
+sed -n '/<nav class="site-nav"/,/<\/nav>/p' "$B/dist/guides/caching.html" | grep -q 'remote-cache' \
+    && fail "blueprint draft guide leaked into the sidebar"
+grep -q '"path": *"guides/remote-cache.html"' "$B/dist/_boris/search/search-index.json" && fail "blueprint draft guide leaked into search"
+grep -q '<body data-status="draft">' "$B/dist/guides/remote-cache.html" \
+    || fail "blueprint remote-cache does not carry status draft"
+grep -q 'class="bp-banner bp-banner--draft"' "$B/dist/guides/remote-cache.html" || fail "blueprint draft banner missing"
+sed -n '/<nav class="site-nav"/,/<\/nav>/p' "$B/dist/guides/caching.html" \
+    | grep -q '<li class="site-nav__satellite is-current"><a href="caching.html" aria-current="page">' \
+    || fail "blueprint sidebar does not mark the current page"
+sed -n '/<nav class="site-nav"/,/<\/nav>/p' "$B/dist/guides/caching.html" | grep -q 'is-ancestor"><a href="../guides.html"' \
+    || fail "blueprint sidebar does not mark the current section"
+grep -q '<nav class="page-toc"' "$B/dist/reference/cli.html" || fail "blueprint reference page has no on-page outline"
+grep -q '<nav class="breadcrumb"' "$B/dist/reference/cli.html" || fail "blueprint reference page has no breadcrumb"
+sed -n '/semantic-relations/,/<\/section>/p' "$B/dist/getting-started/quick-start.html" \
+    | grep -q 'data-relation-kind="depends_on".*href="installation.html"' \
+    || fail "blueprint quick-start depends_on relation did not render"
+sed -n '/semantic-backlinks/,/<\/section>/p' "$B/dist/reference/cli.html" \
+    | grep -q 'data-relation-kind="relates_to".*href="../getting-started/quick-start.html"' \
+    || fail "blueprint reference/cli has no relates_to backlink"
+for kind in note tip info warning danger; do
+    grep -rq "admonition--$kind" "$B/dist" --include='*.html' || fail "blueprint starter renders no $kind Aside"
+done
+grep -q '<details class="details"' "$B/dist/guides/caching.html" || fail "blueprint Details block did not render"
+grep -q '<kbd>' "$B/dist/getting-started/quick-start.html" || fail "blueprint kbd markup did not survive"
+grep -q 'class="table-viewport"' "$B/dist/reference/cli.html" || fail "blueprint reference table did not render"
+grep -q 'class="btn theme-secondary"' "$B/dist/index.html" || fail "blueprint hero calls to action did not survive"
+grep -rEn 'https?://|@import|<script src=' "$B/dist" --include='*.html' --include='*.css' \
+    && fail "blueprint output references a remote URL, @import, or external script"
+pass "blueprint: home + section + main layouts; drafts unadvertised; nav state, relations, every Aside kind; offline output"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site" "$OUT/raced" "$OUT/claimed"
 for t in "${ARCHETYPES[@]}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done
