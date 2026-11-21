@@ -10,32 +10,139 @@
 </head>
 <body data-status="{{page-status}}">
   <a class="skip-link" href="#main-content">Skip to content</a>
-  <header class="bp-topbar">
-    <div class="bp-topbar__inner">
-      <p class="bp-brand"><span class="bp-brand__mark" aria-hidden="true">◧</span> Blueprint</p>
-      <p class="bp-topbar__note">A token-driven shell</p>
+  <header class="bp-header">
+    <div class="bp-header__inner">
+      <input class="bp-toggle" id="bp-nav-toggle" type="checkbox" aria-controls="bp-sidebar">
+      <label class="bp-menu" for="bp-nav-toggle"><span class="bp-menu__icon" aria-hidden="true"></span><span class="bp-menu__text">Menu</span></label>
+      <a class="bp-brand" data-bp-home><span class="bp-brand__mark" aria-hidden="true"></span>Blueprint</a>
+      <section class="bp-search" data-boris-search-ui aria-label="Search">
+        <form action="_boris/search/" method="get" role="search" data-boris-search-form>
+          <label class="bp-visually-hidden" for="site-search-input">Search documentation</label>
+          <input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search docs" spellcheck="false">
+          <kbd class="bp-search__key" aria-hidden="true">/</kbd>
+          <button class="bp-visually-hidden" type="submit">Search</button>
+        </form>
+        <div class="bp-search__panel">
+          <p class="bp-search__status" data-boris-search-status role="status" aria-live="polite">Loading search…</p>
+          <ol class="bp-search__results" data-boris-search-results aria-label="Search results"></ol>
+          <noscript><p class="bp-search__fallback">Search needs JavaScript in this static site. Use the site navigation instead.</p></noscript>
+        </div>
+      </section>
     </div>
   </header>
   <div class="bp-shell">
-    <details class="bp-nav" open data-boris-search-exclude>
-      <summary>Site</summary>
-      <div class="bp-nav__body">{{nav}}</div>
-    </details>
+  <aside class="bp-sidebar" id="bp-sidebar" aria-label="Documentation" data-boris-search-exclude>{{nav}}</aside>
     <main id="main-content" class="bp-main" tabindex="-1" data-boris-search-root>
-      <header class="bp-main__head" data-boris-search-exclude>
-        {{breadcrumb}}
-        {{metadata}}{{tags}}
-      </header>
-      <article class="prose">{{content}}</article>
-      {{children}}
-      {{parent}}
-      <div class="graph-links" data-boris-search-exclude>{{relations}}{{backlinks}}</div>
+      <article class="bp-article">
+        <header class="bp-article__head" data-boris-search-exclude>
+          {{breadcrumb}}
+          <div class="bp-meta"><span class="bp-status"></span>{{tags}}</div>
+        </header>
+        <p class="bp-banner bp-banner--draft" data-boris-search-exclude><strong>Draft.</strong> This page renders at its address, but it is left out of navigation, section listings, search, and feeds.</p>
+        <p class="bp-banner bp-banner--archived" data-boris-search-exclude><strong>Archived.</strong> This page is kept for reference and is no longer maintained.</p>
+        <div class="prose">{{content}}</div>
+        <section class="bp-children" aria-labelledby="bp-children-title" data-boris-search-exclude>
+          <h2 class="bp-children__title" id="bp-children-title">In this section</h2>
+          {{children}}
+        </section>
+        <footer class="bp-article__foot" data-boris-search-exclude>
+          {{parent}}
+          <section class="bp-seealso" aria-labelledby="bp-seealso-title" data-boris-search-exclude>
+            <h2 class="bp-seealso__title" id="bp-seealso-title">See also</h2>
+            {{relations}}{{backlinks}}
+          </section>
+        </footer>
+      </article>
     </main>
-    <aside class="bp-toc" data-boris-search-exclude>
-      <p class="bp-rail-label">On this page</p>
+    <div class="bp-toc" data-boris-search-exclude>
+      <input class="bp-toggle" id="bp-toc-toggle" type="checkbox">
+      <label class="bp-toc__label" for="bp-toc-toggle">On this page</label>
       {{toc}}
-    </aside>
+    </div>
   </div>
   <footer class="bp-footer">{{footer}}</footer>
+<script>
+(() => {
+  "use strict";
+  const ui = document.querySelector("[data-boris-search-ui]");
+  if (!ui) return;
+  const input = ui.querySelector("#site-search-input");
+  const form = ui.querySelector("form");
+  const status = ui.querySelector("[data-boris-search-status]");
+  const results = ui.querySelector("[data-boris-search-results]");
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from guides/overview.html, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form) form.action = siteRootPrefix + "_boris/search/";
+  document.querySelectorAll("[data-bp-home]").forEach(link => { link.href = siteRootPrefix + "index.html"; });
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
+  const expectedFormat = "boris-rendered-search-index";
+  const expectedSchema = 1;
+  let documents = [];
+
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const fields = section => [section.heading, section.text, section.code].map(normalize);
+  const excerpt = (section, terms) => {
+    const source = String(section.text || section.code || section.heading || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+    const needle = terms.find(term => source.toLowerCase().indexOf(term) >= 0);
+    const start = needle ? Math.max(0, source.toLowerCase().indexOf(needle) - 48) : 0;
+    return (start ? "…" : "") + source.slice(start, start + 150) + (start + 150 < source.length ? "…" : "");
+  };
+  const scoreDocument = (doc, terms, phrase) => {
+    const title = normalize(doc.title);
+    let best = null;
+    (Array.isArray(doc.sections) ? doc.sections : []).forEach((section, sectionIndex) => {
+      const values = fields(section);
+      let score = 0;
+      terms.forEach(term => {
+        if (title.includes(term)) score += 12;
+        if (values[0].includes(term)) score += 8;
+        if (values[1].includes(term)) score += 2;
+        if (values[2].includes(term)) score += 1;
+      });
+      if (score > 0 && section.level === 1) score += 1;
+      if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
+      if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
+    });
+    return best;
+  };
+  const setStatus = message => { status.textContent = message; };
+  const render = () => {
+    results.replaceChildren();
+    const query = normalize(input.value);
+    if (!query) { setStatus(documents.length ? "Type to search the site." : "Search index unavailable."); return; }
+    const terms = query.split(" ").filter(Boolean);
+    const matches = documents.map(doc => scoreDocument(doc, terms, query)).filter(Boolean).sort((a, b) => b.score - a.score || String(a.doc.path).localeCompare(String(b.doc.path)) || a.sectionIndex - b.sectionIndex);
+    if (!matches.length) { setStatus("No results. Try a different search."); return; }
+    setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}.`);
+    matches.slice(0, 12).forEach(match => {
+      const item = document.createElement("li"); item.className = "site-search__result";
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
+      const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
+      const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);
+      link.append(title, path, text); item.append(link); results.append(item);
+    });
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); render(); input.focus(); });
+  input.addEventListener("input", render);
+  document.addEventListener("keydown", event => { if (event.key === "/" && document.activeElement !== input && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { event.preventDefault(); input.focus(); } if (event.key === "Escape" && document.activeElement === input) { input.value = ""; render(); } });
+  fetch(indexUrl, { credentials: "same-origin" }).then(response => { if (!response.ok) throw new Error("index request failed"); return response.json(); }).then(index => {
+    if (!index || index.format !== expectedFormat || index.schema_version !== expectedSchema || !Array.isArray(index.documents)) throw new Error("unsupported search index");
+    documents = index.documents.filter(doc => doc && typeof doc.path === "string" && typeof doc.title === "string" && Array.isArray(doc.sections)).map(doc => ({
+      path: doc.path,
+      title: doc.title,
+      sections: doc.sections.filter(section => section && typeof section.level === "number" && typeof section.heading === "string" && typeof section.fragment === "string" && typeof section.text === "string" && typeof section.code === "string")
+    }));
+    render();
+  }).catch(() => { documents = []; setStatus("Search index unavailable."); });
+})();
+</script>
 </body>
 </html>

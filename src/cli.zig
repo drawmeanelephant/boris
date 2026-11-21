@@ -3077,8 +3077,8 @@ pub fn printInitUsage() void {
         \\            (published/draft/archived), shown as a visible status label
         \\  photo-gallery  two image albums; each page keeps its PNG plates in
         \\            its own {{stem}}.assets/ folder, captioned with <figure>
-        \\  blueprint token-driven shell (Bootstrap-6 grammar: :root tokens,
-        \\            .theme-* surfaces, light-dark()); index on the home layout
+        \\  blueprint documentation site: landing page, Getting started / Guides /
+        \\            Reference sections, sidebar, outline, search, draft gating
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.

@@ -37,7 +37,7 @@ themes/<name>/
 | [`engineering`](engineering/) | Dense engineering docs | `main`, `home`, `section` | `--theme themes/engineering` |
 | [`civic`](civic/) | Public-information shell: banner, gold rule, tinted alerts | `main`, `home`, `section` | `--theme themes/civic` |
 | [`tokens`](tokens/) | Fluid custom properties: every size, step, and kind colour is a token | `main`, `home`, `section` | `--theme themes/tokens` |
-| [`blueprint`](blueprint/) | Bootstrap-6-grammar token shell: `:root` tokens, `.theme-*` surfaces, `light-dark()` | `main`, `home` | `--theme themes/blueprint` (`id:index` → `layouts/home.html`) |
+| [`blueprint`](blueprint/) | Documentation site in the Bootstrap 6 token grammar: search header, `{{nav}}` sidebar with a CSS-only mobile drawer, collapsible `{{toc}}` rail, `light-dark()` | `main`, `home`, `section` | `--theme themes/blueprint` (`id:index` → `layouts/home.html`; section pages → `layouts/section.html`) |
 | [`corporate`](corporate/) | Dense product-docs chrome | `main` (single shape by design; `@media print` is the CV shape) | `--theme themes/corporate` |
 | [`minimal`](minimal/) | Corporate's flat, square shell plus a focused link page, no search | `main`, `links` | `--theme themes/minimal` |
 | [`lab`](lab/) | Dark-first lab terminal, three color modes, prints on paper from any mode | `main`, `print` | `--theme themes/lab` |

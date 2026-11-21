@@ -1,44 +1,66 @@
 # Accessibility notes
 
-What Blueprint guarantees, checked against the built output and
-`assets/css/blueprint.css`. Blueprint uses real landmarks, one native
-disclosure, and generated links — the framework look is CSS, not a
-simulated application.
+What Blueprint guarantees, checked against the built output of the
+`boris init --type blueprint` starter and `assets/css/blueprint.css`.
+Blueprint uses real landmarks, native controls, and the compiler's own
+generated links. The docs-site behavior is CSS, not a simulated
+application.
 
 - Every layout starts with a skip link to `main#main-content`
-  (`tabindex="-1"`), and each page keeps `header`, `main`, and `footer`
-  landmarks. The site rail is a `<details>` disclosure whose summary is a
-  real focusable control; the compiler's own `nav aria-label="Site"`,
-  `"Breadcrumb"`, `"Children"`, and `"On this page"` landmarks survive
-  inside the rails and content.
-- `:focus-visible` is a `0.1875rem` ring in `--focus-ring-color`
-  (`color-mix` of the primary solid): a visible shape change, never
-  color-only. It applies to links, the disclosure summary, and every
-  author-added `.btn`.
-- Color intent is always paired with text. Status chips keep their field
-  labels (`Status`, `Parent`, `Tags`); relation chips print the relation
-  kind as monospace text from `data-relation-kind`, not an icon; admonition
-  titles stay visible text over their tinted surface.
-- Contrast is maintained by construction: each `--*-fg` token is chosen
-  against its `--*-bg-subtle` pair in both `light-dark()` modes — e.g.
-  `--blue-700` on `--blue-100` in light mode and `--blue-300` on
-  `--blue-900` in dark. Muted text (`--fg-muted`) is reserved for labels,
-  breadcrumbs, and rail copy, not sentences.
-- The nav rail is a `<details open>`: it starts expanded (nothing hides
-  behind a toggle) and collapses cleanly for a reader who closes it. No
-  viewport-dependent disclosure state, so no surprise at any width.
-- `prefers-reduced-motion` removes the details animation and smooth
-  scrolling entirely. The `::details-content` height transition is the
-  only motion in the theme.
-- Print drops the topbar, rails, footer, parent link, and relation blocks,
-  resets to black on white, and underlines links.
+  (`tabindex="-1"`). Each page keeps `header`, `main`, and `footer`
+  landmarks. The sidebar is an `aside` labelled "Documentation", and the
+  compiler's `nav aria-label="Site"`, `"Breadcrumb"`, `"Children"`,
+  `"Parent"`, and `"On this page"` landmarks survive inside it and the
+  content.
+- The mobile drawer and the narrow-screen outline are each a real checkbox
+  with a visible `<label>` ("Menu", "On this page"). The checkbox stays in
+  the tab order, Space toggles it, and its focus ring is drawn on the
+  label. The drawer checkbox carries `aria-controls="bp-sidebar"`. No
+  script holds the open or closed state.
+- `:focus-visible` is a `0.1875rem` ring in `--focus-ring-color` (a
+  `color-mix` of the primary solid). It is a shape change, never color
+  alone. "See also" cards draw the ring around the whole card when their
+  link has focus.
+- Color intent is always paired with text. The status pill prints "Draft",
+  "Published", or "Archived", and draft and archived pages also get a
+  text banner. Relation cards print their kind ("Related", "Builds on",
+  "Linked from"). Admonition titles stay visible text, and each kind also
+  has its own glyph.
+- The current page in the sidebar has `aria-current="page"` from the
+  compiler. The theme adds a tinted background and, for leaf pages, a
+  thicker accent bar, so the state does not depend on hue. Under
+  `forced-colors: active`, the current link gets a `Highlight` outline.
+- Contrast holds by construction. Each `--*-fg` token is chosen against
+  its `--*-bg-subtle` pair in both `light-dark()` modes. Muted text
+  (`--fg-muted`) is reserved for labels, breadcrumbs, and rail copy, not
+  body sentences.
+- Code blocks and tables scroll horizontally inside their own box, so a
+  long line never widens the page at 320px. Oliver's table wrapper is a
+  focusable region with `aria-label="Table data"`.
+- The search entry point is a labelled `role="search"` form. The status
+  line is an `aria-live="polite"` region that is clipped, not
+  `display: none`, while the panel is closed, so updates are still
+  announced. Without JavaScript, a `<noscript>` note points to the
+  sidebar.
+- `prefers-reduced-motion` removes the drawer slide, the `<Details>`
+  height animation, hover nudges, and smooth scrolling.
+- Print drops the header, sidebar, outline, footer, section listings, and
+  relation cards. It prints black on white, wraps code, opens `<Details>`
+  bodies where `::details-content` is supported, and prints each external
+  link's URL.
 
 ## Known constraints
 
-- The `light-dark()` / `oklch()` / `color-mix()` floor (Chrome/Edge 130+,
-  Firefox 132+, Safari 18+) is deliberate — it matches the Bootstrap 6
-  alpha surface this theme takes its grammar from. Engines below the floor
-  ignore the declarations they cannot parse; content stays readable but
-  the palette may not apply.
-- `backdrop-filter` on the topbar is decorative: if unsupported, the bar
+- The floor is `light-dark()`, `oklch()`, `color-mix()`, and `:has()`:
+  Chrome/Edge 131+, Firefox 132+, Safari 18+. Engines below the floor
+  ignore declarations they cannot parse. Content stays readable, but the
+  palette and the drawer may not apply.
+- The checkbox pattern exposes the drawer toggle as a checkbox ("Menu,
+  checkbox, not checked"), not as a disclosure button. A native
+  `<details>` cannot be open on wide screens and closed on narrow ones
+  without script, so the checkbox is the CSS-only choice.
+- The brand link gets its page-relative `href` from the search script. No
+  layout helper emits the site root. Without JavaScript, the brand is
+  plain text, and the sidebar's first link goes home.
+- `backdrop-filter` on the header is decorative. If unsupported, the bar
   is simply more opaque.

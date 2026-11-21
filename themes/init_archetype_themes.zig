@@ -105,6 +105,7 @@ pub const archive_accessibility = @embedFile("archive/ACCESSIBILITY.md");
 
 pub const blueprint_layout_main = @embedFile("blueprint/layouts/main.html");
 pub const blueprint_layout_home = @embedFile("blueprint/layouts/home.html");
+pub const blueprint_layout_section = @embedFile("blueprint/layouts/section.html");
 pub const blueprint_footer = @embedFile("blueprint/footer.html");
 pub const blueprint_css = @embedFile("blueprint/assets/css/blueprint.css");
 pub const blueprint_readme = @embedFile("blueprint/README.md");
