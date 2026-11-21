@@ -19,6 +19,9 @@ are expected to style:
 - one typed `relates_to` edge, so `guides/components` renders
   `{{relations}}` and `reference/slots-and-rules` renders `{{backlinks}}`
 - breadcrumbs, children, and outlines at three depths
+- [content resilience](content/reference/content-resilience.md): an unbroken
+  112-character title, prose URL/inline identifier, ordinary and wide tables,
+  and a 336-character code line
 
 The six themes with named layouts select `home.html` for the index and
 `section.html` for the trunks:
@@ -74,3 +77,32 @@ THEME=corporate   # or minimal, boris
   line per page for this build: the `http://www.w3.org/TR/html4/strict.dtd`
   system identifier in the Strict DOCTYPE. The profile requires that line.
   It is not a fetched resource.
+
+## Content-resilience check
+
+Open `reference/content-resilience.html` from a build above at 320, 375, 768,
+1024 and 1440 CSS pixels. Open any native navigation/outline disclosures too.
+The document must fit the viewport; all title and prose text must remain
+visible. Wide tables and code scroll locally without changing their text or
+column relationships. Every table has one keyboard entry, including ordinary
+tables, so data stays reachable in engines without native scroll-container focus.
+
+Check Tab (Option-Tab for link-inclusive navigation in macOS WebKit), the
+visible entry/container focus ring and local keyboard scrolling. HTML/XHTML
+focus the named region; Strict focuses its valid anchor entry, without a fake
+link or script. The inner table remains one native aligned grid, and ordinary
+rows retain the theme's existing width rather than shrinking inside a block.
+Check the theme's supported color modes, reduced motion and print preview.
+Print retains table columns and wraps otherwise unbreakable values rather
+than clipping the final column. Copy the long code identifier from a generated
+PDF and compare it with the source after removing whitespace only: wrapping
+must not introduce hyphens or other punctuation.
+
+For diagnosis, isolate each construct in a two-page corpus with ordinary root
+and child titles, `parent: index`, and only one of the URL/inline identifier,
+wide table or long code block above. For the title-only case, use the long
+title as both frontmatter title and authored H1, with one ordinary paragraph.
+This prevents one overflowing construct or a long navigation label from
+masking another. Compare `document.documentElement.scrollWidth` with
+`innerWidth`; a child wider than its correctly scrolling table/pre is not
+document overflow.

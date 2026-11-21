@@ -35,22 +35,54 @@ pub const Cell = union(enum) {
 
 pub const Sink = struct {
     gpa: std.mem.Allocator,
-    buf: std.ArrayList(u8) = .empty,
+    output: union(enum) {
+        allocating: std.Io.Writer.Allocating,
+        borrowed: *std.Io.Writer,
+    },
 
     pub fn init(gpa: std.mem.Allocator) Sink {
-        return .{ .gpa = gpa };
+        return .{ .gpa = gpa, .output = .{ .allocating = .init(gpa) } };
+    }
+
+    /// The caller owns and flushes the writer. The allocator is only for
+    /// joined values and inline-code scratch space, never the output artifact.
+    pub fn initWriter(gpa: std.mem.Allocator, destination: *std.Io.Writer) Sink {
+        return .{ .gpa = gpa, .output = .{ .borrowed = destination } };
     }
 
     pub fn deinit(self: *Sink) void {
-        self.buf.deinit(self.gpa);
+        switch (self.output) {
+            .allocating => |*output| output.deinit(),
+            .borrowed => {},
+        }
     }
 
+    /// Only allocating sinks retain bytes for inspection or ownership transfer.
     pub fn items(self: *const Sink) []const u8 {
-        return self.buf.items;
+        return self.output.allocating.writer.buffered();
     }
 
     pub fn toOwnedSlice(self: *Sink) ![]u8 {
-        return try self.buf.toOwnedSlice(self.gpa);
+        return try self.output.allocating.toOwnedSlice();
+    }
+
+    fn writer(self: *Sink) *std.Io.Writer {
+        return switch (self.output) {
+            .allocating => |*output| &output.writer,
+            .borrowed => |output| output,
+        };
+    }
+
+    fn writeError(self: *const Sink, err: error{ WriteFailed, OutOfMemory }) error{ WriteFailed, OutOfMemory } {
+        return if (self.output == .allocating and err == error.WriteFailed) error.OutOfMemory else err;
+    }
+
+    fn writeAll(self: *Sink, bytes: []const u8) !void {
+        self.writer().writeAll(bytes) catch |err| return self.writeError(err);
+    }
+
+    fn writeByte(self: *Sink, byte: u8) !void {
+        self.writer().writeByte(byte) catch |err| return self.writeError(err);
     }
 
     /// Template text authored in this repository.
@@ -58,43 +90,43 @@ pub const Sink = struct {
     /// `comptime` is the safety mechanism, not a performance choice: content
     /// read from disk is a runtime value and will not compile here.
     pub fn lit(self: *Sink, comptime s: []const u8) !void {
-        try self.buf.appendSlice(self.gpa, s);
+        try self.writeAll(s);
     }
 
     /// The ordinary way to write a runtime value: always encoded for `target`.
     pub fn field(self: *Sink, comptime target: Target, value: []const u8) !void {
-        try encode.escapeAppend(&self.buf, self.gpa, target, value);
+        encode.write(self.writer(), target, value) catch |err| return self.writeError(err);
     }
 
     /// A value assembled from several fragments, encoded as one whole.
     pub fn fieldJoined(self: *Sink, comptime target: Target, parts: []const []const u8) !void {
-        try encode.escapeAppendJoined(&self.buf, self.gpa, target, parts);
+        encode.writeJoined(self.writer(), self.gpa, target, parts) catch |err| return self.writeError(err);
     }
 
     pub fn num(self: *Sink, value: usize) !void {
         var tmp: [32]u8 = undefined;
-        try self.buf.appendSlice(self.gpa, try std.fmt.bufPrint(&tmp, "{d}", .{value}));
+        try self.writeAll(try std.fmt.bufPrint(&tmp, "{d}", .{value}));
     }
 
     /// A JSON string, quotes included. Delegates to `json_out` — JSON escaping
     /// has one implementation in this codebase and this is not it.
     pub fn jsonString(self: *Sink, value: []const u8) !void {
-        try json_out.writeString(&self.buf, self.gpa, value);
+        json_out.writeStringTo(self.writer(), value) catch |err| return self.writeError(err);
     }
 
     pub fn jsonNumber(self: *Sink, value: usize) !void {
-        try json_out.writeUsize(&self.buf, self.gpa, value);
+        try self.num(value);
     }
 
-    /// A JSON boolean, `true` or `false`. Delegates to `json_out`.
+    /// A JSON boolean, `true` or `false`.
     pub fn jsonBool(self: *Sink, value: bool) !void {
-        try json_out.writeBool(&self.buf, self.gpa, value);
+        try self.writeAll(if (value) "true" else "false");
     }
 
     /// Append bytes another `Sink` produced. Safe by construction: they already
     /// went through `lit` / `field` / an audited `rawTrusted`.
     pub fn appendSink(self: *Sink, other: *const Sink) !void {
-        try self.buf.appendSlice(self.gpa, other.items());
+        try self.writeAll(other.items());
     }
 
     /// The only unescaped runtime path. `why` must name the invariant that
@@ -104,7 +136,7 @@ pub const Sink = struct {
         comptime {
             if (why.len == 0) @compileError("rawTrusted requires a justification");
         }
-        try self.buf.appendSlice(self.gpa, value);
+        try self.writeAll(value);
     }
 
     /// Append a path segment in RFC 3986 percent-encoded form. This is a
@@ -117,11 +149,11 @@ pub const Sink = struct {
         for (path) |byte| {
             const safe = std.ascii.isAlphanumeric(byte) or byte == '-' or byte == '.' or byte == '_' or byte == '~' or byte == '/';
             if (safe) {
-                try self.buf.append(self.gpa, byte);
+                try self.writeByte(byte);
             } else {
-                try self.buf.append(self.gpa, '%');
-                try self.buf.append(self.gpa, hex[byte >> 4]);
-                try self.buf.append(self.gpa, hex[byte & 0x0f]);
+                try self.writeByte('%');
+                try self.writeByte(hex[byte >> 4]);
+                try self.writeByte(hex[byte & 0x0f]);
             }
         }
     }
@@ -203,9 +235,9 @@ pub const Sink = struct {
         try span.appendNTimes(self.gpa, '`', longest + 1);
 
         if (in_table) {
-            try encode.escapeAppend(&self.buf, self.gpa, .md_table_cell, span.items);
+            try self.field(.md_table_cell, span.items);
         } else {
-            try self.buf.appendSlice(self.gpa, span.items);
+            try self.writeAll(span.items);
         }
     }
 };
@@ -219,6 +251,35 @@ fn expectSink(build: anytype, want: []const u8) !void {
     defer sink.deinit();
     try build(&sink);
     try std.testing.expectEqualStrings(want, sink.items());
+    var buffer: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    var borrowed = Sink.initWriter(std.testing.allocator, &writer);
+    defer borrowed.deinit();
+    try build(&borrowed);
+    try std.testing.expectEqualStrings(want, writer.buffered());
+}
+
+test "borrowed sinks do not allocate output and preserve writer failures" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var buffer: [256]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buffer);
+    var sink = Sink.initWriter(failing.allocator(), &writer);
+    defer sink.deinit();
+    try sink.field(.xml_text, "<&>");
+    try sink.jsonString("\x08\x0c\u{2028}");
+    try sink.jsonNumber(123);
+    try sink.jsonBool(true);
+    try sink.uriPath("a b");
+    try std.testing.expectEqualStrings("&lt;&amp;&gt;\"\\u0008\\u000c\\u2028\"123truea%20b", writer.buffered());
+
+    var full = std.Io.Writer.fixed(&.{});
+    var borrowed = Sink.initWriter(failing.allocator(), &full);
+    try std.testing.expectError(error.WriteFailed, borrowed.lit("x"));
+    try std.testing.expectError(error.WriteFailed, borrowed.field(.xml_text, "&"));
+    try std.testing.expectError(error.WriteFailed, borrowed.jsonString("x"));
+    var owned = Sink.init(failing.allocator());
+    defer owned.deinit();
+    try std.testing.expectError(error.OutOfMemory, owned.field(.xml_text, "&"));
 }
 
 test "yamlField keeps benign values plain and quotes hostile ones" {

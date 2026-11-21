@@ -16,6 +16,10 @@
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+/* Emergency breaks for author text and graph labels, not tabular data. */
+body { overflow-wrap: anywhere; }
+table { overflow-wrap: normal; }
+
 body { margin: 0; background: var(--primer-canvas); color: var(--primer-ink); font-size: 0.9375rem; line-height: 1.5; }
 a { color: var(--primer-accent); text-decoration-thickness: 0.1em; text-underline-offset: 0.14em; }
 a:hover { color: #0550ae; }
@@ -154,5 +158,18 @@ details summary { cursor: pointer; font-weight: 600; }
   .Box { border: 0; box-shadow: none; padding: 0; }
   .Box--nested, .semantic-relations, .semantic-backlinks { border: 1px solid #999; padding: 0.6rem 0.8rem; }
   .markdown-body pre { background: #fff; color: #000; border: 1px solid #999; white-space: pre-wrap; }
+  .markdown-body table { display: table; width: 100%; max-width: none; table-layout: fixed; overflow: visible; }
+  .markdown-body th, .markdown-body td { overflow-wrap: anywhere; }
   [data-status] .page-metadata > div:first-child { background: #fff !important; color: #000 !important; border-color: #000 !important; }
+}
+
+/* Keep the native grid inside its keyboard-accessible scroll surface. */
+.table-viewport { max-width: 100%; overflow-x: auto; }
+.table-viewport > table { display: table; max-width: none; overflow: visible; }
+.table-viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.table-entry { margin: 0; font-size: 0.85em; }
+.table-entry a { display: inline-block; color: inherit; text-decoration: none; }
+@media print {
+  .table-viewport { overflow: visible; }
+  .table-entry { display: none; }
 }

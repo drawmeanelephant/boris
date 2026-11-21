@@ -749,6 +749,12 @@
     await tick();
   }
 
+  async function buildAuthoringDiagnostics() {
+    await revealSection('problems');
+    document.getElementById('problems')?.focus();
+    await runCommand('ir_build');
+  }
+
   function reportBlockedNav(reason: string) {
     buffer.editorStatus = reason;
   }
@@ -968,6 +974,7 @@
     onScale={() => runCommand('recipe_scale')}
     onReset={resetScale}
     onEnterFocus={enterFocusMode}
+    onBuildDiagnostics={buildAuthoringDiagnostics}
   />
 
   {#if density.mode === 'review'}

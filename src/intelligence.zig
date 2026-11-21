@@ -95,8 +95,8 @@ pub const Summary = struct {
 pub const Report = struct {
     allocator: std.mem.Allocator,
     summary: Summary,
-    findings: std.ArrayListUnmanaged(Finding) = .empty,
-    impact: std.ArrayListUnmanaged(Endpoint) = .empty,
+    findings: std.ArrayList(Finding) = .empty,
+    impact: std.ArrayList(Endpoint) = .empty,
 
     pub fn deinit(self: *Report) void {
         self.findings.deinit(self.allocator);
@@ -134,7 +134,7 @@ pub fn analyze(
 
     var known_sources: std.StringHashMapUnmanaged(void) = .empty;
     defer known_sources.deinit(allocator);
-    var incoming: std.ArrayListUnmanaged(Incoming) = .empty;
+    var incoming: std.ArrayList(Incoming) = .empty;
     defer incoming.deinit(allocator);
 
     for (edges) |edge| {
@@ -297,9 +297,9 @@ fn collectImpact(
     allocator: std.mem.Allocator,
     edges: []const Edge,
     root: Endpoint,
-    output: *std.ArrayListUnmanaged(Endpoint),
+    output: *std.ArrayList(Endpoint),
 ) !void {
-    var seen: std.ArrayListUnmanaged(Endpoint) = .empty;
+    var seen: std.ArrayList(Endpoint) = .empty;
     defer seen.deinit(allocator);
     try seen.append(allocator, root);
 

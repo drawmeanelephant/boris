@@ -425,15 +425,16 @@ test "no payload reread: rewriting payload bytes leaves prior touches untouched"
 }
 
 /// The exact committed bytes of the poisoned fixture's `touches.json` emitted
-/// by PR #294 (first Touch Atlas implementation). This change is a pure
-/// ownership cleanup and must not alter a single emitted byte; the golden
-/// captures the full report (36834 bytes) and pins its SHA-256.
+/// by PR #294 (first Touch Atlas implementation). The golden captures the
+/// full report (36835 bytes) and pins its SHA-256.
 /// Re-pinned for #778: code-span word boundaries in `search-index.json`
 /// (an inventoried artifact) shift every downstream evidence digest.
-const touches_golden_sha256 = "ec7119b5fc13de63adb99f1ffa639260b76f6aa91360f4ed6f091223e62e2edb";
+/// Re-pinned for table presentation: only the three input-evidence digests
+/// change; the independent old-source capture matches the prior golden.
+const touches_golden_sha256 = "fe0f4b4eca57254dc670aef543821407c4da5598efa6832e2fb6bc60de10545d";
 const touches_golden_len = 36835;
 
-test "touches emission remains byte-identical to the PR #294 golden" {
+test "touches emission remains byte-identical to the reviewed fixture golden" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});

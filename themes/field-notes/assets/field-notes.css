@@ -33,6 +33,10 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+/* Emergency breaks for author text and graph labels, not tabular data. */
+body { overflow-wrap: anywhere; }
+table { overflow-wrap: normal; }
+
 body {
   margin: 0;
   background: var(--paper);
@@ -166,6 +170,7 @@ code { font-family: var(--mono); }
   color: var(--pencil); font-style: italic;
 }
 .prose table {
+  display: block; max-width: 100%; overflow-x: auto;
   width: 100%; margin-bottom: 1.5rem;
   border-collapse: collapse;
   font-size: 0.92rem; font-variant-numeric: tabular-nums;
@@ -341,7 +346,7 @@ details summary:hover { color: var(--flag); }
 }
 
 @media (max-width: 52rem) {
-  .spread { grid-template-columns: 1fr; }
+  .spread { grid-template-columns: minmax(0, 1fr); }
   .margin-col { order: 2; }
 }
 
@@ -360,4 +365,22 @@ details summary:hover { color: var(--flag); }
   .page-children a::after { content: ""; }
   .prose pre { background: #fff; color: #000; border: 1px solid #999; white-space: pre-wrap; }
   .entry-stamp { transform: none; }
+}
+
+/* Paper has no scrollbars: retain columns and wrap only when necessary. */
+@media print {
+  .prose table { display: table; width: 100%; max-width: none; table-layout: fixed; overflow: visible; }
+  .prose th, .prose td { overflow-wrap: anywhere; }
+  .prose pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+}
+
+/* Keep the native grid inside its keyboard-accessible scroll surface. */
+.table-viewport { max-width: 100%; overflow-x: auto; }
+.table-viewport > table { display: table; max-width: none; overflow: visible; }
+.table-viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.table-entry { margin: 0; font-size: 0.85em; }
+.table-entry a { display: inline-block; color: inherit; text-decoration: none; }
+@media print {
+  .table-viewport { overflow: visible; }
+  .table-entry { display: none; }
 }

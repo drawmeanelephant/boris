@@ -2418,14 +2418,14 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
         };
     }
 
-    var pages: std.ArrayListUnmanaged(intelligence.Page) = .empty;
+    var pages: std.ArrayList(intelligence.Page) = .empty;
     defer pages.deinit(gpa);
     pages.ensureTotalCapacity(gpa, result.pages.items.len) catch return .io_error;
     for (result.pages.items) |page| {
         pages.appendAssumeCapacity(.{ .id = page.id, .parent = page.parent, .source_path = page.source_path });
     }
 
-    var edges: std.ArrayListUnmanaged(intelligence.Edge) = .empty;
+    var edges: std.ArrayList(intelligence.Edge) = .empty;
     defer edges.deinit(gpa);
     edges.ensureTotalCapacity(gpa, result.edges.items.len) catch return .io_error;
     for (result.edges.items) |edge| {
@@ -2967,7 +2967,7 @@ fn renderAnalysisJson(
         try w.writeAll("}");
     }
     try w.writeAll("],\n  \"sources\": [");
-    var source_names: std.ArrayListUnmanaged([]const u8) = .empty;
+    var source_names: std.ArrayList([]const u8) = .empty;
     defer source_names.deinit(gpa);
     for (edges) |edge| {
         if (edge.to.type != .source) continue;
@@ -3146,7 +3146,7 @@ fn addWatchRoots(io: Io, gpa: std.mem.Allocator, opts: Options, watcher: *watch.
     }
 
     // Watch unique layout parent directories (global + per-target overrides).
-    var layout_roots: std.StringHashMapUnmanaged(void) = .{};
+    var layout_roots: std.StringHashMapUnmanaged(void) = .empty;
     defer layout_roots.deinit(gpa);
     const add_layout_root = struct {
         fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, layout: []const u8, input_dir: []const u8, workspace: ?[]const u8) !void {
@@ -3435,8 +3435,12 @@ fn mapHtmlError(
         // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
         => return .content_error,
-        // The HTML loader already emitted the structured ETEXTILE diagnostic.
+        // The HTML loader already emitted the structured ETEXTILE / ECOOKLANG
+        // diagnostic for the adapter refusals; the xhtml refusal's page-context
+        // diagnostic is emitted at render time (#1122).
         error.TextileFailed,
+        error.CooklangFailed,
+        error.RawHtmlNotXmlWellFormed,
         error.InputFormatMismatch,
         => return .content_error,
         error.MultiTargetIoFailed => {
@@ -3503,7 +3507,7 @@ pub fn runArgs(args: []const []const u8) u8 {
     return cli.runArgs(args, &runner);
 }
 
-/// Zig 0.16 entry: main receives `std.process.Init` (gpa, arena, io, …).
+/// Zig 0.17 entry: main receives `std.process.Init` (gpa, arena, io, …).
 pub fn main(init: std.process.Init) u8 {
     const cold = init.arena.allocator();
 
@@ -3687,6 +3691,17 @@ test "mapHtmlError: unsafe SVG content failure exits 1 without a generic wrapper
     // content-asset path; mapHtmlError must classify it as a content error
     // (exit 1) and must not print either generic wrapper line.
     try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, "content"));
+}
+
+test "mapHtmlError: adapter and xhtml refusals are content failures (exit 1)" {
+    // #1122: the load-time adapter refusals and the xhtml raw-HTML refusal
+    // already emitted structured diagnostics with real loci; mapping them to
+    // the generic I/O class misroutes them as environment failures.
+    inline for (.{
+        error.TextileFailed,
+        error.CooklangFailed,
+        error.RawHtmlNotXmlWellFormed,
+    }) |err| try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(err, "content"));
 }
 
 fn writeTreeFileMain(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8) !void {
@@ -4090,7 +4105,7 @@ test "runPipeline: multi-target reports omit proofPack (#741)" {
     const rep = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/multi-report.json", .{tmp.sub_path});
     defer gpa.free(rep);
 
-    var targets: std.ArrayListUnmanaged(target.TargetSpec) = .empty;
+    var targets: std.ArrayList(target.TargetSpec) = .empty;
     defer targets.deinit(gpa);
     try targets.append(gpa, .{ .name = "one", .output_dir = one });
     try targets.append(gpa, .{ .name = "two", .output_dir = two });

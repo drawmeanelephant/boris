@@ -72,7 +72,7 @@ fn parse(args: []const []const u8) CliError!Options {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             // Side-effect-free: printing the usage text is the caller's job.
             // The --help unit test exercises this path, and output here would
-            // leak onto stderr, which the Zig 0.16 build runner surfaces as a
+            // leak onto stderr, which the Zig 0.17 build runner surfaces as a
             // "failed command" block on green focused-gate runs (#882).
             return error.Help;
         }
@@ -295,11 +295,11 @@ fn runInner(allocator: std.mem.Allocator, io: Io, options: Options) !void {
         };
         try documents.append(allocator, document);
     }
-    const json = try search.writeJson(allocator, documents.items);
-    defer allocator.free(json);
     const output_file = try std.fmt.allocPrint(allocator, "{s}/search-index.json", .{options.out});
     defer allocator.free(output_file);
     if (options.check) {
+        const json = try search.writeJson(allocator, documents.items);
+        defer allocator.free(json);
         const existing = readFile(io, Io.Dir.cwd(), output_file, allocator) catch return error.CheckMismatch;
         defer allocator.free(existing);
         if (!std.mem.eql(u8, existing, json)) return error.CheckMismatch;
@@ -308,7 +308,7 @@ fn runInner(allocator: std.mem.Allocator, io: Io, options: Options) !void {
         defer atomic.deinit(io);
         var buffer: [4096]u8 = undefined;
         var writer = atomic.file.writer(io, &buffer);
-        try writer.interface.writeAll(json);
+        try search.writeJsonTo(&writer.interface, documents.items);
         try writer.interface.flush();
         try atomic.replace(io);
     }

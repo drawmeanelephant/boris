@@ -488,13 +488,13 @@ pub fn renderCompletion(gpa: std.mem.Allocator, result: anytype, versions: Versi
     var kinds: std.ArrayList([]const u8) = .empty;
     defer kinds.deinit(gpa);
     try kinds.appendSlice(gpa, &canonical_relation_kinds);
-    var seen_kinds: std.StringHashMapUnmanaged(void) = .{};
+    var seen_kinds: std.StringHashMapUnmanaged(void) = .empty;
     defer seen_kinds.deinit(gpa);
     for (canonical_relation_kinds) |k| try seen_kinds.put(gpa, k, {});
 
     var parents: std.ArrayList([]const u8) = .empty;
     defer parents.deinit(gpa);
-    var seen_parents: std.StringHashMapUnmanaged(void) = .{};
+    var seen_parents: std.StringHashMapUnmanaged(void) = .empty;
     defer seen_parents.deinit(gpa);
 
     for (result.pages.items) |p| {

@@ -1,0 +1,68 @@
+/* The one-page link surface keeps Minimal's flat, ruled vocabulary. */
+.links-main {
+  width: 100%;
+  max-width: 38rem;
+  margin-inline: auto;
+  padding: var(--spacing-xl) var(--spacing-lg);
+}
+
+.links-page .boris-content h1 {
+  margin-bottom: var(--spacing-md);
+  font-size: clamp(2.5rem, 5vw, 3rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.links-page .boris-content h2 {
+  margin-top: var(--spacing-xl);
+  margin-bottom: var(--spacing-md);
+  padding: 0;
+  border: 0;
+}
+
+.links-page .boris-content > :is(ul, ol) {
+  padding: 0;
+  list-style: none;
+}
+
+.links-page .boris-content > :is(ul, ol) > li {
+  margin: 0 0 var(--spacing-sm);
+}
+
+.links-page .boris-content > :is(ul, ol) > li > p:only-child { margin: 0; }
+
+.links-page .boris-content > :is(ul, ol) > li > a:only-child,
+.links-page .boris-content > :is(ul, ol) > li > p:only-child > a:only-child {
+  display: block;
+  min-height: 3.5rem;
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-outline);
+  font-weight: 600;
+}
+
+.links-page .boris-content > :is(ul, ol) > li > a:only-child:hover,
+.links-page .boris-content > :is(ul, ol) > li > a:only-child:active,
+.links-page .boris-content > :is(ul, ol) > li > p:only-child > a:only-child:hover,
+.links-page .boris-content > :is(ul, ol) > li > p:only-child > a:only-child:active {
+  background: var(--color-surface-container-highest);
+}
+
+.links-page [id] { scroll-margin-top: var(--spacing-md); }
+
+@media print {
+  .links-main { max-width: none; padding: 0; }
+  .links-page .boris-content > :is(ul, ol) > li > a:only-child,
+  .links-page .boris-content > :is(ul, ol) > li > p:only-child > a:only-child {
+    min-height: 0;
+    padding: var(--spacing-sm) 0;
+    border: 0;
+    color: #000;
+  }
+  .links-page .boris-content a[href^="https:"]::after,
+  .links-page .boris-content a[href^="http:"]::after,
+  .links-page .boris-content a[href^="mailto:"]::after {
+    content: " (" attr(href) ")";
+    font-weight: 400;
+    overflow-wrap: anywhere;
+  }
+}

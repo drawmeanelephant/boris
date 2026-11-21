@@ -57,6 +57,31 @@ helpers). Related contracts: [parallel-rendering.md](parallel-rendering.md),
 [watch-mode.md](watch-mode.md),
 [multi-target-isolated-output.md](multi-target-isolated-output.md).
 
+## Table presentation
+
+The shared HTML-body publication path places each complete table inside
+`div.table-viewport` after Oliver and components have rendered. The original
+table, rows, cells, alignment attributes and authored bytes remain unchanged.
+The existing HTML scanner skips comments, quoted attributes and raw-text
+elements, so documented or scripted `<table>` strings are not annotated.
+Malformed or unbalanced table markup is left unchanged rather than repaired.
+The Oliver render API and semantic plain-text projection are unchanged.
+
+HTML and XHTML use a focusable, named region:
+`<div class="table-viewport" tabindex="0" role="region" aria-label="Table data">`.
+HTML 4.01 Strict uses an ordinary `div` containing
+`<p class="table-entry"><a tabindex="0">Table data. Scroll horizontally when needed.</a></p>`.
+That anchor is a keyboard entry, not a fake hyperlink; it has no `href`,
+generated identifier, script or unsupported Strict attribute.
+
+Every table, including one that fits, has one keyboard entry. This is the
+explicit accessibility tradeoff for engines without automatic focus on
+overflowing containers. Catalog CSS scrolls the outer container and retains
+the native inner table grid; print hides the Strict entry and wraps data
+without clipping columns. The Strict entry text is compiler chrome excluded
+from rendered search. Custom themes can style these same class hooks.
+The cache discriminator is bumped so earlier unwrapped bodies cannot be reused.
+
 ## Hosted publication locations
 
 HTML remains target-relative by default: navigation, theme assets, and
@@ -358,7 +383,7 @@ published as IR or RAG semantic edges.
 On `--incremental`, a page is **reused** only when all of the following hold:
 
 1. Prior `dist/.boris-cache/manifest.json` parses and its `format_version`
-   equals the fingerprint discriminator (`boris-cache-v3-nav-digest`).
+   equals the fingerprint discriminator (`boris-cache-v4-table-viewport`).
 2. A manifest entry matches the page’s `entity_id`, `output_path`, effective
    `selected_layout`, and current **input** fingerprint (source / includes /
    selected layout path+bytes / target / nav material / theme material).

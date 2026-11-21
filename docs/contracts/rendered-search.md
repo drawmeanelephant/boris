@@ -116,6 +116,7 @@ layouts that cannot use the `data-boris-search-exclude` attribute:
 | Slot | Element and class excluded |
 |---|---|
 | `{{metadata}}` | `<dl class="page-metadata">` |
+| Table keyboard entry (Strict) | `<p class="table-entry">`; the surrounding table and cell data stay searchable |
 | `{{tags}}` | `<ul class="page-tags">` |
 | `{{relations}}` | `<section class="semantic-relations">`; Strict `<div class="semantic-relations">` |
 | `{{backlinks}}` | `<section class="semantic-backlinks">`; Strict `<div class="semantic-backlinks">` |

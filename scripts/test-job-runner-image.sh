@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Linux smoke for boris-job-runner (#300).
 #
-# Required path: native --once against the valid and poisoned fixtures.
+# Required path: native --once against the valid and poisoned fixtures,
+# plus the image's listen command and Worker authentication wiring.
 # That is the compiler contract. The Docker image remains an operator
 # example; it is not this job's gate. This is not a live Cloudflare run
 # and does not claim macOS-vs-Linux byte identity.
@@ -77,5 +78,9 @@ assert any(x["code"] == "EPARENTMISSING" for x in d["diagnostics"]), d
 print("poisoned closed correctly")
 PY
 pass "poisoned fixture failed closed, no artifacts"
+
+note "image command and Worker authentication"
+node --experimental-vm-modules examples/cloudflare-container/test/auth.mjs "$OUT"
+pass "runner startup, HTTP authentication, and Worker token forwarding"
 
 note "job-runner smoke complete"

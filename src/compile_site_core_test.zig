@@ -365,6 +365,92 @@ test "#829: parse failures reach the diagnostics collector with their locus" {
     try std.testing.expectEqual(@as(?u32, 1), d.column);
 }
 
+test "#1122: a refused .cook on the HTML path reaches the collector as ECOOKLANG" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-1122-cooklang-collector", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "{{content}}");
+    // `~{}` — a timer with neither name nor duration — is a contract
+    // refusal at 8:6 in this corpus.
+    try writeTreeFile(io, work, "content/index.cook", "---\nid: index\ntitle: T\n---\n\n# T\n\nWait ~{} then serve.\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.CooklangFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .input_format = .cook,
+        .quiet = true,
+        .diagnostics = &collector,
+    }));
+
+    // The structured ECOOKLANG diagnostic must reach the collector with its
+    // real locus, so `--report` / `--watch-json` never degrade to the bare
+    // `EIO: CooklangFailed` escaped-error fallback (#1122).
+    try std.testing.expectEqual(@as(usize, 1), diag.countErrors(collector.list.items));
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.ECOOKLANG, d.code);
+    try std.testing.expectEqualStrings("index.cook", d.source_path);
+    try std.testing.expectEqual(@as(?u32, 8), d.line);
+    try std.testing.expectEqual(@as(?u32, 6), d.column);
+}
+
+test "#1124: the zero-width advisory reaches the HTML-path collector once" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-1124-eunicode", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "{{content}}");
+    // U+200B ZWSP interleaved in ASCII: the advisory warning the IR path
+    // already reports must also reach the HTML-path collector (#1124).
+    try writeTreeFile(io, work, "content/index.md", "# T\n\nZero\u{200B}width here.\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .diagnostics = &collector,
+    });
+
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(collector.list.items));
+    try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.EUNICODE, d.code);
+    try std.testing.expectEqual(diag.Severity.warning, d.severity);
+    try std.testing.expectEqualStrings("index.md", d.source_path);
+    try std.testing.expect(d.line != null);
+    try std.testing.expect(d.column != null);
+}
+
 test "#395: rule-selected layout emits an info ILAYOUTSELECTED outcome finding" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -552,16 +638,24 @@ test "#448: xhtml target emits a well-formed document and fails closed on raw HT
     // are well-formed block elements.
     try std.testing.expect(std.mem.indexOf(u8, got, "<h1 id=\"home\">Home</h1>") != null);
 
-    // 2. Fail closed: verbatim raw HTML on an XHTML target is a hard error.
+    // 2. Fail closed: verbatim raw HTML on an XHTML target is a hard error
+    // whose diagnostic names the refusing page — not the layout (#1122).
     try writeTreeFile(io, work, "content/raw.md", "before <em>raw</em> after\n");
     try writeTreeFile(io, work, "content/index.md", "# Home\n\n[[raw]]\n");
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
     try std.testing.expectError(error.RawHtmlNotXmlWellFormed, compileHtmlSite(io, gpa, .{
         .content_root = content,
         .dist_dir = dist,
         .layout_path = layout_path,
         .output_profile = .xhtml,
         .quiet = true,
+        .diagnostics = &collector,
     }));
+    try std.testing.expectEqual(@as(usize, 1), diag.countErrors(collector.list.items));
+    const refusal = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.EXHTML, refusal.code);
+    try std.testing.expectEqualStrings("raw.md", refusal.source_path);
 
     // 3. The same raw content renders under the default HTML profile.
     _ = try compileHtmlSite(io, gpa, .{

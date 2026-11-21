@@ -46,8 +46,8 @@ never strips HTML) into the deterministic semantic plain-text projection — see
 |-------|-------|
 | Repository | <https://github.com/drawmeanelephant/oliver> |
 | Branch | `main` |
-| Commit | `2a0a1e9` |
-| Package hash | `oliver-1.1.0-LOsZkOeMKAB1o3ynv6PTycxCt3nzpYB6l_hz-J3lVvxF` |
+| Commit | `af2233b` |
+| Package hash | `oliver-1.3.0-LOsZkGUXLwB9ygrMZ3drtbYkQzvjPkI9B68MK-BsVKvU` |
 | Zig | 0.17.0 |
 
 The pin lives in `build.zig.zon` (`.dependencies.oliver.url` + `.hash`). Zig
@@ -59,8 +59,10 @@ time and cached by Zig).
 ### Why this revision
 
 Oliver upstream is CommonMark 0.31.2 (652/652 conformance) plus GFM tables.
-The pinned revision is the Oliver #131 merge, containing the HTML 4.01 Strict
-fragment profile and the renderer's expanded typed error set. It retains the
+The pinned revision is the Oliver #205 change: Cooklang token-marker name
+termination and nested-delimiter degradation (boris#1123) on top of the #131
+merge's HTML 4.01 Strict fragment profile and expanded typed error set. It
+retains the
 #907 Cooklang brace-adjacency fix and everything from oliver#77's merge:
 public Cooklang string-quantity classify/scale (`classifyQuantity`,
 `parseFactor`, `scaleAmount`) and mixed numbers (`1 1/2`), on the same

@@ -63,6 +63,10 @@
   box-sizing: border-box;
 }
 
+/* Emergency breaks for author text and graph labels, not tabular data. */
+body { overflow-wrap: anywhere; }
+table { overflow-wrap: normal; }
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -887,12 +891,12 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
 }
 
 .prose table {
+  display: block; max-width: 100%; overflow-x: auto;
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   margin: 1rem 0;
   font-size: 0.94rem;
-  overflow: hidden;
   border: 1px solid var(--b-line);
   border-radius: var(--b-radius-sm);
 }
@@ -1119,4 +1123,22 @@ body[data-layout="section"] .section-intro {
     color: inherit;
     text-decoration: underline;
   }
+}
+
+/* Paper has no scrollbars: retain columns and wrap only when necessary. */
+@media print {
+  .prose table { display: table; width: 100%; max-width: none; table-layout: fixed; overflow: visible; }
+  .prose th, .prose td { overflow-wrap: anywhere; }
+  .prose pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+}
+
+/* Keep the native grid inside its keyboard-accessible scroll surface. */
+.table-viewport { max-width: 100%; overflow-x: auto; }
+.table-viewport > table { display: table; max-width: none; overflow: visible; }
+.table-viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.table-entry { margin: 0; font-size: 0.85em; }
+.table-entry a { display: inline-block; color: inherit; text-decoration: none; }
+@media print {
+  .table-viewport { overflow: visible; }
+  .table-entry { display: none; }
 }

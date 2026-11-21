@@ -19,6 +19,7 @@ const diag = @import("diag.zig");
 const content_asset = @import("content_asset.zig");
 const doclink = @import("doclink.zig");
 const source_provider = @import("source_provider.zig");
+const html_scan = @import("html_scan.zig");
 
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
@@ -118,6 +119,57 @@ fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed
     diag.printText(structured, gpa);
 }
 
+/// Emit an adapter refusal (ETEXTILE / ECOOKLANG) once: prose to stderr plus
+/// the structured diagnostic for `--report` / `--watch-json`, so a content
+/// refusal never degrades to the bare `EIO` escaped-error fallback (#1122).
+fn emitAdaptDiagnostic(
+    code: diag.Code,
+    gpa: std.mem.Allocator,
+    source_path: []const u8,
+    line: u32,
+    column: u32,
+    message: []const u8,
+    remediation: []const u8,
+    sink: ?*diag.Collector,
+) void {
+    const structured: diag.Diagnostic = .{
+        .severity = .error_,
+        .code = code,
+        .message = message,
+        .remediation = remediation,
+        .source_path = source_path,
+        .line = line,
+        .column = column,
+    };
+    if (sink) |s| s.append(structured);
+    diag.printText(structured, gpa);
+}
+
+/// The xhtml profile fails closed on verbatim raw HTML in page content —
+/// report the refusing page once, through prose and the report collector,
+/// before the typed error unwinds (oliver-renderer.md: the typed error is
+/// "surfaced with page/offset context"; it carries no byte offset, so the
+/// page paths are the locus). Covers every renderSource caller — render and
+/// heading-harvest passes alike (#1122).
+fn reportXhtmlRefusal(
+    gpa: std.mem.Allocator,
+    source_path: []const u8,
+    output_path: []const u8,
+    sink: ?*diag.Collector,
+) void {
+    const message = std.fmt.allocPrint(gpa, "xhtml page '{s}': verbatim raw HTML in page content is not XML-well-formed", .{output_path}) catch null;
+    defer if (message) |m| gpa.free(m);
+    const structured: diag.Diagnostic = .{
+        .severity = .error_,
+        .code = .EXHTML,
+        .message = message orelse "xhtml page: verbatim raw HTML in page content is not XML-well-formed",
+        .remediation = "Remove the raw HTML from the page, or publish this target under the html output profile",
+        .source_path = source_path,
+    };
+    if (sink) |s| s.append(structured);
+    diag.printText(structured, gpa);
+}
+
 /// An adapted page body plus whatever structured data the adapter recovered.
 pub const AdaptedBody = struct {
     markdown: []const u8,
@@ -131,7 +183,10 @@ pub const AdaptedBody = struct {
 /// arena must pass a longer-lived one.
 ///
 /// An adaptation diagnostic is fatal, so it is never gated on `--quiet`: that
-/// flag suppresses progress and success output only.
+/// flag suppresses progress and success output only. The structured
+/// diagnostic is also appended to `diagnostics` so `--report` / `--watch-json`
+/// consumers see the real code and locus instead of the escaped-error
+/// fallback (#1122).
 pub fn bodyForInput(
     allocator: std.mem.Allocator,
     input_format: identity.InputFormat,
@@ -143,18 +198,14 @@ pub fn bodyForInput(
     /// validation call in `compile.zig` prints; the render and heading-harvest
     /// passes pass false so each warning surfaces exactly once per build.
     print_warnings: bool,
+    diagnostics: ?*diag.Collector,
 ) !AdaptedBody {
     switch (input_format) {
         .markdown => return .{ .markdown = body },
         .textile => {
             const adapted = try textile.toMarkdown(body, allocator);
             if (adapted.diagnostic) |td| {
-                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
-                    source_path,
-                    sourceLineAt(source, body_offset) + td.line - 1,
-                    td.column,
-                    td.message,
-                });
+                emitAdaptDiagnostic(.ETEXTILE, allocator, source_path, sourceLineAt(source, body_offset) + td.line - 1, td.column, td.message, "Use only the bounded Textile compatibility subset", diagnostics);
                 return error.TextileFailed;
             }
             return .{ .markdown = adapted.markdown };
@@ -162,12 +213,7 @@ pub fn bodyForInput(
         .cook => {
             const adapted = try cooklang_seam.toMarkdown(body, allocator);
             if (adapted.diagnostic) |cd| {
-                if (!diag.text_suppressed.load(.unordered)) std.debug.print("error: ECOOKLANG: {s}:{d}:{d}: {s} [Use only the bounded Cooklang subset]\n", .{
-                    source_path,
-                    sourceLineAt(source, body_offset) + cd.line - 1,
-                    cd.column,
-                    cd.message,
-                });
+                emitAdaptDiagnostic(.ECOOKLANG, allocator, source_path, sourceLineAt(source, body_offset) + cd.line - 1, cd.column, cd.message, "Use only the bounded Cooklang subset", diagnostics);
                 return error.CooklangFailed;
             }
             // Oliver's structural warnings degrade to literal text; they
@@ -417,7 +463,12 @@ pub fn renderSource(
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try render.renderProfile(md, doc_arena, options.output_profile);
+                const h = render.renderProfile(md, doc_arena, options.output_profile) catch |err| {
+                    if (err == error.RawHtmlNotXmlWellFormed) {
+                        reportXhtmlRefusal(gpa, source_path, output_path, options.diagnostics);
+                    }
+                    return err;
+                };
                 try html_buf.appendSlice(arena, h.bytes);
             },
             .aside => |component| {
@@ -430,7 +481,51 @@ pub fn renderSource(
             },
         }
     }
-    return html_buf.items;
+    return presentTables(arena, html_buf.items, options.output_profile);
+}
+
+fn presentTables(arena: std.mem.Allocator, html: []const u8, profile: render.OutputProfile) ![]const u8 {
+    if (html_scan.validate(html) != null) return html;
+    const Insertion = struct { offset: usize, closing: bool };
+    var insertions: std.ArrayList(Insertion) = .empty;
+    var depth: usize = 0;
+    var position: usize = 0;
+    while (std.mem.indexOfScalarPos(u8, html, position, '<')) |start| {
+        const tag = html_scan.tagAt(html, start) orelse {
+            position = start + 1;
+            continue;
+        };
+        position = tag.end + 1;
+        if (!tag.closing and !tag.self_closing and html_scan.isRawTextElement(tag.name)) {
+            position = html_scan.rawTextEnd(html, position, tag.name) orelse return html;
+            continue;
+        }
+        if (!std.ascii.eqlIgnoreCase(tag.name, "table") or tag.self_closing) continue;
+        if (tag.closing) {
+            if (depth == 0) return html;
+            depth -= 1;
+            try insertions.append(arena, .{ .offset = position, .closing = true });
+        } else {
+            depth += 1;
+            try insertions.append(arena, .{ .offset = start, .closing = false });
+        }
+    }
+    if (depth != 0 or insertions.items.len == 0) return html;
+
+    var out: std.ArrayList(u8) = .empty;
+    var copied: usize = 0;
+    for (insertions.items) |insertion| {
+        try out.appendSlice(arena, html[copied..insertion.offset]);
+        try out.appendSlice(arena, if (insertion.closing)
+            "</div>"
+        else if (profile == .html4_strict)
+            "<div class=\"table-viewport\"><p class=\"table-entry\"><a tabindex=\"0\">Table data. Scroll horizontally when needed.</a></p>"
+        else
+            "<div class=\"table-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Table data\">");
+        copied = insertion.offset;
+    }
+    try out.appendSlice(arena, html[copied..]);
+    return out.items;
 }
 
 /// Render one already-read page source through the same ordered preprocessing
@@ -491,7 +586,7 @@ fn prepareBody(
         try printParserDiagnostic(gpa, source_path, pd, options.diagnostics);
         return error.ParseFailed;
     }
-    const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, false)).markdown;
+    const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, false, options.diagnostics)).markdown;
 
     // Graph-backed Markdown documentation links → canonical page URLs
     // (pre-render). This runs before include expansion so source-relative links
@@ -599,6 +694,61 @@ fn writeTestFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !v
     var file = try cwd.createFile(io, path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, data);
+}
+
+test "published tables keep native grids inside keyboard-accessible presentation" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/html-body-tables", .{tmp.sub_path});
+    defer gpa.free(root);
+    try writeTestFile(io, root, "content/index.md", "placeholder\n");
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{root});
+    defer gpa.free(content_path);
+    var content_dir = try Io.Dir.cwd().openDir(io, content_path, .{});
+    defer content_dir.close(io);
+    var whiteboard = std.heap.ArenaAllocator.init(gpa);
+    defer whiteboard.deinit();
+    const markdown = "| Name | State |\n| --- | --- |\n| Entry | Ready |\n";
+    for ([_]render.OutputProfile{ .html, .xhtml, .html4_strict }) |profile| {
+        const html = try renderSource(io, gpa, content_dir, &whiteboard, markdown, "index.md", "index.html", .{ .output_profile = profile });
+        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, html, "class=\"table-viewport\""));
+        try std.testing.expect(std.mem.indexOf(u8, html, "<table>\n<thead>") != null);
+        try std.testing.expect(std.mem.indexOf(u8, html, "<td>Entry</td>") != null);
+        if (profile == .html4_strict) {
+            try std.testing.expect(std.mem.indexOf(u8, html, "<a tabindex=\"0\">Table data.") != null);
+            try std.testing.expect(std.mem.indexOf(u8, html, "role=") == null);
+        } else {
+            try std.testing.expect(std.mem.indexOf(u8, html, "tabindex=\"0\" role=\"region\" aria-label=\"Table data\"") != null);
+        }
+    }
+    const raw = "<!-- <table>not markup</table> -->\n<script>const x = '<table>not markup</table>';</script>\n<pre><table>literal</table></pre>\n<table title=\"x > y\"><tbody><tr><td>Actual</td></tr></tbody></table>\n";
+    const html = try renderSource(io, gpa, content_dir, &whiteboard, raw, "index.md", "index.html", .{});
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, html, "class=\"table-viewport\""));
+    try std.testing.expect(std.mem.indexOf(u8, html, "<table title=\"x > y\"><tbody><tr><td>Actual</td></tr></tbody></table>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<script>const x = '<table>not markup</table>';</script>") != null);
+    const with_aside = try std.fmt.allocPrint(gpa, "{s}\n<Aside kind=\"note\">\n\n{s}\n</Aside>\n", .{ markdown, markdown });
+    defer gpa.free(with_aside);
+    const composed = try renderSource(io, gpa, content_dir, &whiteboard, with_aside, "index.md", "index.html", .{});
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, composed, "class=\"table-viewport\""));
+}
+
+test "table presentation preserves malformed authored markup and balances nested tables" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for ([_][]const u8{
+        "<table><tbody><tr><td>unclosed",
+        "<script>const text = '<table>unclosed';",
+        "<table title=\"unterminated <table>",
+        "</table>",
+    }) |html| {
+        try std.testing.expectEqualStrings(html, try presentTables(arena.allocator(), html, .html));
+    }
+    const nested = "<table><tbody><tr><td><table><tbody><tr><td>Nested</td></tr></tbody></table></td></tr></tbody></table>";
+    const html = try presentTables(arena.allocator(), nested, .html);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, html, "class=\"table-viewport\""));
+    try std.testing.expect(std.mem.indexOf(u8, html, "</table></div></td>") != null);
 }
 
 test "footnote definition split by an Aside reconciles (#860)" {

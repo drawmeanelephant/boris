@@ -104,7 +104,7 @@ Cache isolation is strictly structural. Each target has its cache namespace and 
 
 ### Configuration Identity Hashing:
 Every page fingerprint hashes a stable **Target Configuration Identity**. The fingerprint includes:
-- Cache-format/version discriminator (e.g., `boris-cache-v3-nav-digest`)
+- Cache-format/version discriminator (e.g., `boris-cache-v4-table-viewport`)
 - Target configuration digest, including:
   - Target name / stable namespace string
   - Global/target-specific layout path and layout template bytes/fingerprint
@@ -119,7 +119,7 @@ This ensures that:
 - Target A's cache manifest cannot be read or overwritten by Target B.
 - Accidental cache hits cannot leak across targets if their configuration, layouts, or settings differ.
 - Old or pre-P3 cache directories (lacking a matching configuration/format discriminator) are safely invalidated, triggering a clean cold rebuild.
-- On-disk `manifest.json` `format_version` must equal the fingerprint discriminator (currently `boris-cache-v3-nav-digest`). Manifests with any other version string are ignored (cold rebuild for that target).
+- On-disk `manifest.json` `format_version` must equal the fingerprint discriminator (currently `boris-cache-v4-table-viewport`). Manifests with any other version string are ignored (cold rebuild for that target).
 
 ---
 

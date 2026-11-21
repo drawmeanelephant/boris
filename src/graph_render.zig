@@ -38,7 +38,7 @@ pub fn render(
     var tables = Tables{};
     defer tables.deinit(gpa);
     try tables.build(gpa, pages, edges);
-    var relations: std.ArrayListUnmanaged(RelationEdge) = .empty;
+    var relations: std.ArrayList(RelationEdge) = .empty;
     defer relations.deinit(gpa);
     try collectRelations(gpa, pages, &tables, &relations);
     std.mem.sort(RelationEdge, relations.items, {}, relationLess);
@@ -55,7 +55,7 @@ pub fn render(
 const Tables = struct {
     page_alias: std.StringHashMapUnmanaged(u32) = .empty,
     source_alias: std.StringHashMapUnmanaged(u32) = .empty,
-    source_order: std.ArrayListUnmanaged([]const u8) = .empty,
+    source_order: std.ArrayList([]const u8) = .empty,
     seen_sources: std.StringHashMapUnmanaged(void) = .empty,
 
     fn deinit(self: *Tables, gpa: std.mem.Allocator) void {
@@ -126,7 +126,7 @@ fn collectRelations(
     gpa: std.mem.Allocator,
     pages: []const graph_mod.Node,
     tables: *const Tables,
-    out: *std.ArrayListUnmanaged(RelationEdge),
+    out: *std.ArrayList(RelationEdge),
 ) !void {
     for (pages, 0..) |node, index| {
         for (node.semantic_relations) |relation| {

@@ -16,7 +16,7 @@
 //! - Segment slices are views into `Layout.raw`. The owning `Layout` (and its
 //!   raw buffer) must outlive every `writePage` call.
 //! - Page bytes are written as N sequential segments (static + slot + asset URLs).
-//! - Publish uses Zig 0.16 `Dir.createFileAtomic` + `File.Atomic.replace`:
+//! - Publish uses Zig 0.17 `Dir.createFileAtomic` + `File.Atomic.replace`:
 //!   a unique temporary name (hex u64, scoped to the destination directory) is
 //!   created, fully written and flushed, then renamed into the final path.
 //! - On any failure before successful `replace`, only the **current operation's**

@@ -24,6 +24,7 @@ type MockOptions = {
   failFilesAfter?: number;
   lastOpen?: string | null;
   previewState?: Record<string, unknown>;
+  density?: 'author' | 'review';
 };
 
 type CommandResult = {
@@ -341,7 +342,9 @@ async function installApi(page: Page, options: MockOptions = {}) {
   // This suite exercises the full pane chrome (Problems, Preview, Watch,
   // Graph, Publication), which lives in Review density (#990); the default
   // Author view is covered by density-modes.spec.ts.
-  await page.addInitScript(() => localStorage.setItem('boris-editor-density', 'review'));
+  if (options.density !== 'author') {
+    await page.addInitScript(() => localStorage.setItem('boris-editor-density', 'review'));
+  }
   await page.goto(options.hash ?? '/#token=test-session-token');
 }
 
@@ -2746,11 +2749,246 @@ test('theme layouts list closed slots and preview widths are named (#418 M8)', a
   await expect(theme.getByRole('button', { name: /layout fallback selected/ })).toBeVisible();
 
   await expect(page.getByRole('group', { name: 'Preview width' })).toBeVisible();
+  await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
   await page.getByRole('radio', { name: '375px', exact: true }).check();
   await expect(page.getByRole('radio', { name: '375px', exact: true })).toBeChecked();
+  const frame = await (await page.locator('#preview iframe').elementHandle())!.contentFrame();
+  await expect.poll(() => frame!.evaluate(() => innerWidth)).toBe(375);
   await expect(page.getByText('Accessibility review aid')).toBeVisible();
   await page.getByText('Accessibility review aid').click();
   await expect(page.getByText(/does not replace a screen reader/)).toBeVisible();
+});
+
+for (const theme of ['light', 'dark']) {
+  for (const reducedMotion of ['reduce', 'no-preference'] as const) {
+    test(`preview CSS viewports stay truthful in Review (${theme}, ${reducedMotion})`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.addInitScript(theme => localStorage.setItem('boris-editor-theme', theme), theme);
+      await installApi(page, {
+        previewState: {
+          phase: 'success', generation: 7, exit_code: 0, used_stderr_fallback: false,
+          message: 'Current output.', preview_url: 'https://preview.invalid/?token=test'
+        }
+      });
+      const iframe = page.locator('#preview iframe');
+      const frame = await (await iframe.elementHandle())!.contentFrame();
+      await expect(iframe).toHaveAttribute('sandbox', 'allow-same-origin');
+      for (const width of [1440, 768, 375]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const target of [375, 768, 1440, 375]) {
+          await page.getByRole('radio', { name: `${target}px`, exact: true }).check();
+          await expect.poll(() => frame!.evaluate(() => innerWidth)).toBe(target);
+          await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+          await expect(page.getByText(`${target}px CSS viewport, at actual size. Scroll horizontally to inspect the rest.`, { exact: true })).toBeVisible();
+        }
+        await page.getByRole('radio', { name: '1440px', exact: true }).focus();
+        await page.keyboard.press('Space');
+        await page.keyboard.press('Tab');
+        const viewport = page.getByRole('region', { name: 'Scrollable site preview', exact: true });
+        await expect(page.getByText('Accessibility review aid', { exact: true })).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(viewport).toBeFocused();
+        const ring = await viewport.evaluate(el => {
+          const style = getComputedStyle(el);
+          return { width: Number.parseFloat(style.outlineWidth), style: style.outlineStyle };
+        });
+        expect(ring.width).toBeGreaterThan(0);
+        expect(ring.style).toBe('solid');
+        await viewport.press('ArrowRight');
+        await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);
+        await page.getByRole('radio', { name: 'Full pane', exact: true }).check();
+        const available = await viewport.evaluate(el => el.clientWidth);
+        await expect.poll(() => frame!.evaluate(() => innerWidth)).toBe(available);
+        await expect(iframe).toHaveAttribute('src', /generation=7$/);
+      }
+      await page.getByRole('radio', { name: '768px', exact: true }).check();
+      await page.route('**/api/preview/rebuild', route => route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          phase: 'stale', generation: 7, exit_code: 1, stale_reason: 'failed_rebuild',
+          used_stderr_fallback: true, message: 'Last valid output is stale.',
+          preview_url: 'https://preview.invalid/?token=test'
+        })
+      }));
+      await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
+      await expect(page.locator('.preview-state')).toHaveAttribute('data-tone', 'danger');
+      await expect(iframe).toHaveAttribute('src', /generation=7$/);
+      const staleFrame = await (await iframe.elementHandle())!.contentFrame();
+      await expect.poll(() => staleFrame!.evaluate(() => innerWidth)).toBe(768);
+      await expect(staleFrame!.getByRole('heading', { name: 'Compiler output' })).toBeVisible();
+    });
+  }
+}
+
+test('cold Author hints offer the existing diagnostics flow and recover after failure (#1140)', async ({ page }) => {
+  await installApi(page, {
+    density: 'author',
+    authoring: [authoringPayload(false), authoringPayload(true)],
+    graph: [graphPayload(false), graphPayload(true)],
+    commandByCall: [
+      commandResult('ir_build', { exit_code: 1, failure_class: 'content' }),
+      commandResult('ir_build')
+    ]
+  });
+  await expect(page.getByRole('button', { name: 'Author', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('.authoring-collapse > summary').click();
+  await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('entity');
+  const build = page.getByRole('button', { name: 'Build diagnostics for hints', exact: true });
+  await expect(build).toBeVisible();
+  const calls: string[] = [];
+  page.on('request', request => {
+    if (request.url().endsWith('/api/commands/run')) calls.push(request.postDataJSON().mode);
+  });
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Unsaved author work\n');
+  await build.focus();
+  await page.keyboard.press('Enter');
+  const resolution = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(resolution).toBeVisible();
+  await resolution.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(calls).toEqual([]);
+  await expect(page.locator('#problems')).toBeFocused();
+  await expect(editor).toHaveValue('# Unsaved author work\n');
+  await build.click();
+  await resolution.getByRole('button', { name: /Discard.*run/ }).click();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Content or graph failure (exit 1)');
+  await expect(build).toBeVisible();
+  await build.click();
+  await expect(page.getByText('Boris completion index ready from boris/0.9.0.')).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Boris graph ready');
+  expect(calls).toEqual(['ir_build', 'ir_build']);
+  await expect(build).toHaveCount(0);
+});
+
+for (const theme of ['light', 'dark']) {
+  test(`unsupported layout hints use the existing command path without editing read-only files (${theme}, #1140)`, async ({ page }) => {
+    const path = 'themes/boris/layouts/main.html';
+    await page.addInitScript(theme => localStorage.setItem('boris-editor-theme', theme), theme);
+    await installApi(page, {
+      density: 'author', lastOpen: path,
+      files: [{ path }],
+      authoring: [
+        { ...authoringPayload(false), completion_status: 'unsupported' },
+        { ...authoringPayload(false), completion_status: 'unsupported' },
+        authoringPayload(true)
+      ]
+    });
+    await page.route('**/api/files/probe', route => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({ status: 'unchanged', read_only: true })
+    }));
+    await page.route('**/api/files/open', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ path, content: '{{content}}', fingerprint: 'a'.repeat(64), read_only: true })
+    }));
+    await page.reload();
+    const editor = page.getByRole('textbox', { name: `Source for ${path}` });
+    await expect(editor).toHaveAttribute('readonly', '');
+    const themePane = page.locator('.theme-pane');
+    await expect(themePane).toContainText('stale or unsupported');
+    const build = themePane.getByRole('button', { name: 'Build diagnostics for layout slots', exact: true });
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    let calls = 0;
+    await page.route('**/api/commands/run', async route => {
+      calls += 1;
+      expect(route.request().postDataJSON()).toEqual({ mode: 'ir_build' });
+      if (calls === 1) {
+        await pending;
+        await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'unsupported_boris_artifact' }) });
+      } else {
+        await route.fulfill({ contentType: 'application/json', body: JSON.stringify(commandResult('ir_build')) });
+      }
+    });
+    await build.focus();
+    await page.keyboard.press('Enter');
+    await expect(build).toBeDisabled();
+    await expect(build).toHaveAttribute('aria-busy', 'true');
+    await expect(page.getByRole('button', { name: 'Build diagnostics for hints', exact: true })).toBeDisabled();
+    expect(calls).toBe(1);
+    release();
+    await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Could not run Build diagnostics');
+    await expect(build).toBeEnabled();
+    await expect(themePane).not.toContainText('Present:');
+    await build.click();
+    await expect(themePane).toContainText('Present:');
+    await expect(editor).toHaveValue('{{content}}');
+    await expect(editor).toHaveAttribute('readonly', '');
+    expect(calls).toBe(2);
+  });
+}
+
+test('layout-hint request failures offer refresh, not a false build-required state (#1140)', async ({ page }) => {
+  const path = 'themes/boris/layouts/main.html';
+  await installApi(page, { density: 'author', lastOpen: path, files: [{ path }], authoring: [authoringPayload(false)] });
+  const theme = page.locator('.theme-pane');
+  await expect(theme).toContainText('Layout hints have not been built yet.');
+  await expect(theme.getByRole('button', { name: 'Build diagnostics for layout slots', exact: true })).toBeVisible();
+  await page.route('**/api/authoring', route => route.fulfill({
+    status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'host_unavailable' })
+  }));
+  await page.reload();
+  await expect(theme).toContainText('Layout hints could not be loaded or refreshed.');
+  await expect(theme.getByRole('button', { name: /Build diagnostics/ })).toHaveCount(0);
+  const refresh = theme.getByRole('button', { name: 'Refresh layout hints', exact: true });
+  await refresh.click();
+  await page.locator('.authoring-collapse > summary').click();
+  await expect(page.getByText('Boris authoring hints could not be refreshed. Previous suggestions, if any, are unchanged.')).toBeVisible();
+  await expect(theme).not.toContainText('have not been built');
+  await page.route('**/api/authoring', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ ...authoringPayload(), completion: { ...authoringPayload().completion, layout_slots: [] } })
+  }));
+  await refresh.click();
+  await expect(theme).toContainText('Boris reported no layout slots in the current completion index.');
+  await expect(theme.getByRole('button', { name: /Build diagnostics/ })).toHaveCount(0);
+  await page.route('**/api/authoring', route => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify(authoringPayload())
+  }));
+  await page.getByRole('button', { name: 'Refresh Boris suggestions', exact: true }).click();
+  await expect(theme).toContainText('Absent: {{content}}');
+  await page.route('**/api/authoring', route => route.fulfill({
+    status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'unsupported_boris_artifact' })
+  }));
+  await page.getByRole('button', { name: 'Refresh Boris suggestions', exact: true }).click();
+  await expect(theme).toContainText('Layout hints could not be loaded or refreshed.');
+  await expect(theme).toContainText('Absent: {{content}}');
+});
+
+test('saving from the inline diagnostics action uses dirty-buffer resolution (#1140)', async ({ page }) => {
+  await installApi(page, {
+    density: 'author',
+    authoring: [authoringPayload(false), authoringPayload(true)]
+  });
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Save this author work\n');
+  await page.locator('.authoring-collapse > summary').click();
+  const save = page.waitForRequest('**/api/files/save');
+  const command = page.waitForRequest('**/api/commands/run');
+  await page.getByRole('button', { name: 'Build diagnostics for hints', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes in content/index.md' })
+    .getByRole('button', { name: 'Save & run', exact: true }).click();
+  expect((await save).postDataJSON().content).toBe('# Save this author work\n');
+  expect((await command).postDataJSON()).toEqual({ mode: 'ir_build' });
+  await expect(page.getByText('Boris completion index ready from boris/0.9.0.')).toBeVisible();
+  await expect(editor).toHaveValue('# Save this author work\n');
+  await expect(page.getByRole('button', { name: 'Save file', exact: true })).toBeDisabled();
+});
+
+test('a no-match file filter can be cleared by keyboard without changing the buffer (#1140)', async ({ page }) => {
+  await installApi(page, { density: 'author' });
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Keep my work\n');
+  const filter = page.getByRole('textbox', { name: 'Filter project files' });
+  await filter.fill('no-matching-file');
+  await expect(page.getByRole('status', { name: 'Project files status' })).toContainText('No project files match');
+  await filter.press('Tab');
+  const clear = page.getByRole('button', { name: 'Clear file filter', exact: true });
+  await expect(clear).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(filter).toHaveValue('');
+  await expect(filter).toBeFocused();
+  await expect(page.getByRole('button', { name: 'content/index.md', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(editor).toHaveValue('# Keep my work\n');
 });
 
 test('graph inspector refreshes after a successful diagnostics build (#418 M6)', async ({ page }) => {

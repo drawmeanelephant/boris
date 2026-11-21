@@ -122,7 +122,7 @@ pub fn collectHeadingIds(
     }
     try collectHeadingsInRange(allocator, html, fragment_min_level, fragment_max_level, &headings);
 
-    var seen: std.StringHashMapUnmanaged(void) = .{};
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
     defer seen.deinit(allocator);
 
     for (headings.items) |h| {

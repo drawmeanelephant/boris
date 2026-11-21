@@ -14,6 +14,10 @@
 
 * { box-sizing: border-box; }
 
+/* Emergency breaks for author text and graph labels, not tabular data. */
+body { overflow-wrap: anywhere; }
+table { overflow-wrap: normal; }
+
 body {
   margin: 0;
   color: var(--ink);
@@ -130,7 +134,7 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
 .entry-copy dd, .archive-note dd { margin: .15em 0 0; padding-bottom: .6em; border-bottom: 1px solid var(--line); }
 .entry-copy blockquote, .archive-note blockquote { margin: 1.5em 0; padding: .1em 0 .1em 1.1em; border-left: 3px solid var(--accent); font-style: italic; }
 .entry-copy hr, .archive-note hr { margin: 2.5em 0; border: 0; border-top: 1px solid var(--ink); }
-.entry-copy table, .archive-note table { width: 100%; margin: 1.5em 0; border-collapse: collapse; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); font-size: .78em; font-variant-numeric: tabular-nums; }
+.entry-copy table, .archive-note table { display: block; max-width: 100%; overflow-x: auto; width: 100%; margin: 1.5em 0; border-collapse: collapse; border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink); font-size: .78em; font-variant-numeric: tabular-nums; }
 .entry-copy th, .entry-copy td, .archive-note th, .archive-note td { padding: .5em .6em; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top; }
 .entry-copy th, .archive-note th { color: var(--muted); font: .8em var(--mono); letter-spacing: .08em; text-transform: uppercase; }
 .entry-copy :is(th, td)[align="center"], .archive-note :is(th, td)[align="center"] { text-align: center; }
@@ -189,4 +193,22 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
   .entry-copy pre { white-space: pre-wrap; }
   .archive-index, .archive-note { padding-bottom: 1.5rem; }
   a { color: inherit; }
+}
+
+/* Paper has no scrollbars: retain columns and wrap only when necessary. */
+@media print {
+  .entry-copy table, .archive-note table { display: table; width: 100%; max-width: none; table-layout: fixed; overflow: visible; }
+  .entry-copy th, .entry-copy td, .archive-note th, .archive-note td { overflow-wrap: anywhere; }
+  .entry-copy pre, .archive-note pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+}
+
+/* Keep the native grid inside its keyboard-accessible scroll surface. */
+.table-viewport { max-width: 100%; overflow-x: auto; }
+.table-viewport > table { display: table; max-width: none; overflow: visible; }
+.table-viewport:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.table-entry { margin: 0; font-size: 0.85em; }
+.table-entry a { display: inline-block; color: inherit; text-decoration: none; }
+@media print {
+  .table-viewport { overflow: visible; }
+  .table-entry { display: none; }
 }

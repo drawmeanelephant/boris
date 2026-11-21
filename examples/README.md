@@ -36,6 +36,11 @@ and the corpus covers Aside, Details, tables, a footnote, page-local images,
 and a typed relation. See [`studies-site/README.md`](studies-site/README.md)
 for the per-theme commands.
 
+The focused `minimal/links.html` and `showcase/portfolio.html` shapes use
+fresh `boris init --type link-in-bio` and `--type portfolio` sites as their
+purpose-fit specimens. Their profiles select those layouts; the generic
+documentation/blog specimen commands above remain unchanged.
+
 | Theme | Specimen |
 |---|---|
 | `archive`, `cards`, `compact`, `cozy`, `field-notes`, `gallery`, `journal`, `lab`, `ledger`, `press`, `reading`, `reference`, `showcase` | Own `examples/<theme>-site/` |

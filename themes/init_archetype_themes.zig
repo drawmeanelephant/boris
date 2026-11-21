@@ -64,8 +64,10 @@ pub const reference_readme = @embedFile("reference/README.md");
 pub const reference_accessibility = @embedFile("reference/ACCESSIBILITY.md");
 
 pub const minimal_layout_main = @embedFile("minimal/layouts/main.html");
+pub const minimal_layout_links = @embedFile("minimal/layouts/links.html");
 pub const minimal_footer = @embedFile("minimal/footer.html");
 pub const minimal_css = @embedFile("minimal/assets/minimal.css");
+pub const minimal_links_css = @embedFile("minimal/assets/links.css");
 pub const minimal_readme = @embedFile("minimal/README.md");
 pub const minimal_accessibility = @embedFile("minimal/ACCESSIBILITY.md");
 
@@ -84,10 +86,12 @@ pub const corporate_accessibility = @embedFile("corporate/ACCESSIBILITY.md");
 
 pub const showcase_layout_main = @embedFile("showcase/layouts/main.html");
 pub const showcase_layout_home = @embedFile("showcase/layouts/home.html");
+pub const showcase_layout_portfolio = @embedFile("showcase/layouts/portfolio.html");
 pub const showcase_layout_section = @embedFile("showcase/layouts/section.html");
 pub const showcase_layout_blog = @embedFile("showcase/layouts/blog.html");
 pub const showcase_footer = @embedFile("showcase/footer.html");
 pub const showcase_css = @embedFile("showcase/assets/css/showcase.css");
+pub const showcase_portfolio_css = @embedFile("showcase/assets/css/portfolio.css");
 pub const showcase_mark_svg = @embedFile("showcase/assets/img/mark.svg");
 pub const showcase_readme = @embedFile("showcase/README.md");
 pub const showcase_accessibility = @embedFile("showcase/ACCESSIBILITY.md");

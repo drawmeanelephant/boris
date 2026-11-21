@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { Tween } from 'svelte/motion';
-  import { cubicOut } from 'svelte/easing';
   import { fade } from 'svelte/transition';
   import { motionMs } from '../lib/motion';
   import { previewTone } from '../lib/utils';
@@ -11,13 +9,6 @@
   }: {
     onRebuild: () => void;
   } = $props();
-
-  // The constrained viewport width tweens between the author-selected widths;
-  // under prefers-reduced-motion it jumps straight to the target.
-  const frameWidth = Tween.of(() => (preview.width === 'full' ? 0 : Number(preview.width)), {
-    duration: () => motionMs('base'),
-    easing: cubicOut
-  });
 
   const tone = $derived(previewTone(preview.data));
 </script>
@@ -63,12 +54,29 @@
     <p class="notice" data-tone="warn">Rich HTML diagnostics are unavailable; this failure message comes from bounded Boris stderr.</p>
   {/if}
   {#if preview.data && (preview.data.phase === 'success' || preview.data.phase === 'stale')}
-    <div class="preview-frame" class:constrained={preview.width !== 'full'} style={preview.width === 'full' ? undefined : `width:${frameWidth.current}px`}>
-      <iframe
-        title="Boris site preview"
-        src={`${preview.data.preview_url}&generation=${preview.data.generation}`}
-        sandbox="allow-same-origin"
-      ></iframe>
+    <p id="preview-size-note" class="preview-size-note">
+      {#if preview.width === 'full'}
+        Responsive CSS viewport: fills the pane.
+      {:else}
+        {preview.width}px CSS viewport, at actual size. Scroll horizontally to inspect the rest.
+      {/if}
+    </p>
+    <!-- Native arrow-key scrolling needs a focusable scroll container. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div
+      class="preview-viewport"
+      role="region"
+      aria-label="Scrollable site preview"
+      aria-describedby="preview-size-note"
+      tabindex={preview.width === 'full' ? undefined : 0}
+    >
+      <div class="preview-frame" style:width={preview.width === 'full' ? '100%' : `${preview.width}px`}>
+        <iframe
+          title="Boris site preview"
+          src={`${preview.data.preview_url}&generation=${preview.data.generation}`}
+          sandbox="allow-same-origin"
+        ></iframe>
+      </div>
     </div>
   {:else}
     <p class="empty-state" class:is-loading={preview.data?.phase === 'running'}>No valid Boris preview output is available yet.</p>

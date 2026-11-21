@@ -184,6 +184,10 @@ The first slice is for **trusted author content**. Boris still passes raw
 HTML through Oliver. This contract does not establish a safe multi-tenant
 untrusted-content service.
 
+Artifact collection enforces the cumulative `artifactBytes` budget before
+allocating an oversized file. Reads are bounded by the remaining budget plus
+one overflow-detection byte; exactly-at-budget output is accepted.
+
 ---
 
 ## Listen mode
@@ -197,7 +201,10 @@ untrusted-content service.
 | `POST` | `/v1/jobs/package` | ustar | ustar of `result.json` then `artifacts/**` |
 
 `POST` requires `Authorization: Bearer <token>` unless the process was
-started with `--allow-unauthenticated`. The token is `BORIS_JOB_TOKEN`.
+started with `--allow-unauthenticated`. That flag is accepted only with an
+explicit `127.0.0.1:PORT` listen address; wildcard and bare-port binds require
+a nonempty `BORIS_JOB_TOKEN`. Token comparison uses constant-time SHA-256
+digest equality, preserving arbitrary token lengths.
 It is not written to the workspace, the result, or diagnostics.
 
 ### Environment
@@ -209,10 +216,11 @@ It is not written to the workspace, the result, or diagnostics.
 | `BORIS_JOB_TOKEN` | (none) | Bearer token for `POST /v1/jobs*`; see above. |
 | `BORIS_IMAGE_DIGEST` | (none) | Recorded as `imageDigest` in `result.json`; see above. |
 
-The official image starts with `--allow-unauthenticated` because the
-Worker is the authenticated edge and the container port is not public.
-A listen process that is reachable from the internet must set
-`BORIS_JOB_TOKEN` and omit that flag.
+The official image listens on `0.0.0.0:8080` with authentication required.
+The Worker passes only `BORIS_JOB_TOKEN` into the container's runtime
+environment and forwards that bearer credential on job requests. R2 and
+other Worker credentials stay outside the container. Missing or empty
+runner credentials refuse startup before binding.
 
 The process handles one request at a time. That is the isolation model:
 one job, one workspace, one `boris` exec, then cleanup.

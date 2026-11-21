@@ -63,10 +63,13 @@ zig build -Doptimize=ReleaseSafe
 docker build -f examples/cloudflare-container/Dockerfile -t boris-job-runner .
 ```
 
-The image entrypoint is `boris-job-runner --listen 0.0.0.0:8080
---allow-unauthenticated`. The Worker holds `BORIS_JOB_TOKEN` and is the
-authenticated edge; the container port is not public. `BORIS_IMAGE_DIGEST`
-is copied into `result.json` when the host provides it.
+The image entrypoint is `boris-job-runner --listen 0.0.0.0:8080`.
+Authentication is required at both the Worker and runner. The Worker
+passes `BORIS_JOB_TOKEN` into the container at runtime and forwards the
+same bearer credential with each job request. A direct Docker launch must
+also provide a nonempty token with `-e BORIS_JOB_TOKEN`. Never bake it into
+the image. `BORIS_IMAGE_DIGEST` is copied into `result.json` when the host
+provides it.
 
 `scripts/test-job-runner-image.sh` is the Linux CI smoke: native
 `--once` on the valid and poisoned fixtures. The Dockerfile is the
@@ -86,7 +89,8 @@ product architecture.
 4. `npx wrangler secret put BORIS_JOB_TOKEN`.
 5. `npx wrangler deploy`.
 
-`enableInternet` is `false`. The container never sees R2 credentials.
+`enableInternet` is `false`. Only the runner bearer token enters the
+container; it never sees R2 credentials.
 The Worker streams the result package to R2 when the binding is present.
 
 Instance type defaults to `basic` (1 GiB / 1/4 vCPU / 4 GB). `lite`

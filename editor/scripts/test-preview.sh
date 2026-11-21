@@ -41,16 +41,24 @@ api_post() {
 initial="$(api_get /api/preview/state)"
 node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.stale_reason!=="earlier_build"||r.generation!==0||r.exit_code!==null||r.message!=="Showing existing preview output from an earlier build; rebuild to refresh.") throw Error("preview did not identify existing output as stale from an earlier build")' "$initial"
 initial_preview_url="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).preview_url)' "$initial")"
-curl --fail --silent --show-error --cookie-jar "$work/initial-cookies" "$initial_preview_url" >"$work/initial.html"
+node -e 'if(process.argv[1].includes(process.argv[2])) throw Error("preview URL contains the editor API token")' "$initial_preview_url" "$token"
+curl --fail --silent --show-error --dump-header "$work/initial-headers" --cookie-jar "$work/initial-cookies" "$initial_preview_url" >"$work/initial.html"
+grep -qi '^referrer-policy: no-referrer' "$work/initial-headers"
 cmp "$work/initial.html" "$work/project/dist/index.html"
 
 current="$(api_post /api/preview/rebuild '{}')"
 node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="success"||r.stale_reason!==null||r.generation!==1||r.exit_code!==0) throw Error("first preview build failed or kept a stale reason")' "$current"
 preview_url="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).preview_url)' "$current")"
 preview_origin="$(node -e 'process.stdout.write(new URL(process.argv[1]).origin)' "$preview_url")"
+preview_token="$(node -e 'process.stdout.write(new URL(process.argv[1]).searchParams.get("token"))' "$preview_url")"
+scoped_token_api="$(curl --silent --output /dev/null --write-out '%{http_code}' -H "X-Boris-Editor-Token: $preview_token" "$base_url/api/preview/state")"
+[[ "$scoped_token_api" == "403" ]]
+master_token_preview="$(curl --silent --output /dev/null --write-out '%{http_code}' "$preview_origin/?token=$token")"
+[[ "$master_token_preview" == "403" ]]
 
-unauthorized="$(curl --silent --output /dev/null --write-out '%{http_code}' "$preview_origin/")"
+unauthorized="$(curl --silent --dump-header "$work/unauthorized-headers" --output /dev/null --write-out '%{http_code}' "$preview_origin/")"
 [[ "$unauthorized" == "403" ]]
+grep -qi '^referrer-policy: no-referrer' "$work/unauthorized-headers"
 bad_host="$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Host: attacker.test' "$preview_url")"
 [[ "$bad_host" == "403" ]]
 bad_origin="$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Origin: https://attacker.test' "$preview_url")"

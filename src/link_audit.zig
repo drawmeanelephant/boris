@@ -661,7 +661,7 @@ pub fn audit(
     opts: Options,
     findings: *std.ArrayList(Finding),
 ) !void {
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     for (page_paths) |p| try intended.put(gpa, p, {});
     for (asset_paths) |p| try intended.put(gpa, p, {});
@@ -745,7 +745,7 @@ test "relative targets resolve against the linking page's directory" {
 
 test "references inside code, pre, and comments are documentation, not links" {
     const gpa = std.testing.allocator;
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
 
@@ -765,7 +765,7 @@ test "references inside code, pre, and comments are documentation, not links" {
 
 test "published references are audited across quoting and attribute variants" {
     const gpa = std.testing.allocator;
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
     try intended.put(gpa, "real.html", {});
@@ -789,7 +789,7 @@ test "published references are audited across quoting and attribute variants" {
 
 test "a local Markdown destination without a published route is rejected" {
     const gpa = std.testing.allocator;
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "guides/start.html", {});
 
@@ -809,7 +809,7 @@ test "a local Markdown destination without a published route is rejected" {
 
 test "the markdown opt-out spares rewriter-left literals and nothing else" {
     const gpa = std.testing.allocator;
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "guides/start.html", {});
 
@@ -838,7 +838,7 @@ test "the markdown opt-out spares rewriter-left literals and nothing else" {
 
 test "finding line numbers survive the incremental counter" {
     const gpa = std.testing.allocator;
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
     try intended.put(gpa, "ok.html", {});
@@ -891,7 +891,7 @@ test "the line counter carries forward and recovers from a backwards offset" {
 
 test "same-document references without a base remain ignored" {
     const gpa = std.testing.allocator;
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
 
@@ -907,7 +907,7 @@ test "a local base makes fragment-only and empty references audit its document r
     var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
     defer location.deinit(gpa);
 
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
     try intended.put(gpa, "guides/index.html", {});
@@ -925,7 +925,7 @@ test "a base makes missing fragment-only and empty references report the base do
     var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
     defer location.deinit(gpa);
 
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
 
@@ -941,7 +941,7 @@ test "a file present in the live tree but not intended to survive is not a valid
     const gpa = std.testing.allocator;
     // `old.html` exists on disk from a previous build and will be removed by
     // this build's stale cleanup. Set membership, not existence, decides.
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
 
@@ -958,7 +958,7 @@ test "project-site root-relative links must carry the publication base path" {
     const github_pages = @import("github_pages.zig");
     var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
     defer location.deinit(gpa);
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
     try intended.put(gpa, "assets/theme.css", {});
@@ -976,7 +976,7 @@ test "canonical and public metadata must match the declared origin" {
     const github_pages = @import("github_pages.zig");
     var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
     defer location.deinit(gpa);
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
 
@@ -994,7 +994,7 @@ test "the first effective base controls relative and query-only routes" {
     var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
     defer location.deinit(gpa);
 
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
     try intended.put(gpa, "next.html", {});
@@ -1014,7 +1014,7 @@ test "a base route is context, not an artifact, and browser-relative routes use 
     var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
     defer location.deinit(gpa);
 
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "guides/next.html", {});
 
@@ -1031,7 +1031,7 @@ test "a hosted base with the wrong origin or path fails publication validation" 
     var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
     defer location.deinit(gpa);
 
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "next.html", {});
 
@@ -1050,7 +1050,7 @@ test "ambiguous microdata url is not assumed to be the document URL" {
     var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
     defer location.deinit(gpa);
 
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
 
@@ -1063,7 +1063,7 @@ test "ambiguous microdata url is not assumed to be the document URL" {
 
 test "resolution counter counts resolved local references" {
     const gpa = std.testing.allocator;
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
     try intended.put(gpa, "real.html", {});
@@ -1089,7 +1089,7 @@ test "resolution counter counts resolved local references" {
 
 test "common audit routes use caller scratch without allocation" {
     const gpa = std.testing.allocator;
-    var intended: std.StringHashMapUnmanaged(void) = .{};
+    var intended: std.StringHashMapUnmanaged(void) = .empty;
     defer intended.deinit(gpa);
     try intended.put(gpa, "index.html", {});
     try intended.put(gpa, "real.html", {});
@@ -1110,7 +1110,7 @@ test "common audit routes use caller scratch without allocation" {
 }
 
 const FragmentAudit = struct {
-    intended: std.StringHashMapUnmanaged(void) = .{},
+    intended: std.StringHashMapUnmanaged(void) = .empty,
     id_index: IdIndex = .{},
     pending: std.ArrayList(PendingFragment) = .empty,
     findings: std.ArrayList(Finding) = .empty,

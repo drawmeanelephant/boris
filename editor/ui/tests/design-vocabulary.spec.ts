@@ -138,7 +138,7 @@ test.describe('state honesty', () => {
     const graphStatus = page.getByRole('status', { name: 'Graph status' });
     await expect(graphStatus).toHaveText('The Boris build succeeded, but graph.json could not be adapted.');
     await expect(graphStatus).toHaveAttribute('data-tone', 'danger');
-    await expect(page.getByText('The Boris build succeeded, but completion.json could not be adapted.'))
+    await expect(page.getByText('Boris authoring hints could not be refreshed. Previous suggestions, if any, are unchanged.'))
       .toHaveAttribute('data-tone', 'danger');
   });
 

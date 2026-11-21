@@ -70,6 +70,13 @@ on `127.0.0.1` (default port `8090`; `--port 0` selects an ephemeral port). It
 reuses the watch coordinator — the same debounced rebuild cycle — and pushes an
 SSE `reload` event to connected clients after every successful rebuild.
 
+Every route requires exactly one `Host` header naming `127.0.0.1:<bound port>`
+or `localhost:<bound port>`. When supplied, exactly one `Origin` header must
+name either loopback alias at that same port over HTTP. Invalid, missing, or
+duplicate authorities and foreign, opaque, or duplicate origins receive `403`
+before any route is served. An absent `Origin` remains valid for same-origin
+navigations and non-browser clients.
+
 Served routes:
 
 | Route | Behavior |
@@ -189,7 +196,10 @@ catalog themes that fit each one.
   the full chain.
 - `link-in-bio` — the smallest starter: a single trunk page holding a
   personal link list, under `minimal`. It proves a one-page graph still
-  validates and builds through the profile.
+  validates and builds through the profile. Its profile selects
+  `themes/minimal/layouts/links.html` for `id:index`; identity and links lead
+  without a documentation menu or outline. Root `README.md` carries author
+  setup instructions instead of publishing them as visitor content.
 - `changelog` — release notes under `journal`: trunk `index` → `changes`
   hub → dated entries with `published_at` + `summary`. One entry is
   `status: draft` (the unreleased section): it renders at its route but is
@@ -218,9 +228,11 @@ catalog themes that fit each one.
 - `portfolio` — a studio site under `showcase`: trunk `index`, an `about`
   satellite, and three `projects/` satellites with `published_at` +
   `summary` (one `relates_to` edge). Its profile's `layout_rules` send
-  `id:index` to `themes/showcase/layouts/home.html`, whose `{{children}}`
+  `id:index` to `themes/showcase/layouts/portfolio.html`, whose `{{children}}`
   lists the `about` page and the three projects (the index carries no
-  hand-written list); every other page uses `main.html`.
+  hand-written list); every other page uses `main.html`. The collection is
+  labelled "Work & about" rather than implying a filtered project taxonomy.
+  Root `README.md` explains wiring; the public introduction stays visitor-focused.
 - `archive` — a long-lived archive under `archive`: trunk `index`, four
   tagged `entries/` satellites joined by `relates_to` and `supersedes`
   relations (one entry is `status: archived`), and a hand-kept `topics`

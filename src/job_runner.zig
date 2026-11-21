@@ -313,7 +313,10 @@ fn listArtifacts(
 ) !ArtifactList {
     var list: std.ArrayList(Artifact) = .empty;
     errdefer {
-        for (list.items) |a| gpa.free(a.path);
+        for (list.items) |a| {
+            gpa.free(a.path);
+            gpa.free(a.bytes);
+        }
         list.deinit(gpa);
     }
 
@@ -324,19 +327,23 @@ fn listArtifacts(
         if (entry.kind != .file) continue;
         const rel = try normalizeRel(gpa, entry.path);
         errdefer gpa.free(rel);
-        const data = readFileAlloc(io, out_dir, rel, gpa) catch {
-            gpa.free(rel);
-            continue;
+        const remaining = limits.artifact_bytes - total;
+        const data = out_dir.readFileAlloc(io, rel, gpa, .limited64(remaining +| 1)) catch |err| {
+            if (err == error.StreamTooLong) {
+                const items = try list.toOwnedSlice(gpa);
+                gpa.free(rel);
+                return .{ .items = items, .oversize = true };
+            }
+            return err;
         };
         errdefer gpa.free(data);
-        total = std.math.add(u64, total, data.len) catch {
+        if (data.len > remaining) {
+            const items = try list.toOwnedSlice(gpa);
             gpa.free(data);
-            return .{ .items = try list.toOwnedSlice(gpa), .oversize = true };
-        };
-        if (total > limits.artifact_bytes) {
-            gpa.free(data);
-            return .{ .items = try list.toOwnedSlice(gpa), .oversize = true };
+            gpa.free(rel);
+            return .{ .items = items, .oversize = true };
         }
+        total += data.len;
 
         var digest: [Sha256.digest_length]u8 = undefined;
         Sha256.hash(data, &digest, .{});
@@ -376,9 +383,28 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, gpa: std.mem.Allocator) 
 const ParsedReport = struct {
     compiler_id: ?[]const u8,
     diagnostics: []Diagnostic,
+
+    fn deinit(self: ParsedReport, gpa: std.mem.Allocator) void {
+        if (self.compiler_id) |s| gpa.free(s);
+        for (self.diagnostics) |d| {
+            gpa.free(d.severity);
+            gpa.free(d.code);
+            gpa.free(d.message);
+            gpa.free(d.remediation);
+            if (d.source_path) |s| gpa.free(s);
+            if (d.id) |s| gpa.free(s);
+        }
+        gpa.free(self.diagnostics);
+    }
 };
 
-fn parseReport(gpa: std.mem.Allocator, bytes: []const u8) !ParsedReport {
+fn readReport(io: Io, dir: Io.Dir, path: []const u8, gpa: std.mem.Allocator) !ParsedReport {
+    const file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    var buffer: [64 * 1024]u8 = undefined;
+    var input = file.reader(io, &buffer);
+    var json = std.json.Reader.init(gpa, &input.interface);
+    defer json.deinit();
     const ReportDiag = struct {
         severity: []const u8 = "",
         code: []const u8 = "",
@@ -394,9 +420,12 @@ fn parseReport(gpa: std.mem.Allocator, bytes: []const u8) !ParsedReport {
         diagnostics: []ReportDiag = &.{},
     };
 
-    const parsed = std.json.parseFromSlice(Report, gpa, bytes, .{
+    const parsed = std.json.parseFromTokenSource(Report, gpa, &json, .{
         .ignore_unknown_fields = true,
         .allocate = .alloc_always,
+        // The former slice parser imposed no per-value limit. In particular,
+        // do not introduce Reader's default limit for long diagnostics.
+        .max_value_len = std.math.maxInt(usize),
     }) catch return .{
         .compiler_id = null,
         .diagnostics = try gpa.alloc(Diagnostic, 0),
@@ -550,9 +579,7 @@ pub fn runJob(io: Io, gpa: std.mem.Allocator, opts: RunOpts) !JobResult {
     };
     var class: RunnerClass = if (exit_code) |c| classFromExit(c) else .process;
 
-    const report_bytes = readFileAlloc(io, cwd, report_rel, gpa) catch null;
-    defer if (report_bytes) |b| gpa.free(b);
-    const parsed = parseReport(gpa, report_bytes orelse "") catch
+    const parsed = readReport(io, cwd, report_rel, gpa) catch
         ParsedReport{ .compiler_id = null, .diagnostics = try gpa.alloc(Diagnostic, 0) };
 
     var artifacts: []Artifact = try gpa.alloc(Artifact, 0);
@@ -987,6 +1014,24 @@ fn parseListen(spec: []const u8) !struct { ip: [4]u8, port: u16 } {
     return .{ .ip = .{ 0, 0, 0, 0 }, .port = port };
 }
 
+fn validateListenAuth(ip: [4]u8, token: ?[]const u8, allow_unauthenticated: bool) !void {
+    if (allow_unauthenticated and !std.mem.eql(u8, &ip, &.{ 127, 0, 0, 1 })) return error.UnauthenticatedNonLoopback;
+    if (token) |value| {
+        if (value.len == 0) return error.EmptyToken;
+    } else if (!allow_unauthenticated) return error.MissingToken;
+}
+
+fn bearerMatches(header: ?[]const u8, expected: []const u8) bool {
+    const actual = header orelse return false;
+    const prefix = "Bearer ";
+    if (!std.mem.startsWith(u8, actual, prefix) or expected.len == 0) return false;
+    var actual_digest: [Sha256.digest_length]u8 = undefined;
+    var expected_digest: [Sha256.digest_length]u8 = undefined;
+    Sha256.hash(actual[prefix.len..], &actual_digest, .{});
+    Sha256.hash(expected, &expected_digest, .{});
+    return std.crypto.timing_safe.eql([Sha256.digest_length]u8, actual_digest, expected_digest);
+}
+
 fn serve(init: std.process.Init, cli: Cli) u8 {
     const io = init.io;
     const spec = parseListen(cli.listen.?) catch {
@@ -994,10 +1039,10 @@ fn serve(init: std.process.Init, cli: Cli) u8 {
         return 2;
     };
     const token = getenv(init.environ_map, "BORIS_JOB_TOKEN");
-    if (token == null and !cli.allow_unauthenticated) {
-        std.debug.print("error: set BORIS_JOB_TOKEN or pass --allow-unauthenticated\n", .{});
+    validateListenAuth(spec.ip, token, cli.allow_unauthenticated) catch |err| {
+        std.debug.print("error: {s}: set a nonempty BORIS_JOB_TOKEN; --allow-unauthenticated requires 127.0.0.1\n", .{@errorName(err)});
         return 2;
-    }
+    };
 
     const host = if (std.mem.eql(u8, &spec.ip, &.{ 127, 0, 0, 1 }))
         "127.0.0.1"
@@ -1065,10 +1110,7 @@ fn handleHttp(init: std.process.Init, cli: Cli, token: ?[]const u8, stream: Io.n
 
     if (token) |expected| {
         const auth = headerLine(request.head_buffer, "authorization");
-        const ok = if (auth) |a|
-            std.mem.startsWith(u8, a, "Bearer ") and std.mem.eql(u8, a["Bearer ".len..], expected)
-        else
-            false;
+        const ok = bearerMatches(auth, expected);
         if (!ok) {
             request.respond("{\"ok\":false,\"runnerClass\":\"auth\"}\n", .{
                 .status = .unauthorized,
@@ -1233,6 +1275,153 @@ pub fn main(init: std.process.Init) u8 {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+test "file-backed report retains long diagnostic strings after its reader closes" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const message_len = 5 * 1024 * 1024 + 17;
+    {
+        const file = try tmp.dir.createFile(io, "report.json", .{});
+        defer file.close(io);
+        var buffer: [4096]u8 = undefined;
+        var writer = file.writer(io, &buffer);
+        try writer.interface.writeAll(
+            \\{"compilerId":"boris/test","unknown":{"nested":[true,{"x":null}]},"diagnostics":[{"severity":"error","code":"ELONG","message":"
+        );
+        try writer.interface.splatByteAll('x', message_len);
+        try writer.interface.writeAll(
+            \\","remediation":"fix\nit","sourcePath":"content/é.md","line":12,"column":3,"id":"page"}]}
+        );
+        try writer.interface.flush();
+    }
+    const parsed = try readReport(io, tmp.dir, "report.json", gpa);
+    defer parsed.deinit(gpa);
+    // No result string may borrow the file buffer or the temporary parse arena.
+    try tmp.dir.writeFile(io, .{ .sub_path = "report.json", .data = "overwritten" });
+    try std.testing.expectEqualStrings("boris/test", parsed.compiler_id.?);
+    try std.testing.expectEqual(@as(usize, 1), parsed.diagnostics.len);
+    const d = parsed.diagnostics[0];
+    try std.testing.expectEqual(message_len, d.message.len);
+    try std.testing.expect(std.mem.allEqual(u8, d.message, 'x'));
+    try std.testing.expectEqualStrings("error", d.severity);
+    try std.testing.expectEqualStrings("ELONG", d.code);
+    try std.testing.expectEqualStrings("fix\nit", d.remediation);
+    try std.testing.expectEqualStrings("content/é.md", d.source_path.?);
+    try std.testing.expectEqual(@as(?u32, 12), d.line);
+    try std.testing.expectEqual(@as(?u32, 3), d.column);
+    try std.testing.expectEqualStrings("page", d.id.?);
+}
+
+test "file-backed reports reject truncation malformed values and trailing documents without partial diagnostics" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const valid =
+        \\{"compilerId":"boris/test","diagnostics":[{"code":"EFIRST"}]}
+    ;
+    for ([_][]const u8{
+        "",
+        valid[0 .. valid.len - 1],
+        valid ++ " {}",
+        valid ++ " garbage",
+        \\{"compilerId":"boris/test","diagnostics":[{"code":"EFIRST"},{"line":"bad"}]}
+        ,
+        \\{"compilerId":"boris/test","diagnostics":[{"message":"bad\q"}]}
+        ,
+    }) |bytes| {
+        try tmp.dir.writeFile(io, .{ .sub_path = "report.json", .data = bytes });
+        const parsed = try readReport(io, tmp.dir, "report.json", gpa);
+        defer parsed.deinit(gpa);
+        try std.testing.expectEqual(@as(?[]const u8, null), parsed.compiler_id);
+        try std.testing.expectEqual(@as(usize, 0), parsed.diagnostics.len);
+    }
+    try std.testing.expectError(error.FileNotFound, readReport(io, tmp.dir, "missing.json", gpa));
+}
+
+test "artifact collection rejects oversize before payload allocation" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    var file = try tmp.dir.createFile(io, "large.html", .{});
+    try file.setLength(io, 8 * 1024 * 1024);
+    file.close(io);
+    var storage: [32 * 1024]u8 = undefined;
+    var fixed = std.heap.FixedBufferAllocator.init(&storage);
+    const gpa = fixed.allocator();
+    const result = try listArtifacts(io, gpa, tmp.dir, .{ .artifact_bytes = 16 });
+    defer {
+        for (result.items) |artifact| {
+            gpa.free(artifact.path);
+            gpa.free(artifact.bytes);
+        }
+        gpa.free(result.items);
+    }
+    try std.testing.expect(result.oversize);
+    try std.testing.expectEqual(@as(usize, 0), result.items.len);
+}
+
+test "artifact byte budget is inclusive and cumulative" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    for ([_]u64{ 0, 7, 8, 9 }) |budget| {
+        var tmp = std.testing.tmpDir(.{ .iterate = true });
+        defer tmp.cleanup();
+        try tmp.dir.writeFile(io, .{ .sub_path = "a", .data = "1234" });
+        try tmp.dir.writeFile(io, .{ .sub_path = "b", .data = "5678" });
+        const result = try listArtifacts(io, gpa, tmp.dir, .{ .artifact_bytes = budget });
+        defer {
+            for (result.items) |artifact| {
+                gpa.free(artifact.path);
+                gpa.free(artifact.bytes);
+            }
+            gpa.free(result.items);
+        }
+        try std.testing.expectEqual(budget < 8, result.oversize);
+        if (budget >= 8) try std.testing.expectEqual(@as(usize, 2), result.items.len);
+    }
+}
+
+test "listen authorization permits unauthenticated loopback only" {
+    try validateListenAuth(.{ 127, 0, 0, 1 }, null, true);
+    try validateListenAuth(.{ 0, 0, 0, 0 }, "test-token", false);
+    try std.testing.expectError(error.UnauthenticatedNonLoopback, validateListenAuth(.{ 0, 0, 0, 0 }, null, true));
+    try std.testing.expectError(error.UnauthenticatedNonLoopback, validateListenAuth(.{ 0, 0, 0, 0 }, "test-token", true));
+    try std.testing.expectError(error.MissingToken, validateListenAuth(.{ 127, 0, 0, 1 }, null, false));
+    try std.testing.expectError(error.EmptyToken, validateListenAuth(.{ 127, 0, 0, 1 }, "", false));
+}
+
+test "artifact collection releases partial results on allocation failure" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "a", .data = "1234" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "b", .data = "5678" });
+    const Check = struct {
+        fn collect(gpa: std.mem.Allocator, test_io: Io, dir: Io.Dir, budget: u64) !void {
+            const result = try listArtifacts(test_io, gpa, dir, .{ .artifact_bytes = budget });
+            defer gpa.free(result.items);
+            for (result.items) |artifact| {
+                gpa.free(artifact.path);
+                gpa.free(artifact.bytes);
+            }
+        }
+    };
+    for ([_]u64{ 7, 8 }) |budget| {
+        try std.testing.checkAllAllocationFailures(std.testing.allocator, Check.collect, .{ io, tmp.dir, budget });
+    }
+}
+
+test "bearer comparison preserves exact arbitrary-length token matching" {
+    try std.testing.expect(bearerMatches("Bearer a-test-token", "a-test-token"));
+    try std.testing.expect(!bearerMatches("Bearer a-test-tokem", "a-test-token"));
+    try std.testing.expect(!bearerMatches("Bearer a-test-token-more", "a-test-token"));
+    try std.testing.expect(!bearerMatches("bearer a-test-token", "a-test-token"));
+    try std.testing.expect(!bearerMatches(null, "a-test-token"));
+    try std.testing.expect(!bearerMatches("Bearer ", ""));
+}
 
 test "validateArchivePath rejects traversal and accepts fixture paths" {
     try std.testing.expectError(error.PathTraversal, validateArchivePath("../etc/passwd"));

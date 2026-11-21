@@ -1,3 +1,9 @@
+//! Resolve CLI HTML target declarations into ordered, isolated output plans.
+//! Own target names, effective layouts, path containment, and collision checks,
+//! not page rendering or publication execution (`compile.zig`).
+//! Normative behavior: docs/contracts/cli.md and
+//! docs/contracts/multi-target-isolated-output.md.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
