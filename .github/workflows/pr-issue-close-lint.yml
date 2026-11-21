@@ -1,0 +1,34 @@
+name: PR issue-close lint
+
+# Split out of ci.yml so editing a PR body reruns only this lint, not the
+# whole CI matrix. Rules: see the header of scripts/check-pr-issue-close.sh.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main, afterparty, 'codex/editor-*']
+
+concurrency:
+  group: pr-issue-close-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  pr-issue-close-lint:
+    name: pr-issue-close lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run the issue-close grammar self-test
+        run: ./scripts/check-pr-issue-close.sh --selftest
+
+      - name: Lint the PR body for per-issue closing keywords
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/check-pr-issue-close.sh --pr ${{ github.event.pull_request.number }}

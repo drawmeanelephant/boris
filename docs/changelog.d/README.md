@@ -6,11 +6,11 @@ conflicting on the release notes.
 
 ## Add a fragment
 
-1. Copy [`TEMPLATE.md`](TEMPLATE.md) to
-   `<pr-number>-<short-kebab-case-summary>.md`, for example
-   `73-cache-cleanup.md`. The PR number makes the name unique. If you draft
-   the fragment before opening the PR, rename the file to the actual PR
-   number when the PR exists — release assembly sorts by numeric filename.
+1. Copy [`TEMPLATE.md`](TEMPLATE.md) to `<short-kebab-slug>.md`, for example
+   `cache-cleanup.md`. Do not add the PR number and do not rename the file
+   after the PR opens: release assembly orders fragments by category, not by
+   number. Pick a slug specific enough not to collide with another open PR.
+   Older fragments that start with a PR number stay valid.
 2. Keep exactly one of the template's category headings: `Added`, `Changed`,
    `Fixed`, `Security`, or `Docs`.
 3. Write one short, user-facing or contract-visible bullet. Include at least one
@@ -23,12 +23,13 @@ conflicting on the release notes.
 Before opening the PR, inspect the deterministic release order and whitespace:
 
 ```bash
-find docs/changelog.d -maxdepth 1 -type f -name '[0-9]*-*.md' -print | LC_ALL=C sort
+find docs/changelog.d -maxdepth 1 -type f -name '*.md' ! -name README.md ! -name TEMPLATE.md ! -name INVENTORY.md -print | LC_ALL=C sort
 git diff --check -- AGENTS.md CHANGELOG.md docs/changelog.d
 ```
 
-`INVENTORY.md` is release-bookkeeping evidence, not a fragment; release owners
-must continue to use the numeric-filename command above when assembling notes.
+`INVENTORY.md` is release-bookkeeping evidence, not a fragment; the command
+above excludes it, so release owners must use that command when assembling
+notes.
 
 ## Release-owner procedure
 
