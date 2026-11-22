@@ -99,6 +99,30 @@ expect_exit 1 "${BORIS}" check --input="${DRAFT}" --format=human --report="${TMP
 cmp "${TMP}/check-draft.txt" "${TMP}/check-draft-strict.txt"
 expect_exit 2 "${BORIS}" impact guides/reference --input="${FIXTURE}" --fail-on-draft --quiet
 
+# Age-based freshness advisory (#1163): explicit --as-of YYYY-MM-DD +
+# --max-age-days N reports stale_page (exit 0 by default, exit 1 with
+# --fail-on-stale) with byte-identical JSON and human reports; omitting --as-of
+# emits no stale_page; incomplete pairs, invalid dates, and non-check commands
+# fail with usage exit 2.
+STALE="docs/contracts/fixtures/documentation-intelligence/edge-cases/stale/content"
+STALE_EXPECTED="docs/contracts/fixtures/documentation-intelligence/edge-cases/stale/expected"
+expect_exit 0 "${BORIS}" check --input="${STALE}" --as-of=2026-06-01 --max-age-days=90 --format=json --report="${TMP}/check-stale.json" --quiet
+cmp "${STALE_EXPECTED}/check.json" "${TMP}/check-stale.json"
+expect_exit 1 "${BORIS}" check --input="${STALE}" --as-of=2026-06-01 --max-age-days=90 --fail-on-stale --format=json --report="${TMP}/check-stale-strict.json" --quiet
+cmp "${TMP}/check-stale.json" "${TMP}/check-stale-strict.json"
+expect_exit 0 "${BORIS}" check --input="${STALE}" --as-of=2026-06-01 --max-age-days=90 --format=human --report="${TMP}/check-stale.txt" --quiet
+cmp "${STALE_EXPECTED}/check.txt" "${TMP}/check-stale.txt"
+expect_exit 1 "${BORIS}" check --input="${STALE}" --as-of=2026-06-01 --max-age-days=90 --fail-on-stale --format=human --report="${TMP}/check-stale-strict.txt" --quiet
+cmp "${TMP}/check-stale.txt" "${TMP}/check-stale-strict.txt"
+expect_exit 0 "${BORIS}" check --input="${STALE}" --format=json --report="${TMP}/check-stale-omitted.json" --quiet
+! grep -q '"code":"stale_page"' "${TMP}/check-stale-omitted.json"
+expect_exit 2 "${BORIS}" check --input="${STALE}" --as-of=2026-06-01 --quiet
+expect_exit 2 "${BORIS}" check --input="${STALE}" --max-age-days=90 --quiet
+expect_exit 2 "${BORIS}" check --input="${STALE}" --fail-on-stale --quiet
+expect_exit 2 "${BORIS}" check --input="${STALE}" --as-of=2026-02-30 --max-age-days=90 --quiet
+expect_exit 2 "${BORIS}" impact guides/reference --input="${FIXTURE}" --as-of=2026-06-01 --max-age-days=90 --quiet
+expect_exit 2 "${BORIS}" impact guides/reference --input="${FIXTURE}" --fail-on-stale --quiet
+
 # Content, usage, and I/O failures stay distinct and do not create an analysis
 # report when no valid frozen graph exists.
 expect_exit 1 "${BORIS}" check --input="${INVALID}" --format=json --report="${TMP}/invalid.json" --quiet

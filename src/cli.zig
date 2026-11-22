@@ -13,6 +13,7 @@ const site_url_mod = @import("site_url.zig");
 const sitemap = @import("sitemap.zig");
 const render = @import("render.zig");
 const recipe_scale = @import("recipe_scale.zig");
+const rss_date = @import("rss_date.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
@@ -218,6 +219,12 @@ pub const Options = struct {
     fail_on_zero_includes: bool = false,
     fail_on_zero_relations: bool = false,
     fail_on_draft: bool = false,
+    fail_on_stale: bool = false,
+    /// Explicit UTC reference date (`--as-of YYYY-MM-DD`) and age threshold
+    /// (`--max-age-days N`) for `check` stale-page advisories (#1163). Either
+    /// both are set or both are null; never read from the wall clock.
+    as_of: ?rss_date.Date = null,
+    max_age_days: ?u32 = null,
     mode: Mode = .html,
     /// Explicit whole-tree authoring format (Markdown remains the default).
     input_format: identity.InputFormat = .markdown,
@@ -350,6 +357,7 @@ pub const ParseError = error{
     RSSMetadataRequired,
     SitemapSiteUrlRequired,
     PagesLocationIncomplete,
+    StaleCheckOptionsIncomplete,
     // `--rss-limit` given a non-numeric or out-of-range value: the parse
     // loop knows the flag, so name it instead of letting findBadArg guess.
     InvalidRssLimit,
@@ -655,6 +663,9 @@ const ParseState = struct {
     saw_fail_on_zero_includes: bool = false,
     saw_fail_on_zero_relations: bool = false,
     saw_fail_on_draft: bool = false,
+    saw_fail_on_stale: bool = false,
+    saw_as_of: bool = false,
+    saw_max_age_days: bool = false,
     saw_profile: bool = false,
 
     // Analysis commands (`check` / `impact`) and their shared flags.
@@ -667,6 +678,9 @@ const ParseState = struct {
     fail_on_zero_includes: bool = false,
     fail_on_zero_relations: bool = false,
     fail_on_draft: bool = false,
+    fail_on_stale: bool = false,
+    as_of: ?rss_date.Date = null,
+    max_age_days: ?u32 = null,
 
     // `init [DIR]` positional and its `--type NAME` archetype selector.
     init_dir: ?[]const u8 = null,
@@ -808,7 +822,13 @@ const ParseState = struct {
     fn sawCheckPolicyFlag(st: *const ParseState) bool {
         return st.saw_fail_on_unreferenced or st.saw_fail_on_unlinked or
             st.saw_fail_on_flat_graph or st.saw_fail_on_zero_includes or
-            st.saw_fail_on_zero_relations or st.saw_fail_on_draft;
+            st.saw_fail_on_zero_relations or st.saw_fail_on_draft or
+            st.saw_fail_on_stale;
+    }
+
+    /// Any `check`-only flag (finding policies plus freshness parameters).
+    fn sawCheckOnlyFlag(st: *const ParseState) bool {
+        return st.sawCheckPolicyFlag() or st.saw_as_of or st.saw_max_age_days;
     }
 
     fn sawPagesLocation(st: *const ParseState) bool {
@@ -1455,7 +1475,37 @@ fn parseAnalysisFlags(
         st.fail_on_draft = true;
         return true;
     }
+
+    if (std.mem.eql(u8, a, "--fail-on-stale")) {
+        try markSaw(&st.saw_fail_on_stale);
+        st.fail_on_stale = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--as-of") or std.mem.startsWith(u8, a, "--as-of=")) {
+        try markSaw(&st.saw_as_of);
+        const value = try takeValue(args, i, a, "--as-of");
+        st.as_of = rss_date.parseDate(value) catch
+            return failInvalidValue(st, "--as-of", "expected a valid UTC calendar date YYYY-MM-DD");
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--max-age-days") or std.mem.startsWith(u8, a, "--max-age-days=")) {
+        try markSaw(&st.saw_max_age_days);
+        const value = try takeValue(args, i, a, "--max-age-days");
+        st.max_age_days = parseUnsignedDecimal(u32, value) orelse
+            return failInvalidValue(st, "--max-age-days", "expected a non-negative integer");
+        return true;
+    }
     return false;
+}
+
+fn parseUnsignedDecimal(comptime T: type, text: []const u8) ?T {
+    if (text.len == 0) return null;
+    for (text) |c| {
+        if (c < '0' or c > '9') return null;
+    }
+    return std.fmt.parseInt(T, text, 10) catch null;
 }
 
 /// Target declarations and their deferred attachments (`--target`,
@@ -1901,6 +1951,15 @@ fn buildPlanOptions(st: *ParseState) ParseError!Options {
         .{ .token = "--report", .triggered = st.saw_report },
         .{ .token = "--watch", .triggered = st.saw_watch },
         .{ .token = "--timings", .triggered = st.saw_timings },
+        .{ .token = "--fail-on-unreferenced", .triggered = st.saw_fail_on_unreferenced },
+        .{ .token = "--fail-on-unlinked", .triggered = st.saw_fail_on_unlinked },
+        .{ .token = "--fail-on-flat-graph", .triggered = st.saw_fail_on_flat_graph },
+        .{ .token = "--fail-on-zero-includes", .triggered = st.saw_fail_on_zero_includes },
+        .{ .token = "--fail-on-zero-relations", .triggered = st.saw_fail_on_zero_relations },
+        .{ .token = "--fail-on-draft", .triggered = st.saw_fail_on_draft },
+        .{ .token = "--fail-on-stale", .triggered = st.saw_fail_on_stale },
+        .{ .token = "--as-of", .triggered = st.saw_as_of },
+        .{ .token = "--max-age-days", .triggered = st.saw_max_age_days },
     });
     if (plan_scan.triggered == 1) return failConflict(st, commandWord(st.command), plan_scan.offender);
     if (plan_scan.triggered > 1) return error.ConflictingFlags;
@@ -1934,7 +1993,7 @@ fn buildNostrPlanOptions(st: *ParseState) ParseError!Options {
     if (st.saw_out) return failConflict(st, commandWord(st.command), "--out");
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence)
+        st.saw_format or st.saw_report or st.sawCheckOnlyFlag() or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence)
     {
         return error.ConflictingFlags;
     }
@@ -1968,7 +2027,7 @@ fn buildNostrSignOptions(st: *ParseState) ParseError!Options {
     } else if (st.saw_nostr_bundle or st.saw_nostr_report_out) return error.ConflictingFlags;
     if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
+        st.saw_format or st.saw_report or st.sawCheckOnlyFlag() or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
         return error.ConflictingFlags;
     }
@@ -2005,7 +2064,7 @@ fn buildNostrPublishOptions(st: *ParseState) ParseError!Options {
     if (st.nostr_bundle_path == null) return error.MissingValue;
     if (st.saw_profile or st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
+        st.saw_format or st.saw_report or st.sawCheckOnlyFlag() or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs)
     {
         return error.ConflictingFlags;
     }
@@ -2079,6 +2138,9 @@ fn buildProofVerifyOptions(st: *ParseState) ParseError!Options {
         .{ .token = "--fail-on-zero-includes", .triggered = st.saw_fail_on_zero_includes },
         .{ .token = "--fail-on-zero-relations", .triggered = st.saw_fail_on_zero_relations },
         .{ .token = "--fail-on-draft", .triggered = st.saw_fail_on_draft },
+        .{ .token = "--fail-on-stale", .triggered = st.saw_fail_on_stale },
+        .{ .token = "--as-of", .triggered = st.saw_as_of },
+        .{ .token = "--max-age-days", .triggered = st.saw_max_age_days },
     });
     if (scan.triggered == 1) return failConflict(st, commandWord(st.command), scan.offender);
     if (scan.triggered > 1) return error.ConflictingFlags;
@@ -2106,7 +2168,7 @@ fn buildInitOptions(st: *ParseState) ParseError!Options {
     // `--input` is rejected rather than silently misread.
     if (st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
-        st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
+        st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.sawCheckOnlyFlag() or st.saw_watch or st.saw_timings or
         st.saw_profile or st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_out or st.saw_rag_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_static_dir)
     {
         return error.ConflictingFlags;
@@ -2140,7 +2202,7 @@ fn buildRecipeScaleOptions(st: *ParseState) ParseError!Options {
     // JSON stream.
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile)
+        st.saw_format or st.saw_report or st.sawCheckOnlyFlag() or st.saw_watch or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile)
     {
         return error.ConflictingFlags;
     }
@@ -2169,7 +2231,7 @@ fn buildRecipeScaleOptions(st: *ParseState) ParseError!Options {
 fn buildGraphOptions(st: *ParseState) ParseError!Options {
     if (st.saw_html or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasTargetProfiles() or st.hasLayoutRules() or st.wantsSitemap() or st.wantsStatic() or
         st.wantsRag() or st.wantsIr() or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or
-        st.saw_report or st.sawCheckPolicyFlag() or st.saw_watch or st.saw_watch_json or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile or
+        st.saw_report or st.sawCheckOnlyFlag() or st.saw_watch or st.saw_watch_json or st.saw_timings or st.saw_html_dir or st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_profile or
         st.saw_scope or st.saw_split_size or st.saw_bundles_only or st.saw_complete or st.saw_serve or st.serve_port != null)
     {
         return error.ConflictingFlags;
@@ -2199,7 +2261,7 @@ fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
     // `sessions` forbids both.
     if (st.saw_html or st.saw_html_dir or st.hasExplicitTargets() or st.saw_html_layout or st.saw_theme or st.hasTargetLayouts() or st.hasLayoutRules() or
         st.wantsStatic() or st.wantsSitemap() or st.wantsRag() or st.saw_no_rag or st.wantsContext() or st.wantsLlms() or st.wantsRss() or st.saw_site_url or st.sawPagesLocation() or
-        st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.saw_watch or st.saw_timings or
+        st.saw_rss_title or st.saw_rss_description or st.saw_rss_limit or st.saw_format or st.saw_report or st.sawCheckOnlyFlag() or st.saw_watch or st.saw_timings or
         st.saw_input or st.saw_textile or st.saw_cooklang or st.saw_rag_dir or st.saw_scope or st.saw_split_size or st.saw_bundles_only or st.saw_complete or
         st.saw_incremental or st.saw_refresh_evidence or st.saw_jobs or st.saw_llms_path or st.saw_rss_path or st.saw_sitemap_path or st.saw_context_dir)
     {
@@ -2343,7 +2405,10 @@ fn validateBuildConflicts(st: *ParseState) ParseError!void {
             if (profile_scan.triggered > 1) return error.ConflictingFlags;
         }
     }
-    if (st.sawCheckPolicyFlag() and st.command != .check) return error.ConflictingFlags;
+    if (st.sawCheckOnlyFlag() and st.command != .check) return error.ConflictingFlags;
+    if (st.command == .check and (st.saw_as_of or st.saw_max_age_days or st.saw_fail_on_stale) and !(st.saw_as_of and st.saw_max_age_days)) {
+        return error.StaleCheckOptionsIncomplete;
+    }
 
     if (st.command == .validate) {
         // Validation is the no-publication form of the selected HTML source /
@@ -2715,6 +2780,9 @@ fn buildOptionsForMode(
             o.fail_on_zero_includes = st.fail_on_zero_includes;
             o.fail_on_zero_relations = st.fail_on_zero_relations;
             o.fail_on_draft = st.fail_on_draft;
+            o.fail_on_stale = st.fail_on_stale;
+            o.as_of = st.as_of;
+            o.max_age_days = st.max_age_days;
             o.sitemap_path = if (st.wantsSitemap()) st.sitemap_path else null;
             o.static_dir = if (st.wantsStatic()) st.static_dir else null;
             o.site_url = st.site_url;
@@ -2915,6 +2983,9 @@ pub const usage_text =
     \\  --fail-on-zero-includes Make check fail when the corpus uses no includes
     \\  --fail-on-zero-relations Make check fail when the corpus uses no references
     \\  --fail-on-draft       Make check fail when it reports draft pages
+    \\  --as-of YYYY-MM-DD    Explicit UTC reference date for stale-page check (requires --max-age-days)
+    \\  --max-age-days N      Flag pages published more than N UTC days before --as-of (requires --as-of)
+    \\  --fail-on-stale       Make check fail when it reports stale pages (requires --as-of and --max-age-days)
     \\  --profile PATH      Selected publication profile for plan/build/watch/validate
     \\  --id PAGE            Recipe page entity id (`recipe-scale`; required)
     \\  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; exclusive with --servings)
@@ -3230,6 +3301,12 @@ pub fn printParseErrorDetail(err: ParseError, bad_arg: ?[]const u8, detail: ?*co
                 .{},
             );
         },
+        error.StaleCheckOptionsIncomplete => {
+            std.debug.print(
+                "error: --as-of and --max-age-days are required together (and required by --fail-on-stale) (try --help)\n",
+                .{},
+            );
+        },
         error.InvalidRssLimit => {
             std.debug.print(
                 "error: invalid value for --rss-limit (must be 1-500; try --help)\n",
@@ -3264,6 +3341,7 @@ const never_blamed_flags = [_][]const u8{
     "--fail-on-zero-includes",
     "--fail-on-zero-relations",
     "--fail-on-draft",
+    "--fail-on-stale",
     "--context",
     "--bundles-only",
     "--complete",
@@ -3444,6 +3522,58 @@ test "parse: documentation intelligence commands" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--fail-on-draft" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--fail-on-flat-graph" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--fail-on-draft" }));
+
+    // Age-based freshness flags (#1163): explicit --as-of + --max-age-days pair
+    // plus optional --fail-on-stale, all check-only and never reading a clock.
+    var stale = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--as-of", "2026-06-01", "--max-age-days", "90", "--fail-on-stale" });
+    defer stale.deinit(std.testing.allocator);
+    try expectEqual(rss_date.Date{ .year = 2026, .month = 6, .day = 1 }, stale.as_of.?);
+    try expectEqual(@as(u32, 90), stale.max_age_days.?);
+    try expect(stale.fail_on_stale);
+
+    var stale_leap_zero = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--as-of=2024-02-29", "--max-age-days=0" });
+    defer stale_leap_zero.deinit(std.testing.allocator);
+    try expectEqual(rss_date.Date{ .year = 2024, .month = 2, .day = 29 }, stale_leap_zero.as_of.?);
+    try expectEqual(@as(u32, 0), stale_leap_zero.max_age_days.?);
+    try expect(!stale_leap_zero.fail_on_stale);
+
+    // Calendar validation and non-negative integer parsing.
+    for ([_][]const u8{ "2026-02-29", "2026-02-30", "2026-13-01", "2026-04-31", "2026-06-01T00:00:00Z", "not-a-date" }) |bad_date| {
+        var detail: ParseErrorDetail = .{};
+        try expectError(error.InvalidValue, parseOptionsWithDetail(std.testing.allocator, &.{ "boris", "check", "--as-of", bad_date, "--max-age-days", "90" }, &detail));
+        try expectEqualStrings("--as-of", detail.blame_flag.?);
+    }
+    for ([_][]const u8{ "-1", "+10", "90d", "abc", "1_0" }) |bad_days| {
+        var detail: ParseErrorDetail = .{};
+        try expectError(error.InvalidValue, parseOptionsWithDetail(std.testing.allocator, &.{ "boris", "check", "--as-of", "2026-06-01", "--max-age-days", bad_days }, &detail));
+        try expectEqualStrings("--max-age-days", detail.blame_flag.?);
+    }
+
+    // Pairing requirements: no hidden wall clock, no hidden default threshold,
+    // and no silent no-op --fail-on-stale.
+    try expectError(error.StaleCheckOptionsIncomplete, parseOptions(std.testing.allocator, &.{ "boris", "check", "--as-of", "2026-06-01" }));
+    try expectError(error.StaleCheckOptionsIncomplete, parseOptions(std.testing.allocator, &.{ "boris", "check", "--max-age-days", "90" }));
+    try expectError(error.StaleCheckOptionsIncomplete, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-stale" }));
+    try expectError(error.StaleCheckOptionsIncomplete, parseOptions(std.testing.allocator, &.{ "boris", "check", "--as-of", "2026-06-01", "--fail-on-stale" }));
+    try expectError(error.StaleCheckOptionsIncomplete, parseOptions(std.testing.allocator, &.{ "boris", "check", "--max-age-days", "90", "--fail-on-stale" }));
+
+    // Duplicates rejected.
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--as-of", "2026-06-01", "--as-of", "2026-06-02", "--max-age-days", "90" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--as-of", "2026-06-01", "--max-age-days", "90", "--max-age-days", "30" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--as-of", "2026-06-01", "--max-age-days", "90", "--fail-on-stale", "--fail-on-stale" }));
+
+    // Check-only: rejected on impact, validate, graph, build, plan, init, proof verify.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--as-of", "2026-06-01", "--max-age-days", "90" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--fail-on-stale" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--as-of", "2026-06-01", "--max-age-days", "90" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--fail-on-stale" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--as-of", "2026-06-01", "--max-age-days", "90" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--fail-on-stale" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--as-of", "2026-06-01", "--max-age-days", "90" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--fail-on-stale" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "boris.json", "--as-of", "2026-06-01" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "init", "--as-of", "2026-06-01" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "proof", "verify", "--as-of", "2026-06-01" }));
 
     var impact = try parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--quiet" });
     defer impact.deinit(std.testing.allocator);

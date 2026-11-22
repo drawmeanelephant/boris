@@ -1,0 +1,32 @@
+{
+  "format": "boris-documentation-intelligence",
+  "schemaVersion": "0.2.0",
+  "compiler": "boris/0.9.0",
+  "input": "docs/contracts/fixtures/documentation-intelligence/edge-cases/stale/content",
+  "summary": {
+    "pages": 6,
+    "roots": 1,
+    "satellites": 5,
+    "sourceEndpoints": 1,
+    "edgeCounts": {
+      "incoming": {
+        "pages": {"parent": 5, "include": 0, "reference": 5},
+        "sources": {"parent": 0, "include": 1, "reference": 0}
+      },
+      "outgoing": {
+        "pages": {"parent": 5, "include": 1, "reference": 5},
+        "sources": {"parent": 0, "include": 0, "reference": 0}
+      }
+    },
+    "unreferencedPages": 1,
+    "hotspots": 0
+  },
+  "nodes": [{"type":"page","id":"guides/boundary","sourcePath":"guides/boundary.md","parent":"index"},{"type":"page","id":"guides/fresh","sourcePath":"guides/fresh.md","parent":"index"},{"type":"page","id":"guides/future","sourcePath":"guides/future.md","parent":"index"},{"type":"page","id":"guides/old","sourcePath":"guides/old.md","parent":"index"},{"type":"page","id":"guides/undated","sourcePath":"guides/undated.md","parent":"index"},{"type":"page","id":"index","sourcePath":"index.md","parent":null}],
+  "edges": [{"from":{"type":"page","value":"guides/boundary"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"guides/fresh"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"guides/future"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"guides/old"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"guides/undated"},"to":{"type":"page","value":"index"},"kind":"parent"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/boundary"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/fresh"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/future"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/old"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"page","value":"guides/undated"},"kind":"reference"},{"from":{"type":"page","value":"index"},"to":{"type":"source","value":"includes/shared.md"},"kind":"include"}],
+  "sourceLocations": [{"type":"page","value":"guides/boundary","sourcePath":"guides/boundary.md","line":1,"column":1},{"type":"page","value":"guides/fresh","sourcePath":"guides/fresh.md","line":1,"column":1},{"type":"page","value":"guides/future","sourcePath":"guides/future.md","line":1,"column":1},{"type":"page","value":"guides/old","sourcePath":"guides/old.md","line":1,"column":1},{"type":"page","value":"guides/undated","sourcePath":"guides/undated.md","line":1,"column":1},{"type":"page","value":"index","sourcePath":"index.md","line":1,"column":1}],
+  "pages": [{"id":"guides/boundary","parent":"index"},{"id":"guides/fresh","parent":"index"},{"id":"guides/future","parent":"index"},{"id":"guides/old","parent":"index"},{"id":"guides/undated","parent":"index"},{"id":"index","parent":null}],
+  "sources": ["includes/shared.md"],
+  "findings": [{"code":"stale_page","type":"page","value":"guides/old","count":152,"sourcePath":"guides/old.md","line":1,"column":1},{"code":"unreferenced_page","type":"page","value":"index","count":0,"sourcePath":"index.md","line":1,"column":1}],
+  "impact": null,
+  "diagnostics": []
+}

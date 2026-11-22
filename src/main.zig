@@ -18,6 +18,7 @@ const rag = @import("rag.zig");
 const context = @import("context.zig");
 const llms = @import("llms.zig");
 const rss = @import("rss.zig");
+const rss_date = @import("rss_date.zig");
 const compile = @import("compile.zig");
 const target = @import("target.zig");
 const layout_select = @import("layout_select.zig");
@@ -2422,7 +2423,13 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
     defer pages.deinit(gpa);
     pages.ensureTotalCapacity(gpa, result.pages.items.len) catch return .io_error;
     for (result.pages.items) |page| {
-        pages.appendAssumeCapacity(.{ .id = page.id, .parent = page.parent, .source_path = page.source_path, .status = page.status });
+        pages.appendAssumeCapacity(.{
+            .id = page.id,
+            .parent = page.parent,
+            .source_path = page.source_path,
+            .status = page.status,
+            .published_at = page.published_at,
+        });
     }
 
     var edges: std.ArrayList(intelligence.Edge) = .empty;
@@ -2468,7 +2475,15 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
         if (requested == null) requested = .{ .type = .source, .value = id };
     }
 
-    var report = intelligence.analyze(gpa, pages.items, edges.items, .{ .impact = requested }) catch |err| {
+    const freshness: ?intelligence.FreshnessPolicy = if (opts.command == .check and opts.as_of != null and opts.max_age_days != null)
+        .{ .as_of = opts.as_of.?, .max_age_days = opts.max_age_days.? }
+    else
+        null;
+
+    var report = intelligence.analyze(gpa, pages.items, edges.items, .{
+        .impact = requested,
+        .freshness = freshness,
+    }) catch |err| {
         errPrint("error: analysis failed: {s}\n", .{@errorName(err)});
         return .io_error;
     };
@@ -2509,6 +2524,7 @@ fn checkPolicyFailed(opts: Options, findings: []const intelligence.Finding) bool
             .zero_includes => opts.fail_on_zero_includes,
             .zero_relations => opts.fail_on_zero_relations,
             .draft_page => opts.fail_on_draft,
+            .stale_page => opts.fail_on_stale,
             .fan_in_hotspot => false,
         };
         if (fatal) return true;
@@ -3988,6 +4004,78 @@ test "runPipeline: draft_page advisory is exit 0 unless --fail-on-draft opts in 
 
         try std.testing.expectEqualStrings(golden_bytes, default_bytes);
         try std.testing.expectEqualStrings(default_bytes, strict_bytes);
+    }
+}
+
+test "runPipeline: stale_page advisory is exit 0 unless --fail-on-stale opts in (#1163)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const cwd = Io.Dir.cwd();
+    const stale_input = "docs/contracts/fixtures/documentation-intelligence/edge-cases/stale/content";
+    const as_of = try rss_date.parseDate("2026-06-01");
+
+    const cases = [_]struct {
+        format: cli.AnalysisFormat,
+        golden: []const u8,
+        ext: []const u8,
+    }{
+        .{
+            .format = .json,
+            .golden = "docs/contracts/fixtures/documentation-intelligence/edge-cases/stale/expected/check.json",
+            .ext = "json",
+        },
+        .{
+            .format = .human,
+            .golden = "docs/contracts/fixtures/documentation-intelligence/edge-cases/stale/expected/check.txt",
+            .ext = "txt",
+        },
+    };
+
+    for (cases) |case| {
+        const default_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-stale.{s}", .{ tmp.sub_path, case.ext });
+        defer gpa.free(default_report);
+        const strict_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-stale-strict.{s}", .{ tmp.sub_path, case.ext });
+        defer gpa.free(strict_report);
+        const no_as_of_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-stale-no-as-of.{s}", .{ tmp.sub_path, case.ext });
+        defer gpa.free(no_as_of_report);
+
+        const base = Options{
+            .command = .check,
+            .input_dir = stale_input,
+            .analysis_format = case.format,
+            .analysis_report = default_report,
+            .as_of = as_of,
+            .max_age_days = 90,
+            .quiet = true,
+        };
+        try std.testing.expectEqual(ExitCode.success, runPipeline(io, gpa, base));
+
+        var strict = base;
+        strict.analysis_report = strict_report;
+        strict.fail_on_stale = true;
+        try std.testing.expectEqual(ExitCode.content_error, runPipeline(io, gpa, strict));
+
+        // Without --as-of / --max-age-days, stale_page is never emitted.
+        var no_as_of = base;
+        no_as_of.analysis_report = no_as_of_report;
+        no_as_of.as_of = null;
+        no_as_of.max_age_days = null;
+        try std.testing.expectEqual(ExitCode.success, runPipeline(io, gpa, no_as_of));
+
+        const default_bytes = try cwd.readFileAlloc(io, default_report, gpa, .unlimited);
+        defer gpa.free(default_bytes);
+        const strict_bytes = try cwd.readFileAlloc(io, strict_report, gpa, .unlimited);
+        defer gpa.free(strict_bytes);
+        const no_as_of_bytes = try cwd.readFileAlloc(io, no_as_of_report, gpa, .unlimited);
+        defer gpa.free(no_as_of_bytes);
+        const golden_bytes = try cwd.readFileAlloc(io, case.golden, gpa, .unlimited);
+        defer gpa.free(golden_bytes);
+
+        try std.testing.expectEqualStrings(golden_bytes, default_bytes);
+        try std.testing.expectEqualStrings(default_bytes, strict_bytes);
+        try std.testing.expect(std.mem.indexOf(u8, no_as_of_bytes, "stale_page") == null);
     }
 }
 
