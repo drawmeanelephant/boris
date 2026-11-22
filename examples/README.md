@@ -36,17 +36,15 @@ and the corpus covers Aside, Details, tables, a footnote, page-local images,
 and a typed relation. See [`studies-site/README.md`](studies-site/README.md)
 for the per-theme commands.
 
-The focused `minimal/links.html` and `showcase/portfolio.html` shapes use
-fresh `boris init --type link-in-bio` and `--type portfolio` sites as their
-purpose-fit specimens. Their profiles select those layouts; the generic
-documentation/blog specimen commands above remain unchanged.
+The focused `minimal/links.html` and `showcase/portfolio.html` shapes are
+selected via `--layout-rule` (or a profile's `layout_rules`) on `id:index`;
+the generic documentation/blog specimen commands above remain unchanged.
 
 | Theme | Specimen |
 |---|---|
 | `archive`, `cards`, `compact`, `cozy`, `field-notes`, `gallery`, `journal`, `lab`, `ledger`, `press`, `reading`, `reference`, `showcase` | Own `examples/<theme>-site/` |
-| `semantic`, `columns`, `service`, `engineering`, `civic`, `tokens` | `studies-site` with the theme's `home.html` / `section.html` rules |
-| `blueprint` | `studies-site` with `home.html` / `section.html` rules. The `boris init --type blueprint` tree is its teaching specimen |
-| `corporate`, `minimal` | `studies-site` with no layout rules. The `boris init --type resume` tree is corporate's print specimen |
+| `semantic`, `columns`, `service`, `engineering`, `civic`, `tokens`, `blueprint` | `studies-site` with the theme's `home.html` / `section.html` rules |
+| `corporate`, `minimal` | `studies-site` with no layout rules |
 | `boris` | `studies-site` with no layout rules. The repository's own [`content/`](../content/) docs site is its dogfood specimen |
 | `html4-strict` | `studies-site` under `--target-profile default=html4-strict`. [`fixtures/html4-strict/content`](../fixtures/html4-strict/content/) is the minimal regression fixture |
 

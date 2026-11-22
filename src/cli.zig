@@ -3137,31 +3137,12 @@ pub fn printInitUsage() void {
         \\            relations, {{{{include}}}} composition, an <Aside> component
         \\  cookbook  Cooklang .cook recipe box; profile declares input_format: cook
         \\            and layout_rules send index to cards' home.html recipe deck
-        \\  blog      dated posts on a parent chain (published_at + summary)
+        \\  blog      dated posts on a parent chain (published_at + summary),
+        \\            a status: draft post, and profile-declared head + rss + sitemap
         \\  textile   Textile pages through the native adapter;
         \\            profile declares input_format: textile
-        \\  landing   one trunk page built from {{{{include}}}} sections, plus
-        \\            one satellite; layout_rules send index to home.html
-        \\  wiki      three-level reference tree (index, hubs, entries) with
-        \\            breadcrumbs, per-page contents, and cross-entry links
-        \\  link-in-bio  one trunk page holding a personal link list
-        \\  changelog dated release notes (published_at + summary) with a
-        \\            status: draft unreleased entry kept out of search and feeds;
-        \\            layout_rules send the changes hub to journal's archive.html
-        \\  resume    single-page CV with tags for {{{{metadata}}}} plus a "now" page;
-        \\            print the page for the PDF
-        \\  newsletter  weekly paper of dated issues on press's named layouts;
-        \\            profile enables head and declares rss (feed.xml) + sitemap
-        \\  portfolio studio front plus dated project satellites; layout_rules
-        \\            send index to showcase's home.html
-        \\  archive   tagged entries joined by relates_to/supersedes relations,
-        \\            rendered with relations and backlinks; a hand-kept topics index
-        \\  dashboard project-status board: one project per status: value
-        \\            (published/draft/archived), shown as a visible status label
         \\  photo-gallery  two image albums; each page keeps its PNG plates in
         \\            its own {{stem}}.assets/ folder, captioned with <figure>
-        \\  blueprint documentation site: landing page, Getting started / Guides /
-        \\            Reference sections, sidebar, outline, search, draft gating
         \\
         \\Each archetype writes its own theme and a boris.json publication
         \\profile, so `boris --profile boris.json` builds it out of the box.

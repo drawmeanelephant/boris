@@ -7,8 +7,8 @@ bounds, validation, execution boundaries) and
 `html_profile`, the bounded RSS rider). If this page and a contract disagree,
 the contract wins.
 
-Each block below is a complete `boris.json`, grown one axis at a time from the
-starter that `boris init --type portfolio` writes. Check a declaration before
+Each block below is a complete `boris.json`, grown one axis at a time from a
+minimal single-target profile. Check a declaration before
 building with `boris plan --profile boris.json` (normalize + validate, no
 outputs), then execute it with `boris build --profile boris.json`.
 
@@ -34,8 +34,8 @@ before the recipes:
 
 ## 1. Minimal
 
-Exactly what `boris init --type portfolio` materializes: one public HTML
-target under the showcase theme, no public artifacts.
+A single public HTML target under the `showcase` theme, with one layout rule
+and no public artifacts.
 
 ```json
 {
@@ -192,7 +192,7 @@ profile field selects the output gate.
 
 ## The canonical example
 
-`boris init --type newsletter` materializes a complete `site.url` + `head` +
+`boris init --type blog` materializes a complete `site.url` + `head` +
 `rss` + `sitemap` profile — the archetype contract in
 [cli.md](contracts/cli.md#init-deterministic-starter-scaffold-with-self-verification)
 describes it as the worked composition, and its emitted `boris.json` is the

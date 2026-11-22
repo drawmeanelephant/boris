@@ -5,8 +5,7 @@ inline consumer. There are no `#` links or dead icon buttons. See
 [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `main.html`
-- Specimen: [`examples/studies-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/studies-site/) (docs);
-  `boris init --type resume` (print, see [Print](#print))
+- Specimen: [`examples/studies-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/studies-site/) (docs and print, see [Print](#print))
 
 Build the specimen from a Boris checkout:
 
@@ -46,8 +45,8 @@ breaking from their first line; lists keep their bullets; body links stay
 underlined in black, and external links print their URL after the link
 text.
 
-Print specimen: the `boris init --type resume` tree. Verified on
-2026-10-10 by building that tree with this theme and printing `index.html`
-with headless Chrome (`--print-to-pdf --no-pdf-header-footer`). The result
-is one Letter page, a single column on white. No breadcrumb, children list,
-footer, or surface tint prints, and the internal "Now" link is underlined.
+Print pass verified on 2026-10-10 by building a single-page CV tree with
+this theme and printing `index.html` with headless Chrome
+(`--print-to-pdf --no-pdf-header-footer`). The result is one Letter page, a
+single column on white. No breadcrumb, children list, footer, or surface
+tint prints, and the internal "Now" link is underlined.

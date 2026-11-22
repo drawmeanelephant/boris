@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 
 # Every `--type` name, in enum order; docs is the default archetype.
-ARCHETYPES=(docs garden cookbook blog textile landing wiki link-in-bio changelog resume newsletter portfolio archive dashboard photo-gallery blueprint)
+ARCHETYPES=(docs garden cookbook blog textile photo-gallery)
 ARCHETYPE_LIST="$(IFS=,; printf '%s' "${ARCHETYPES[*]}" | sed 's/,/, /g')"
 
 note() { printf '==> %s\n' "$*"; }
@@ -251,200 +251,31 @@ for recipe in mains/carbonara mains/pancakes sauces/pepper-oil; do
 done
 pass "formats, includes, components, and recipe-scale all exercise their seams; cookbook index deck on home.html"
 
-# --- wave-1 archetypes: each teaches the primitive its issue names ---------
-note "landing: one trunk page composed from includes, index on the home layout"
-L="$OUT/arch-landing/dist"
-grep -q 'govuk-home-grid' "$L/index.html" || fail "landing index does not use the service home layout"
-grep -q 'govuk-home-grid' "$L/about.html" && fail "landing about should fall back to main.html"
-grep -q 'govuk-breadcrumbs' "$L/about.html" || fail "landing about is not on the service main layout"
-grep -q 'What we do' "$L/index.html" || fail "landing index did not splice includes/services.md"
-grep -q 'Do I need an appointment' "$L/index.html" || fail "landing index did not splice includes/faq.md"
-grep -q 'Open Tuesday to Saturday' "$L/index.html" || fail "landing index did not splice includes/visit.md"
-[[ ! -e "$L/includes" ]] || fail "landing include fragments compiled as pages"
-pass "landing: home layout on index, main on about, three fragments spliced"
-
-note "wiki: breadcrumbs walk the three-level chain; hubs and index use named layouts"
-W="$OUT/arch-wiki/dist"
-grep -q 'home-shell' "$W/index.html" || fail "wiki index does not use the reference home layout"
-grep -q 'section-children' "$W/wiki/tools.html" || fail "wiki hub does not use the reference section layout"
-grep -q 'section-children' "$W/wiki/tools/chisels.html" && fail "wiki entry should fall back to main.html"
-crumbs="$(sed -n '/<nav class="breadcrumb"/,/<\/nav>/p' "$W/wiki/tools/chisels.html")"
-for crumb in '>Workshop Wiki</a>' '>Tools</a>' 'aria-current="page">Chisels<'; do
-    grep -qF "$crumb" <<<"$crumbs" || fail "wiki entry breadcrumb is missing $crumb"
+note "blog: profile-declared feed with autodiscovery, sitemap, and draft gating"
+B="$OUT/arch-blog"
+[[ -f "$B/dist/posts/2026-10-12-in-progress.html" ]] || fail "blog draft post did not render"
+grep -q 'class="entry entry--draft"' "$B/dist/posts/2026-10-12-in-progress.html" \
+    || fail "blog draft post did not carry entry--draft"
+grep -q '<loc>https://the-corner.example.com/posts/2026-09-14-first-post.html</loc>' "$B/dist/sitemap.xml" \
+    || fail "blog profile build did not emit the sitemap"
+[[ -f "$B/dist/feed.xml" ]] || fail "blog profile build did not emit dist/feed.xml"
+[[ "$(grep -c '<item>' "$B/dist/feed.xml")" == 3 ]] || fail "blog feed does not carry all three published posts"
+grep -q '2026-10-12-in-progress' "$B/dist/feed.xml" "$B/dist/sitemap.xml" \
+    && fail "blog draft post leaked into feed.xml or sitemap.xml"
+grep -q '2026-10-12-in-progress' "$B/dist/_boris/search/search-index.json" \
+    && fail "blog draft post leaked into the search index"
+sed -n '/<section class="recent-posts"/,/<\/section>/p' "$B/dist/posts.html" | grep -q '2026-10-12-in-progress' \
+    && fail "blog draft post leaked into posts {{children}}"
+sed -n '/<nav class="site-nav"/,/<\/nav>/p' "$B/dist/posts.html" | grep -q '2026-10-12-in-progress' \
+    && fail "blog draft post leaked into {{nav}}"
+autodiscovery='<link rel="alternate" type="application/rss+xml" href="https://the-corner.example.com/feed.xml">'
+for page in index about posts posts/2026-09-14-first-post; do
+    sed -n '/<head>/,/<\/head>/p' "$B/dist/$page.html" | grep -qF "$autodiscovery" \
+        || fail "blog $page head has no feed autodiscovery link"
 done
-grep -q 'href="../techniques/sharpening.html"' "$W/wiki/tools/chisels.html" \
-    || fail "wiki cross-entry link did not resolve"
-pass "wiki: index → hub → entry breadcrumb, home/section/main layouts, cross-entry links"
-
-note "link-in-bio: one page is a complete, checkable site"
-BIO="$OUT/arch-link-in-bio"
-grep -q 'class="links-page"' "$BIO/dist/index.html" || fail "link-in-bio did not select the focused links layout"
-grep -q 'href="assets/links.css"' "$BIO/dist/index.html" || fail "link-in-bio lacks its local link-row stylesheet"
-grep -q 'mobile-nav-details\|class="toc-sidebar"' "$BIO/dist/index.html" && fail "link-in-bio still publishes documentation rails"
-grep -q 'smallest graph' "$BIO/content/index.md" && fail "link-in-bio publishes author wiring as visitor prose"
-grep -q -- '--serve' "$BIO/README.md" || fail "link-in-bio README lacks the native preview command"
-grep -q '^verified: starter compiled 1 page(s)$' "$OUT/arch-link-in-bio.stderr" \
-    || fail "link-in-bio probe did not compile exactly one page"
-[[ "$(find "$OUT/arch-link-in-bio/dist" -name '*.html' -not -path '*/_boris/*' | wc -l | tr -d ' ')" == 1 ]] \
-    || fail "link-in-bio profile build wrote more than one page"
-grep -q 'href="https://example.com/shop"' "$OUT/arch-link-in-bio/dist/index.html" \
-    || fail "link-in-bio link list did not render"
-(cd "$OUT/arch-link-in-bio" && "$ROOT/zig-out/bin/boris" check) >"$OUT/link-in-bio-check.stdout" 2>"$OUT/link-in-bio-check.stderr" \
-    || fail "boris check failed on the one-page site: $(head -3 "$OUT/link-in-bio-check.stderr")"
-pass "link-in-bio: one page compiled, built, and checked"
-
-note "changelog: the draft entry renders but is kept out of search, RSS, sitemap, and the hub listing"
-C="$OUT/arch-changelog"
-[[ -f "$C/dist/changes/unreleased.html" ]] || fail "changelog draft entry did not render"
-grep -q 'data-layout="journal-index"' "$C/dist/changes.html" || fail "changelog changes hub does not use the journal archive layout"
-for page in index changes/2026-09-28-v0-2-0; do
-    grep -q 'data-layout="journal-archive"' "$C/dist/$page.html" || fail "changelog $page should fall back to main.html"
-done
-listing="$(sed -n '/<section class="log-listing"/,/<\/section>/p' "$C/dist/changes.html")"
-for release in 2026-08-17-v0-1-0 2026-09-28-v0-2-0; do
-    grep -q "href=\"changes/$release.html\"" <<<"$listing" || fail "changelog hub listing is missing $release"
-done
-grep -q 'unreleased' <<<"$listing" && fail "changelog draft entry leaked into the hub listing"
-grep -q 'href="changes/unreleased.html"' "$C/dist/changes.html" || fail "changelog hub lost its hand link to the draft"
-grep -q '"path": "changes/2026-09-28-v0-2-0.html"' "$C/dist/_boris/search/search-index.json" \
-    || fail "changelog search index is missing a published release"
-grep -q 'changes/unreleased' "$C/dist/_boris/search/search-index.json" \
-    && fail "changelog draft entry leaked into the search index"
-(cd "$C" && "$ROOT/zig-out/bin/boris" --rss --input content --site-url https://tidepool.example.com/ \
-    --rss-title "Tidepool" --rss-description "Release notes" --rss-path feed/rss.xml --quiet) \
-    >/dev/null 2>"$OUT/changelog-rss.stderr" || fail "changelog RSS export failed: $(head -3 "$OUT/changelog-rss.stderr")"
-grep -q '<link>https://tidepool.example.com/changes/2026-08-17-v0-1-0.html</link>' "$C/feed/rss.xml" \
-    || fail "changelog feed is missing a published release"
-grep -q 'unreleased' "$C/feed/rss.xml" && fail "changelog draft entry leaked into the RSS feed"
-(cd "$C" && "$ROOT/zig-out/bin/boris" --input content --html-dir dist-sitemap --theme themes/journal \
-    --sitemap --site-url https://tidepool.example.com/ --quiet) >/dev/null 2>"$OUT/changelog-sitemap.stderr" \
-    || fail "changelog sitemap build failed: $(head -3 "$OUT/changelog-sitemap.stderr")"
-grep -q 'changes/2026-09-28-v0-2-0.html' "$C/dist-sitemap/sitemap.xml" || fail "changelog sitemap is missing a release"
-grep -q 'unreleased' "$C/dist-sitemap/sitemap.xml" && fail "changelog draft entry leaked into the sitemap"
-pass "changelog: hub on archive.html lists both releases; draft emitted at its route; absent from listing, search index, RSS, and sitemap"
-
-note "resume: the CV page carries its tags through {{metadata}} and ships a print stylesheet"
-R="$OUT/arch-resume"
-grep -q '<dd>production-editing, typesetting, publishing-systems</dd>' "$R/dist/index.html" \
-    || fail "resume {{metadata}} did not render the CV tags"
-[[ -f "$R/dist/now.html" ]] || fail "resume now satellite did not render"
-grep -q '@media print' "$R/dist/assets/corporate.css" || fail "resume theme ships no print stylesheet"
-pass "resume: tags in metadata, now satellite, print stylesheet published"
-
-note "newsletter: press named layouts, a profile-declared feed with autodiscovery, and a sitemap"
-N="$OUT/arch-newsletter"
-grep -q 'txp-home' "$N/dist/index.html" || fail "newsletter index does not use the press home layout"
-grep -q 'txp-archive-body' "$N/dist/issues.html" || fail "newsletter issues hub does not use the press archive layout"
-grep -q 'txp-blog-body' "$N/dist/issues/2026-10-03-the-paper-mill.html" \
-    || fail "newsletter issue does not use the press blog layout"
-grep -q '<loc>https://saturday-sheet.example.com/issues/2026-09-19-first-edition.html</loc>' "$N/dist/sitemap.xml" \
-    || fail "newsletter profile build did not emit the sitemap"
-[[ -f "$N/dist/feed.xml" ]] || fail "newsletter profile build did not emit dist/feed.xml"
-[[ "$(grep -c '<item>' "$N/dist/feed.xml")" == 3 ]] || fail "newsletter feed does not carry all three issues"
-autodiscovery='<link rel="alternate" type="application/rss+xml" href="https://saturday-sheet.example.com/feed.xml">'
-for page in index issues issues/2026-09-19-first-edition; do
-    sed -n '/<head>/,/<\/head>/p' "$N/dist/$page.html" | grep -qF "$autodiscovery" \
-        || fail "newsletter $page head has no feed autodiscovery link"
-done
-# Drafting an issue is the documented way to hold it back: it leaves the feed
-# and sitemap, and its own head advertises nothing.
-cp -R "$N" "$OUT/newsletter-draft"
-ND="$OUT/newsletter-draft"
-rm -rf "$ND/dist"
-printf '%s\n' '---' 'title: Held Back' 'parent: issues' 'published_at: 2026-10-10T08:00:00Z' \
-    'summary: Not ready yet.' 'status: draft' '---' '' '# Held Back' > "$ND/content/issues/2026-10-10-held-back.md"
-(cd "$ND" && "$ROOT/zig-out/bin/boris" --profile boris.json --quiet) >/dev/null 2>"$OUT/newsletter-draft.stderr" \
-    || fail "newsletter build with a draft issue failed: $(head -3 "$OUT/newsletter-draft.stderr")"
-[[ -f "$ND/dist/issues/2026-10-10-held-back.html" ]] || fail "newsletter draft issue did not render"
-[[ "$(grep -c '<item>' "$ND/dist/feed.xml")" == 3 ]] || fail "newsletter draft issue changed the feed item count"
-grep -q 'held-back' "$ND/dist/feed.xml" "$ND/dist/sitemap.xml" && fail "newsletter draft issue leaked into the feed or sitemap"
-grep -q 'application/rss+xml' "$ND/dist/issues/2026-10-10-held-back.html" && fail "newsletter draft head advertises the feed"
-rm -rf "$ND"
-pass "newsletter: home/archive/blog layouts, dist/feed.xml with three items + head autodiscovery, sitemap; drafts held back"
-
-note "portfolio: the focused studio front lists work and about through {{children}}"
-P="$OUT/arch-portfolio/dist"
-grep -q 'data-layout="portfolio"' "$P/index.html" || fail "portfolio index does not use the focused layout"
-grep -q 'href="assets/css/portfolio.css"' "$P/index.html" || fail "portfolio lacks its local stylesheet"
-grep -q 'Browse the site\|parent: index' "$P/index.html" && fail "portfolio still leads with documentation chrome or wiring"
-grep -q 'portfolio.html' "$OUT/arch-portfolio/README.md" || fail "portfolio author README lacks its layout wiring"
-# The list is the layout's {{children}}, not prose: the article links no page.
-work="$(sed -n '/<section class="children-panel home-work portfolio-collection"/,/<\/section>/p' "$P/index.html")"
-grep -q '<nav class="page-children"' <<<"$work" || fail "portfolio home has no {{children}} list"
-sed -n '/<article class="prose portfolio-intro">/,/<\/article>/p' "$P/index.html" | grep -q '<a href=' \
-    && fail "portfolio index still carries a hand-written page list"
-for page in about projects/harbor-signage projects/field-almanac projects/specimen-book; do
-    grep -q 'class="main card"' "$P/$page.html" || fail "portfolio $page is not on the showcase main layout"
-    grep -q 'data-layout="portfolio"' "$P/$page.html" && fail "portfolio $page should not use the front layout"
-    grep -q "href=\"${page}.html\"" <<<"$work" || fail "portfolio home {{children}} does not list $page"
-done
-cat > "$OUT/arch-portfolio/content/projects/additional-work.md" <<'MD'
----
-title: Additional work
-parent: index
-published_at: 2026-10-01T09:00:00Z
-summary: Another authored satellite.
----
-
-# Additional work
-MD
-cat > "$OUT/arch-portfolio/content/projects/draft-work.md" <<'MD'
----
-title: Draft work
-parent: index
-status: draft
----
-
-# Draft work
-MD
-(cd "$OUT/arch-portfolio" && "$ROOT/zig-out/bin/boris" build --profile boris.json --quiet) \
-    || fail "portfolio with additional work did not build"
-grep -q 'href="projects/additional-work.html"' "$P/index.html" || fail "portfolio collection does not pick up new work"
-grep -q 'href="projects/draft-work.html"' "$P/index.html" && fail "portfolio advertises a draft"
-[[ -f "$P/projects/draft-work.html" ]] || fail "portfolio draft route was not emitted"
-pass "portfolio: identity-first layout, automatic children, draft gating, and unchanged detail layout"
-
-note "archive: entries render their relations and the backlinks derived from them"
-A="$OUT/arch-archive/dist"
-grep -q 'data-layout="archive"' "$A/index.html" || fail "archive index does not use the archive layout"
-grep -q 'href="entries/2019-ferry-timetable.html"' "$A/index.html" || fail "archive index {{children}} does not list the entries"
-for page in topics entries/2019-ferry-timetable entries/2020-harbor-lights entries/2021-ferry-timetable entries/2023-pier-closing; do
-    grep -q 'data-layout="entry"' "$A/$page.html" || fail "archive $page is not on the archive main layout"
-done
-rel() { sed -n "/<section class=\"semantic-$1\"/,/<\/section>/p" "$A/entries/$2.html"; }
-rel relations 2021-ferry-timetable | grep -q 'data-relation-kind="supersedes".*href="2019-ferry-timetable.html"' \
-    || fail "archive supersedes relation did not render on the 2021 timetable"
-rel relations 2023-pier-closing | grep -q 'href="2020-harbor-lights.html"' \
-    || fail "archive relates_to relation did not render on the pier notice"
-rel backlinks 2019-ferry-timetable | grep -q 'data-relation-kind="supersedes".*href="2021-ferry-timetable.html"' \
-    || fail "archive 2019 timetable has no supersedes backlink"
-rel backlinks 2019-ferry-timetable | grep -q 'data-relation-kind="relates_to".*href="2020-harbor-lights.html"' \
-    || fail "archive 2019 timetable has no relates_to backlink"
-rel backlinks 2021-ferry-timetable | grep -q 'href="2023-pier-closing.html"' \
-    || fail "archive 2021 timetable has no backlink from the pier notice"
-grep -q '<body data-status="archived">' "$A/entries/2019-ferry-timetable.html" \
-    || fail "archive status: archived did not reach the page"
-for e in 2020-harbor-lights 2023-pier-closing 2019-ferry-timetable 2021-ferry-timetable; do
-    grep -q "href=\"entries/$e.html\"" "$A/topics.html" || fail "archive topics index does not link $e"
-done
-pass "archive: archive layout on index; relations + backlinks on entries; status archived; topics index by tag"
-
-note "dashboard: every project page shows its status, and the board maps each value"
-D="$OUT/arch-dashboard/dist"
-grep -q 'data-layout="home"' "$D/index.html" || fail "dashboard board does not use the engineering home layout"
-for pair in tide-gauge-network:published harbor-sensor-pilot:draft telemetry-relay:archived; do
-    page="${pair%%:*}" status="${pair#*:}"
-    grep -q 'data-layout="main"' "$D/projects/$page.html" || fail "dashboard $page is not on the engineering main layout"
-    grep -q "<body data-status=\"$status\">" "$D/projects/$page.html" || fail "dashboard $page body does not carry status $status"
-    # The theme styles the metadata's first entry as the status label.
-    sed -n '/<dl class="page-metadata">/,/<\/dl>/p' "$D/projects/$page.html" | sed -n 2p \
-        | grep -qF "<div><dt>Status</dt><dd>$status</dd></div>" || fail "dashboard $page shows no visible $status label"
-    grep -q "href=\"projects/$page.html\"" "$D/index.html" || fail "dashboard board does not link $page"
-done
-grep -q 'data-relation-kind="depends_on"' "$D/projects/tide-gauge-network.html" \
-    || fail "dashboard active project has no depends_on backlink"
-grep -q 'harbor-sensor-pilot' "$D/_boris/search/search-index.json" && fail "dashboard draft project leaked into search"
-pass "dashboard: home layout board; published/draft/archived labels on project pages; drafts unadvertised"
+grep -q 'application/rss+xml' "$B/dist/posts/2026-10-12-in-progress.html" \
+    && fail "blog draft post head advertises the feed"
+pass "blog: dist/feed.xml (3 items) + head autodiscovery, sitemap; draft rendered at route and held back from feed, sitemap, search, and nav"
 
 note "photo-gallery: every page's images resolve page-relative to byte-identical copies"
 G="$OUT/arch-photo-gallery"
@@ -467,61 +298,6 @@ done
 [[ "$images" == 5 ]] || fail "photo-gallery rendered $images images, expected 5"
 grep -q '<figcaption><strong>Dawn.</strong>' "$G/dist/photos/coast.html" || fail "photo-gallery figure caption did not render"
 pass "photo-gallery: home grid; 5 images at depths 0 and 1 resolve page-relative and publish byte-identical"
-
-note "blueprint: docs shell, section layouts, draft gating, relations, search, no remote URLs"
-B="$OUT/arch-blueprint"
-grep -q 'data-layout="home"' "$B/dist/index.html" || fail "blueprint index does not use the home layout"
-for page in getting-started guides reference; do
-    grep -q 'data-layout="section"' "$B/dist/$page.html" || fail "blueprint $page is not on the section layout"
-done
-for page in getting-started/installation getting-started/quick-start guides/task-graphs guides/caching guides/remote-cache reference/cli; do
-    grep -q 'data-layout="main"' "$B/dist/$page.html" || fail "blueprint $page is not on the main layout"
-done
-# Every layout carries the shell: skip link, header search, CSS-only drawer toggle.
-for page in index guides guides/caching; do
-    grep -q 'class="skip-link" href="#main-content"' "$B/dist/$page.html" || fail "blueprint $page has no skip link"
-    grep -q 'data-boris-search-ui' "$B/dist/$page.html" || fail "blueprint $page has no search UI"
-    grep -q 'id="bp-nav-toggle" type="checkbox"' "$B/dist/$page.html" || fail "blueprint $page has no CSS-only drawer toggle"
-done
-[[ -f "$B/dist/_boris/search/search-index.json" ]] || fail "blueprint published no search index"
-deck="$(sed -n '/<section class="bp-home__deck"/,/<\/section>/p' "$B/dist/index.html")"
-for page in getting-started guides reference; do
-    grep -q "href=\"$page.html\"" <<<"$deck" || fail "blueprint home deck does not list $page"
-done
-steps="$(sed -n '/<section class="bp-steps"/,/<\/section>/p' "$B/dist/guides.html")"
-for page in caching task-graphs; do
-    grep -q "href=\"guides/$page.html\"" <<<"$steps" || fail "blueprint Guides section does not list $page"
-done
-grep -q 'remote-cache' <<<"$steps" && fail "blueprint draft guide leaked into the Guides section listing"
-sed -n '/<nav class="site-nav"/,/<\/nav>/p' "$B/dist/guides/caching.html" | grep -q 'remote-cache' \
-    && fail "blueprint draft guide leaked into the sidebar"
-grep -q '"path": *"guides/remote-cache.html"' "$B/dist/_boris/search/search-index.json" && fail "blueprint draft guide leaked into search"
-grep -q '<body data-status="draft">' "$B/dist/guides/remote-cache.html" \
-    || fail "blueprint remote-cache does not carry status draft"
-grep -q 'class="bp-banner bp-banner--draft"' "$B/dist/guides/remote-cache.html" || fail "blueprint draft banner missing"
-sed -n '/<nav class="site-nav"/,/<\/nav>/p' "$B/dist/guides/caching.html" \
-    | grep -q '<li class="site-nav__satellite is-current"><a href="caching.html" aria-current="page">' \
-    || fail "blueprint sidebar does not mark the current page"
-sed -n '/<nav class="site-nav"/,/<\/nav>/p' "$B/dist/guides/caching.html" | grep -q 'is-ancestor"><a href="../guides.html"' \
-    || fail "blueprint sidebar does not mark the current section"
-grep -q '<nav class="page-toc"' "$B/dist/reference/cli.html" || fail "blueprint reference page has no on-page outline"
-grep -q '<nav class="breadcrumb"' "$B/dist/reference/cli.html" || fail "blueprint reference page has no breadcrumb"
-sed -n '/semantic-relations/,/<\/section>/p' "$B/dist/getting-started/quick-start.html" \
-    | grep -q 'data-relation-kind="depends_on".*href="installation.html"' \
-    || fail "blueprint quick-start depends_on relation did not render"
-sed -n '/semantic-backlinks/,/<\/section>/p' "$B/dist/reference/cli.html" \
-    | grep -q 'data-relation-kind="relates_to".*href="../getting-started/quick-start.html"' \
-    || fail "blueprint reference/cli has no relates_to backlink"
-for kind in note tip info warning danger; do
-    grep -rq "admonition--$kind" "$B/dist" --include='*.html' || fail "blueprint starter renders no $kind Aside"
-done
-grep -q '<details class="details"' "$B/dist/guides/caching.html" || fail "blueprint Details block did not render"
-grep -q '<kbd>' "$B/dist/getting-started/quick-start.html" || fail "blueprint kbd markup did not survive"
-grep -q 'class="table-viewport"' "$B/dist/reference/cli.html" || fail "blueprint reference table did not render"
-grep -q 'class="btn theme-secondary"' "$B/dist/index.html" || fail "blueprint hero calls to action did not survive"
-grep -rEn 'https?://|@import|<script src=' "$B/dist" --include='*.html' --include='*.css' \
-    && fail "blueprint output references a remote URL, @import, or external script"
-pass "blueprint: home + section + main layouts; drafts unadvertised; nav state, relations, every Aside kind; offline output"
 
 rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site" "$OUT/raced" "$OUT/claimed"
 for t in "${ARCHETYPES[@]}"; do rm -rf "$OUT/arch-$t" "$OUT/arch-$t-b"; done
