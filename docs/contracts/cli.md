@@ -180,76 +180,21 @@ catalog themes that fit each one.
   `themes/cards/layouts/home.html`, whose `{{children}}` deck lists the
   three recipes (each a direct satellite of `index`); selectors match
   `.cook` pages by entity id like any other input.
-- `blog` — dated posts on a parent chain (`published_at` + `summary`)
-  under `cozy`.
+- `blog` — dated posts on a parent chain (`index` → `posts` → three
+  published posts plus one `status: draft` post, each with `published_at`
+  + `summary`) under `cozy`. Its single target enables `head` (with
+  `base_url` equal to `site.url`) and declares `rss` (`feed.xml`) and
+  `sitemap` (`sitemap.xml`), so the first profile build emits
+  `dist/feed.xml` (the three published posts) and `dist/sitemap.xml`, and
+  every non-draft page head carries the feed's autodiscovery link through
+  the [single-target RSS rider](head-metadata.md#bounded-rss-rider-and-execution-boundary).
+  The `status: draft` post renders at its route for local preview while
+  staying out of `feed.xml`, `sitemap.xml`, the search index, `{{nav}}`,
+  and `{{children}}` per [status gating](html-output.md); its emitted
+  `boris.json` is the canonical `site.url` + `head` + `rss` + `sitemap`
+  composition annotated in the [profile cookbook](../profile-cookbook.md).
 - `textile` — `.textile` pages through the native adapter under `press`;
   its profile declares `"input_format": "textile"`.
-- `landing` — a single-Trunk site: one long trunk page composed from
-  `{{include}}` section fragments under `content/includes/`, plus one
-  satellite, under `service`. Its profile's `layout_rules` send `id:index`
-  to `themes/service/layouts/home.html`; other pages use the theme's
-  `main.html`.
-- `wiki` — a three-level reference tree (trunk `index` → two section hubs
-  under `wiki/` → four leaf entries) with cross-entry wiki links and one
-  semantic relation, under `reference`. Its profile's `layout_rules` send
-  `id:index` to `home.html` and `glob:wiki/*` (the hubs only) to
-  `section.html`; entries use `main.html`, whose `{{breadcrumb}}` shows
-  the full chain.
-- `link-in-bio` — the smallest starter: a single trunk page holding a
-  personal link list, under `minimal`. It proves a one-page graph still
-  validates and builds through the profile. Its profile selects
-  `themes/minimal/layouts/links.html` for `id:index`; identity and links lead
-  without a documentation menu or outline. Root `README.md` carries author
-  setup instructions instead of publishing them as visitor content.
-- `changelog` — release notes under `journal`: trunk `index` → `changes`
-  hub → dated entries with `published_at` + `summary`. One entry is
-  `status: draft` (the unreleased section): it renders at its route but is
-  excluded from the search index, RSS, and sitemap per
-  [status gating](html-output.md). Its profile's `layout_rules` send
-  `id:changes` to `themes/journal/layouts/archive.html`, whose
-  `{{children}}` listing names the published releases in id order; the
-  draft is absent from it, so the hub links the draft by hand.
-- `resume` — a single-page CV (trunk `index` with `tags`, `published_at`,
-  and `summary`) plus one "now" satellite, under `corporate`. `{{metadata}}`
-  renders the page's status and tags; the theme's `@media print` rules
-  are the PDF path.
-- `newsletter` — a weekly paper under `press`: trunk `index` → `issues`
-  hub → three dated issues (`published_at` + `summary`, one `relates_to`
-  edge). Its profile's `layout_rules` send `id:index` to `home.html`,
-  `id:issues` to `archive.html`, and `glob:issues/*` to `blog.html`. Its
-  single target enables `head` (with `base_url` equal to `site.url`) and
-  declares `rss` and `sitemap`, so the first profile build emits
-  `dist/feed.xml` (the three issues) and `dist/sitemap.xml`, and every
-  non-draft page head carries the feed's autodiscovery link through the
-  [single-target RSS rider](head-metadata.md#bounded-rss-rider-and-execution-boundary).
-  A `status: draft` issue renders but stays out of the feed and sitemap.
-  Its emitted `boris.json` is the canonical `site.url` + `head` + `rss` +
-  `sitemap` composition; the [profile cookbook](../profile-cookbook.md)
-  annotates it and the neighboring declarations.
-- `portfolio` — a studio site under `showcase`: trunk `index`, an `about`
-  satellite, and three `projects/` satellites with `published_at` +
-  `summary` (one `relates_to` edge). Its profile's `layout_rules` send
-  `id:index` to `themes/showcase/layouts/portfolio.html`, whose `{{children}}`
-  lists the `about` page and the three projects (the index carries no
-  hand-written list); every other page uses `main.html`. The collection is
-  labelled "Work & about" rather than implying a filtered project taxonomy.
-  Root `README.md` explains wiring; the public introduction stays visitor-focused.
-- `archive` — a long-lived archive under `archive`: trunk `index`, four
-  tagged `entries/` satellites joined by `relates_to` and `supersedes`
-  relations (one entry is `status: archived`), and a hand-kept `topics`
-  index by tag (Boris generates no tag pages). Entries render
-  `{{relations}}` and the `{{backlinks}}` derived from them. Its profile's
-  `layout_rules` send `id:index` to `themes/archive/layouts/archive.html`;
-  every other page uses `main.html`.
-- `dashboard` — a project-status board under `engineering`: trunk `index`
-  (the board table plus the documented mapping `published` = active,
-  `draft` = proposed, `archived` = retired) and three `projects/`
-  satellites, one per `status:` value, with `depends_on` / `supersedes`
-  relations and status-history tables. Each project page shows its status
-  as a visible label (the theme styles `{{metadata}}`'s Status entry from
-  `<body data-status="{{page-status}}">`); the draft project renders but
-  is not advertised. Its profile's `layout_rules` send `id:index` to
-  `themes/engineering/layouts/home.html`.
 - `photo-gallery` — an image gallery under `gallery`: trunk `index` with a
   cover image and two `photos/` album satellites with two images each.
   Every page keeps its PNG plates in its own sibling `{stem}.assets/`
@@ -259,22 +204,6 @@ catalog themes that fit each one.
   beside its page. Boris does no resizing or thumbnailing. Its profile's
   `layout_rules` send `id:index` to `themes/gallery/layouts/home.html`,
   whose `{{children}}` is the album grid.
-- `blueprint` — a ten-page documentation site for a fictional task
-  runner, under `blueprint`: a docs theme in the Bootstrap 6 token grammar
-  (`:root` custom properties, `.theme-*` surface classes, `light-dark()`
-  color modes; no vendored code) with a sticky search header, a `{{nav}}`
-  sidebar that becomes a CSS-only drawer on narrow screens, and a
-  collapsible `{{toc}}` rail. Trunk `index` is a landing page (hero, two
-  calls to action, a feature deck); satellites `getting-started`,
-  `guides`, and `reference` are section pages whose `{{children}}` render
-  as numbered steps, with their own satellites (installation, quick start,
-  task graphs, caching, a CLI and configuration reference) carrying every
-  Aside kind, `<Details>`, tables, code, `kbd`, `tags`, and `depends_on` /
-  `relates_to` edges. `guides/remote-cache` is `status: draft`, so it
-  renders with a draft banner but stays out of `{{nav}}`, `{{children}}`,
-  and search. Its profile's `layout_rules` send `id:index` to
-  `themes/blueprint/layouts/home.html` and the three section ids to
-  `themes/blueprint/layouts/section.html`.
 
 Each archetype ships its own theme (byte-identical to the `themes/` catalog
 copy) and a `boris.json` publication profile that declares its input format
