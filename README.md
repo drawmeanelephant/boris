@@ -184,6 +184,9 @@ Useful first commands:
 zig build test
 ```
 
+For a worked consumer of the `--watch-json` stderr NDJSON stream, see the
+[watch JSON consumer recipe](docs/watch-json-recipe.md).
+
 ### Publication targets (not the default path)
 
 The repository’s GitHub Pages publication path is documented in

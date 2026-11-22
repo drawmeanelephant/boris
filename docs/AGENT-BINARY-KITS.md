@@ -60,7 +60,8 @@ The kit README names the built-in feedback loop for the recipient:
 browser reload, `boris watch --watch-json` streams machine-readable NDJSON
 build events (including structured failure diagnostics), and
 `boris validate --watch` re-runs the zero-write validation preflight on
-every change.
+every change. For a worked stderr consumer example and the event vocabulary,
+see the [watch JSON consumer recipe](watch-json-recipe.md).
 
 The manifest records the repository commit, branch, dirty state, platform, Zig
 version, and digest for every executable. Archive inputs are sorted and have
