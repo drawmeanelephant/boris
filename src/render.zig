@@ -661,6 +661,157 @@ test "render: footnotes render with refs and a back-ref section" {
     }.run);
 }
 
+test "render: footnotes stay paired across html, xhtml, and html4_strict profiles (#1126)" {
+    const md =
+        \\Body text[^alpha].
+        \\
+        \\[^alpha]: Footnote body.
+        \\
+    ;
+
+    try withRenderProfile(md, .html, struct {
+        fn run(html: []const u8) !void {
+            try testing.expectEqualStrings(
+                "<p>Body text<sup class=\"footnote-ref\"><a href=\"#fn-1\" id=\"fnref-1\" data-footnote-ref>1</a></sup>.</p>\n" ++
+                    "<section class=\"footnotes\" data-footnotes>\n" ++
+                    "<ol>\n" ++
+                    "<li id=\"fn-1\">\n" ++
+                    "<p>Footnote body. <a href=\"#fnref-1\" class=\"footnote-backref\" data-footnote-backref data-footnote-backref-idx=\"1\" aria-label=\"Back to reference 1\">↩</a></p>\n" ++
+                    "</li>\n" ++
+                    "</ol>\n" ++
+                    "</section>\n",
+                html,
+            );
+        }
+    }.run);
+
+    try withRenderProfile(md, .xhtml, struct {
+        fn run(html: []const u8) !void {
+            try testing.expectEqualStrings(
+                "<p>Body text<sup class=\"footnote-ref\"><a href=\"#fn-1\" id=\"fnref-1\" data-footnote-ref=\"\">1</a></sup>.</p>\n" ++
+                    "<section class=\"footnotes\" data-footnotes=\"\">\n" ++
+                    "<ol>\n" ++
+                    "<li id=\"fn-1\">\n" ++
+                    "<p>Footnote body. <a href=\"#fnref-1\" class=\"footnote-backref\" data-footnote-backref=\"\" data-footnote-backref-idx=\"1\" aria-label=\"Back to reference 1\">↩</a></p>\n" ++
+                    "</li>\n" ++
+                    "</ol>\n" ++
+                    "</section>\n",
+                html,
+            );
+        }
+    }.run);
+
+    try withRenderProfile(md, .html4_strict, struct {
+        fn run(html: []const u8) !void {
+            try testing.expectEqualStrings(
+                "<p>Body text<sup class=\"footnote-ref\"><a href=\"#fn-1\" id=\"fnref-1\">1</a></sup>.</p>\n" ++
+                    "<div class=\"footnotes\">\n" ++
+                    "<ol>\n" ++
+                    "<li id=\"fn-1\">\n" ++
+                    "<p>Footnote body. <a href=\"#fnref-1\" class=\"footnote-backref\" title=\"Back to reference 1\">↩</a></p>\n" ++
+                    "</li>\n" ++
+                    "</ol>\n" ++
+                    "</div>\n",
+                html,
+            );
+        }
+    }.run);
+
+    try withPlainText(md, struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("Body text.\n\nalpha: Footnote body.\n", text);
+        }
+    }.run);
+}
+
+test "render: markdown_options stays on the explicit allowlist (not obsidian preset) (#1126)" {
+    try testing.expect(markdown_options.footnotes);
+    try testing.expect(markdown_options.definition_lists);
+    try testing.expect(markdown_options.heading_attributes);
+    try testing.expect(markdown_options.strikethrough);
+
+    inline for (@typeInfo(oliver.MarkdownOptions).@"struct".field_names) |field_name| {
+        const allowlisted =
+            std.mem.eql(u8, field_name, "footnotes") or
+            std.mem.eql(u8, field_name, "definition_lists") or
+            std.mem.eql(u8, field_name, "heading_attributes") or
+            std.mem.eql(u8, field_name, "strikethrough");
+        if (!allowlisted and @TypeOf(@field(markdown_options, field_name)) == bool) {
+            try testing.expect(!@field(markdown_options, field_name));
+        }
+    }
+}
+
+test "render: obsidian-only syntax stays literal across all output profiles (#1126)" {
+    const md =
+        \\==highlight== and $a+b$ and [[raw-link]] and ![[embed.png]] and %%comment%%.
+        \\
+        \\$$block$$
+        \\
+        \\$$
+        \\x + y
+        \\$$
+        \\
+        \\%%
+        \\hidden block
+        \\%%
+        \\
+        \\> [!note] callout
+        \\> body
+        \\
+        \\- [x] done
+        \\- [ ] todo
+        \\
+    ;
+    const expected_html =
+        \\<p>==highlight== and $a+b$ and [[raw-link]] and ![[embed.png]] and %%comment%%.</p>
+        \\<p>$$block$$</p>
+        \\<p>$$
+        \\x + y
+        \\$$</p>
+        \\<p>%%
+        \\hidden block
+        \\%%</p>
+        \\<blockquote>
+        \\<p>[!note] callout
+        \\body</p>
+        \\</blockquote>
+        \\<ul>
+        \\<li>[x] done</li>
+        \\<li>[ ] todo</li>
+        \\</ul>
+        \\
+    ;
+
+    for ([_]OutputProfile{ .html, .xhtml, .html4_strict }) |profile| {
+        try withRenderProfile(md, profile, struct {
+            fn run(html: []const u8) !void {
+                try testing.expectEqualStrings(expected_html, html);
+            }
+        }.run);
+    }
+
+    try withPlainText(md, struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings(
+                \\==highlight== and $a+b$ and [[raw-link]] and ![[embed.png]] and %%comment%%.
+                \\
+                \\$$block$$
+                \\
+                \\$$ x + y $$
+                \\
+                \\%% hidden block %%
+                \\
+                \\[!note] callout body
+                \\
+                \\• [x] done
+                \\• [ ] todo
+                \\
+            , text);
+        }
+    }.run);
+}
+
 test "render: definition lists render as dl/dt/dd" {
     try withRender(
         \\Term
@@ -685,6 +836,63 @@ test "render: GFM tables render as tables" {
         fn run(html: []const u8) !void {
             try testing.expect(std.mem.indexOf(u8, html, "<table") != null);
             try testing.expect(std.mem.indexOf(u8, html, "<td>1</td>") != null);
+        }
+    }.run);
+}
+
+test "render: GFM table delimiter forms remain intact under Oliver 1.3.0 (#1126)" {
+    const md =
+        \\| plain | left | right | center |
+        \\| --- | :- | -: | :-: |
+        \\| a | b | c | d |
+        \\
+    ;
+    const expected_html =
+        \\<table>
+        \\<thead>
+        \\<tr>
+        \\<th>plain</th>
+        \\<th align="left">left</th>
+        \\<th align="right">right</th>
+        \\<th align="center">center</th>
+        \\</tr>
+        \\</thead>
+        \\<tbody>
+        \\<tr>
+        \\<td>a</td>
+        \\<td align="left">b</td>
+        \\<td align="right">c</td>
+        \\<td align="center">d</td>
+        \\</tr>
+        \\</tbody>
+        \\</table>
+        \\
+    ;
+
+    for ([_]OutputProfile{ .html, .xhtml, .html4_strict }) |profile| {
+        try withRenderProfile(md, profile, struct {
+            fn run(html: []const u8) !void {
+                try testing.expectEqualStrings(expected_html, html);
+            }
+        }.run);
+    }
+
+    try withPlainText(md, struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("plain\tleft\tright\tcenter\na\tb\tc\td\n", text);
+        }
+    }.run);
+
+    // Delimiter cells without a colon still require at least three hyphens.
+    try withRender(
+        \\| a |
+        \\| - |
+        \\| 1 |
+        \\
+    , struct {
+        fn run(html: []const u8) !void {
+            try testing.expect(std.mem.indexOf(u8, html, "<table") == null);
+            try testing.expectEqualStrings("<p>| a |\n| - |\n| 1 |</p>\n", html);
         }
     }.run);
 }

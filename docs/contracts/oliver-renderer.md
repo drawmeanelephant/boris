@@ -104,6 +104,45 @@ The `html4-strict` target is a **whole-document** opt-in: Boris checks the
 assembled layout, generated chrome, body and proof page, not just Oliver's
 fragment. See [the HTML 4.01 Strict contract](html4-strict.md).
 
+### Explicit dialect allowlist and footnote pairing
+
+`src/render.zig` **MUST** stay on the explicit `oliver.MarkdownOptions`
+allowlist above (`footnotes`, `definition_lists`, `heading_attributes`,
+`strikethrough`) and **MUST NOT** adopt Oliver's `obsidian` parse preset
+(`oliver.markdown.obsidian` / `--obsidian`).
+
+Oliver's `obsidian` preset turns on nine extensions at once
+(`wikilinks`, `embeds`, `callouts`, `highlights`, `comments`, `math`,
+`strikethrough`, `task_lists`, `footnotes`) while leaving `definition_lists`
+and `heading_attributes` off. Adopting it would silently change existing Boris
+corpus semantics on seven constructs Boris does not delegate to Oliver:
+
+| Construct | Oliver `obsidian` behavior | Boris contract |
+|-----------|----------------------------|----------------|
+| `==x==` | `<mark>` (`highlights`) | stays literal text |
+| `$…$` / `$$…$$` | math spans and display blocks (`math`) | stays literal text |
+| `[[x]]` | Oliver-side wikilink `<a>` (`wikilinks`) | stays literal in Oliver; Boris owns wiki-link resolution upstream ([includes-and-wiki-links.md](includes-and-wiki-links.md)) |
+| `![[x]]` | Oliver embed placeholder (`embeds`) | stays literal text |
+| `%%x%%` / `%%` blocks | stripped silently (`comments`) | stays literal text |
+| `> [!x]` | callout wrapper (`callouts`) | ordinary `<blockquote>` |
+| `- [x] item` / `- [ ] item` | `<input type="checkbox">` (`task_lists`) | ordinary `<ul><li>` item |
+
+All non-allowlisted boolean options in `oliver.MarkdownOptions` (including the
+seven Obsidian-only extensions above and `smartypants`) **MUST** stay `false`
+unless a dedicated contract change and corpus audit explicitly opts one in.
+
+`parse.markdown.footnotes = true` and `render.footnotes = true` **MUST** remain
+paired in `src/render.zig` across every output profile (`.html`, `.xhtml`, and
+`.html4_strict`). Leaving `render.footnotes = false` while parsing footnotes
+suppresses the footnotes container and degrades `[^label]` references to
+bare/literal text instead of emitting numbered `<sup class="footnote-ref">`
+links paired with the rendered footnotes list (`<section class="footnotes">`
+under `.html`/`.xhtml`, `<div class="footnotes">` under `.html4_strict`).
+
+GFM table delimiter rows follow Oliver's `:?-+:?` grammar (at least three
+hyphens, or at least one hyphen when a colon is present: `| --- |`, `| :- |`,
+`| -: |`, `| :-: |`). All three invariants are pinned by `zig build test-render`.
+
 ## XHTML output profile
 
 The pinned Oliver revision carries Oliver's XHTML serializer profile
@@ -200,15 +239,17 @@ raw-HTML policy is unchanged — trusted author content passes through); GFM
 tables; hard/soft breaks; escaping; Unicode; footnotes; definition lists; GFM
 strikethrough (two-tilde runs, GFM spec §6.5).
 
-### Apex-only constructs no longer rendered (not used by published content)
+### Constructs deliberately disabled (not part of Boris's Markdown dialect)
 
-Math, callouts (`> [!NOTE]`), task lists, fenced divs (`:::`), bracket spans,
-critic markup, smart typography, and image/table captions. The
-only place these were exercised in content was the renderer showcase guide
-(`content/guides/oliver-markdown.md`), which this migration rewrote to describe
-Oliver. `> [!NOTE]`-style lines now render as ordinary blockquotes. If a future
-Boris feature genuinely needs one of these, implement the smallest principled
-feature in Oliver (with tests) and consume it through the seam — never a
+Math, callouts (`> [!NOTE]`), task lists, highlights (`==x==`), comments
+(`%%x%%`), Oliver-side wikilinks (`[[x]]`) and embeds (`![[x]]`), fenced divs
+(`:::`), bracket spans, critic markup, smart typography, and image/table
+captions. Oliver 1.3.0 ships opt-in extensions for several of these (including
+its `obsidian` preset and `smartypants`), and Boris keeps every one disabled as
+documented in [Explicit dialect allowlist and footnote pairing](#explicit-dialect-allowlist-and-footnote-pairing).
+`> [!NOTE]`-style lines render as ordinary blockquotes. If a future Boris
+feature genuinely needs one of these, opt in explicitly through the seam with a
+contract update and corpus check — never by swapping in a preset or adding a
 Boris-side parser hack.
 
 ## Determinism
