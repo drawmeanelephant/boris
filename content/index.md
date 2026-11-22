@@ -43,7 +43,7 @@ Graph-aware
   exits, not vibes — see [[reference/diagnostics|Diagnostics]].
 
 Closed on purpose
-: Eight frontmatter keys. Two components. No YAML archaeology, no MDX
+: Nine frontmatter keys. Two components. No YAML archaeology, no MDX
   runtime, no “whatever the plugin ate.” Exact rules live in the
   [[reference/frontmatter|frontmatter reference]].
 
@@ -235,6 +235,7 @@ keeps them as text. The compatibility wall is in
 | If you want to… | Start here |
 |---|---|
 | Build a first site | [[getting-started|Getting Started]] |
+| Scaffold your own starter site | [[getting-started#init|Getting Started → Start your own site]] |
 | Publish it somewhere real | [[guides/publishing|Publishing Workflows]] |
 | Create pages and links | [[guides/building-pages|Building Pages]] |
 | Understand nested hierarchy | [[guides/trunk-satellite|Trunk & Satellite]] |

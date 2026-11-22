@@ -29,7 +29,7 @@ Fail-Loud Graph Freeze
 
 ## Why Zig?
 
-Boris is written in Zig 0.16. Zig was chosen for three properties that matter directly to a publication compiler:
+Boris is written in Zig 0.17. Zig was chosen for three properties that matter directly to a publication compiler:
 
 **Deterministic per-page scratch.** Zig has no garbage collector, and Boris
 controls its rendering scratch with a per-page arena that is reset after each

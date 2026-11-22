@@ -247,13 +247,18 @@ locally predicts the deploy.
 ./zig-out/bin/boris init my-site
 ```
 
-`init [DIR]` materializes a fixed starter tree — three content pages that
-exercise the graph, a closed-slot theme whose layout ships the rendered-search
-client, and the two publication profiles — and then compiles it through the
-normal HTML pipeline into a probe directory that is removed again. `DIR` must
-be empty or not exist, and the tree is byte-deterministic. Exit `0` means the
-starter was both materialized and compiled; a probe failure removes the tree
-and exits `1`, and a target outside the workspace skips the probe and says so.
+`init [DIR] [--type NAME]` materializes a deterministic starter site and
+verifies that it compiles. `--type` selects one of six archetypes — `docs`
+(the default), `garden`, `cookbook`, `blog`, `textile`, and `photo-gallery` —
+and each writes its own theme plus a `boris.json` publication profile, so
+`boris --profile boris.json` builds the fresh tree out of the box. `boris
+init --help` prints a one-line description of each archetype.
+
+After materializing, `init` compiles the fresh tree through the normal HTML
+pipeline into a probe directory that is removed again. `DIR` must be empty or
+not exist, and the tree is byte-deterministic. Exit `0` means the starter was
+both materialized and compiled; a probe failure removes the tree and exits
+`1`, and a target outside the workspace skips the probe and says so.
 
 ## Publication profiles
 

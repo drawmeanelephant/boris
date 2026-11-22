@@ -87,7 +87,7 @@ html4-strict — gained a distinct voice of their own.
   excluded from [rendered search](/docs/contracts/rendered-search.md) as
   compiler chrome.
 
-- `boris init [DIR] [--type NAME]` materializes five deterministic,
+- `boris init [DIR] [--type NAME]` materializes the first five deterministic,
   compile-verified starter archetypes: `docs` (the unchanged default),
   `garden` (dense wiki links, semantic relations, `{{include}}`
   composition, and a registered `<Aside>` under the `ledger` theme),

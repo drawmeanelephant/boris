@@ -24,7 +24,7 @@ usage conflicts use exit `2`; I/O and system failures use exit `3`.
 
 | Code | Meaning | First action |
 |---|---|---|
-| `EFRONTMATTER` | Closed frontmatter syntax, unknown key, duplicate key, or value error | Compare the file with [[reference/frontmatter|the eight-key grammar]] |
+| `EFRONTMATTER` | Closed frontmatter syntax, unknown key, duplicate key, or value error | Compare the file with [[reference/frontmatter|the nine-key grammar]] |
 | `EINVALIDUTF8` | Source, layout, or other input is not valid UTF-8 | Rewrite the file as UTF-8 without a leading BOM |
 | `EINVALIDPATH` | Entity id, input path, or output path violates path rules | Use `/`-separated non-empty safe segments |
 | `EPARENTMISSING` | `parent` names no discovered page | Use the exact parent entity id |

@@ -162,7 +162,7 @@ error: EFRONTMATTER: content/page.md:4:1: unknown key "sidebar_position"
 
 1. Run `boris validate --input content` to exercise the HTML compiler path
    without writing output.
-2. Remove unknown keys or rewrite them using the eight-key grammar above.
+2. Remove unknown keys or rewrite them using the nine-key grammar above.
 3. Run `boris build` once the preflight is clean.
 
 Use `boris check` for graph-health analysis after compiler validation; it is not

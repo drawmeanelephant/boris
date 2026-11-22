@@ -60,7 +60,7 @@ MDX allows embedding arbitrary JavaScript components inside Markdown. While flex
 
 ### Bounded authoring
 - **Rich, Safe Authoring:** Boris supports rich components like callout Aside blocks (`&lt;Aside kind="tip"&gt;`), wiki-links (`[[getting-started]]`), and transclusion (`{{include includes/shared-tip.md}}`) directly in native Markdown without executing client-side or build-side JavaScript.
-- **Closed Frontmatter Grammar:** Enforces eight documented keys (`id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, `summary`). Malformed or legacy keys raise clear diagnostic errors (`EFRONTMATTER`) instead of silently ignoring bad fields.
+- **Closed Frontmatter Grammar:** Enforces nine documented keys (`id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, `summary`, `servings`). Malformed or legacy keys raise clear diagnostic errors (`EFRONTMATTER`) instead of silently ignoring bad fields.
 
 ---
 

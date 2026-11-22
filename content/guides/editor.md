@@ -182,8 +182,7 @@ uses that facet, not a second renderer.
 Quantities stay the strings the author wrote. **Scale factor** plus **Scale
 recipe** asks `boris recipe-scale` and shows the derived view next to the
 authored amounts. **Reset scale** drops that view. Neither button writes the
-`.cook` file
-([issue 554](https://github.com/drawmeanelephant/boris/issues/554) S3).
+`.cook` file; scaling stays compiler-owned ([[guides/cooklang]]).
 Graph diagnostics that are not `ECOOKLANG` are marked **position
 approximate** because Boris locates them on adapted Markdown.
 
@@ -283,7 +282,7 @@ and what is a deliberate non-goal. The developer copy lives in the
 | Watch daemon | `boris watch --input content --html-dir dist --watch-json` | partial | NDJSON event stream |
 | IR / RAG / context / llms / rss / sitemap | — | missing | stay on the CLI |
 | `standard-site *` / `nostr *` publish or login | — | non-goal | no secrets, no deploy |
-| `init`, full build flag matrix, `serve` | — | non-goal | preview is the `serve` fallback |
+| `init`, full build flag matrix, `watch --serve` | — | non-goal | `watch --serve` is the compiler-owned server |
 
 Boris exit codes stay distinct: **1** content/graph failure, **2**
 usage/configuration failure, **3** I/O/system failure. The editor surfaces the
@@ -336,9 +335,11 @@ the preview iframe advances only on success. Embedded preview content is
 sandboxed; a named link opens the exact site origin in a new tab for full
 behavior.
 
-While the compiler-owned `boris serve` command is still in flight, this is an
-honest fallback: failures show bounded Boris stderr and say so. There is no
-HMR, CSS injection, watcher, or typing-triggered build.
+`boris watch --serve` is the compiler-owned loopback server with automatic
+browser reload; the editor preview is the authoring-side counterpart: it
+serves the committed `dist/` output and rebuilds only on explicit save or the
+button, and failures show bounded Boris stderr and say so. There is no HMR,
+CSS injection, watcher, or typing-triggered build.
 
 ---
 
@@ -350,8 +351,7 @@ HMR, CSS injection, watcher, or typing-triggered build.
 - No preview daemon or renderer: a fixed, visible rebuild command only.
 - No deploy, deployment secrets, or hosting dashboard.
 - This editor does not classify or multiply recipe amounts locally. Scale
-  recipe only spawns `boris recipe-scale`
-  ([issue 554](https://github.com/drawmeanelephant/boris/issues/554) S3).
+  recipe only spawns `boris recipe-scale` ([[guides/cooklang]]).
 - No layout diagnostics or autofix.
 
 When a capability is missing, the editor says so instead of guessing — the

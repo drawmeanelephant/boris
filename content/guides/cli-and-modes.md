@@ -35,6 +35,10 @@ check` is graph-health analysis, not an alias for validation.
 | `boris nostr plan` | What is the offline NIP-23 publication plan for this profile? | Plan JSON on stdout |
 | `boris nostr sign` | Sign the plan into a signed-event bundle (key once via stdin) | Bundle JSON on stdout or `--out PATH` |
 | `boris nostr publish` | Deliver the signed events to the plan's relays | Report JSON on stdout or `--out PATH` |
+| `boris recipe-scale --id PAGE --factor TEXT` | What is this Cooklang recipe scaled to? | View JSON on stdout or `--out PATH` |
+| `boris graph` | What does the frozen content graph look like? | Mermaid/DOT render on stdout or `--out PATH` |
+| `boris proof verify` | Does a committed `checks.json` pass the publication-check policy? | Verdict report on stderr |
+| `boris init [DIR]` | What starter tree materializes here? (`--type` picks one of six archetypes) | A starter tree into `DIR` (must be empty) |
 
 > Pick the command that matches the question. `validate` is not `check`.
 > `plan` does not publish. `standard-site` and `nostr` are families, not
