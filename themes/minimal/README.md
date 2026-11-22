@@ -21,13 +21,13 @@ Build the specimen from a Boris checkout:
 ## Named layouts
 
 `main.html` remains Corporate's comparable documentation shell without search.
-`links.html` is the focused one-page front selected by `boris init --type
-link-in-bio`: the authored identity and link rows lead, with no redundant
-menu, breadcrumb, metadata line or outline rail.
+`links.html` is a focused one-page link front: the authored identity and
+link rows lead, with no redundant menu, breadcrumb, metadata line or
+outline rail.
 
 Select it for an index with
-`--layout-rule default id:index themes/minimal/layouts/links.html`. The
-starter's profile already declares that rule. Other pages still use `main`.
+`--layout-rule default id:index themes/minimal/layouts/links.html` (or the
+equivalent `layout_rules` entry in `boris.json`). Other pages still use `main`.
 As a `portfolio` alternate, `main` continues to list work through `{{children}}`.
 Use top-level Markdown lists for link rows (one link per item, tight or loose);
 contextual inline links belong in paragraphs outside those lists.

@@ -1,7 +1,7 @@
 # Accessibility notes
 
-What Blueprint guarantees, checked against the built output of the
-`boris init --type blueprint` starter and `assets/css/blueprint.css`.
+What Blueprint guarantees, checked against built output from its layouts
+and `assets/css/blueprint.css`.
 Blueprint uses real landmarks, native controls, and the compiler's own
 generated links. The docs-site behavior is CSS, not a simulated
 application.

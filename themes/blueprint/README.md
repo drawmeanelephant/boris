@@ -38,7 +38,7 @@ is skipped where `::details-content` is unsupported.
   `{{children}}` deck, with the sidebar in the drawer at every width)
 - Stylesheet: [`assets/css/blueprint.css`](assets/css/blueprint.css)
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
-- Specimen: the `boris init --type blueprint` tree, a ten-page docs site
+- Specimen: [`examples/studies-site/`](https://github.com/drawmeanelephant/boris/tree/main/examples/studies-site/) with `home.html` / `section.html` layout rules
 
 ## Selecting it
 

@@ -26,8 +26,8 @@ Build the specimen from a Boris checkout:
 The `portfolio` layout leads with the authored studio introduction and its
 compiler-owned child collection, without the generic masthead, full site
 index, metadata card or outline. Select it with
-`--layout-rule default id:index themes/showcase/layouts/portfolio.html`;
-`boris init --type portfolio` declares this rule in its profile.
+`--layout-rule default id:index themes/showcase/layouts/portfolio.html`
+(or the equivalent `layout_rules` entry in `boris.json`).
 The collection is labelled "Work & about": About and projects are all direct
 children, not a filtered taxonomy or a second hand-maintained list.
 Generic home/docs/blog layouts remain unchanged. Only the portfolio layout
