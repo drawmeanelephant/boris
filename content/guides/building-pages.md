@@ -34,8 +34,9 @@ its extension, becomes the entity id and HTML output path by default:
 
 Frontmatter is optional and deliberately closed. The accepted author-facing
 keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`,
-and `summary`. `title` is optional; if it is absent, the compiler keeps it
-unset rather than inventing one from the filename.
+`summary`, and `servings` (the Cooklang-convention recipe key). `title` is
+optional; if it is absent, the compiler keeps it unset rather than inventing
+one from the filename.
 
 ```markdown
 ---

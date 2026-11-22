@@ -42,7 +42,7 @@ stay scannable on purpose.
 ## Product boundaries
 
 - Boris frontmatter is closed: `id`, `title`, `parent`, `status`, `tags`,
-  `relations`, `published_at`, and `summary`.
+  `relations`, `published_at`, `summary`, and `servings`.
 - `&lt;Aside&gt;` and `&lt;Details&gt;` are the only registered PascalCase components.
 - `[[entity-id]]`, include directives, and component tokens are handled in the
   compiler pipeline around the renderer; they are not arbitrary MDX.

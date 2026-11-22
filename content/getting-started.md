@@ -28,7 +28,7 @@ index command for a normal Boris build.
 
 Building Boris itself requires:
 
-- **Zig 0.16+** — the compiler language Boris is written in. Markdown
+- **Zig 0.17+** — the compiler language Boris is written in. Markdown
   rendering uses the Oliver library, pinned in `build.zig.zon` and fetched by
   Zig at build time — no CMake or other host tools are required.
 
@@ -40,7 +40,23 @@ zig build
 
 The binary is written to `./zig-out/bin/boris`.
 
-## 2. Inspect the sample content {#inspect}
+## 2. Start your own site {#init}
+
+```bash
+./zig-out/bin/boris init my-site
+cd my-site
+../zig-out/bin/boris --quiet
+```
+
+`init` writes a deterministic starter site into `my-site` and compiles it
+once to prove it builds. `--type` selects one of six archetypes — `docs` is
+the default — and each ships its own theme and `boris.json` profile, so
+`boris --profile boris.json` builds the tree too. Use `boris watch --serve`
+for a rebuild-and-preview loop while you edit.
+
+The steps below tour the sample content bundled in this repository instead.
+
+## 3. Inspect the sample content {#inspect}
 
 Pages are ordinary Markdown files under `content/`. The path without its
 extension is normally the page's entity id: `content/guides/overview.md`
@@ -49,7 +65,7 @@ becomes `guides/overview`. Start with
 [[guides/oliver-markdown|the Markdown showcase]] if you want to see what
 Oliver will actually render.
 
-## 3. Preflight without publishing {#preflight}
+## 4. Preflight without publishing {#preflight}
 
 ```bash
 ./zig-out/bin/boris validate --quiet
@@ -68,7 +84,7 @@ ask “is this graph healthy?”
 
 </Aside>
 
-## 4. Publish the static site {#publish-local}
+## 5. Publish the static site {#publish-local}
 
 ```bash
 ./zig-out/bin/boris build --quiet
@@ -80,7 +96,7 @@ browser search UI to fetch its same-origin index.
 
 {{include includes/publish-first.md}}
 
-## 5. Then choose a hosted target {#hosted}
+## 6. Then choose a hosted target {#hosted}
 
 Local `dist/` is the default. It is not the only exit.
 
