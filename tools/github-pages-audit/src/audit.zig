@@ -246,7 +246,12 @@ pub fn parsePlan(
         else => return error.InvalidPlan,
     };
     if (!std.mem.eql(u8, try valueString(root, "format"), "boris-publication-plan")) return error.InvalidPlan;
-    if (try requiredInteger(root, "schema_version") != 1) return error.InvalidPlan;
+    // Schemas 2 (nostr.auth) and 3 (target head/html_profile) only add
+    // declarations the observer does not read; every field below is unchanged.
+    switch (try requiredInteger(root, "schema_version")) {
+        1, 2, 3 => {},
+        else => return error.InvalidPlan,
+    }
 
     const publication_value = root.get("publication") orelse return error.InvalidPlan;
     const publication = switch (publication_value) {
@@ -1656,6 +1661,25 @@ pub fn renderEvidence(gpa: std.mem.Allocator, report: *const Report) ![]u8 {
     }
     try out.appendSlice(gpa, "\n  ]\n}\n");
     return out.toOwnedSlice(gpa);
+}
+
+test "parsePlan accepts head-bearing schema 3 plans and rejects unknown schemas" {
+    const gpa = std.testing.allocator;
+    const v3 =
+        \\{"format":"boris-publication-plan","schema_version":3,
+        \\"publication":{"target":"github-pages","base_url":"https://owner.github.io/boris","origin":"https://owner.github.io","base_path":"/boris"},
+        \\"targets":[{"name":"public","public":true,
+        \\"projections":{"html":true,"sitemap":{"path":"sitemap.xml"},"rss":null,"llms":null,"static":{"dir":"static"}},
+        \\"head":{"enabled":true,"base_url":"https://owner.github.io/boris","ogp":"optional","pages":[]}}]}
+    ;
+    var plan = try parsePlan(gpa, v3, "public");
+    defer plan.deinit();
+    try std.testing.expectEqualStrings("public", plan.target);
+    try std.testing.expectEqualStrings("sitemap.xml", plan.projections.sitemap.?);
+
+    const v4 = try std.mem.replaceOwned(u8, gpa, v3, "\"schema_version\":3", "\"schema_version\":4");
+    defer gpa.free(v4);
+    try std.testing.expectError(error.InvalidPlan, parsePlan(gpa, v4, "public"));
 }
 
 test "deployment location accepts project, root, and custom Pages identities" {
