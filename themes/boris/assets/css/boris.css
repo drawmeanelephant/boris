@@ -172,6 +172,10 @@ main > h1 + p, main > p:first-of-type:not(.eyebrow) { font-size: 1.15em; color: 
 .semantic-relations li::before { margin-right: 0.45rem; }
 .semantic-backlinks li::after { margin-left: 0.45rem; }
 .site-footer { max-width: var(--reading-width); padding: 1rem 0; color: var(--muted); font-size: 0.8rem; }
+.site-footer__sites { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.75rem; margin: 0 0 0.4rem; }
+.site-footer__label { font-weight: 700; }
+.site-footer__sites ul { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; margin: 0; padding: 0; list-style: none; }
+.site-footer__stamp { margin: 0; }
 
 @media (min-width: 48rem) {
   body { display: grid; grid-template-areas: "nav breadcrumb" "nav toc" "nav main" "nav footer"; grid-template-columns: 17rem minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; align-items: start; column-gap: clamp(1.5rem, 4vw, 4rem); row-gap: 1rem; }

@@ -139,6 +139,14 @@ pub fn classify(
             error.OutOfMemory => return error.OutOfMemory,
         };
         allocator.free(normalized);
+        // A project site shares its origin with sibling project sites
+        // (`owner.github.io/other/`); an ordinary hyperlink there is external.
+        if (!require_public) {
+            _ = stripPublicationBase(location, raw[origin_end..end]) catch |err| switch (err) {
+                error.BasePathMismatch => return .external,
+                else => return err,
+            };
+        }
         return .{ .publication = try makeRoute(allocator, location, raw[origin_end..end], raw[end..]) };
     }
 
@@ -227,6 +235,22 @@ test "wrong origins are external links unless a public URL is required" {
     try std.testing.expectEqual(Classification.external, try classify(gpa, &location, "https://www.github.io/boris/start.html", false));
     try std.testing.expectError(error.OriginMismatch, classify(gpa, &location, "https://www.github.io/boris/start.html", true));
     try std.testing.expectError(error.BasePathMismatch, classify(gpa, &location, "https://owner.github.io/other/start.html", true));
+}
+
+test "same-origin sibling project sites are external hyperlinks, not public URLs" {
+    const gpa = std.testing.allocator;
+    var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
+    defer location.deinit(gpa);
+    try std.testing.expectEqual(Classification.external, try classify(gpa, &location, "https://owner.github.io/oliver/", false));
+    try std.testing.expectEqual(Classification.external, try classify(gpa, &location, "https://owner.github.io/borisx/start.html", false));
+    try std.testing.expectError(error.BasePathMismatch, classify(gpa, &location, "https://owner.github.io/oliver/", true));
+    try std.testing.expectError(error.BasePathMismatch, classify(gpa, &location, "/oliver/", false));
+    const own = try classify(gpa, &location, "https://owner.github.io/boris/guides/start.html", false);
+    defer switch (own) {
+        .publication => |route| gpa.free(route),
+        else => {},
+    };
+    try std.testing.expectEqualStrings("/guides/start.html", own.publication);
 }
 
 test "projection site URLs must equal the normalized publication identity" {

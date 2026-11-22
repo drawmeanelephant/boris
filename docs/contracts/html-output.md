@@ -94,7 +94,10 @@ requires that:
 - a root-relative local URL includes the declared `base_path` for a project
   site and is stripped back to a target-relative route before manifest checking;
 - same-origin absolute URLs and Boris-owned canonical/public metadata use the
-  declared origin and base path;
+  declared origin and base path, except that an ordinary hyperlink to a
+  same-origin absolute URL outside a project site's `base_path` (a sibling
+  project site such as `https://owner.github.io/oliver/` from `/boris/`) is an
+  external link; root-relative URLs and public metadata stay strict;
 - the first effective `<base href>` is validated against the declared location
   and becomes the resolution base for later relative, query-only,
   fragment-only, and empty-reference URLs; when those latter references use a

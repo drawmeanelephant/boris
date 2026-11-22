@@ -1901,3 +1901,11 @@ test "concurrent materialize on one target: at most one run writes" {
         try std.testing.expect((try it.next(io)) == null);
     }
 }
+
+test "boris theme footer stamps the current product version" {
+    const pipeline = @import("pipeline.zig");
+    const stamp = "Boris " ++ pipeline.boris_version ++ "</a>";
+    const release = "/releases/tag/v" ++ pipeline.boris_version ++ "\"";
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.boris_footer, stamp) != null);
+    try std.testing.expect(std.mem.indexOf(u8, archetype_themes.boris_footer, release) != null);
+}
