@@ -211,12 +211,13 @@ pub const Options = struct {
     report_path: ?[]const u8 = null,
     /// Make ordinary unreferenced-page analysis findings fatal for `check`.
     fail_on_unreferenced: bool = false,
-    /// Advisory-finding policy opt-ins for `check` (#1023); each flag makes
-    /// its finding class fatal. All are informational without a flag.
+    /// Advisory-finding policy opt-ins for `check` (#1023, #1163); each flag
+    /// makes its finding class fatal. All are informational without a flag.
     fail_on_unlinked: bool = false,
     fail_on_flat_graph: bool = false,
     fail_on_zero_includes: bool = false,
     fail_on_zero_relations: bool = false,
+    fail_on_draft: bool = false,
     mode: Mode = .html,
     /// Explicit whole-tree authoring format (Markdown remains the default).
     input_format: identity.InputFormat = .markdown,
@@ -653,6 +654,7 @@ const ParseState = struct {
     saw_fail_on_flat_graph: bool = false,
     saw_fail_on_zero_includes: bool = false,
     saw_fail_on_zero_relations: bool = false,
+    saw_fail_on_draft: bool = false,
     saw_profile: bool = false,
 
     // Analysis commands (`check` / `impact`) and their shared flags.
@@ -664,6 +666,7 @@ const ParseState = struct {
     fail_on_flat_graph: bool = false,
     fail_on_zero_includes: bool = false,
     fail_on_zero_relations: bool = false,
+    fail_on_draft: bool = false,
 
     // `init [DIR]` positional and its `--type NAME` archetype selector.
     init_dir: ?[]const u8 = null,
@@ -801,11 +804,11 @@ const ParseState = struct {
         return st.saw_rss or st.saw_rss_path;
     }
 
-    /// Any `check`-only finding-policy flag (`--fail-on-*`, #1023).
+    /// Any `check`-only finding-policy flag (`--fail-on-*`, #1023, #1163).
     fn sawCheckPolicyFlag(st: *const ParseState) bool {
         return st.saw_fail_on_unreferenced or st.saw_fail_on_unlinked or
             st.saw_fail_on_flat_graph or st.saw_fail_on_zero_includes or
-            st.saw_fail_on_zero_relations;
+            st.saw_fail_on_zero_relations or st.saw_fail_on_draft;
     }
 
     fn sawPagesLocation(st: *const ParseState) bool {
@@ -1446,6 +1449,12 @@ fn parseAnalysisFlags(
         st.fail_on_zero_relations = true;
         return true;
     }
+
+    if (std.mem.eql(u8, a, "--fail-on-draft")) {
+        try markSaw(&st.saw_fail_on_draft);
+        st.fail_on_draft = true;
+        return true;
+    }
     return false;
 }
 
@@ -2069,6 +2078,7 @@ fn buildProofVerifyOptions(st: *ParseState) ParseError!Options {
         .{ .token = "--fail-on-flat-graph", .triggered = st.saw_fail_on_flat_graph },
         .{ .token = "--fail-on-zero-includes", .triggered = st.saw_fail_on_zero_includes },
         .{ .token = "--fail-on-zero-relations", .triggered = st.saw_fail_on_zero_relations },
+        .{ .token = "--fail-on-draft", .triggered = st.saw_fail_on_draft },
     });
     if (scan.triggered == 1) return failConflict(st, commandWord(st.command), scan.offender);
     if (scan.triggered > 1) return error.ConflictingFlags;
@@ -2704,6 +2714,7 @@ fn buildOptionsForMode(
             o.fail_on_flat_graph = st.fail_on_flat_graph;
             o.fail_on_zero_includes = st.fail_on_zero_includes;
             o.fail_on_zero_relations = st.fail_on_zero_relations;
+            o.fail_on_draft = st.fail_on_draft;
             o.sitemap_path = if (st.wantsSitemap()) st.sitemap_path else null;
             o.static_dir = if (st.wantsStatic()) st.static_dir else null;
             o.site_url = st.site_url;
@@ -2903,6 +2914,7 @@ pub const usage_text =
     \\  --fail-on-flat-graph  Make check fail on a flat-corpus advisory
     \\  --fail-on-zero-includes Make check fail when the corpus uses no includes
     \\  --fail-on-zero-relations Make check fail when the corpus uses no references
+    \\  --fail-on-draft       Make check fail when it reports draft pages
     \\  --profile PATH      Selected publication profile for plan/build/watch/validate
     \\  --id PAGE            Recipe page entity id (`recipe-scale`; required)
     \\  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; exclusive with --servings)
@@ -3251,6 +3263,7 @@ const never_blamed_flags = [_][]const u8{
     "--fail-on-flat-graph",
     "--fail-on-zero-includes",
     "--fail-on-zero-relations",
+    "--fail-on-draft",
     "--context",
     "--bundles-only",
     "--complete",
@@ -3413,18 +3426,24 @@ test "parse: documentation intelligence commands" {
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unreferenced", "--fail-on-unreferenced" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unreferenced", "--out", ".boris" }));
 
-    // Advisory-finding policy flags (#1023): all check-only opt-ins.
-    var advisory = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unlinked", "--fail-on-flat-graph", "--fail-on-zero-includes", "--fail-on-zero-relations" });
+    // Advisory-finding policy flags (#1023, #1163): all check-only opt-ins.
+    var advisory = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unlinked", "--fail-on-flat-graph", "--fail-on-zero-includes", "--fail-on-zero-relations", "--fail-on-draft" });
     defer advisory.deinit(std.testing.allocator);
     try expect(advisory.fail_on_unlinked);
     try expect(advisory.fail_on_flat_graph);
     try expect(advisory.fail_on_zero_includes);
     try expect(advisory.fail_on_zero_relations);
+    try expect(advisory.fail_on_draft);
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unlinked", "--fail-on-unlinked" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-draft", "--fail-on-draft" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--fail-on-flat-graph" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--fail-on-draft" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--fail-on-zero-includes" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--fail-on-draft" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--fail-on-zero-relations" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "graph", "--fail-on-draft" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--fail-on-flat-graph" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--fail-on-draft" }));
 
     var impact = try parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--quiet" });
     defer impact.deinit(std.testing.allocator);
