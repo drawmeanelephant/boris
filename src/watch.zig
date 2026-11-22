@@ -1590,9 +1590,24 @@ pub const WatchCoordinator = struct {
             .diagnostics = c.list.items,
         }) catch return;
         defer self.gpa.free(rendered);
-        Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = rendered }) catch |err| {
-            std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+        writeFileAtomic(self.io, self.gpa, path, rendered) catch {
+            Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = rendered }) catch |err| {
+                std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+            };
         };
+    }
+
+    fn writeFileAtomic(io: Io, gpa: std.mem.Allocator, path: []const u8, data: []const u8) !void {
+        const tmp_path = try std.fmt.allocPrint(gpa, "{s}.tmp", .{path});
+        defer gpa.free(tmp_path);
+        const cwd = Io.Dir.cwd();
+        try cwd.writeFile(io, .{ .sub_path = tmp_path, .data = data });
+        errdefer cwd.deleteFile(io, tmp_path) catch {};
+        if (std.fs.path.isAbsolute(tmp_path) and std.fs.path.isAbsolute(path)) {
+            try Io.Dir.renameAbsolute(tmp_path, path, io);
+        } else {
+            try cwd.rename(tmp_path, cwd, path, io);
+        }
     }
 
     /// Drain pending paths (sorted for deterministic logging), then rebuild.
@@ -2911,4 +2926,30 @@ fn readWatchTreeFile(io: Io, gpa: std.mem.Allocator, root_rel: []const u8, rel: 
     defer file.close(io);
     var reader = file.reader(io, &.{});
     return try reader.interface.allocRemaining(gpa, .unlimited);
+}
+
+test "WatchCoordinator.writeFileAtomic replaces report atomically without leaving a temp file" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir_abs = try tmp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(dir_abs);
+    const report_path = try std.fmt.allocPrint(gpa, "{s}/html-build-report.json", .{dir_abs});
+    defer gpa.free(report_path);
+    const tmp_path = try std.fmt.allocPrint(gpa, "{s}.tmp", .{report_path});
+    defer gpa.free(tmp_path);
+
+    try WatchCoordinator.writeFileAtomic(io, gpa, report_path, "{\"ok\":true}");
+    const first = try Io.Dir.cwd().readFileAlloc(io, report_path, gpa, .limited(4096));
+    defer gpa.free(first);
+    try std.testing.expectEqualStrings("{\"ok\":true}", first);
+    try std.testing.expectError(error.FileNotFound, Io.Dir.cwd().access(io, tmp_path, .{}));
+
+    try WatchCoordinator.writeFileAtomic(io, gpa, report_path, "{\"ok\":false,\"errorCount\":1}");
+    const second = try Io.Dir.cwd().readFileAlloc(io, report_path, gpa, .limited(4096));
+    defer gpa.free(second);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"errorCount\":1}", second);
+    try std.testing.expectError(error.FileNotFound, Io.Dir.cwd().access(io, tmp_path, .{}));
 }

@@ -293,10 +293,13 @@ pub const Daemon = struct {
         const compiler_id = self.compiler_id orelse return;
         const bytes = self.readReport(self.gpa) catch return;
         defer self.gpa.free(bytes);
-        _ = self.result_arena.reset(.retain_capacity);
-        const stored = self.result_arena.allocator().create(runner.Result) catch return;
+        var next_arena: std.heap.ArenaAllocator = .init(self.gpa);
+        const stored = next_arena.allocator().create(runner.Result) catch {
+            next_arena.deinit();
+            return;
+        };
         stored.* = runner.resultFromReport(
-            self.result_arena.allocator(),
+            next_arena.allocator(),
             .{
                 .project_root = self.config.project_root,
                 .boris_path = self.config.boris_path,
@@ -304,7 +307,12 @@ pub const Daemon = struct {
             },
             compiler_id,
             bytes,
-        ) catch return;
+        ) catch {
+            next_arena.deinit();
+            return;
+        };
+        self.result_arena.deinit();
+        self.result_arena = next_arena;
         self.latest = stored;
         self.last_signature = signature;
         self.cycle += 1;
@@ -370,8 +378,16 @@ pub const Daemon = struct {
     fn hasPendingCycle(self: *Daemon) bool {
         const activity = self.activity_at orelse return false;
         if (self.nowNs() - activity > activity_window_ns) return false;
-        const current = self.reportSignature() catch null;
         const at = self.activity_signature;
+        if (self.last_signature) |last| {
+            if (at) |saved| {
+                return last.mtime.nanoseconds == saved.mtime.nanoseconds and last.size == saved.size;
+            }
+            const current = self.reportSignature() catch null;
+            if (current == null) return true;
+            return last.mtime.nanoseconds != current.?.mtime.nanoseconds or last.size != current.?.size;
+        }
+        const current = self.reportSignature() catch null;
         if (at == null) return current == null;
         if (current == null) return true;
         return current.?.mtime.nanoseconds == at.?.mtime.nanoseconds and current.?.size == at.?.size;
@@ -604,4 +620,89 @@ test "reaped statuses convert to the contracted term shape" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 3 }, exited);
     const signaled = termFromStatus(9);
     try std.testing.expect(signaled == .signal);
+}
+
+test "torn report rewrite preserves the last valid result and stateJson" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    const root_path = try temp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(root_path);
+
+    try temp.dir.createDir(io, ".boris", .default_dir);
+    const valid_ok =
+        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/test","ok":true,"contentRoot":"content","outDir":"dist","errorCount":0,"diagnostics":[]}
+    ;
+    const valid_fail =
+        \\{"schemaVersion":"html-build-report-0.2.0","compilerId":"boris/test","ok":false,"contentRoot":"content","outDir":"dist","errorCount":1,"diagnostics":[{"severity":"error","code":"EDUPLICATEID","message":"b.md:1:1: duplicate id","remediation":"use unique ids","sourcePath":"b.md","line":1,"column":1,"id":null}]}
+    ;
+    try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = valid_ok });
+
+    var daemon: Daemon = .init(gpa, io, .{
+        .project_root = root_path,
+        .boris_path = "boris",
+        .editor_id = "boris-editor/test",
+        .input_mode = .markdown,
+    });
+    defer daemon.deinit();
+    daemon.watch_supported = true;
+    daemon.compiler_id = try gpa.dupe(u8, "boris/test");
+
+    // Initial valid cycle populates `latest` inside `result_arena`.
+    const initial_json = try daemon.stateJson(gpa);
+    defer gpa.free(initial_json);
+    try std.testing.expectEqual(@as(u64, 1), daemon.cycle);
+    try std.testing.expectEqual(State.success, daemon.state);
+    try std.testing.expect(std.mem.indexOf(u8, initial_json, "\"failure_class\":\"success\"") != null);
+
+    // Simulate a torn in-place rewrite (truncated to 0 bytes, then partial JSON).
+    // Both change the file signature and fail JSON parsing; `latest` must stay
+    // intact instead of pointing into a reset/poisoned arena.
+    Io.sleep(io, .{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake) catch {};
+    try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = "" });
+    const torn_empty_json = try daemon.stateJson(gpa);
+    defer gpa.free(torn_empty_json);
+    try std.testing.expectEqual(@as(u64, 1), daemon.cycle);
+    try std.testing.expect(std.mem.indexOf(u8, torn_empty_json, "\"failure_class\":\"success\"") != null);
+
+    Io.sleep(io, .{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake) catch {};
+    try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = "{\"schemaVersion\":\"html-build" });
+    const torn_partial_json = try daemon.stateJson(gpa);
+    defer gpa.free(torn_partial_json);
+    try std.testing.expectEqual(@as(u64, 1), daemon.cycle);
+    try std.testing.expect(std.mem.indexOf(u8, torn_partial_json, "\"failure_class\":\"success\"") != null);
+
+    // Once the complete report lands, the next poll parses it and advances the cycle.
+    Io.sleep(io, .{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake) catch {};
+    try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = valid_fail });
+    const failed_json = try daemon.stateJson(gpa);
+    defer gpa.free(failed_json);
+    try std.testing.expectEqual(@as(u64, 2), daemon.cycle);
+    try std.testing.expectEqual(State.failed, daemon.state);
+    try std.testing.expect(std.mem.indexOf(u8, failed_json, "\"failure_class\":\"content\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, failed_json, "\"problems_count\":1") != null);
+
+    // Torn write after a failed cycle with diagnostics also keeps the cached
+    // problems slice valid and does not prematurely clear a pending post-save cycle.
+    daemon.noteSave();
+    try std.testing.expect(daemon.hasPendingCycle());
+    Io.sleep(io, .{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake) catch {};
+    try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = "" });
+    const torn_after_fail_json = try daemon.stateJson(gpa);
+    defer gpa.free(torn_after_fail_json);
+    try std.testing.expectEqual(@as(u64, 2), daemon.cycle);
+    try std.testing.expect(std.mem.indexOf(u8, torn_after_fail_json, "\"failure_class\":\"content\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, torn_after_fail_json, "\"problems_count\":1") != null);
+    try std.testing.expectEqualStrings("EDUPLICATEID", daemon.latest.?.problems[0].code.?);
+    try std.testing.expect(daemon.hasPendingCycle());
+
+    // Completing the rewrite clears the pending cycle and updates `latest`.
+    Io.sleep(io, .{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake) catch {};
+    try temp.dir.writeFile(io, .{ .sub_path = ".boris/html-build-report.json", .data = valid_ok });
+    const recovered_json = try daemon.stateJson(gpa);
+    defer gpa.free(recovered_json);
+    try std.testing.expectEqual(@as(u64, 3), daemon.cycle);
+    try std.testing.expectEqual(State.success, daemon.state);
+    try std.testing.expect(!daemon.hasPendingCycle());
 }
