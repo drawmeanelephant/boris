@@ -119,7 +119,7 @@ h1, h2 { font-weight: normal; }
 @media (max-width: 700px) { .topbar { align-items: flex-start; flex-direction: column; } .page-wrap { grid-template-columns: minmax(0, 1fr); } .node-copy table { display: block; overflow-x: auto; } .node-main { padding-right: 0; } .epicenter { order: 2; } }
 @media (forced-colors: active) {
   :focus-visible { outline: 2px solid Highlight; }
-  .skip-link:focus, .nodelet, .admonition, .details, .semantic-relations, .semantic-backlinks, .node-status { border: 1px solid CanvasText; }
+  .skip-link:focus { border: 1px solid CanvasText; }
   .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }

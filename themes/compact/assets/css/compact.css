@@ -123,7 +123,7 @@ a:hover { text-decoration-thickness: 0.16em; }
 @media (max-width: 42rem) { .site-header__inner, .hero__inner { align-items: flex-start; flex-direction: column; padding-block: 1rem; }.page-grid, .home-grid { grid-template-columns: 1fr; gap: 0.8rem; }.rail--nav, .rail--toc, .home-nav { grid-column: auto; position: static; padding: 0.7rem; background: var(--surface-soft); border-radius: var(--radius); }.site-nav ul { display: flex; flex-wrap: wrap; gap: 0.15rem; }.site-nav ul ul { display: none; }.reading-panel { padding: 1rem; }.prose table { display: block; overflow-x: auto; }.prose dl { grid-template-columns: 1fr; gap: 0; }.prose dd { margin-bottom: 0.4rem; } }
 @media (forced-colors: active) {
   :focus-visible { outline: 3px solid Highlight; }
-  .skip-link:focus, .reading-panel, .page-metadata, .admonition, .details { border: 1px solid CanvasText; }
+  .skip-link:focus, .page-metadata { border: 1px solid CanvasText; }
   .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

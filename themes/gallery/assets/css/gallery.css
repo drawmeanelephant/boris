@@ -821,10 +821,7 @@ body[data-status="draft"] .g-main::before {
     outline: 2px solid Highlight;
   }
 
-  .skip-link:focus,
-  .prose .admonition,
-  .details,
-  .page-children a {
+  .skip-link:focus {
     border: 1px solid CanvasText;
   }
 

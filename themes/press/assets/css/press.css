@@ -1289,12 +1289,7 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
     outline: 3px solid Highlight;
   }
 
-  .skip-link:focus,
-  .txp-paper,
-  .txp-widget,
-  .admonition,
-  .details,
-  .page-children a {
+  .skip-link:focus {
     border: 1px solid CanvasText;
   }
 

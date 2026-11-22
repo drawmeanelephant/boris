@@ -7,7 +7,8 @@
   within the labelled `aside` so navigation landmarks are not nested.
 - `color-scheme: light` aligns native chrome with the light canvas, font sizes
   use `rem` units for browser/OS text scaling, and `@media (forced-colors:
-  active)` preserves focus outlines, current-nav outlines, and panel borders.
+  active)` preserves focus outlines, current-nav outlines, and a focused
+  skip-link border without flattening base borders.
 - There is no search box, login, or other control that would need a runtime.
   Navigation is the graph.
 - `:focus-visible` draws a 2px red outline with a 2px offset, and focused

@@ -32,8 +32,9 @@ application.
   compiler. The theme adds a tinted background and, for leaf pages, a
   thicker accent bar, so the state does not depend on hue. Under
   `forced-colors: active`, focus rings and the current link use `Highlight`
-  outlines, cards and callouts keep `CanvasText` borders, and the hero
-  heading drops its gradient text fill so text remains visible.
+  outlines, tag pills and the focused skip link gain `CanvasText` borders
+  (preserving base borders on cards and callouts), and the hero heading drops
+  its gradient text fill so text remains visible.
 - Contrast holds by construction. Each `--*-fg` token is chosen against
   its `--*-bg-subtle` pair in both `light-dark()` modes. Muted text
   (`--fg-muted`) is reserved for labels, breadcrumbs, and rail copy, not

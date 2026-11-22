@@ -209,7 +209,6 @@ mark { background: var(--mark); color: var(--bright); }
 
 @media (forced-colors: active) {
   :focus-visible { outline: 2px solid Highlight; }
-  .skip-link:focus, .admonition, .details, .page-metadata, .search-panel, .theme-toggle { border: 1px solid CanvasText; }
   .treewrap .is-current > a, .treewrap a[aria-current="page"] { outline: 2px solid Highlight; }
   html[data-theme="pride"] .site-title { background: none; color: CanvasText; }
 }

@@ -153,7 +153,7 @@ hr { height: 0; margin: 2rem 0; border: 0; border-top: 1px dashed var(--line); }
 
 @media (forced-colors: active) {
   :focus-visible { outline: 2px solid Highlight; }
-  .skip-link:focus, .sidebar-module, .admonition, .details, .semantic-relations, .semantic-backlinks { border: 1px solid CanvasText; }
+  .skip-link:focus { border: 1px solid CanvasText; }
   .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 

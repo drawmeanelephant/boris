@@ -176,7 +176,6 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
 @media (forced-colors: active) {
   :focus-visible { outline: 3px solid Highlight; }
   .skip-link:focus { border: 1px solid Highlight; }
-  .archive-module, .admonition, .details, .page-children li { border: 1px solid CanvasText; }
   .site-nav .is-current > a { outline: 2px solid Highlight; }
   .page-children a:focus-visible { outline: 3px solid Highlight; outline-offset: -3px; }
 }

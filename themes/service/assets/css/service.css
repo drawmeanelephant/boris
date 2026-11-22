@@ -89,7 +89,7 @@ a:focus-visible { outline: 3px solid transparent; background: var(--govuk-yellow
 @media (max-width: 48rem) { .govuk-header__inner { display: grid; align-items: start; } .govuk-service-nav ul { justify-content: start; } .govuk-grid-row { grid-template-columns: 1fr; } .govuk-contents-rail { position: static; } }
 @media (forced-colors: active) {
   :focus-visible, a:focus-visible { outline: 3px solid Highlight; }
-  .govuk-skip-link:focus, .govuk-panel, .admonition, .details { border: 1px solid CanvasText; }
+  .govuk-skip-link:focus { border: 1px solid CanvasText; }
   .govuk-service-nav a[aria-current="page"] { outline: 2px solid Highlight; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }

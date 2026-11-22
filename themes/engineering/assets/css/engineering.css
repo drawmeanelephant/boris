@@ -103,7 +103,7 @@ details summary { cursor: pointer; font-weight: 600; }
 @media (max-width: 48rem) { .primer-header__inner { display: grid; align-items: start; } .primer-nav ul { justify-content: start; } .primer-grid, .primer-home { grid-template-columns: 1fr; } .primer-sidebar { position: static; } }
 @media (forced-colors: active) {
   :focus-visible, .primer-header :focus-visible { outline: 3px solid Highlight; }
-  .skip-link:focus, .Box, .admonition, .details, .Label, .semantic-relations, .semantic-backlinks { border: 1px solid CanvasText; }
+  .skip-link:focus { border: 1px solid CanvasText; }
   .primer-nav a[aria-current="page"] { outline: 2px solid Highlight; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }

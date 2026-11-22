@@ -450,7 +450,7 @@ details summary:hover { color: var(--accent); }
 
 @media (forced-colors: active) {
   :focus-visible { outline: 2px solid Highlight; }
-  .skip-link:focus, .sheet, .cover-sheet, .admonition, .details { border: 1px solid CanvasText; }
+  .skip-link:focus { border: 1px solid CanvasText; }
   .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 

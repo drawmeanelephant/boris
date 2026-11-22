@@ -12,7 +12,8 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 - **Palette & scaling.** One light palette (`color-scheme: light`); font sizes
   use `rem` units so browser and OS text scaling apply cleanly. Under
   `forced-colors: active`, focus rings and the current navigation link use
-  `Highlight` outlines, and callouts and disclosures keep `CanvasText` borders.
+  `Highlight` outlines, and the focused skip link gains a `CanvasText` border
+  while base callout stripes are preserved.
 - **Link front.** `links.html` keeps the skip target and one main landmark,
   without documentation rails or fixed-header offsets. Tight and loose
   top-level link lists use 56px minimum-height targets with the same visible

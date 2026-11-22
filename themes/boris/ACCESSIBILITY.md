@@ -12,9 +12,9 @@ What the default theme guarantees, checked against the built output and
   content, and purely decorative toggle/breadcrumb/section markers use empty
   CSS alt text (`content: "…" / ""`) with a single-value fallback.
 - Under `forced-colors: active`, focus rings and the current navigation link
-  use `Highlight` outlines, and callouts, disclosures, and cards keep explicit
-  `CanvasText` borders. Heading targets carry `scroll-margin-top` for fragment
-  jumps.
+  use `Highlight` outlines, and the focused skip link gains a `CanvasText`
+  border while base borders and callout stripes are preserved. Heading targets
+  carry `scroll-margin-top` for fragment jumps.
 - Every focusable element gets a 3px `:focus-visible` outline in the theme's
   accent ink, offset 3px. Measured against the page canvas it is 5.68:1 in
   light mode (`#ae4622` on `#fff`) and 5.6–6.3:1 in dark mode (`#e17955` on

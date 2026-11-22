@@ -133,7 +133,7 @@ main { min-width: 0; max-width: var(--measure); }
 }
 @media (forced-colors: active) {
   :focus-visible { outline: 3px solid Highlight; }
-  .skip-link:focus, .admonition, .details, .specimen { border: 1px solid CanvasText; }
+  .skip-link:focus { border: 1px solid CanvasText; }
   .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 @media (prefers-reduced-motion: reduce) {

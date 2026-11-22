@@ -1039,13 +1039,7 @@ body[data-layout="section"] .section-intro {
     outline: 3px solid Highlight;
   }
 
-  .skip-link:focus,
-  .panel,
-  .admonition,
-  .details,
-  .page-children a,
-  .page-metadata,
-  .page-toc {
+  .skip-link:focus {
     border: 1px solid CanvasText;
   }
 

@@ -183,7 +183,7 @@ summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 }
 @media (forced-colors: active) {
   :focus, :focus-visible { outline: 3px solid Highlight; }
-  .skip-link:focus, .reading-card, .index-drawer > summary, .index-drawer__body, .admonition, .details, .page-children a, .semantic-relations, .semantic-backlinks { border: 1px solid CanvasText; }
+  .skip-link:focus { border: 1px solid CanvasText; }
   .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }

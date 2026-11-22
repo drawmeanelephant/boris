@@ -425,7 +425,7 @@ details summary:hover { color: var(--accent); }
 
 @media (forced-colors: active) {
   :focus-visible { outline: 3px solid Highlight; }
-  .skip-link:focus, .sheet, .admonition, .details, .press-stamp { border: 1px solid CanvasText; }
+  .skip-link:focus { border: 1px solid CanvasText; }
   .desks-bar .site-nav a[aria-current="page"] { outline: 2px solid Highlight; }
 }
 

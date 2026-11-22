@@ -951,7 +951,7 @@
   .semantic-relations li:has(a:focus-visible), .semantic-backlinks li:has(a:focus-visible) { outline-color: Highlight; }
   .bp-brand__mark, .admonition::before, .bp-status::before { forced-color-adjust: none; background: CanvasText; }
   .site-nav .is-current > a { outline: 2px solid Highlight; }
-  .skip-link:focus, .bp-status, .page-tags li, .card, .feature, .admonition, details.details { border: 1px solid CanvasText; }
+  .skip-link:focus, .page-tags li { border: 1px solid CanvasText; }
   .prose .hero h1 { background: none; color: CanvasText; }
 }
 

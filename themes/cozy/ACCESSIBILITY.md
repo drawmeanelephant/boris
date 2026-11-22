@@ -7,7 +7,8 @@
   navigation landmarks are not nested).
 - `color-scheme: light` aligns native chrome with the paper palette, body type
   uses `rem` units for browser/OS text scaling, and `@media (forced-colors:
-  active)` preserves focus outlines, current-nav outlines, and panel borders.
+  active)` preserves focus outlines, current-nav outlines, and a focused
+  skip-link border without flattening base callout stripes.
 - Links keep visible underlines. `:focus-visible` adds a 2px dashed slate
   outline with a 3px offset and a pale tint; the outline measures 3.65:1 on
   the paper background and 4.08:1 on the focus tint (`#5a7b8c`), above the
