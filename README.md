@@ -196,8 +196,8 @@ zig build test
 ./zig-out/bin/boris --rag --quiet              # RAG working-context packs
 ./zig-out/bin/boris --rag --complete --quiet   # complete-corpus RAG export
 ./zig-out/bin/boris --context --quiet          # AI Context Bundle
-./zig-out/bin/boris --rag-dir ./uploads/rag --scope mascots --split-size 262144
-./zig-out/bin/boris --context-dir ./uploads/context --scope mascots/genny --split-size 131072
+./zig-out/bin/boris --rag-dir ./uploads/rag --scope guides --split-size 262144
+./zig-out/bin/boris --context-dir ./uploads/context --scope guides/publishing --split-size 131072
 ./zig-out/bin/boris --llms --quiet             # llms.txt
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
 ./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
