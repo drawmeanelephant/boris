@@ -28,7 +28,21 @@ ui_dir="$(cd "$3" && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/boris-editor-daemon.XXXXXX")"
 editor_pid=""
 cleanup() {
-  if [[ -n "$editor_pid" ]]; then kill "$editor_pid" 2>/dev/null || true; fi
+  local rc=$?
+  if [[ $rc -ne 0 && -d "${work:-}" ]]; then
+    local log
+    for log in "$work"/*.log; do
+      if [[ -s "$log" ]]; then
+        echo "=== $(basename "$log") (exit $rc) ===" >&2
+        cat "$log" >&2
+        echo "=== end $(basename "$log") ===" >&2
+      fi
+    done
+  fi
+  if [[ -n "$editor_pid" ]]; then
+    kill "$editor_pid" 2>/dev/null || true
+    wait "$editor_pid" 2>/dev/null || true
+  fi
   rm -rf -- "$work"
 }
 trap cleanup EXIT
@@ -78,7 +92,7 @@ get_api() {
 }
 
 state_cycle() {
-  get_api "$work/state.json" '/api/validate-state'
+  get_api "$work/state.json" '/api/validate-state' || return 1
   node -e 'const s = require(process.argv[1]); if (!s.supported || typeof s.cycle !== "number" || !(s.report_age_ms === null || typeof s.report_age_ms === "number")) throw Error("validate-state payload mismatch"); console.log(s.cycle);' "$work/state.json"
 }
 
@@ -195,8 +209,8 @@ node -e '
 ' "$work/validate-dead.json"
 restarted=""
 for _ in $(seq 1 60); do
-  run_command "$work/validate-restart.json" '{"mode":"validate"}' || true
-  if node -e 'const r = require(process.argv[1]); process.exit(r.failure_class === "success" ? 0 : 1)' "$work/validate-restart.json"; then
+  if run_command "$work/validate-restart.json" '{"mode":"validate"}' &&
+    node -e 'const r = require(process.argv[1]); process.exit(r.failure_class === "success" ? 0 : 1)' "$work/validate-restart.json"; then
     restarted=1
     break
   fi

@@ -32,9 +32,31 @@ boris_bin="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 editor_bin="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 ui_dir="$(cd "$3" && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/boris-editor-watch.XXXXXX")"
+export XDG_CACHE_HOME="$work/cache"
 editor_pid=""
 cleanup() {
-  if [[ -n "$editor_pid" ]]; then kill "$editor_pid" 2>/dev/null || true; fi
+  local rc=$?
+  if [[ $rc -ne 0 && -d "${work:-}" ]]; then
+    local log spool
+    for log in "$work"/*.log; do
+      if [[ -s "$log" ]]; then
+        echo "=== $(basename "$log") (exit $rc) ===" >&2
+        cat "$log" >&2
+        echo "=== end $(basename "$log") ===" >&2
+      fi
+    done
+    for spool in "$work"/cache/boris-editor/*/watch-events.ndjson; do
+      if [[ -s "$spool" ]]; then
+        echo "=== watch-events.ndjson (exit $rc) ===" >&2
+        tail -n 200 "$spool" >&2
+        echo "=== end watch-events.ndjson ===" >&2
+      fi
+    done
+  fi
+  if [[ -n "$editor_pid" ]]; then
+    kill "$editor_pid" 2>/dev/null || true
+    wait "$editor_pid" 2>/dev/null || true
+  fi
   rm -rf -- "$work"
 }
 trap cleanup EXIT

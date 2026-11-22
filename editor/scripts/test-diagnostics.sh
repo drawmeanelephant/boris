@@ -13,7 +13,21 @@ ui_dir="$(cd "$3" && pwd)"
 work="$(mktemp -d "${TMPDIR:-/tmp}/boris-editor-diagnostics.XXXXXX")"
 editor_pid=""
 cleanup() {
-  if [[ -n "$editor_pid" ]]; then kill "$editor_pid" 2>/dev/null || true; fi
+  local rc=$?
+  if [[ $rc -ne 0 && -d "${work:-}" ]]; then
+    local log
+    for log in "$work"/*.log; do
+      if [[ -s "$log" ]]; then
+        echo "=== $(basename "$log") (exit $rc) ===" >&2
+        cat "$log" >&2
+        echo "=== end $(basename "$log") ===" >&2
+      fi
+    done
+  fi
+  if [[ -n "$editor_pid" ]]; then
+    kill "$editor_pid" 2>/dev/null || true
+    wait "$editor_pid" 2>/dev/null || true
+  fi
   rm -rf -- "$work"
 }
 trap cleanup EXIT
@@ -126,8 +140,8 @@ mv "$work/project/content" "$work/project/content-away"
 # are deterministic.
 io_seen=""
 for _ in $(seq 1 60); do
-  run_command "$work/io-failure.json" '{"mode":"validate"}' || true
-  if node -e 'const r = require(process.argv[1]); process.exit(r.failure_class === "io" && (r.exit_code === 3 || r.exit_code === null) ? 0 : 1)' "$work/io-failure.json"; then
+  if run_command "$work/io-failure.json" '{"mode":"validate"}' &&
+    node -e 'const r = require(process.argv[1]); process.exit(r.failure_class === "io" && (r.exit_code === 3 || r.exit_code === null) ? 0 : 1)' "$work/io-failure.json"; then
     io_seen=1
     break
   fi
