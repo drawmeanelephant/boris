@@ -942,6 +942,8 @@ const docs_files = [_]FileToWrite{
     .{ .path = "themes/boris/layouts/main.html", .data = archetype_themes.boris_layout_main },
     .{ .path = "themes/boris/footer.html", .data = archetype_themes.boris_footer },
     .{ .path = "themes/boris/assets/css/boris.css", .data = archetype_themes.boris_css },
+    .{ .path = "themes/boris/assets/favicon.svg", .data = archetype_themes.boris_favicon_svg },
+    .{ .path = "themes/boris/assets/search.html", .data = archetype_themes.boris_search_html },
     .{ .path = "themes/boris/README.md", .data = archetype_themes.boris_readme },
     .{ .path = "themes/boris/ACCESSIBILITY.md", .data = archetype_themes.boris_accessibility },
     .{ .path = "boris.json", .data = starter_profile },

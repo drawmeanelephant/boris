@@ -4,9 +4,11 @@ The product default. Orange accent, sticky rail, slightly-too-large type.
 That oddness is the point — do not sand it into another calm docs skin.
 
 - Layouts: `main.html`
-- Assets: `assets/css/boris.css` (system UI stack; no webfont)
+- Assets: `assets/css/boris.css` (system UI stack; no webfont),
+  `assets/favicon.svg` (site icon), `assets/search.html` (no-JS search landing)
 - Footer: `footer.html`
-- Search: first-party inline consumer; nav remains the no-JS path
+- Search: first-party inline consumer; the form submits to `assets/search.html`,
+  which explains the fallback and points back at the navigation
 - Slots: title, head, nav, breadcrumb, toc, metadata, content, children, relations, backlinks, footer, asset-url
 - Accessibility: [`ACCESSIBILITY.md`](ACCESSIBILITY.md)
 - Specimens: the repository's own [`content/`](https://github.com/drawmeanelephant/boris/tree/main/content/) docs site

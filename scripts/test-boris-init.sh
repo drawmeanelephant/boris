@@ -40,6 +40,8 @@ for f in \
     themes/boris/layouts/main.html \
     themes/boris/footer.html \
     themes/boris/assets/css/boris.css \
+    themes/boris/assets/favicon.svg \
+    themes/boris/assets/search.html \
     themes/boris/README.md \
     themes/boris/ACCESSIBILITY.md \
     boris.json \
