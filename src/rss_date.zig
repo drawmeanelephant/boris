@@ -5,6 +5,12 @@
 
 const std = @import("std");
 
+pub const Date = struct {
+    year: u16,
+    month: u8,
+    day: u8,
+};
+
 pub const Timestamp = struct {
     year: u16,
     month: u8,
@@ -38,17 +44,25 @@ fn number(text: []const u8) Error!u16 {
     return out;
 }
 
-/// Parse exactly `YYYY-MM-DDTHH:MM:SSZ`, with a real Gregorian calendar date.
-pub fn parse(text: []const u8) Error!Timestamp {
-    if (text.len != 20 or text[4] != '-' or text[7] != '-' or text[10] != 'T' or text[13] != ':' or text[16] != ':' or text[19] != 'Z') return error.InvalidTimestamp;
+/// Parse exactly `YYYY-MM-DD`, with a real Gregorian calendar date.
+pub fn parseDate(text: []const u8) Error!Date {
+    if (text.len != 10 or text[4] != '-' or text[7] != '-') return error.InvalidTimestamp;
     const year = try number(text[0..4]);
     const month: u8 = @intCast(try number(text[5..7]));
     const day: u8 = @intCast(try number(text[8..10]));
+    if (month < 1 or month > 12 or day < 1 or day > daysInMonth(year, month)) return error.InvalidTimestamp;
+    return .{ .year = year, .month = month, .day = day };
+}
+
+/// Parse exactly `YYYY-MM-DDTHH:MM:SSZ`, with a real Gregorian calendar date.
+pub fn parse(text: []const u8) Error!Timestamp {
+    if (text.len != 20 or text[4] != '-' or text[7] != '-' or text[10] != 'T' or text[13] != ':' or text[16] != ':' or text[19] != 'Z') return error.InvalidTimestamp;
+    const date = try parseDate(text[0..10]);
     const hour: u8 = @intCast(try number(text[11..13]));
     const minute: u8 = @intCast(try number(text[14..16]));
     const second: u8 = @intCast(try number(text[17..19]));
-    if (month < 1 or month > 12 or day < 1 or day > daysInMonth(year, month) or hour > 23 or minute > 59 or second > 59) return error.InvalidTimestamp;
-    return .{ .year = year, .month = month, .day = day, .hour = hour, .minute = minute, .second = second };
+    if (hour > 23 or minute > 59 or second > 59) return error.InvalidTimestamp;
+    return .{ .year = date.year, .month = date.month, .day = date.day, .hour = hour, .minute = minute, .second = second };
 }
 
 pub fn lessThan(a: Timestamp, b: Timestamp) bool {
@@ -60,20 +74,28 @@ pub fn lessThan(a: Timestamp, b: Timestamp) bool {
     return false;
 }
 
-/// Sunday is zero, matching the RFC 822 weekday spelling table below.
-pub fn weekday(timestamp: Timestamp) u3 {
-    // Howard Hinnant's civil-date conversion, fixed to the proleptic Gregorian
-    // calendar. It never consults the host timezone or clock.
-    var year: i64 = timestamp.year;
-    if (timestamp.month <= 2) year -= 1;
+/// Proleptic Gregorian civil day count relative to 1970-01-01 (Howard
+/// Hinnant's civil-date conversion). Never consults the host timezone or clock.
+pub fn daysFromCivil(date: Date) i64 {
+    var year: i64 = date.year;
+    if (date.month <= 2) year -= 1;
     const era = @divFloor(year, 400);
     const yoe = year - era * 400;
-    const month: i64 = timestamp.month;
-    const day: i64 = timestamp.day;
+    const month: i64 = date.month;
+    const day: i64 = date.day;
     const shifted_month: i64 = if (month > 2) -3 else 9;
     const doy = @divFloor(153 * (month + shifted_month) + 2, 5) + day - 1;
     const doe = yoe * 365 + @divFloor(yoe, 4) - @divFloor(yoe, 100) + doy;
-    const days_since_unix = era * 146097 + doe - 719468;
+    return era * 146097 + doe - 719468;
+}
+
+/// Sunday is zero, matching the RFC 822 weekday spelling table below.
+pub fn weekday(timestamp: Timestamp) u3 {
+    const days_since_unix = daysFromCivil(.{
+        .year = timestamp.year,
+        .month = timestamp.month,
+        .day = timestamp.day,
+    });
     return @intCast(@mod(days_since_unix + 4, 7)); // 1970-01-01 was Thursday.
 }
 
@@ -125,4 +147,35 @@ test "RFC 822 date uses known UTC weekday" {
     defer out.deinit(std.testing.allocator);
     try appendRfc822(&out, std.testing.allocator, try parse("2026-07-28T14:30:00Z"));
     try std.testing.expectEqualStrings("Tue, 28 Jul 2026 14:30:00 GMT", out.items);
+}
+
+test "strict calendar date parsing and civil day arithmetic" {
+    try std.testing.expectEqual(Date{ .year = 2024, .month = 2, .day = 29 }, try parseDate("2024-02-29"));
+    try std.testing.expectEqual(Date{ .year = 2000, .month = 2, .day = 29 }, try parseDate("2000-02-29"));
+    const invalid = [_][]const u8{
+        "2026-02-29", "2026-02-30",           "2100-02-29", "2026-13-01",
+        "2026-00-10", "2026-04-31",           "2026-01-00", "2026-7-08",
+        "2026/07/28", "2026-07-28T00:00:00Z", "",
+    };
+    for (invalid) |value| try std.testing.expectError(error.InvalidTimestamp, parseDate(value));
+
+    try std.testing.expectEqual(@as(i64, 0), daysFromCivil(try parseDate("1970-01-01")));
+    try std.testing.expectEqual(@as(i64, 1), daysFromCivil(try parseDate("1970-01-02")));
+    try std.testing.expectEqual(@as(i64, -1), daysFromCivil(try parseDate("1969-12-31")));
+    try std.testing.expectEqual(
+        @as(i64, 2),
+        daysFromCivil(try parseDate("2024-03-01")) - daysFromCivil(try parseDate("2024-02-28")),
+    );
+    try std.testing.expectEqual(
+        @as(i64, 1),
+        daysFromCivil(try parseDate("2026-03-01")) - daysFromCivil(try parseDate("2026-02-28")),
+    );
+    try std.testing.expectEqual(
+        @as(i64, 90),
+        daysFromCivil(try parseDate("2026-06-01")) - daysFromCivil(try parseDate("2026-03-03")),
+    );
+    try std.testing.expectEqual(
+        @as(i64, 152),
+        daysFromCivil(try parseDate("2026-06-01")) - daysFromCivil(try parseDate("2025-12-31")),
+    );
 }

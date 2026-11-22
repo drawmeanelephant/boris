@@ -5,6 +5,7 @@
 //! render the returned report in a separately owned product surface.
 
 const std = @import("std");
+const rss_date = @import("rss_date.zig");
 
 pub const EndpointType = enum {
     page,
@@ -37,6 +38,8 @@ pub const Page = struct {
     source_path: ?[]const u8 = null,
     /// Frontmatter `status` (`"draft"`, `"published"`, `"archived"`), if set.
     status: ?[]const u8 = null,
+    /// Frontmatter `published_at` (`YYYY-MM-DDTHH:MM:SSZ`), if set.
+    published_at: ?[]const u8 = null,
 };
 
 pub const Edge = struct {
@@ -53,6 +56,7 @@ pub const FindingCode = enum {
     zero_includes,
     zero_relations,
     draft_page,
+    stale_page,
 };
 
 /// `flat_graph` fires only once a corpus is large enough for the missing
@@ -107,11 +111,22 @@ pub const Report = struct {
     }
 };
 
+pub const FreshnessPolicy = struct {
+    /// Explicit UTC reference date (`--as-of YYYY-MM-DD`). Never wall-clock.
+    as_of: rss_date.Date,
+    /// Maximum allowed age in UTC calendar days (`--max-age-days N`). Pages
+    /// strictly older than this threshold emit `stale_page`.
+    max_age_days: u32,
+};
+
 pub const Options = struct {
     /// A target with this many incoming edges is reported as a hotspot.
     fan_in_threshold: usize = 0,
     /// If set, return transitive incoming dependents for this endpoint.
     impact: ?Endpoint = null,
+    /// If set, emit `stale_page` for pages whose `published_at` UTC calendar
+    /// date predates `as_of` by strictly more than `max_age_days` (#1163).
+    freshness: ?FreshnessPolicy = null,
 };
 
 /// Analyze a frozen page/edge snapshot. Inputs remain caller-owned; the report
@@ -262,6 +277,32 @@ pub fn analyze(
                 try report.findings.append(allocator, .{
                     .code = .draft_page,
                     .endpoint = .{ .type = .page, .value = page.id },
+                });
+            }
+        }
+    }
+
+    // Age-based freshness advisory (#1163): surface pages whose `published_at`
+    // UTC calendar date predates the caller-declared `--as-of` reference date
+    // by strictly more than `max_age_days`. Never consults the wall clock.
+    if (options.freshness) |freshness| {
+        const as_of_day = rss_date.daysFromCivil(freshness.as_of);
+        for (pages) |page| {
+            const published_at = page.published_at orelse continue;
+            const ts = rss_date.parse(published_at) catch continue;
+            const published_day = rss_date.daysFromCivil(.{
+                .year = ts.year,
+                .month = ts.month,
+                .day = ts.day,
+            });
+            const age_days_signed = as_of_day - published_day;
+            if (age_days_signed <= 0) continue;
+            const age_days: usize = @intCast(age_days_signed);
+            if (age_days > freshness.max_age_days) {
+                try report.findings.append(allocator, .{
+                    .code = .stale_page,
+                    .endpoint = .{ .type = .page, .value = page.id },
+                    .count = age_days,
                 });
             }
         }
@@ -567,4 +608,94 @@ test "advisory findings: draft_page fires only for status draft and sorts determ
     try std.testing.expectEqual(FindingCode.draft_page, report.findings.items[4].code);
     try std.testing.expectEqualStrings("zeta", report.findings.items[4].endpoint.value);
     try std.testing.expectEqual(@as(usize, 0), report.findings.items[4].count);
+}
+
+test "advisory findings: stale_page honors exact day boundary, leap years, undated, and future dates (#1163)" {
+    const pages = [_]Page{
+        .{ .id = "old", .published_at = "2026-03-02T23:59:59Z" },
+        .{ .id = "boundary", .published_at = "2026-03-03T00:00:00Z" },
+        .{ .id = "fresh", .published_at = "2026-05-15T12:00:00Z" },
+        .{ .id = "future", .published_at = "2026-07-01T00:00:00Z" },
+        .{ .id = "undated", .published_at = null },
+        .{ .id = "draft-old", .status = "draft", .published_at = "2025-12-31T12:00:00Z" },
+    };
+    const edges = [_]Edge{
+        .{ .from = .{ .type = .page, .value = "undated" }, .to = .{ .type = .page, .value = "old" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "undated" }, .to = .{ .type = .page, .value = "boundary" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "undated" }, .to = .{ .type = .page, .value = "fresh" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "undated" }, .to = .{ .type = .page, .value = "future" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "undated" }, .to = .{ .type = .page, .value = "draft-old" }, .kind = "reference" },
+        .{ .from = .{ .type = .page, .value = "undated" }, .to = .{ .type = .source, .value = "includes/s.md" }, .kind = "include" },
+    };
+
+    // Without freshness policy, no stale_page findings are emitted.
+    var no_policy = try analyze(std.testing.allocator, &pages, &edges, .{});
+    defer no_policy.deinit();
+    try std.testing.expectEqual(@as(usize, 0), countFindings(&no_policy, .stale_page));
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&no_policy, .draft_page));
+
+    // With --as-of 2026-06-01 --max-age-days 90:
+    // - old (91 days) -> stale_page (count 91)
+    // - boundary (90 days) -> not stale
+    // - fresh (17 days), future (-30 days), undated -> not stale
+    // - draft-old (152 days, status draft) -> both draft_page and stale_page (count 152)
+    var report = try analyze(std.testing.allocator, &pages, &edges, .{
+        .freshness = .{
+            .as_of = try rss_date.parseDate("2026-06-01"),
+            .max_age_days = 90,
+        },
+    });
+    defer report.deinit();
+    try std.testing.expectEqual(@as(usize, 2), countFindings(&report, .stale_page));
+    // Expected deterministic order:
+    // 0: draft-old -> draft_page (0)
+    // 1: draft-old -> stale_page (152)
+    // 2: old       -> stale_page (91)
+    // 3: undated   -> unreferenced_page (0)
+    try std.testing.expectEqual(@as(usize, 4), report.findings.items.len);
+    try std.testing.expectEqual(FindingCode.draft_page, report.findings.items[0].code);
+    try std.testing.expectEqualStrings("draft-old", report.findings.items[0].endpoint.value);
+    try std.testing.expectEqual(FindingCode.stale_page, report.findings.items[1].code);
+    try std.testing.expectEqualStrings("draft-old", report.findings.items[1].endpoint.value);
+    try std.testing.expectEqual(@as(usize, 152), report.findings.items[1].count);
+    try std.testing.expectEqual(FindingCode.stale_page, report.findings.items[2].code);
+    try std.testing.expectEqualStrings("old", report.findings.items[2].endpoint.value);
+    try std.testing.expectEqual(@as(usize, 91), report.findings.items[2].count);
+    try std.testing.expectEqual(FindingCode.unreferenced_page, report.findings.items[3].code);
+    try std.testing.expectEqualStrings("undated", report.findings.items[3].endpoint.value);
+
+    // Leap year vs non-leap year crossing + max_age_days = 0.
+    const leap_pages = [_]Page{
+        .{ .id = "leap", .published_at = "2024-02-28T00:00:00Z" },
+    };
+    var leap_exact = try analyze(std.testing.allocator, &leap_pages, &.{}, .{
+        .freshness = .{ .as_of = try rss_date.parseDate("2024-03-01"), .max_age_days = 2 },
+    });
+    defer leap_exact.deinit();
+    try std.testing.expectEqual(@as(usize, 0), countFindings(&leap_exact, .stale_page));
+
+    var leap_stale = try analyze(std.testing.allocator, &leap_pages, &.{}, .{
+        .freshness = .{ .as_of = try rss_date.parseDate("2024-03-01"), .max_age_days = 1 },
+    });
+    defer leap_stale.deinit();
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&leap_stale, .stale_page));
+    for (leap_stale.findings.items) |f| {
+        if (f.code == .stale_page) try std.testing.expectEqual(@as(usize, 2), f.count);
+    }
+
+    const same_day_pages = [_]Page{
+        .{ .id = "today", .published_at = "2026-06-01T00:00:00Z" },
+        .{ .id = "yesterday", .published_at = "2026-05-31T23:59:59Z" },
+    };
+    var zero_max = try analyze(std.testing.allocator, &same_day_pages, &.{}, .{
+        .freshness = .{ .as_of = try rss_date.parseDate("2026-06-01"), .max_age_days = 0 },
+    });
+    defer zero_max.deinit();
+    try std.testing.expectEqual(@as(usize, 1), countFindings(&zero_max, .stale_page));
+    for (zero_max.findings.items) |f| {
+        if (f.code == .stale_page) {
+            try std.testing.expectEqualStrings("yesterday", f.endpoint.value);
+            try std.testing.expectEqual(@as(usize, 1), f.count);
+        }
+    }
 }

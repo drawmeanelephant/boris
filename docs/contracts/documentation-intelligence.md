@@ -54,11 +54,12 @@ uses these precise categories:
 
 ### Advisory findings
 
-Advisory findings surface valid-but-flat graph structure and draft-status
-pages: legal content worth reporting, not failing by default. They ride the
-same findings array and sorting rules as `unreferenced_page` and are
-informational unless a matching `--fail-on-*` flag opts into exit `1`
-(#1023, #1163). The closed advisory code set:
+Advisory findings surface valid-but-flat graph structure and freshness
+signals (`draft_page` and age-based `stale_page`): legal content worth
+reporting, not failing by default. They ride the same findings array and
+sorting rules as `unreferenced_page` and are informational unless a matching
+`--fail-on-*` flag opts into exit `1` (#1023, #1163). The closed advisory
+code set:
 
 - **flat_graph** — the corpus holds at least two pages and the frozen graph
   carries no `parent`, `include`, or `reference` edges at all. The finding's
@@ -73,6 +74,18 @@ informational unless a matching `--fail-on-*` flag opts into exit `1`
   Pages with `status: published`, `status: archived`, or unset `status` do not
   emit this finding. Its finding endpoint is `{"type": "page", "value": "<id>"}`
   with `count: 0`.
+- **stale_page** — emitted only when the caller explicitly passes both
+  `--as-of YYYY-MM-DD` and `--max-age-days N` (#1163). Fires for each page
+  whose frontmatter `published_at` UTC calendar date predates `--as-of` by
+  strictly more than `N` UTC calendar days (`as_of_day - published_day > N`,
+  using proleptic Gregorian civil-day arithmetic with zero wall-clock reads).
+  Pages without `published_at`, pages on or within `N` days of `--as-of`, and
+  pages dated after `--as-of` do not emit this finding. Evaluation is
+  orthogonal to `status`: a `status: draft` page with an aged `published_at`
+  emits both `draft_page` and `stale_page`. Its finding endpoint is
+  `{"type": "page", "value": "<id>"}` with `count` equal to the page's age in
+  UTC calendar days (`>= 1`). When `--as-of` and `--max-age-days` are omitted,
+  `stale_page` is never emitted and the report is byte-identical.
 
 Corpus-level advisories (`flat_graph`, `zero_includes`, `zero_relations`)
 name the whole graph rather than a node: their finding endpoint is
@@ -89,9 +102,9 @@ The first slice reports facts already represented by the frozen graph:
 - incoming and outgoing edge counts by existing edge kind (`parent`, `include`,
   `reference`);
 - unreferenced pages, excluding the page's own `parent` relationship;
-- advisory findings for valid-but-flat corpora and draft-status pages
+- advisory findings for valid-but-flat corpora and freshness
   (`unlinked_page`, `flat_graph`, `zero_includes`, `zero_relations`,
-  `draft_page`); see above;
+  `draft_page`, `stale_page`); see above;
 - dependency fan-in hotspots using a declared threshold, not an arbitrary
   severity claim;
 - transitive impact for a requested page or source endpoint.
@@ -138,9 +151,10 @@ The eventual CLI surface is:
 
 ```text
 boris check [--input DIR] [--format human|json] [--report PATH]
+            [--as-of YYYY-MM-DD --max-age-days N]
             [--fail-on-unreferenced] [--fail-on-unlinked]
             [--fail-on-flat-graph] [--fail-on-zero-includes]
-            [--fail-on-zero-relations] [--fail-on-draft]
+            [--fail-on-zero-relations] [--fail-on-draft] [--fail-on-stale]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 ```
 
@@ -150,20 +164,26 @@ The option spelling is implemented as shown above. Behavior:
 - valid graph with policy findings: exit `1` when CI mode requests a failing
   health check, otherwise `0` for an informational report;
 - invalid content or graph: existing content exit `1` and existing diagnostics;
-- malformed command or ID: usage exit `2`;
+- malformed command, date, day threshold, incomplete freshness pair, or ID: usage exit `2`;
 - filesystem/system failure: existing I/O exit `3`.
 
 The shipped first slice reports `unreferenced_page` findings and the advisory
-findings above without failing by default. Each `--fail-on-*` flag opts into
-exit `1` when one or more findings of its class are present:
+findings above without failing by default. Age-based freshness requires an
+explicit `--as-of YYYY-MM-DD` (strictly Gregorian calendar-validated UTC date;
+never read from the wall clock) paired with `--max-age-days N` (non-negative
+decimal integer; passing only one is usage exit `2`). Each `--fail-on-*` flag
+opts into exit `1` when one or more findings of its class are present:
 `--fail-on-unreferenced` for `unreferenced_page`, `--fail-on-unlinked` for
 `unlinked_page`, `--fail-on-flat-graph` for `flat_graph`,
 `--fail-on-zero-includes` for `zero_includes`, `--fail-on-zero-relations`
-for `zero_relations`, and `--fail-on-draft` for `draft_page`. The flags are check-only — `impact` and every other
+for `zero_relations`, `--fail-on-draft` for `draft_page`, and
+`--fail-on-stale` for `stale_page` (requires both `--as-of` and
+`--max-age-days`, preventing a silent no-op policy). All policy and freshness
+flags are check-only — `impact` and every other
 command rejects them — and `impact` returns exit `0` when the requested page
 or source endpoint exists and the graph is valid. Parse, graph, and I/O
 failures retain their existing exit classes. The report schema and bytes do
-not depend on these policies.
+not depend on `--fail-on-*` policies.
 
 ## Acceptance fixtures
 
@@ -176,8 +196,10 @@ cases proving analysis does not run on an unfrozen graph; requested page/source,
 missing ID, invalid ID grammar; a flat multi-page corpus (no `parent`,
 `include`, or `reference` edges) covering every flat-graph advisory finding
 and each `--fail-on-*` opt-in; a draft-status corpus covering `draft_page`
-(draft vs published, archived, and unset status) and `--fail-on-draft`; and
-empty/single-page sites.
+(draft vs published, archived, and unset status) and `--fail-on-draft`; an
+age-based freshness corpus covering `stale_page` (aged, exact-boundary, fresh,
+future-dated, and undated `published_at` pages), `--as-of` + `--max-age-days`,
+and `--fail-on-stale`; and empty/single-page sites.
 
 Acceptance requires fixture goldens for JSON and human summaries, plus proof
 that `check` and `impact` do not modify HTML, IR, RAG, or cache outputs.

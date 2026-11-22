@@ -10,9 +10,10 @@ family is an additional explicit network family, not a build mode.
 boris build [build options]
 boris validate [HTML source and target options]
 boris check [--input DIR] [--format human|json] [--report PATH]
+            [--as-of YYYY-MM-DD --max-age-days N]
             [--fail-on-unreferenced] [--fail-on-unlinked]
             [--fail-on-flat-graph] [--fail-on-zero-includes]
-            [--fail-on-zero-relations] [--fail-on-draft]
+            [--fail-on-zero-relations] [--fail-on-draft] [--fail-on-stale]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 boris watch [build options]
 boris plan --profile PATH [plan overrides]
@@ -443,14 +444,18 @@ boris impact ID --input CONTENT --format json --report REPORT.json
 
 `boris check` reports `unreferenced_page` and advisory findings
 (`unlinked_page`, `flat_graph`, `zero_includes`, `zero_relations`,
-`draft_page` — see
+`draft_page`, and — when `--as-of YYYY-MM-DD` and `--max-age-days N` are
+supplied together — `stale_page`; see
 [documentation-intelligence.md](documentation-intelligence.md) § Advisory
-findings) without failing by default. CI that treats a finding class as fatal
-may add its opt-in flag — `--fail-on-unreferenced`, `--fail-on-unlinked`,
-`--fail-on-flat-graph`, `--fail-on-zero-includes`,
-`--fail-on-zero-relations`, or `--fail-on-draft`; each flag scopes to its own
-class, is rejected for other commands, and does not change the report schema
-or bytes.
+findings) without failing by default. `--as-of` accepts only a real Gregorian
+UTC date `YYYY-MM-DD` (never reads the wall clock) and `--max-age-days`
+accepts a non-negative integer; passing only one of the pair, or passing
+`--fail-on-stale` without both, is a usage error (exit 2). CI that treats a
+finding class as fatal may add its opt-in flag — `--fail-on-unreferenced`,
+`--fail-on-unlinked`, `--fail-on-flat-graph`, `--fail-on-zero-includes`,
+`--fail-on-zero-relations`, `--fail-on-draft`, or `--fail-on-stale`; each
+policy and freshness flag is rejected for other commands, and `--fail-on-*`
+flags do not change the report schema or bytes.
 
 These reports use the versioned `boris-documentation-intelligence` schema
 defined in [`documentation-intelligence.md`](documentation-intelligence.md).
