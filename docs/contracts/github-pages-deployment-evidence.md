@@ -13,7 +13,11 @@ payload.
 
 The standalone Zig tool under `tools/github-pages-audit/` consumes:
 
-- the normalized `boris-publication-plan` declaration;
+- the normalized `boris-publication-plan` declaration (plan schema 1, 2, or 3;
+  the schema-2 `nostr.auth` and schema-3 target `head`/`html_profile`
+  declarations do not affect what the observer requests, so it reads the same
+  publication location and projection fields from all three and rejects any
+  other schema);
 - the exact target-local `boris-publication-artifacts` inventory and its file
   digest;
 - the `page_url` output from the successful Pages deployment step;

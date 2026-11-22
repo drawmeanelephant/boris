@@ -83,29 +83,40 @@ jobs:
                 output: "dist",
                 public: true,
                 theme: "themes/boris",
-                sitemap: {path: "sitemap.xml"}
+                static: {dir: "static"},
+                sitemap: {path: "sitemap.xml"},
+                head: {
+                  enabled: true,
+                  base_url: $base_url,
+                  defaults: {
+                    description: "Boris is a graph-native publication compiler: Markdown in, validated Trunk/Satellite graph out, static HTML and other contracted targets.",
+                    image: {
+                      source: "static",
+                      path: "og-card.png",
+                      alt: "Boris: a graph-native publication compiler"
+                    },
+                    twitter_card: "summary_large_image"
+                  }
+                }
               }]
             }' > .boris-pages-profile.json
           ./zig-out/bin/boris plan --profile .boris-pages-profile.json > evidence/publication-plan.json
 
+      # The profile drives the build: target, theme, static/ passthrough
+      # (robots.txt, 404.html), sitemap, publication location, and the
+      # compiler-owned canonical/Open Graph/Twitter head metadata.
       - name: Compile the public HTML target
         run: |
-          # Build from the normalized plan, not a second unbound URL source.
           PAGES_BASE_URL="$(jq -r '.publication.base_url' evidence/publication-plan.json)"
-          PAGES_ORIGIN="$(jq -r '.publication.origin' evidence/publication-plan.json)"
           PAGES_BASE_PATH="$(jq -r '.publication.base_path' evidence/publication-plan.json)"
           test "$PAGES_BASE_URL" != "null"
-          test "$PAGES_ORIGIN" != "null"
           test "$PAGES_BASE_PATH" != "null"
-          ./zig-out/bin/boris \
-            --target public=dist \
-            --target-layout public=themes/boris/layouts/main.html \
-            --sitemap \
-            --pages-base-url "$PAGES_BASE_URL" \
-            --pages-origin "$PAGES_ORIGIN" \
-            --pages-base-path "$PAGES_BASE_PATH" \
-            --site-url "$PAGES_BASE_URL" \
-            --quiet
+          ./zig-out/bin/boris build --profile .boris-pages-profile.json --quiet
+          # static/ carries absolute URLs for this repository's Pages location;
+          # fail loudly if the configured location ever stops matching them.
+          grep -qxF "Sitemap: ${PAGES_BASE_URL%/}/sitemap.xml" dist/robots.txt
+          grep -qF "href=\"${PAGES_BASE_PATH%/}/assets/css/boris.css\"" dist/404.html
+          grep -qF 'property="og:image"' dist/index.html
 
       # #840: the committed publication-check evidence gates the deploy.
       # Error findings block; warnings are counted and reported (non-blocking

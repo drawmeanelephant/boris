@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://drawmeanelephant.github.io/boris/sitemap.xml
