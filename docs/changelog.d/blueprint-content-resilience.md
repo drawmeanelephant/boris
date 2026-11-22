@@ -1,0 +1,3 @@
+### Fixed
+
+- Align the [`blueprint` theme](/themes/blueprint/README.md) with the catalog content-resilience contract: long unspaced headings, prose URLs, navigation/outline labels, and section cards wrap cleanly across narrow and desktop viewports; tables preserve native grids inside keyboard-accessible `.table-viewport` scroll regions with `.table-entry` Strict styling; and `@media print` wraps tables and `<pre>` code without clipping or forced hyphenation. Embedded `boris init --type blueprint` theme bytes and [specimen docs](/examples/studies-site/README.md#content-resilience-check) stay in sync across all 24 shipped themes and 16 starters ([#1132](https://github.com/drawmeanelephant/boris/issues/1132)).

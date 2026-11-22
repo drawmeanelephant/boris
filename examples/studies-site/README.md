@@ -1,14 +1,14 @@
 # Studies sample site
 
-One specimen corpus for eight docs-shell themes: `semantic`, `columns`,
-`service`, `engineering`, `civic`, `tokens`, `corporate`, and `minimal`.
+One specimen corpus for nine docs-shell themes: `semantic`, `columns`,
+`service`, `engineering`, `civic`, `tokens`, `blueprint`, `corporate`, and `minimal`.
 Swap `--theme` to compare them. The CSS is original; the names do not
 claim the projects that inspired them. The same corpus also builds under
 `boris` and `html4-strict` ([below](#also-built-from-this-corpus)).
 
-This shared corpus is each theme's specimen. All eight style the same page
+This shared corpus is each theme's specimen. All nine style the same page
 shape: a docs graph with a home page, two section trunks, and reference
-satellites. One corpus makes them directly comparable, and eight copies of
+satellites. One corpus makes them directly comparable, and nine copies of
 the same Markdown would drift apart. The corpus exercises what those themes
 are expected to style:
 
@@ -23,11 +23,11 @@ are expected to style:
   112-character title, prose URL/inline identifier, ordinary and wide tables,
   and a 336-character code line
 
-The six themes with named layouts select `home.html` for the index and
+The seven themes with named layouts select `home.html` for the index and
 `section.html` for the trunks:
 
 ```bash
-THEME=semantic   # or columns, service, engineering, civic, tokens
+THEME=semantic   # or columns, service, engineering, civic, tokens, blueprint
 
 ./zig-out/bin/boris \
   --input examples/studies-site/content \

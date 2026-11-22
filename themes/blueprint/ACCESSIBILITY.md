@@ -35,8 +35,10 @@ application.
   (`--fg-muted`) is reserved for labels, breadcrumbs, and rail copy, not
   body sentences.
 - Code blocks and tables scroll horizontally inside their own box, so a
-  long line never widens the page at 320px. Oliver's table wrapper is a
-  focusable region with `aria-label="Table data"`.
+  long line never widens the page at 320px. The compiler's `.table-viewport`
+  wrapper is a focusable region with `aria-label="Table data"`.
+- Print wraps long code lines without forced hyphenation and sets tables
+  to full width with wrapping cells so no column clips on paper.
 - The search entry point is a labelled `role="search"` form. The status
   line is an `aria-live="polite"` region that is clipped, not
   `display: none`, while the panel is closed, so updates are still
