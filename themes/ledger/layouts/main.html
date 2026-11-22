@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
   <title>{{title}} · Ledger</title>
   <link rel="stylesheet" href="{{asset-url assets/ledger.css}}">
   {{head}}
@@ -28,10 +29,10 @@
     </main>
 
     <aside class="epicenter" aria-label="Nodelets">
-      <nav class="nodelet" aria-label="Node tracker">
+      <section class="nodelet">
         <h2>Node Tracker</h2>
         <div class="nodelet-body">{{nav}}</div>
-      </nav>
+      </section>
       <section class="nodelet" data-boris-search-exclude>
         <h2>On this page</h2>
         <div class="nodelet-body">{{toc}}</div>

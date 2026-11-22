@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
   <title>{{title}} · Cozy</title>
   <link rel="stylesheet" href="{{asset-url assets/cozy.css}}">
   {{head}}
@@ -32,10 +33,10 @@
         </section>
       </main>
       <aside class="sidebar" aria-label="Site sidebar">
-        <nav class="sidebar-module" aria-label="Site navigation">
+        <section class="sidebar-module">
           <h2>Navigation</h2>
           {{nav}}
-        </nav>
+        </section>
         <section class="sidebar-module toc-module" aria-label="On this page" data-boris-search-exclude>{{toc}}</section>
       </aside>
     </div>

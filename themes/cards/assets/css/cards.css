@@ -69,7 +69,7 @@ summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .workbench, .article-card { padding-block: 1.5rem 4rem; }
 .filing-path { margin-bottom: 2.75rem; }
 .breadcrumb ol { display: flex; flex-wrap: wrap; gap: 0.5rem; list-style: none; padding: 0; margin: 0; color: var(--muted); font-size: 0.8rem; }
-.breadcrumb li + li::before { content: "/"; margin-right: 0.5rem; }
+.breadcrumb li + li::before { content: "/"; content: "/" / ""; margin-right: 0.5rem; }
 .breadcrumb a { color: inherit; }
 .reading-card { position: relative; width: min(100%, 54rem); margin-inline: auto; padding: clamp(1.5rem, 5vw, 4rem); border: 1px solid var(--line); background: var(--paper); box-shadow: 5px 5px 0 var(--paper-alt), 6px 6px 0 var(--line), 11px 11px 0 var(--paper-alt), 12px 12px 0 var(--line); }
 .card-tab { position: absolute; left: -1px; bottom: 100%; padding: 0.35rem 1.2rem; border: 1px solid var(--line); border-bottom: 0; border-radius: 0.45rem 0.45rem 0 0; background: var(--tab); color: #292b27; }
@@ -157,8 +157,8 @@ summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
 .graph-links:empty { display: none; }
 .semantic-relations, .semantic-backlinks { padding: 1.25rem; border: 1px dashed var(--line); }
 .semantic-relations::before, .semantic-backlinks::before { display: block; margin-bottom: 0.75rem; font: 0.8rem ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--muted); }
-.semantic-relations::before { content: "Filed alongside"; }
-.semantic-backlinks::before { content: "Referenced on other cards"; }
+.semantic-relations::before { content: "Filed alongside"; content: "Filed alongside" / ""; }
+.semantic-backlinks::before { content: "Referenced on other cards"; content: "Referenced on other cards" / ""; }
 .semantic-relations li + li, .semantic-backlinks li + li { margin-top: 0.5rem; }
 .semantic-relations li::before, .semantic-backlinks li::after { content: attr(data-relation-kind); font: 0.7rem ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--muted); }
 .semantic-relations li::before { margin-right: 0.6rem; }
@@ -180,6 +180,11 @@ summary:hover { text-decoration: underline; text-underline-offset: 0.2em; }
   .card-tools:has(.card-outline[open]) .card-outline { width: 100%; }
   .page-children a { min-height: 12rem; }
   .filing-path { margin-bottom: 2.5rem; }
+}
+@media (forced-colors: active) {
+  :focus, :focus-visible { outline: 3px solid Highlight; }
+  .skip-link:focus, .reading-card, .index-drawer > summary, .index-drawer__body, .admonition, .details, .page-children a, .semantic-relations, .semantic-backlinks { border: 1px solid CanvasText; }
+  .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 @media print {

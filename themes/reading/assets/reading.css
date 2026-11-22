@@ -53,7 +53,7 @@ main { min-width: 0; max-width: var(--measure); }
 
 .prose { font-size: 1.0625rem; }
 .prose > :first-child { margin-top: 0; }
-.prose h1, .prose h2, .prose h3, .prose h4 { line-height: 1.25; letter-spacing: -0.02em; }
+.prose h1, .prose h2, .prose h3, .prose h4 { line-height: 1.25; letter-spacing: -0.02em; text-wrap: balance; scroll-margin-top: 1.5rem; }
 .prose h1 { margin: 0 0 1.1rem; font-size: 2.1rem; }
 .prose h2 { margin: 2.4rem 0 0.7rem; font-size: 1.45rem; }
 .prose h3 { margin: 1.9rem 0 0.5rem; font-size: 1.15rem; }
@@ -98,7 +98,7 @@ main { min-width: 0; max-width: var(--measure); }
 .prose .details__body > :last-child { margin-bottom: 0; }
 .graph-links:empty { display: none; }
 .page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; padding-top: 0.75rem; border-top: 1px solid var(--line); font-size: 0.92rem; }
-.page-children::before, .semantic-relations::before, .semantic-backlinks::before { content: attr(aria-label); display: block; color: var(--muted); font-size: 0.8rem; font-weight: 750; }
+.page-children::before, .semantic-relations::before, .semantic-backlinks::before { content: attr(aria-label); content: attr(aria-label) / ""; display: block; color: var(--muted); font-size: 0.8rem; font-weight: 750; }
 .page-children ul { margin-top: 0.4rem; }
 .page-children li + li { margin-top: 0.25rem; }
 .semantic-relations ul, .semantic-backlinks ul { margin: 0.4rem 0 0; padding-inline-start: 1.1rem; }
@@ -130,6 +130,11 @@ main { min-width: 0; max-width: var(--measure); }
 
 @media (max-width: 52rem) {
   .prose table { display: block; overflow-x: auto; }
+}
+@media (forced-colors: active) {
+  :focus-visible { outline: 3px solid Highlight; }
+  .skip-link:focus, .admonition, .details, .specimen { border: 1px solid CanvasText; }
+  .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

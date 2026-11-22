@@ -284,6 +284,7 @@ a:active {
   margin-right: 0.45rem;
   color: var(--txp-gold);
   content: "/";
+  content: "/" / "";
 }
 
 .breadcrumb a {
@@ -595,6 +596,7 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
   letter-spacing: -0.025em;
   line-height: 1.12;
   scroll-margin-top: 1.25rem;
+  text-wrap: balance;
 }
 
 .txp-article-content h1 {
@@ -997,6 +999,7 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
   margin-right: 0.45rem;
   color: var(--txp-crimson);
   content: "↗";
+  content: "↗" / "";
   font: 0.85rem var(--txp-mono);
 }
 
@@ -1277,6 +1280,27 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
 
   .txp-article-content {
     font-size: 1.05rem;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible,
+  .txp-header :focus-visible {
+    outline: 3px solid Highlight;
+  }
+
+  .skip-link:focus,
+  .txp-paper,
+  .txp-widget,
+  .admonition,
+  .details,
+  .page-children a {
+    border: 1px solid CanvasText;
+  }
+
+  .txp-header .site-nav .is-current > a,
+  .txp-nav--rail .site-nav .is-current > a {
+    outline: 2px solid Highlight;
   }
 }
 

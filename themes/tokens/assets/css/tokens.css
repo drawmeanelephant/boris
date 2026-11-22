@@ -184,7 +184,7 @@ code { font-family: var(--mono); }
 }
 .sheet-path { margin-bottom: var(--s-3); font-family: var(--mono); font-size: var(--step--1); color: var(--ink-soft); }
 .breadcrumb ol { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); margin: 0; padding: 0; list-style: none; }
-.breadcrumb li + li::before { content: "/"; margin-inline-end: var(--s-2); color: var(--line-strong); }
+.breadcrumb li + li::before { content: "/"; content: "/" / ""; margin-inline-end: var(--s-2); color: var(--line-strong); }
 .breadcrumb a { color: var(--ink-soft); }
 
 /* spec table: page metadata as sheet fields */
@@ -204,12 +204,12 @@ code { font-family: var(--mono); }
   text-transform: uppercase; color: var(--ink-soft);
 }
 .page-metadata dd { margin: 0; }
-.page-metadata dd::before { content: "= "; color: var(--line-strong); font-family: var(--mono); }
+.page-metadata dd::before { content: "= "; content: "= " / ""; color: var(--line-strong); font-family: var(--mono); }
 
 /* --- Prose on the sheet --- */
 
 .prose { max-width: var(--measure); }
-.prose h1, .prose h2, .prose h3, .prose h4 { line-height: 1.15; letter-spacing: -0.02em; }
+.prose h1, .prose h2, .prose h3, .prose h4 { line-height: 1.15; letter-spacing: -0.02em; text-wrap: balance; scroll-margin-top: 1.5rem; }
 .prose h1 { margin: 0 0 var(--s-4); font-size: var(--step-4); letter-spacing: -0.035em; }
 .prose h2 { margin: var(--s-7) 0 var(--s-3); padding-top: var(--s-3); border-top: 1px solid var(--line); font-size: var(--step-2); }
 .prose h3 { margin: var(--s-5) 0 var(--s-2); font-size: var(--step-1); }
@@ -308,6 +308,7 @@ details summary:hover { color: var(--accent); }
 }
 .page-children a::before {
   content: counter(reg, decimal-leading-zero);
+  content: counter(reg, decimal-leading-zero) / "";
   font-family: var(--mono); font-size: var(--step--1); color: var(--ink-soft);
 }
 .page-children a::after {
@@ -332,8 +333,8 @@ details summary:hover { color: var(--accent); }
   color: var(--ink-soft);
   font-family: var(--mono); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
 }
-.semantic-relations::before { content: "Cross-references"; }
-.semantic-backlinks::before { content: "Cited on"; }
+.semantic-relations::before { content: "Cross-references"; content: "Cross-references" / ""; }
+.semantic-backlinks::before { content: "Cited on"; content: "Cited on" / ""; }
 .semantic-relations ul, .semantic-backlinks ul { margin: 0; padding: 0; list-style: none; }
 .semantic-relations li, .semantic-backlinks li { margin-block: var(--s-1); }
 .semantic-relations li::before, .semantic-backlinks li::after {
@@ -445,6 +446,12 @@ details summary:hover { color: var(--accent); }
 @media (max-width: 52rem) {
   .sheet-frame { grid-template-columns: 1fr; }
   .index-col { order: 2; border-top: 1px solid var(--line-strong); }
+}
+
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight; }
+  .skip-link:focus, .sheet, .cover-sheet, .admonition, .details { border: 1px solid CanvasText; }
+  .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 
 @media (prefers-reduced-motion: reduce) {

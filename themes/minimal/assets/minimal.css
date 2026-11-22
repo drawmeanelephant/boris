@@ -1,5 +1,6 @@
 /* theme.css - Standalone Calibrated Milligram Documentation Theme */
         :root {
+            color-scheme: light;
             --color-primary: #00535b;
             --color-primary-fixed-dim: #82d3de;
             --color-primary-container: #006d77;
@@ -47,7 +48,7 @@
             background-color: var(--color-surface);
             color: var(--color-on-surface);
             font-family: var(--font-body);
-            font-size: 16px;
+            font-size: 1rem;
             line-height: 1.6;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
@@ -82,7 +83,7 @@
             right: 0;
         }
 
-        .header-logo { font-size: 24px; font-weight: 700; color: var(--color-primary); }
+        .header-logo { font-size: 1.5rem; font-weight: 700; color: var(--color-primary); }
 
         .main-wrapper {
             display: flex;
@@ -125,7 +126,7 @@
             margin: 0 var(--spacing-lg) var(--spacing-sm);
             color: var(--color-on-surface-variant);
             cursor: pointer;
-            font-size: 12px;
+            font-size: 0.75rem;
             font-weight: 600;
             letter-spacing: 0.05em;
             text-transform: uppercase;
@@ -144,7 +145,7 @@
         .site-nav a {
             display: block;
             padding: 6px var(--spacing-lg);
-            font-size: 14px;
+            font-size: 0.875rem;
             color: var(--color-on-surface-variant);
             border-left: 2px solid transparent;
         }
@@ -171,12 +172,13 @@
             gap: 6px;
             margin-bottom: var(--spacing-md);
             list-style: none;
-            font-size: 14px;
+            font-size: 0.875rem;
             color: var(--color-on-surface-variant);
         }
 
         .breadcrumb li + li::before {
             content: "/";
+            content: "/" / "";
             margin-right: 6px;
             color: var(--color-outline);
         }
@@ -201,7 +203,7 @@
             display: block;
             margin-bottom: var(--spacing-sm);
             color: var(--color-on-surface);
-            font-size: 12px;
+            font-size: 0.75rem;
             font-weight: 600;
             letter-spacing: 0.05em;
             text-transform: uppercase;
@@ -218,7 +220,7 @@
         .page-toc__l3 { padding-inline-start: 1.1rem; }
 
         .page-toc a {
-            font-size: 14px;
+            font-size: 0.875rem;
             color: var(--color-on-surface-variant);
             transition: color 0.15s ease-in-out;
         }
@@ -232,10 +234,11 @@
         .page-metadata dt { font-weight: 700; }
         .page-metadata dd { margin: 0; }
 
-        h1 { font-size: 48px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; margin-bottom: var(--spacing-lg); }
-        h2 { font-size: 24px; line-height: 1.3; font-weight: 600; margin-top: var(--spacing-xl); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--color-outline-variant); padding-bottom: 8px; }
-        h3 { font-size: 20px; line-height: 1.4; font-weight: 600; margin-top: var(--spacing-lg); margin-bottom: 8px; }
-        h4 { font-size: 16px; line-height: 1.4; font-weight: 600; margin-top: var(--spacing-lg); margin-bottom: 4px; color: var(--color-on-surface-variant); }
+        h1, h2, h3, h4 { text-wrap: balance; }
+        h1 { font-size: 3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; margin-bottom: var(--spacing-lg); }
+        h2 { font-size: 1.5rem; line-height: 1.3; font-weight: 600; margin-top: var(--spacing-xl); margin-bottom: var(--spacing-md); border-bottom: 1px solid var(--color-outline-variant); padding-bottom: 8px; }
+        h3 { font-size: 1.25rem; line-height: 1.4; font-weight: 600; margin-top: var(--spacing-lg); margin-bottom: 8px; }
+        h4 { font-size: 1rem; line-height: 1.4; font-weight: 600; margin-top: var(--spacing-lg); margin-bottom: 4px; color: var(--color-on-surface-variant); }
         p { margin-bottom: var(--spacing-md); }
 
         .boris-content a, .graph-links a { color: var(--color-primary); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.16em; }
@@ -259,14 +262,14 @@
             border: 1px solid #333;
             padding: 16px;
             font-family: var(--font-code);
-            font-size: 14px;
+            font-size: 0.875rem;
             line-height: 1.55;
             overflow-x: auto;
             margin: var(--spacing-md) 0 var(--spacing-lg);
         }
         .boris-content pre code { padding: 0; background: transparent; font-size: inherit; }
 
-        .boris-content table { display: block; max-width: 100%; overflow-x: auto; width: 100%; margin: 0 0 var(--spacing-lg); border-collapse: collapse; border-bottom: 1px solid var(--color-outline-variant); font-size: 15px; font-variant-numeric: tabular-nums; }
+        .boris-content table { display: block; max-width: 100%; overflow-x: auto; width: 100%; margin: 0 0 var(--spacing-lg); border-collapse: collapse; border-bottom: 1px solid var(--color-outline-variant); font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
         .boris-content th, .boris-content td { padding: 6px 12px 6px 0; border-top: 1px solid var(--color-outline-variant); text-align: start; vertical-align: top; }
         .boris-content th { border-top: 0; border-bottom: 2px solid var(--color-on-surface); font-weight: 600; }
         .boris-content :is(th, td):last-child { padding-right: 0; }
@@ -276,7 +279,7 @@
         .boris-content img { display: block; max-width: 100%; height: auto; }
         .boris-content figure { margin: 0 0 var(--spacing-lg); }
         .boris-content figure > p { margin: 0; }
-        .boris-content figcaption { margin-top: var(--spacing-sm); color: var(--color-on-surface-variant); font-size: 14px; }
+        .boris-content figcaption { margin-top: var(--spacing-sm); color: var(--color-on-surface-variant); font-size: 0.875rem; }
 
         .admonition {
             --kind: var(--color-primary);
@@ -287,7 +290,7 @@
         }
 
         .admonition__title {
-            font-size: 12px;
+            font-size: 0.75rem;
             font-weight: 600;
             letter-spacing: 0.05em;
             text-transform: uppercase;
@@ -313,7 +316,7 @@
         .footnote-backref { font-variant-emoji: text; text-decoration: none; }
 
         .page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; }
-        .page-children::before, .semantic-relations::before, .semantic-backlinks::before { display: block; margin-bottom: var(--spacing-sm); color: var(--color-on-surface-variant); font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+        .page-children::before, .semantic-relations::before, .semantic-backlinks::before { display: block; margin-bottom: var(--spacing-sm); color: var(--color-on-surface-variant); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
         .page-children::before { content: "In this section"; content: "In this section" / ""; }
         .semantic-relations::before { content: "Related"; content: "Related" / ""; }
         .semantic-backlinks::before { content: "Backlinks"; content: "Backlinks" / ""; }
@@ -323,7 +326,7 @@
         .page-children a:hover { text-decoration: underline; }
         .graph-links:empty { display: none; }
         .semantic-relations li, .semantic-backlinks li { display: flex; flex-wrap: wrap; gap: 0 var(--spacing-md); padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--color-outline-variant); }
-        .semantic-relations li::before, .semantic-backlinks li::before { min-width: 7rem; color: var(--color-on-surface-variant); font-size: 13px; }
+        .semantic-relations li::before, .semantic-backlinks li::before { min-width: 7rem; color: var(--color-on-surface-variant); font-size: 0.8125rem; }
         .semantic-backlinks li::before { order: 1; }
         [data-relation-kind]::before { content: attr(data-relation-kind); }
         [data-relation-kind="relates_to"]::before { content: "relates to"; }
@@ -344,10 +347,16 @@
         }
         @media (max-width: 640px) {
             .content-area { padding: var(--spacing-md); }
-            h1 { font-size: 36px; }
+            h1 { font-size: 2.25rem; }
         }
         @media (max-width: 1280px) {
             .toc-sidebar { display: none; }
+        }
+
+        @media (forced-colors: active) {
+            :focus-visible { outline: 2px solid Highlight; }
+            .skip-link:focus, .admonition, .details { border: 1px solid CanvasText; }
+            .site-nav .is-current > a { outline: 2px solid Highlight; }
         }
 
         @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

@@ -42,6 +42,8 @@ a:hover { color: var(--govuk-dark-blue); }
 .govuk-breadcrumbs ol { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; margin: 0; padding: 0; list-style: none; }
 .govuk-breadcrumbs li + li::before { content: ""; display: inline-block; width: 0.4rem; height: 0.4rem; margin-inline-end: 0.7rem; border: solid currentColor; border-width: 1px 1px 0 0; transform: translateY(-0.1rem) rotate(45deg); }
 .govuk-breadcrumbs a { color: var(--govuk-ink); }
+.govuk-heading-xl, .govuk-heading-m, .prose :is(h2, h3, h4) { text-wrap: balance; }
+.prose :is(h1, h2, h3, h4, h5, h6) { scroll-margin-top: 1.5rem; }
 .govuk-heading-xl { max-width: 20ch; margin: 0.2rem 0 1rem; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.04; letter-spacing: -0.02em; }
 .govuk-heading-m { margin-top: 0; font-size: 1.45rem; line-height: 1.15; }
 .page-metadata { display: flex; flex-wrap: wrap; gap: 0.45rem 1.2rem; margin: 0 0 1.5rem; color: var(--govuk-muted); font-size: 0.88rem; }
@@ -85,11 +87,16 @@ a:focus-visible { outline: 3px solid transparent; background: var(--govuk-yellow
 .govuk-skip-link:focus-visible { box-shadow: 0 0 0 0.2rem #0b0c0c; }
 @media (prefers-color-scheme: dark) { :root { --govuk-ink: #f0f0ef; --govuk-muted: #c8c8c7; --govuk-bg: #1b1c1c; --govuk-surface: #262727; --govuk-line: #777; --govuk-blue: #5694ca; --govuk-green: #4cc38a; --govuk-red: #ff7e66; --govuk-orange: #ffa05c; } .details > summary:hover, .govuk-breadcrumbs a:hover { color: #8fb8e0; } a:hover { color: #8fb8e0; } .govuk-panel { background: #12395c; } }
 @media (max-width: 48rem) { .govuk-header__inner { display: grid; align-items: start; } .govuk-service-nav ul { justify-content: start; } .govuk-grid-row { grid-template-columns: 1fr; } .govuk-contents-rail { position: static; } }
+@media (forced-colors: active) {
+  :focus-visible, a:focus-visible { outline: 3px solid Highlight; }
+  .govuk-skip-link:focus, .govuk-panel, .admonition, .details { border: 1px solid CanvasText; }
+  .govuk-service-nav a[aria-current="page"] { outline: 2px solid Highlight; }
+}
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }
 
 /* First-class constructs */
 .page-toc ul, .page-children ul { margin: 0.4rem 0 0; padding-left: 0; list-style: none; }
-.page-toc li::before { content: "— "; color: var(--govuk-muted); }
+.page-toc li::before { content: "— "; content: "— " / ""; color: var(--govuk-muted); }
 .page-toc li { padding-left: 1.4em; text-indent: -1.4em; }
 .page-toc .page-toc__l3 { padding-inline-start: 2.4em; }
 .prose :not(pre) > code { padding: 0.08em 0.28em; background: #fff; border: 1px solid var(--govuk-line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

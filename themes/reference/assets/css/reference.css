@@ -396,6 +396,7 @@ a:hover {
 
 .breadcrumb li:not(:last-child)::after {
   content: "/";
+  content: "/" / "";
   margin-left: 0.3rem;
   opacity: 0.55;
 }
@@ -606,6 +607,7 @@ a:hover {
   line-height: 1.22;
   letter-spacing: -0.02em;
   scroll-margin-top: 1.25rem;
+  text-wrap: balance;
 }
 
 .prose h1 {
@@ -882,6 +884,7 @@ a:hover {
 
 .details > summary::before {
   content: "▸";
+  content: "▸" / "";
   display: inline-block;
   margin-right: 0.45rem;
   color: var(--r-primary);
@@ -890,6 +893,26 @@ a:hover {
 
 .details[open] > summary::before {
   transform: rotate(90deg);
+}
+
+@media (forced-colors: active) {
+  :focus-visible,
+  .details > summary:focus-visible {
+    outline: 3px solid Highlight;
+  }
+
+  .skip-link:focus,
+  .panel,
+  .admonition,
+  .details,
+  .page-children a {
+    border: 1px solid CanvasText;
+  }
+
+  .site-nav .is-current > a,
+  .site-nav a[aria-current="page"] {
+    outline: 2px solid Highlight;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

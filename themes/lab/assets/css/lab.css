@@ -1,5 +1,6 @@
 /* lab theme — dark-first lab terminal with three color modes */
 :root {
+  color-scheme: dark;
   --bg: #0b0f14;
   --panel: #10161d;
   --panel-2: #0d1319;
@@ -80,7 +81,7 @@ body {
 /* ---------- breadcrumb ---------- */
 .site-breadcrumb { color: var(--muted); font-size: .8rem; font-family: var(--mono); margin-bottom: 1.1rem; }
 .site-breadcrumb ol { list-style: none; display: flex; flex-wrap: wrap; gap: .35rem; margin: 0; padding: 0; }
-.site-breadcrumb li + li::before { content: "/"; margin-right: .35rem; color: var(--rule); }
+.site-breadcrumb li + li::before { content: "/"; content: "/" / ""; margin-right: .35rem; color: var(--rule); }
 .site-breadcrumb li[aria-current] { color: var(--ink); }
 .site-breadcrumb a { color: var(--accent); text-decoration: none; }
 .site-breadcrumb a:hover { text-decoration: underline; }
@@ -120,6 +121,7 @@ body {
 .site-toc a:hover { color: var(--accent); }
 
 /* ---------- content ---------- */
+.site-content :is(h1, h2, h3) { text-wrap: balance; }
 .site-content h1 { font-size: 1.65rem; color: var(--bright); margin-top: 0; letter-spacing: -.01em; scroll-margin-top: 1rem; }
 .site-content h2 { font-size: 1.18rem; color: var(--bright); border-bottom: 1px solid var(--rule); padding-bottom: .3rem; margin-top: 2.1rem; scroll-margin-top: 1rem; }
 .site-content h3 { font-size: 1.02rem; color: var(--bright); scroll-margin-top: 1rem; }
@@ -193,8 +195,8 @@ mark { background: var(--mark); color: var(--bright); }
 .gp-title { font-family: var(--mono); font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 0 0 .4rem; }
 .graph-panel ul { list-style: none; padding-left: 0; margin: 0; font-family: var(--mono); font-size: .82rem; }
 .graph-panel li { margin: .18rem 0; }
-.graph-panel [data-relation-kind] a::before { content: "⟶ "; color: var(--muted); }
-.graph-panel .semantic-backlinks [data-relation-kind] a::before { content: "⟵ "; }
+.graph-panel [data-relation-kind] a::before { content: "⟶ "; content: "⟶ " / ""; color: var(--muted); }
+.graph-panel .semantic-backlinks [data-relation-kind] a::before { content: "⟵ "; content: "⟵ " / ""; }
 .graph-panel [data-relation-kind]::after { content: " " attr(data-relation-kind); color: var(--muted); font-size: .72rem; }
 .graph-panel a { color: var(--accent); text-decoration: none; }
 .graph-panel a:hover { text-decoration: underline; }
@@ -204,6 +206,13 @@ mark { background: var(--mark); color: var(--bright); }
 /* ---------- footer ---------- */
 .site-footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: .82rem; font-family: var(--mono); }
 .site-footer:empty { display: none; }
+
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight; }
+  .skip-link:focus, .admonition, .details, .page-metadata, .search-panel, .theme-toggle { border: 1px solid CanvasText; }
+  .treewrap .is-current > a, .treewrap a[aria-current="page"] { outline: 2px solid Highlight; }
+  html[data-theme="pride"] .site-title { background: none; color: CanvasText; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }

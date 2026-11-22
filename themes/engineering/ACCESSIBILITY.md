@@ -4,7 +4,8 @@ What this theme guarantees in its own HTML and CSS. It does not replace a
 manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 
 - **Skip link.** Every layout opens with "Skip to content" targeting
-  `#main-content`. The link is white on `#0969da` (5.19:1) in both schemes.
+  `#main-content`, a `main` with `tabindex="-1"`. The link is white on
+  `#0969da` (5.19:1) in both schemes.
 - **Landmarks.** A body-level `header`, one `main`, a labelled "On this
   page" `aside` (or the home rail), and a body-level `footer`. The header
   nav and breadcrumb wrappers are plain `div`s; their former `aria-label`s

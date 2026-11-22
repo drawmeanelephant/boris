@@ -4,7 +4,7 @@ What this theme guarantees in its own HTML and CSS. It does not replace a
 manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 
 - **Skip link.** Every layout opens with "Skip to main content" targeting
-  `#main-content`.
+  `#main-content`, a `main` with `tabindex="-1"`.
 - **Landmarks.** A body-level `header`, one `main`, a labelled "On this
   page" `aside` (or the home rail), and a body-level `footer`. The service
   navigation and breadcrumb wrappers are plain `div`s; their former

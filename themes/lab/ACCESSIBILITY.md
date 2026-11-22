@@ -4,8 +4,15 @@ What lab guarantees, checked against the built output and
 `assets/css/lab.css` + `assets/css/modes.css`.
 
 - `layouts/main.html` starts with a skip link to `#main-content`, the `main`
-  element (`tabindex="-1"`). `layouts/print.html` is a single article with
-  no chrome to skip.
+  element (`tabindex="-1"`). The sidebar rail is a labelled `aside`, and the
+  navigation tree and outline sit inside plain `div` wrappers so the compiler's
+  `nav` landmarks are not nested. `layouts/print.html` wraps its article in a
+  `main` landmark with no chrome to skip.
+- CSS `color-scheme` tracks each mode (`dark` on `:root` and `pride`, `light`
+  on `light` and `@media print`). Under `forced-colors: active`, focus rings
+  and the current navigation link use `Highlight` outlines, panels keep
+  `CanvasText` borders, and the pride wordmark drops its transparent gradient
+  text fill.
 - `:focus-visible` draws a 2px accent outline with a 2px offset in all three
   modes. Measured against the page background and panels: dark 12.3–13.0:1
   (`#5eead4`), light 4.9–5.5:1 (`#0f766e`), pride 8.6–9.2:1 (`#ff8ae2`),

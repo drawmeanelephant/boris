@@ -6,10 +6,14 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
 - **Skip link.** "Skip to content" targets `#main-content`, a `main` with
   `tabindex="-1"`.
 - **Landmarks.** A body-level `header` containing the search form
-  (`role="search"`, a labelled input, a polite live status), a navigation
-  `aside` whose menu is a native `<details>` disclosure, one `main`, a
-  labelled "On this page" `aside`, and a footer.
-- **Palette.** One light palette only; there is no dark variant to verify.
+  (`role="search"`, a labelled input, a polite live status), a labelled
+  "Documentation" navigation `aside` whose menu is a native `<details>`
+  disclosure, one `main`, a labelled "On this page" `aside`, and a footer.
+- **Palette & scaling.** One light palette (`color-scheme: light`); font sizes
+  use `rem` units so browser and OS text scaling work without clipping. Under
+  `forced-colors: active`, focus rings (including the search input) and the
+  current navigation link use `Highlight` outlines, and cards, callouts, and
+  disclosures keep `CanvasText` borders.
 - **Focus.** `:focus-visible` draws a 2px outline in the primary colour with
   a 2px offset: `#003d9b` is 9.31:1 on the surface `#f8f9fb`. Anchored
   headings carry `scroll-margin-top` so a fragment jump is not hidden under

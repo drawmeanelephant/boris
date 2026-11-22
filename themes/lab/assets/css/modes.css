@@ -2,6 +2,7 @@
 /* default: dark (the :root block above) */
 
 html[data-theme="light"] {
+  color-scheme: light;
   --bg: #f5f3ee;
   --panel: #ffffff;
   --panel-2: #efece5;
@@ -21,6 +22,7 @@ html[data-theme="light"] {
 }
 
 html[data-theme="pride"] {
+  color-scheme: dark;
   --bg: #120a1e;
   --panel: #1a1030;
   --panel-2: #150c26;
@@ -100,6 +102,7 @@ html[data-theme="pride"] ::selection { background: rgba(195,155,255,.35); color:
 @media print {
   :root,
   html[data-theme] {
+    color-scheme: light;
     --bg: #fff;
     --panel: #fff;
     --panel-2: #fafafa;

@@ -5,9 +5,16 @@ What the default theme guarantees, checked against the built output and
 
 - The first focusable element is a skip link to `#main-content`, which is the
   `main` element (`tabindex="-1"`, so focus lands on it in every browser).
-- The page has a named `main`, a `footer`, a labelled search region, and the
-  graph navigation inside a native `<details>` disclosure that is open by
-  default and keyboard-operable without JavaScript.
+- The page has a named `main`, a labelled site sidebar (`aside`), a `footer`,
+  a labelled search region, and the graph navigation inside a native `<details>`
+  disclosure that is open by default and keyboard-operable without JavaScript.
+  The "Browse the docs" heading is real DOM text rather than CSS generated
+  content, and purely decorative toggle/breadcrumb/section markers use empty
+  CSS alt text (`content: "…" / ""`) with a single-value fallback.
+- Under `forced-colors: active`, focus rings and the current navigation link
+  use `Highlight` outlines, and callouts, disclosures, and cards keep explicit
+  `CanvasText` borders. Heading targets carry `scroll-margin-top` for fragment
+  jumps.
 - Every focusable element gets a 3px `:focus-visible` outline in the theme's
   accent ink, offset 3px. Measured against the page canvas it is 5.68:1 in
   light mode (`#ae4622` on `#fff`) and 5.6–6.3:1 in dark mode (`#e17955` on
