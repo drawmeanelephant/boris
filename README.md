@@ -12,6 +12,7 @@ Write content locally. Build with one native binary. Inspect the output. Ship
 it to a static host, to GitHub Pages, to Standard.site, or to a machine
 projection — from the same frozen graph.
 
+[Live docs site](https://drawmeanelephant.github.io/boris/) ·
 [Authoring spine](docs/authoring-spine.md) ·
 [Status](docs/STATUS.md) ·
 [Contracts](docs/contracts/) ·
@@ -128,9 +129,11 @@ Session mode currently supports macOS only. It requires a proactive relay
 challenge and sends no article before the matching positive auth `OK`.
 Reactive-only relays time out without an article probe. Opt-in artifacts
 negotiate schema 2; schema-1 consumers must refuse them.
-The scoped macOS process/fault tests pass; this capability remains unreleased
-in a draft PR awaiting review. See the contract's phase-2 implementation notes
-for evidence and limitations.
+The scoped macOS process/fault tests pass, and the mode shipped in v0.9.0
+behind the explicit `--auth-session` flag while remaining opt-in. The wider
+NIP-42 relay-authentication program tracks
+[#1002](https://github.com/drawmeanelephant/boris/issues/1002). See the
+contract's phase-2 implementation notes for evidence and limitations.
 
 A bare `boris build` never needs a key, a relay, or the network, and a failed
 Nostr operation never invalidates a committed website. The normative
@@ -155,6 +158,18 @@ zig build
 The sample content is compiled to `dist/`. Open `dist/index.html` or serve the
 directory with any static file server.
 
+For your own site rather than the sample tree:
+
+```bash
+./zig-out/bin/boris init my-site --type docs
+```
+
+`init` writes a deterministic starter into `my-site/` and compiles it once to
+prove the fresh tree builds. `--type` selects one of six archetypes (`docs` —
+the default — `garden`, `cookbook`, `blog`, `textile`, `photo-gallery`), and
+the starter's `boris.json` makes `boris --profile boris.json` build it out of
+the box. `boris init --help` describes each starter.
+
 That is the whole default path. New to authoring? The
 [authoring spine](docs/authoring-spine.md) is the teaching path from
 `boris init` to a published, verified site. It names the publish targets
@@ -163,25 +178,32 @@ without pretending they are the first command.
 Useful first commands:
 
 ```bash
+# build
 ./zig-out/bin/boris --help
-./zig-out/bin/boris --version                 # print the compiler id (e.g. boris/0.9.0)
+./zig-out/bin/boris --version                  # print the compiler id (e.g. boris/0.9.0)
+./zig-out/bin/boris validate --quiet           # HTML source/config preflight; no output
+./zig-out/bin/boris watch --serve              # rebuild on save; live preview at http://127.0.0.1:8090/
+./zig-out/bin/boris watch --watch-json         # NDJSON build events: the machine feedback loop
+zig build test
+
+# inspect
+./zig-out/bin/boris check                      # graph-health report
+./zig-out/bin/boris impact getting-started     # dependency impact report
+./zig-out/bin/boris graph                      # Mermaid graph render (--format dot for Graphviz)
+
+# export
 ./zig-out/bin/boris --out .boris --quiet       # JSON IR
 ./zig-out/bin/boris --rag --quiet              # RAG working-context packs
-./zig-out/bin/boris --rag --complete --quiet    # complete-corpus RAG export
+./zig-out/bin/boris --rag --complete --quiet   # complete-corpus RAG export
 ./zig-out/bin/boris --context --quiet          # AI Context Bundle
-./zig-out/bin/boris --rag-dir ./uploads/rag --scope mascots --split-size 262144
-./zig-out/bin/boris --context-dir ./uploads/context --scope mascots/genny --split-size 131072
+./zig-out/bin/boris --rag-dir ./uploads/rag --scope guides --split-size 262144
+./zig-out/bin/boris --context-dir ./uploads/context --scope guides/publishing --split-size 131072
 ./zig-out/bin/boris --llms --quiet             # llms.txt
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
 ./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
-./zig-out/bin/boris validate --quiet             # HTML source/config preflight; no output
-./zig-out/bin/boris watch --serve               # rebuild on save; live preview at http://127.0.0.1:8090/
-./zig-out/bin/boris watch --watch-json          # NDJSON build events: the machine feedback loop
-./zig-out/bin/boris check                      # graph-health report
-./zig-out/bin/boris impact getting-started    # dependency impact report
-./zig-out/bin/boris graph                      # Mermaid graph render (--format dot for Graphviz)
+
+# publish
 ./zig-out/bin/boris plan --profile boris.json  # normalized publication declaration
-zig build test
 ```
 
 For a worked consumer of the `--watch-json` stderr NDJSON stream, see the
@@ -384,10 +406,11 @@ reviewed or uploaded to an LLM when useful.
 - [x] v0.8.1 release cut: changelog assembled from the queued fragments; tagged on `main`.
 - [x] v0.8.2 release cut: minor version bump packaging the post-v0.8.1 line (migration-lab split, `parser` package module); tagged on `main`.
 - [x] Archive-layout browser review and evidence-gated presentation fixes ([#667](https://github.com/drawmeanelephant/boris/pull/667)).
-- [ ] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)).
+- [x] Standard.site HTML verification-surface emit ([#533](https://github.com/drawmeanelephant/boris/issues/533), shipped in [#569](https://github.com/drawmeanelephant/boris/pull/569)).
 - [x] Nostr NIP-23 CLI (`plan` / `sign` / `publish`). Not a verified target.
 - [x] Embeddable `compileBundle` (native + Wasm) and an example Cloudflare Worker host ([#301](https://github.com/drawmeanelephant/boris/issues/301) M0–M7). Not a verified target. Live Cloudflare smoke and isolate-peak measurement remain open on the parent issue.
 - [x] Cloudflare container hosted runner ([#300](https://github.com/drawmeanelephant/boris/issues/300)). Example only; not a verified target.
+- [x] v0.9.0 release cut (2026-10-11): changelog assembled from the queued fragments; tagged `v0.9.0` on `main`.
 
 Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase banner + pointer table); capability details live in [`docs/contracts/`](docs/contracts/) and the archived [v0.8 snapshot](docs/archived/capability-matrix-v0.8.md).
 
@@ -403,7 +426,8 @@ Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase ban
 - Standard.site browser OAuth is implemented; it requests granular `repo:`
   scopes and the live smoke verifies the provider grant. The app-password path
   is the documented first-tester path.
-- Production HTML does not yet emit Standard.site verification surfaces.
+- Standard.site verification surfaces emit only when the HTML build runs
+  under a Standard.site `--profile`; a bare `boris` build produces none.
 
 ## Project map
 
