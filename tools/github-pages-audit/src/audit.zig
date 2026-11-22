@@ -1853,3 +1853,18 @@ test "sample failures do not fabricate byte identity" {
     try std.testing.expectEqual(Outcome.not_applicable, result.byte);
     try std.testing.expectEqual(Outcome.failed, result.result);
 }
+
+test "same-origin sibling project sites are external hyperlinks, not public URLs" {
+    const gpa = std.testing.allocator;
+    var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
+    defer location.deinit(gpa);
+    try std.testing.expectEqual(location_policy.Classification.external, try location_policy.classify(gpa, &location, "https://owner.github.io/oliver/", false));
+    try std.testing.expectError(error.BasePathMismatch, location_policy.classify(gpa, &location, "https://owner.github.io/oliver/", true));
+    try std.testing.expectError(error.BasePathMismatch, location_policy.classify(gpa, &location, "/oliver/", false));
+    const own = try location_policy.classify(gpa, &location, "https://owner.github.io/boris/start.html", false);
+    defer switch (own) {
+        .publication => |r| gpa.free(r),
+        else => {},
+    };
+    try std.testing.expectEqualStrings("/start.html", own.publication);
+}
