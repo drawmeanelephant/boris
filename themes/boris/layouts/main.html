@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light dark">
   <title>{{title}} · Boris</title>
   <link rel="stylesheet" href="{{asset-url assets/css/boris.css}}">
+  <link rel="icon" type="image/svg+xml" href="{{asset-url assets/favicon.svg}}">
   {{head}}
 </head>
 <body>
@@ -16,7 +17,7 @@
 <span class="site-brand__tagline">A graph-native publication compiler. HTML dist/ is the default target, not the whole product.</span>
 </header>
 <section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
-<form action="_boris/search/" method="get" role="search" data-boris-search-form>
+<form action="{{asset-url assets/search.html}}" method="get" role="search" data-boris-search-form>
 <label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
 <div class="site-search__controls">
 <input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
@@ -59,7 +60,6 @@
     const marker = href.lastIndexOf("assets/");
     return marker >= 0 ? href.slice(0, marker) : "";
   })();
-  if (form) form.action = siteRootPrefix + "_boris/search/";
   const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
   const expectedFormat = "boris-rendered-search-index";
   const expectedSchema = 1;

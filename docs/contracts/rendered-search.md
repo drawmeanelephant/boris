@@ -251,4 +251,5 @@ cmp docs/contracts/fixtures/rendered-search/expected/search-index.json \
 Compiler integration is covered by `src/compile.zig` tests for the staged
 overlay, stale-page removal, and an empty site. The default browser UI validates
 the v1 root marker and fields before rendering text-only result links; its
-no-JavaScript fallback remains ordinary documentation navigation.
+no-JavaScript fallback submits to a themed static page that points back to
+ordinary documentation navigation.

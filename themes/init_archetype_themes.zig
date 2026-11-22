@@ -12,6 +12,8 @@
 pub const boris_layout_main = @embedFile("boris/layouts/main.html");
 pub const boris_footer = @embedFile("boris/footer.html");
 pub const boris_css = @embedFile("boris/assets/css/boris.css");
+pub const boris_favicon_svg = @embedFile("boris/assets/favicon.svg");
+pub const boris_search_html = @embedFile("boris/assets/search.html");
 pub const boris_readme = @embedFile("boris/README.md");
 pub const boris_accessibility = @embedFile("boris/ACCESSIBILITY.md");
 
