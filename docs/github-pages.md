@@ -44,20 +44,28 @@ not equal `origin + base_path`, the profile fails closed. The normalized
 identity is also available in the [publication profile](contracts/publication-profile.md)
 and [publication plan](contracts/publication-plan.md) contracts.
 
-The build step consumes that normalized plan identity directly:
+The build step executes that same profile, so the plan identity is the only
+URL source:
 
 ```text
-boris --target public=dist --sitemap \
-  --pages-base-url https://owner.github.io/boris \
-  --pages-origin https://owner.github.io \
-  --pages-base-path /boris \
-  --site-url https://owner.github.io/boris
+boris build --profile .boris-pages-profile.json --quiet
 ```
+
+The workflow profile declares one `public` target with the `themes/boris`
+theme, `sitemap.xml`, the repository's `static/` passthrough directory, and
+enabled [head metadata](contracts/head-metadata.md). `static/` holds the
+site-root files GitHub Pages looks for: `robots.txt` (pointing at
+`sitemap.xml`) and `404.html` (served for any missing path under the site).
+Both carry this repository's absolute Pages URLs, so the build step fails if
+the configured location stops matching them. Head metadata gives every
+published page a canonical URL plus Open Graph and Twitter card tags, using
+page `title`/`summary`, a site default description, and the 1200×630
+`static/og-card.png` card image (emitted at the site root).
 
 The compiler audits rendered root-relative/public metadata URLs before target
 replacement and binds sitemap URLs to the same identity. `EPUBLICATIONLOCATION`
-is an actionable publication failure. Root and custom-domain builds pass an
-explicit empty `--pages-base-path`. The check is against the local generated
+is an actionable publication failure. Root and custom-domain sites have an
+empty `base_path`. The check is against the local generated
 artifact; this workflow still makes no post-deploy HTTP claim.
 
 ## Public artifact and retained evidence
