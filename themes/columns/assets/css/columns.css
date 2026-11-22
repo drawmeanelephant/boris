@@ -65,7 +65,7 @@ a:hover { color: var(--accent); }
 }
 .press-line .breadcrumb a { text-decoration: none; }
 .press-line .breadcrumb a:hover { text-decoration: underline; }
-.press-line .breadcrumb li + li::before { content: "›"; margin-inline-end: 0.5rem; }
+.press-line .breadcrumb li + li::before { content: "›"; content: "›" / ""; margin-inline-end: 0.5rem; }
 
 .nameplate {
   margin: 0; padding-block: clamp(0.6rem, 2vw, 1.4rem);
@@ -93,7 +93,7 @@ a:hover { color: var(--accent); }
   font-family: var(--gothic);
 }
 .desks-bar::before {
-  content: "Sections"; font-size: 0.68rem; font-weight: 800;
+  content: "Sections"; content: "Sections" / ""; font-size: 0.68rem; font-weight: 800;
   letter-spacing: 0.18em; color: var(--accent);
 }
 .desks-bar .site-nav { flex: 1; }
@@ -109,7 +109,7 @@ a:hover { color: var(--accent); }
 .desks-bar .site-nav ul ul {
   display: contents;
 }
-.desks-bar .site-nav ul ul li::before { content: "·"; margin-inline-end: 0.5rem; color: var(--hairline); }
+.desks-bar .site-nav ul ul li::before { content: "·"; content: "·" / ""; margin-inline-end: 0.5rem; color: var(--hairline); }
 .desks-bar .site-nav ul ul a {
   font-size: 0.78rem; color: var(--ink-soft); text-decoration: none;
 }
@@ -152,7 +152,7 @@ a:hover { color: var(--accent); }
   font-family: var(--gothic); font-size: 0.8rem;
 }
 .credit-line .page-metadata div { display: flex; gap: 0.4rem; }
-.credit-line .page-metadata div + div::before { content: "·"; margin-inline-end: 1.4rem; color: var(--hairline); }
+.credit-line .page-metadata div + div::before { content: "·"; content: "·" / ""; margin-inline-end: 1.4rem; color: var(--hairline); }
 .credit-line .page-metadata dt {
   font-size: 0.66rem; font-weight: 800; letter-spacing: 0.14em;
   text-transform: uppercase; color: var(--ink-soft); align-self: center;
@@ -163,7 +163,7 @@ a:hover { color: var(--accent); }
 
 .breadcrumb, .site-nav, .page-toc, .page-children,
 .semantic-relations, .semantic-backlinks,
-.prose :is(h1, h2, h3, h4, h5, h6) { overflow-wrap: anywhere; }
+.prose :is(h1, h2, h3, h4, h5, h6) { overflow-wrap: anywhere; text-wrap: balance; scroll-margin-top: 1.5rem; }
 
 .prose {
   columns: 21rem auto;
@@ -286,7 +286,7 @@ details summary:hover { color: var(--accent); }
 .jumps-label::after, .edition-label > span:last-child {
   font-size: 0.68rem; color: var(--ink-soft); letter-spacing: 0.16em;
 }
-.jumps-label::after { content: "continued ▸"; }
+.jumps-label::after { content: "continued ▸"; content: "continued ▸" / ""; }
 .page-children { counter-reset: story; }
 .page-children ul { margin: 0; padding: 0; list-style: none; }
 .page-children li {
@@ -299,11 +299,13 @@ details summary:hover { color: var(--accent); }
 }
 .page-children a::before {
   content: "Nº " counter(story, decimal-leading-zero);
+  content: "Nº " counter(story, decimal-leading-zero) / "";
   font-family: var(--gothic); font-size: 0.68rem; font-weight: 800;
   letter-spacing: 0.14em; color: var(--ink-soft); white-space: nowrap;
 }
 .page-children a::after {
   content: "filed";
+  content: "filed" / "";
   margin-left: auto; padding-left: 1rem;
   font-family: var(--gothic); font-size: 0.66rem; font-weight: 800;
   letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-soft);
@@ -345,8 +347,8 @@ details summary:hover { color: var(--accent); }
   font-family: var(--gothic); font-size: 0.68rem; font-weight: 800;
   letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-soft);
 }
-.wire .semantic-relations::before { content: "Related stories"; }
-.wire .semantic-backlinks::before { content: "Picked up by"; }
+.wire .semantic-relations::before { content: "Related stories"; content: "Related stories" / ""; }
+.wire .semantic-backlinks::before { content: "Picked up by"; content: "Picked up by" / ""; }
 .wire ul { margin: 0; padding: 0; list-style: none; }
 .wire li { margin-block: 0.4rem; font-size: 0.88rem; }
 .wire a { text-decoration: none; }
@@ -419,6 +421,12 @@ details summary:hover { color: var(--accent); }
   .press-line { flex-wrap: wrap; }
   .press-line .breadcrumb { order: 3; flex-basis: 100%; text-align: left; }
   .press-stamp { position: static; display: inline-block; transform: rotate(-2deg); margin-top: 0.4rem; }
+}
+
+@media (forced-colors: active) {
+  :focus-visible { outline: 3px solid Highlight; }
+  .skip-link:focus { border: 1px solid CanvasText; }
+  .desks-bar .site-nav a[aria-current="page"] { outline: 2px solid Highlight; }
 }
 
 @media (prefers-reduced-motion: reduce) {

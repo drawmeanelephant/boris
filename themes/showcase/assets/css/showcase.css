@@ -362,6 +362,7 @@ a:hover {
 
 .breadcrumb li:not(:last-child)::after {
   content: "/";
+  content: "/" / "";
   margin-left: 0.3rem;
   opacity: 0.55;
 }
@@ -460,6 +461,7 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
 
 .page-tags li::before {
   content: "#";
+  content: "#" / "";
   opacity: 0.7;
 }
 
@@ -699,6 +701,8 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) {
 .prose h3 {
   line-height: 1.25;
   letter-spacing: -0.015em;
+  text-wrap: balance;
+  scroll-margin-top: 1.5rem;
 }
 
 .prose h1 {
@@ -1028,6 +1032,20 @@ body[data-layout="blog"] .blog-post {
 
 body[data-layout="section"] .section-intro {
   min-width: 0;
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid Highlight;
+  }
+
+  .skip-link:focus {
+    border: 1px solid CanvasText;
+  }
+
+  .site-nav .is-current > a {
+    outline: 2px solid Highlight;
+  }
 }
 
 /* —— Motion and print —— */

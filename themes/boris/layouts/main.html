@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{{title}} · Boris</title>
   <link rel="stylesheet" href="{{asset-url assets/css/boris.css}}">
   {{head}}
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
-<aside class="site-sidebar">
+<aside class="site-sidebar" aria-label="Site sidebar">
 <header class="site-brand">
 <span class="site-brand__name">Boris</span>
 <span class="site-brand__tagline">A graph-native publication compiler. HTML dist/ is the default target, not the whole product.</span>
@@ -28,11 +29,12 @@
 </section>
 <details class="site-menu" open>
 <summary>Documentation menu</summary>
+<p class="site-nav__heading">Browse the docs</p>
 {{nav}}
 </details>
 </aside>
 {{breadcrumb}}
-<aside class="site-outline" data-boris-search-exclude>{{toc}}</aside>
+<div class="site-outline" data-boris-search-exclude>{{toc}}</div>
 <main id="main-content" tabindex="-1" data-boris-search-root>
 {{metadata}}
 {{content}}

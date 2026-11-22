@@ -82,7 +82,7 @@ code { font-family: var(--mono); }
 }
 .book-cover .breadcrumb { font-family: var(--mono); font-size: 0.78rem; }
 .book-cover .breadcrumb ol { display: flex; flex-wrap: wrap; gap: 0.3rem 0.7rem; margin: 0; padding: 0; list-style: none; }
-.book-cover .breadcrumb li + li::before { content: "▸"; margin-inline-end: 0.7rem; opacity: 0.6; }
+.book-cover .breadcrumb li + li::before { content: "▸"; content: "▸" / ""; margin-inline-end: 0.7rem; opacity: 0.6; }
 .book-cover .breadcrumb a { color: #f7ecd4; text-decoration: none; border-bottom: 1px dotted currentColor; }
 .book-cover .breadcrumb a:hover { color: #fff; }
 .book-cover .breadcrumb li[aria-current] { opacity: 0.85; }
@@ -137,13 +137,14 @@ code { font-family: var(--mono); }
 .entry-fields .page-metadata div { display: flex; align-items: baseline; gap: 0.45rem; }
 .entry-fields .page-metadata dt { font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
 .entry-fields .page-metadata dd { margin: 0; }
-.entry-fields .page-metadata dd::after { content: " ·"; }
+.entry-fields .page-metadata dd::after { content: " ·"; content: " ·" / ""; }
 .entry-fields .page-metadata div:last-child dd::after { content: ""; }
 
 /* --- Prose: pencil on grid --- */
 
 .prose { max-width: var(--measure); }
 .prose > :first-child { margin-top: 0; }
+.prose :is(h1, h2, h3, h4) { text-wrap: balance; scroll-margin-top: 1.5rem; }
 .prose h1 { margin: 0 0 1.1rem; font-size: clamp(2rem, 4.5vw, 3rem); line-height: 1.08; letter-spacing: -0.03em; }
 .prose h2 { margin: 2.5rem 0 0.6rem; padding-top: 0.5rem; border-top: 1px solid var(--rule); font-size: 1.4rem; }
 .prose h3 { margin: 1.8rem 0 0.4rem; font-size: 1.12rem; }
@@ -233,6 +234,7 @@ details summary:hover { color: var(--flag); }
 }
 .page-children a::before {
   content: "entry " counter(leg, decimal-leading-zero);
+  content: "entry " counter(leg, decimal-leading-zero) / "";
   font-family: var(--mono); font-size: 0.7rem; color: var(--pencil); letter-spacing: 0.08em;
   flex: none;
 }
@@ -259,8 +261,8 @@ details summary:hover { color: var(--flag); }
   color: var(--pencil);
   font-family: var(--mono); font-size: 0.66rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase;
 }
-.semantic-relations::before { content: "See also"; }
-.semantic-backlinks::before { content: "Cited in"; }
+.semantic-relations::before { content: "See also"; content: "See also" / ""; }
+.semantic-backlinks::before { content: "Cited in"; content: "Cited in" / ""; }
 .semantic-relations ul, .semantic-backlinks ul { margin: 0; padding: 0; list-style: none; }
 .semantic-relations li, .semantic-backlinks li { margin-block: 0.3rem; }
 .semantic-relations li::before, .semantic-backlinks li::after {
@@ -348,6 +350,12 @@ details summary:hover { color: var(--flag); }
 @media (max-width: 52rem) {
   .spread { grid-template-columns: minmax(0, 1fr); }
   .margin-col { order: 2; }
+}
+
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight; }
+  .skip-link:focus { border: 1px solid CanvasText; }
+  .site-nav .is-current > a { outline: 2px solid Highlight; }
 }
 
 @media (prefers-reduced-motion: reduce) {

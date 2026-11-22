@@ -21,15 +21,20 @@ application.
   `color-mix` of the primary solid). It is a shape change, never color
   alone. "See also" cards draw the ring around the whole card when their
   link has focus.
-- Color intent is always paired with text. The status pill prints "Draft",
-  "Published", or "Archived", and draft and archived pages also get a
-  text banner. Relation cards print their kind ("Related", "Builds on",
-  "Linked from"). Admonition titles stay visible text, and each kind also
-  has its own glyph.
+- Color intent is always paired with text. The status pill renders real DOM
+  text (`{{page-status}}`: Draft, Published, or Archived), and draft and
+  archived pages also get a text banner. Relation cards print their kind
+  ("Related", "Builds on", "Linked from"). Admonition titles stay visible text,
+  and decorative glyphs (admonition icons, tag `#`, step counters, button and
+  parent arrows) use empty CSS alt text (`content: "…" / ""`) with a
+  single-value fallback.
 - The current page in the sidebar has `aria-current="page"` from the
   compiler. The theme adds a tinted background and, for leaf pages, a
   thicker accent bar, so the state does not depend on hue. Under
-  `forced-colors: active`, the current link gets a `Highlight` outline.
+  `forced-colors: active`, focus rings and the current link use `Highlight`
+  outlines, tag pills and the focused skip link gain `CanvasText` borders
+  (preserving base borders on cards and callouts), and the hero heading drops
+  its gradient text fill so text remains visible.
 - Contrast holds by construction. Each `--*-fg` token is chosen against
   its `--*-bg-subtle` pair in both `light-dark()` modes. Muted text
   (`--fg-muted`) is reserved for labels, breadcrumbs, and rail copy, not

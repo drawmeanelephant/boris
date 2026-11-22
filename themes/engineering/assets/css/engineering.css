@@ -45,7 +45,9 @@ a:hover { color: #0550ae; }
 .primer-home__rail { position: static; }
 .breadcrumb { margin-bottom: 1rem; color: var(--primer-muted); font-size: 0.85rem; }
 .breadcrumb ol { display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; margin: 0; padding: 0; list-style: none; }
-.breadcrumb li + li::before { content: "/"; margin-inline-end: 0.4rem; color: var(--primer-border); }
+.breadcrumb li + li::before { content: "/"; content: "/" / ""; margin-inline-end: 0.4rem; color: var(--primer-border); }
+.primer-title, .h2, .markdown-body :is(h1, h2, h3, h4) { text-wrap: balance; }
+.markdown-body :is(h1, h2, h3, h4, h5, h6) { scroll-margin-top: 1.5rem; }
 .primer-title { margin: 0.3rem 0 0.6rem; font-size: clamp(1.6rem, 3.5vw, 2.1rem); line-height: 1.2; letter-spacing: -0.02em; }
 .h2 { margin: 0 0 0.8rem; font-size: 1.3rem; line-height: 1.2; }
 .page-metadata { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; margin: 0 0 1.4rem; color: var(--primer-muted); font-size: 0.84rem; }
@@ -99,6 +101,11 @@ details summary { cursor: pointer; font-weight: 600; }
 :focus-visible { outline: 0.2rem solid var(--primer-focus); outline-offset: 0.2rem; }
 @media (prefers-color-scheme: dark) { :root { --primer-canvas: #0d1117; --primer-canvas-subtle: #161b22; --primer-surface: #161b22; --primer-border: #30363d; --primer-ink: #e6edf3; --primer-muted: #8b949e; --primer-accent-soft: #122b42; --primer-accent: #4493f8; --primer-focus: #4493f8; --primer-success: #3fb950; --primer-attention: #d29922; --primer-danger: #f85149; } a:hover { color: #79c0ff; } .Label--accent { color: #79c0ff; } }
 @media (max-width: 48rem) { .primer-header__inner { display: grid; align-items: start; } .primer-nav ul { justify-content: start; } .primer-grid, .primer-home { grid-template-columns: 1fr; } .primer-sidebar { position: static; } }
+@media (forced-colors: active) {
+  :focus-visible, .primer-header :focus-visible { outline: 3px solid Highlight; }
+  .skip-link:focus { border: 1px solid CanvasText; }
+  .primer-nav a[aria-current="page"] { outline: 2px solid Highlight; }
+}
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 @media print { .primer-header, .primer-footer, .primer-sidebar, .primer-home__rail, .skip-link { display: none; } .primer-grid, .primer-home { display: block; padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } }
 

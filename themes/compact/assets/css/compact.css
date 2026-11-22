@@ -18,7 +18,6 @@
   --gutter: 1rem;
   --radius: 0.35rem;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 100%;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -60,7 +59,7 @@ a:hover { text-decoration-thickness: 0.16em; }
 .brand__mark { display: inline-grid; place-items: center; inline-size: 2rem; block-size: 2rem; background: var(--primary); color: #fff; border-radius: 50%; font-weight: 850; }
 .brand__name { letter-spacing: -0.02em; }
 .breadcrumb ol { display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0; margin: 0; list-style: none; color: var(--muted); font-size: 0.86rem; }
-.breadcrumb li + li::before { content: "/"; margin-right: 0.3rem; color: var(--line); }
+.breadcrumb li + li::before { content: "/"; content: "/" / ""; margin-right: 0.3rem; color: var(--line); }
 .breadcrumb a { color: inherit; }
 
 .hero { border-bottom: 1px solid var(--line); background: var(--surface-soft); }
@@ -85,7 +84,7 @@ a:hover { text-decoration-thickness: 0.16em; }
 .reading-panel { min-width: 0; padding: clamp(1rem, 3vw, 1.8rem); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .page-metadata { display: flex; flex-wrap: wrap; gap: 0.35rem 0.9rem; margin: 0 0 1.35rem; padding: 0.55rem 0.7rem; background: var(--surface-soft); border-radius: var(--radius); font-size: 0.8rem; }
 .page-metadata div { display: flex; gap: 0.3rem; }.page-metadata dt { font-weight: 750; }.page-metadata dd { margin: 0; color: var(--muted); }
-.prose > :first-child { margin-top: 0; }.prose h1, .prose h2, .prose h3 { line-height: 1.2; letter-spacing: -0.025em; }.prose h1 { font-size: clamp(1.7rem, 4vw, 2.35rem); }.prose h2 { margin-top: 1.9rem; font-size: 1.3rem; }.prose h3 { margin-top: 1.3rem; font-size: 1.05rem; }
+.prose > :first-child { margin-top: 0; }.prose h1, .prose h2, .prose h3 { line-height: 1.2; letter-spacing: -0.025em; text-wrap: balance; }.prose :is(h1, h2, h3, h4, h5, h6) { scroll-margin-top: 1.5rem; }.prose h1 { font-size: clamp(1.7rem, 4vw, 2.35rem); }.prose h2 { margin-top: 1.9rem; font-size: 1.3rem; }.prose h3 { margin-top: 1.3rem; font-size: 1.05rem; }
 .prose :not(pre) > code { padding: 0.1em 0.3em; background: var(--primary-soft); border-radius: 0.22rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
 .prose pre { overflow-x: auto; padding: 0.9rem; background: var(--code); color: var(--code-text); border-radius: var(--radius); }.prose pre code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
 .prose table { display: block; max-width: 100%; overflow-x: auto; width: 100%; margin: 1rem 0; border: 1px solid var(--line); border-collapse: collapse; font-size: 0.875rem; font-variant-numeric: tabular-nums; }.prose th, .prose td { padding: 0.32rem 0.55rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }.prose th { background: var(--surface-soft); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }.prose tr:last-child td { border-bottom: 0; }
@@ -122,6 +121,11 @@ a:hover { text-decoration-thickness: 0.16em; }
 
 @media (max-width: 58rem) { .page-grid { grid-template-columns: 10.5rem minmax(0, 1fr); }.rail--toc { grid-column: 2; position: static; padding: 0.7rem; background: var(--surface-soft); border-radius: var(--radius); } }
 @media (max-width: 42rem) { .site-header__inner, .hero__inner { align-items: flex-start; flex-direction: column; padding-block: 1rem; }.page-grid, .home-grid { grid-template-columns: 1fr; gap: 0.8rem; }.rail--nav, .rail--toc, .home-nav { grid-column: auto; position: static; padding: 0.7rem; background: var(--surface-soft); border-radius: var(--radius); }.site-nav ul { display: flex; flex-wrap: wrap; gap: 0.15rem; }.site-nav ul ul { display: none; }.reading-panel { padding: 1rem; }.prose table { display: block; overflow-x: auto; }.prose dl { grid-template-columns: 1fr; gap: 0; }.prose dd { margin-bottom: 0.4rem; } }
+@media (forced-colors: active) {
+  :focus-visible { outline: 3px solid Highlight; }
+  .skip-link:focus, .page-metadata { border: 1px solid CanvasText; }
+  .site-nav .is-current > a { outline: 2px solid Highlight; }
+}
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 @media print {
   :root { color-scheme: light; --bg: #fff; --surface: #fff; --surface-soft: #f4f4f4; --text: #000; --muted: #333; --line: #bbb; --primary: #000; --primary-soft: #eee; --code: #f4f4f4; --code-text: #000; }

@@ -3,8 +3,12 @@
 - The first focusable element is a skip link to `#main-content`, the `main`
   element (`tabindex="-1"`).
 - The page uses header, nav, main, article, section, aside, and footer
-  landmarks. The node tracker is a labelled `nav`; the sidebar is a labelled
-  `aside`.
+  landmarks. The node tracker wraps the compiler's `nav` inside a `section`
+  within the labelled `aside` so navigation landmarks are not nested.
+- `color-scheme: light` aligns native chrome with the light canvas, font sizes
+  use `rem` units for browser/OS text scaling, and `@media (forced-colors:
+  active)` preserves focus outlines, current-nav outlines, and a focused
+  skip-link border without flattening base borders.
 - There is no search box, login, or other control that would need a runtime.
   Navigation is the graph.
 - `:focus-visible` draws a 2px red outline with a 2px offset, and focused

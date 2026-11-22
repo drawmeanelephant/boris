@@ -63,7 +63,7 @@ body:has(.page-tags) .page-metadata > div:last-child,
 body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
 .page-metadata:has(+ .page-tags) { margin-bottom: .35rem; }
 .page-tags { display: flex; flex-wrap: wrap; gap: .2rem .6rem; margin: 0 0 1rem; padding: 0; list-style: none; color: var(--accent); font: .72rem ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
-.page-tags li::before { content: "#"; color: var(--muted); }
+.page-tags li::before { content: "#"; content: "#" / ""; color: var(--muted); }
 .page-parent { margin: 0 0 2rem; font: .78rem var(--sans); letter-spacing: .04em; text-transform: uppercase; }
 .page-parent::before { content: "↩ Filed in "; content: "↩ Filed in " / "Filed in "; color: var(--muted); }
 .page-parent a { color: var(--accent); }
@@ -103,14 +103,14 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
 .page-children li { min-height: 13rem; border-right: 1px solid var(--line); }
 .page-children li:first-child { border-left: 1px solid var(--line); }
 .page-children a { display: flex; height: 100%; align-items: end; padding: 1.15rem; color: var(--ink); font-size: clamp(1.55rem, 3vw, 2.35rem); line-height: 1; text-decoration: none; }
-.page-children a::before { align-self: start; margin-right: auto; color: var(--accent); content: "↗"; font-family: ui-monospace, monospace; font-size: 1rem; }
+.page-children a::before { align-self: start; margin-right: auto; color: var(--accent); content: "↗"; content: "↗" / ""; font-family: ui-monospace, monospace; font-size: 1rem; }
 .page-children a:hover, .page-children a:focus-visible { background: var(--ink); color: var(--paper); outline: none; }
 .archive-note { max-width: 39rem; padding-bottom: 5rem; color: var(--muted); }
 
 .entry-shell { width: min(100% - 2.5rem, 56rem); }
 .entry-header { padding: 2rem 0; border-bottom: 1px solid var(--line); }
 .breadcrumb ol { display: flex; flex-wrap: wrap; gap: .35rem; margin: .6rem 0 0; padding: 0; list-style: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
-.breadcrumb li + li::before { padding-right: .35rem; color: var(--muted); content: "/"; }
+.breadcrumb li + li::before { padding-right: .35rem; color: var(--muted); content: "/"; content: "/" / ""; }
 .breadcrumb a { color: var(--accent); }
 .entry-copy { padding: clamp(2rem, 6vw, 4rem) 0; font-size: clamp(1.1rem, 1.8vw, 1.3rem); }
 .entry-copy h1 { margin: 0 0 1.5rem; font-size: clamp(3rem, 8vw, 5.5rem); line-height: .94; letter-spacing: -.045em; }
@@ -168,6 +168,16 @@ body:has(.page-tags) .page-metadata:has(> div:only-child) { display: none; }
   .archive-sidebar, .entry-sidebar { position: static; }
   .page-children ul { grid-template-columns: 1fr; }
   .page-children li, .page-children li:first-child { min-height: 6.5rem; border-right: 0; border-left: 0; border-bottom: 1px solid var(--line); }
+}
+
+.masthead h1, .entry-copy :is(h1, h2, h3), .archive-note :is(h1, h2, h3) { text-wrap: balance; }
+.entry-copy :is(h1, h2, h3, h4, h5, h6), .archive-note :is(h1, h2, h3, h4, h5, h6) { scroll-margin-top: 1.5rem; }
+
+@media (forced-colors: active) {
+  :focus-visible { outline: 3px solid Highlight; }
+  .skip-link:focus { border: 1px solid Highlight; }
+  .site-nav .is-current > a { outline: 2px solid Highlight; }
+  .page-children a:focus-visible { outline: 3px solid Highlight; outline-offset: -3px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

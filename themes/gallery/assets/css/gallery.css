@@ -161,6 +161,7 @@ main:focus {
 
 .breadcrumb li + li::before {
   content: "/";
+  content: "/" / "";
   padding-inline: 0.5rem;
   color: var(--g-rule);
 }
@@ -225,6 +226,7 @@ body[data-status="draft"] .g-main::before {
   line-height: 1.2;
   letter-spacing: -0.01em;
   text-wrap: balance;
+  scroll-margin-top: 1.5rem;
 }
 
 .prose h1 {
@@ -412,6 +414,7 @@ body[data-status="draft"] .g-main::before {
 
 .page-children a::before {
   content: "No. " counter(g-plate, decimal-leading-zero);
+  content: "No. " counter(g-plate, decimal-leading-zero) / "";
   color: var(--g-muted);
   font-size: 0.72rem;
   font-weight: 600;
@@ -449,6 +452,7 @@ body[data-status="draft"] .g-main::before {
 }
 
 .page-parent a::before {
+  content: "\2190\00a0";
   content: "\2190\00a0" / "";
 }
 
@@ -529,10 +533,12 @@ body[data-status="draft"] .g-main::before {
 
 .semantic-relations::before {
   content: "See also";
+  content: "See also" / "";
 }
 
 .semantic-backlinks::before {
   content: "Referenced by";
+  content: "Referenced by" / "";
 }
 
 .semantic-relations ul,
@@ -596,6 +602,7 @@ body[data-status="draft"] .g-main::before {
 }
 
 .site-nav .is-current > a::before {
+  content: "\2192\00a0";
   content: "\2192\00a0" / "";
 }
 
@@ -806,6 +813,20 @@ body[data-status="draft"] .g-main::before {
   .page-children a {
     aspect-ratio: auto;
     min-block-size: 6rem;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight;
+  }
+
+  .skip-link:focus {
+    border: 1px solid CanvasText;
+  }
+
+  .site-nav .is-current > a {
+    outline: 2px solid Highlight;
   }
 }
 
