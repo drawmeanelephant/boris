@@ -21,7 +21,7 @@ second theme attic.
 | [`reading-site`](reading-site/) | [`themes/reading`](../themes/reading/) | `:lang` typesetting specimens |
 | [`lab-site`](lab-site/) | [`themes/lab`](../themes/lab/) | Three color modes, graph panel, dropdown search |
 | [`gallery-site`](gallery-site/) | [`themes/gallery`](../themes/gallery/) | Album grid, figures/captions, page-local `{stem}.assets/` images at three depths |
-| [`studies-site`](studies-site/) | `semantic` / `columns` / `service` / `engineering` / `civic` / `tokens` / `corporate` / `minimal`, plus `boris` and `html4-strict` | One docs corpus; swap `--theme` |
+| [`studies-site`](studies-site/) | `semantic` / `columns` / `service` / `engineering` / `civic` / `tokens` / `blueprint` / `corporate` / `minimal`, plus `boris` and `html4-strict` | One docs corpus; swap `--theme` |
 
 Each site README has the exact `boris` invocation, including every
 `--layout-rule` for named layouts. Keep generated trees under ignored
@@ -45,7 +45,7 @@ documentation/blog specimen commands above remain unchanged.
 |---|---|
 | `archive`, `cards`, `compact`, `cozy`, `field-notes`, `gallery`, `journal`, `lab`, `ledger`, `press`, `reading`, `reference`, `showcase` | Own `examples/<theme>-site/` |
 | `semantic`, `columns`, `service`, `engineering`, `civic`, `tokens` | `studies-site` with the theme's `home.html` / `section.html` rules |
-| `blueprint` | `studies-site` with the `id:index` → `home.html` rule. The `boris init --type blueprint` tree is its teaching specimen |
+| `blueprint` | `studies-site` with `home.html` / `section.html` rules. The `boris init --type blueprint` tree is its teaching specimen |
 | `corporate`, `minimal` | `studies-site` with no layout rules. The `boris init --type resume` tree is corporate's print specimen |
 | `boris` | `studies-site` with no layout rules. The repository's own [`content/`](../content/) docs site is its dogfood specimen |
 | `html4-strict` | `studies-site` under `--target-profile default=html4-strict`. [`fixtures/html4-strict/content`](../fixtures/html4-strict/content/) is the minimal regression fixture |
