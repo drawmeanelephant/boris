@@ -8,3 +8,10 @@
   [the GitHub Pages guide](/docs/github-pages.md),
   [the head-metadata contract](/docs/contracts/head-metadata.md),
   [#1189](https://github.com/drawmeanelephant/boris/issues/1189).
+
+### Fixed
+
+- `boris-github-pages-audit` accepts publication-plan schemas 2 and 3, so
+  `audit_deployment` still runs when the Pages profile declares `head`
+  metadata. Link:
+  [the deployment-evidence contract](/docs/contracts/github-pages-deployment-evidence.md).
