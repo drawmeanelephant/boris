@@ -31,7 +31,9 @@ manual screen-reader, keyboard, zoom, or contrast review of a rendered site.
   the results list is displayed whenever it has entries. While the input is
   empty the status is clipped visually but stays in the accessibility tree,
   so it no longer overlaps the placeholder and is still announced. Without
-  JavaScript a `<noscript>` note points to the menu.
+  JavaScript a `<noscript>` note points to the menu, and a submitted
+  search lands on `assets/search.html` — a static page that explains the
+  fallback — rather than a missing route.
 - **Motion.** `prefers-reduced-motion: reduce` removes every animation and
   transition, including the card lift.
 - **Print.** A clean single-column document (see the README): chrome is

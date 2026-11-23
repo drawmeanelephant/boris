@@ -31,7 +31,9 @@ What lab guarantees, checked against the built output and
   Without JavaScript the page stays in the dark default and remains usable.
 - Search is a progressive enhancement over the first-party index. Results
   are an ordered list with a polite live status; without JavaScript a
-  `<noscript>` note points to the navigation tree. Breadcrumb, rail, TOC,
+  `<noscript>` note points to the navigation tree, and a submitted search
+  lands on `assets/search.html` — a static page that explains the
+  fallback — rather than a missing route. Breadcrumb, rail, TOC,
   and the graph panel are `data-boris-search-exclude`.
 - Relations and backlinks keep their compiler `aria-label`s inside the
   graph panel, with the relation kind shown as text. Empty panel blocks are

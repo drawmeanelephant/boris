@@ -1,7 +1,7 @@
 # Corporate
 
 Dense product-docs chrome. Graph nav is real. Search is the first-party
-inline consumer. There are no `#` links or dead icon buttons. See
+inline consumer; its no-JS form action lands on `assets/search.html`. There are no `#` links or dead icon buttons. See
 [`ACCESSIBILITY.md`](ACCESSIBILITY.md).
 
 - Layouts: `main.html`

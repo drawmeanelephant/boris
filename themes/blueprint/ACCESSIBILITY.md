@@ -48,7 +48,8 @@ application.
   line is an `aria-live="polite"` region that is clipped, not
   `display: none`, while the panel is closed, so updates are still
   announced. Without JavaScript, a `<noscript>` note points to the
-  sidebar.
+  sidebar, and a submitted search lands on `assets/search.html` — a
+  static page that explains the fallback — rather than a missing route.
 - `prefers-reduced-motion` removes the drawer slide, the `<Details>`
   height animation, hover nudges, and smooth scrolling.
 - Print drops the header, sidebar, outline, footer, section listings, and
