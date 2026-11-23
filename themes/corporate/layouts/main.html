@@ -15,7 +15,7 @@
   <span class="header-logo">Corporate</span>
   <div class="header-actions">
     <section class="search-container" data-boris-search-ui aria-labelledby="site-search-label">
-      <form action="_boris/search/" method="get" role="search" data-boris-search-form>
+      <form action="{{asset-url assets/search.html}}" method="get" role="search" data-boris-search-form>
         <label class="visually-hidden" id="site-search-label" for="site-search-input">Search</label>
         <input id="site-search-input" class="search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
         <p class="site-search__status" data-boris-search-status role="status" aria-live="polite"></p>
@@ -58,7 +58,6 @@
     const marker = href.lastIndexOf("assets/");
     return marker >= 0 ? href.slice(0, marker) : "";
   })();
-  if (form) form.action = siteRootPrefix + "_boris/search/";
   const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
   const expectedFormat = "boris-rendered-search-index";
   const expectedSchema = 1;

@@ -9,7 +9,7 @@ Dark-first lab-terminal documentation theme with three persisted color modes
   (`{{relations}}` / `{{children}}` / `{{backlinks}}`), and `{{toc}}`.
 - Search uses the first-party inline rendered-search consumer with the
   documented `data-boris-search-*` hooks; no `<script src>`, no vendored
-  JavaScript.
+  JavaScript. The no-JS form action lands on `assets/search.html`.
 - `layouts/print.html` is an optional named print shape (light-on-paper, on
   screen and in print); select it with a `--layout-rule` when wanted.
   `@media print` on `main.html` prints the same paper palette from any of

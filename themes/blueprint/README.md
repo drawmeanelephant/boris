@@ -94,4 +94,6 @@ Search uses the same browser client as the default `boris` theme, inlined
 in each layout. It reads `_boris/search/search-index.json`, which the
 compiler publishes. It also sets the brand link's page-relative home
 address. Without JavaScript, the search panel says so, and the sidebar and
-section pages remain the way around the site.
+section pages remain the way around the site. A submitted search lands on
+`assets/search.html` — a static page that explains the fallback — rather
+than a missing route.
