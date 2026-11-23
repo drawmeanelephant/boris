@@ -95,6 +95,12 @@ pub fn classify(gpa: std.mem.Allocator, location: *const Location, raw: []const 
         return .external;
     }
     const path_end = suffixStart(raw);
+    if (!require_public) {
+        _ = stripBase(location, if (path_end == end) "/" else raw[end..path_end]) catch |err| switch (err) {
+            error.BasePathMismatch => return .external,
+            else => return err,
+        };
+    }
     return .{ .publication = try route(gpa, location, raw[end..path_end], raw[path_end..]) };
 }
 

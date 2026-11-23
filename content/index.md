@@ -5,18 +5,37 @@ tags: [home, zig, publication]
 summary: Graph-native publication compiler. HTML dist/ is the default target, not the whole product.
 ---
 
-<p class="eyebrow">Publisher platform</p>
+<p class="eyebrow">Start here</p>
 
-# One compiler. Many targets. One graph. {#one-compiler .hero-heading}
+# Write Markdown. Get a website. {#one-compiler .hero-heading}
 
-{{include includes/identity.md}}
+**Boris turns a folder of Markdown files into a static website.** It is one
+native program: no Node, no plugins, no build pipeline to assemble. Before
+it publishes anything it checks every page link and page relationship, so a
+broken site fails the build instead of going live. This site was built with
+it.
+
+Boris is the middle of a three-part stack. Pick the part that fits what you
+came here to do:
+
+<div class="edition-grid audience-grid">
+<div class="edition-card"><span class="edition-card__tag">Write a site</span><h3 id="audience-write-a-site">Boris</h3><p>Docs, a blog, a cookbook, or a plain website from Markdown files, built by one command.</p><p><a href="getting-started.html">Get started with Boris</a></p></div>
+<div class="edition-card"><span class="edition-card__tag">Embed a markup library</span><h3 id="audience-embed-a-library">Oliver</h3><p>The Zig library under Boris: Markdown, Textile, or Cooklang in, deterministic HTML out. Library, CLI, and C ABI.</p><p><a href="https://drawmeanelephant.github.io/oliver/">Oliver documentation</a></p></div>
+<div class="edition-card"><span class="edition-card__tag">Get the Mac app</span><h3 id="audience-mac-app">Solipsist</h3><p>A native macOS app that drives Boris from a window: sources, preview, build, and publish without a terminal.</p><p><a href="https://solipsist.filed.fyi">Solipsist site</a></p></div>
+</div>
+
+Not sure yet? [[ecosystem|The Stack]] explains all three on one page.
 
 <p class="home-actions">
 <a href="getting-started.html">Get started</a>
+<a href="ecosystem.html">The Stack</a>
 <a href="guides/publishing.html">Publish</a>
-<a href="guides/oliver-markdown.html">Watch Oliver work</a>
 <a href="reference/commands.html">Open the reference</a>
 </p>
+
+## Already know what you want? {#for-the-converted}
+
+{{include includes/identity.md}}
 
 <Aside kind="info" id="default-path">
 
