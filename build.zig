@@ -387,6 +387,20 @@ pub fn build(b: *std.Build) void {
     );
     test_atproto_session_std_step.dependOn(&run_atproto_session_std_tests.step);
 
+    // Protected sessions: framed, versioned broker IPC with no filesystem store.
+    const atproto_session_provider_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_session_provider_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_session_provider_tests = b.addTest(.{ .root_module = atproto_session_provider_mod });
+    const run_atproto_session_provider_tests = b.addRunArtifact(atproto_session_provider_tests);
+    run_atproto_session_provider_tests.setCwd(b.path("."));
+    const test_atproto_session_provider_step = b.step(
+        "test-atproto-session-provider",
+        "Run protected session provider protocol and no-disk/no-leak tests",
+    );
+    test_atproto_session_provider_step.dependOn(&run_atproto_session_provider_tests.step);
     // Oliver: freestanding Zig markup library (source bytes → typed document
     // → deterministic HTML). Pinned by content hash in build.zig.zon; see
     // docs/contracts/oliver-renderer.md for the exact revision and the
@@ -537,6 +551,14 @@ pub fn build(b: *std.Build) void {
     });
     const run_unit_tests = b.addRunArtifact(unit_tests);
     run_unit_tests.setCwd(b.path("."));
+
+    const protected_session_cli_run = b.addSystemCommand(&.{
+        "python3",
+        "test/protected-session-provider.py",
+    });
+    protected_session_cli_run.addArtifactArg(exe);
+    protected_session_cli_run.setCwd(b.path("."));
+    test_atproto_session_provider_step.dependOn(&protected_session_cli_run.step);
 
     // --- Fixture inventory tests (milestone 2) -----------------------------
     const fixtures_mod = b.createModule(.{
@@ -1911,6 +1933,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(test_atproto_authorization);
     test_step.dependOn(test_atproto_xrpc);
     test_step.dependOn(test_atproto_password_step);
+    test_step.dependOn(test_atproto_session_provider_step);
     test_step.dependOn(&run_standard_site_tests.step);
     test_step.dependOn(&run_standard_site_emit_tests.step);
     test_step.dependOn(&run_unit_tests.step);

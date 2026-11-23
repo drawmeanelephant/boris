@@ -185,6 +185,9 @@ const modules = [_]Module{
         .note = "persistent session wire documents; the 0600 JSON built with json_out, never printed",
     } }, .source = @embedFile("atproto_session_store.zig") },
     .{ .name = "atproto_session_std.zig", .class = .other },
+    // Private synchronous broker IPC, not a public/model-facing artifact.
+    .{ .name = "atproto_session_provider.zig", .class = .other },
+    .{ .name = "atproto_session_provider_test.zig", .class = .other },
     // Network client, not an emitter: XRPC request envelopes are transient
     // wire messages to the PDS, audited by the offline mock suite.
     .{ .name = "atproto_xrpc.zig", .class = .other },

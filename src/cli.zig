@@ -174,6 +174,8 @@ pub const Options = struct {
     /// Override the persistent session root for the `standard-site` family
     /// (default: `$HOME/.local/share/boris/sessions`).
     session_root: ?[]const u8 = null,
+    /// Reserve stdin/stdout for the framed Capture Vector keychain broker.
+    session_provider_stdio: bool = false,
     /// Namespace prefix for `standard-site smoke` test rkeys (default: a
     /// clock-derived unique namespace).
     smoke_namespace: ?[]const u8 = null,
@@ -683,6 +685,8 @@ const ParseState = struct {
     saw_app_password: bool = false,
     session_root: ?[]const u8 = null,
     saw_session_root: bool = false,
+    session_provider_stdio: bool = false,
+    saw_session_provider_stdio: bool = false,
     plan_path: ?[]const u8 = null,
     saw_plan_path: bool = false,
     publish_prune: bool = false,
@@ -1560,6 +1564,7 @@ fn parseTargetSpecs(
 fn sessionFlagName(a: []const u8) ?[]const u8 {
     if (std.mem.eql(u8, a, "--prune")) return "--prune";
     if (std.mem.eql(u8, a, "--app-password")) return "--app-password";
+    if (std.mem.eql(u8, a, "--session-provider-stdio")) return "--session-provider-stdio";
     const valued = [_][]const u8{
         "--source-commit",
         "--did",
@@ -1615,6 +1620,12 @@ fn parseSessionFlags(
     if (std.mem.eql(u8, a, "--app-password")) {
         try markSaw(&st.saw_app_password);
         st.app_password = true;
+        return true;
+    }
+
+    if (std.mem.eql(u8, a, "--session-provider-stdio")) {
+        try markSaw(&st.saw_session_provider_stdio);
+        st.session_provider_stdio = true;
         return true;
     }
 
@@ -2192,6 +2203,9 @@ fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
     // Smoke-only and verify-only flags have no meaning on the other
     // subcommands; reject them rather than silently ignoring them.
     const saw_smoke_only = st.saw_smoke_namespace or st.saw_smoke_surface_url or st.saw_smoke_indexer_origin;
+    if (st.session_provider_stdio and st.saw_session_root) return error.ConflictingStandardSiteFlags;
+    if (st.session_provider_stdio and (st.standard_site_command == .plan or st.standard_site_command == .records or st.standard_site_command == .verify)) return error.ConflictingStandardSiteFlags;
+    if (st.session_provider_stdio and (st.standard_site_command == .publish or st.standard_site_command == .smoke) and !st.saw_out) return error.ConflictingStandardSiteFlags;
     switch (st.standard_site_command) {
         .publish => {
             if (st.profile_path == null) return error.MissingStandardSiteProfile;
@@ -2254,6 +2268,7 @@ fn buildStandardSiteOptions(st: *ParseState) ParseError!Options {
         .session_handle = st.session_handle,
         .app_password = st.app_password,
         .session_root = st.session_root,
+        .session_provider_stdio = st.session_provider_stdio,
         .smoke_namespace = st.smoke_namespace,
         .smoke_surface_url = st.smoke_surface_url,
         .smoke_indexer_origin = st.smoke_indexer_origin,
@@ -2799,6 +2814,7 @@ pub const usage_text =
     \\  --out PATH          Smoke result artifact path (default: stdout)
     \\  standard-site options (all subcommands):
     \\  --session-root PATH Override the persistent session store root
+    \\  --session-provider-stdio  Use framed keychain broker IPC (publish/smoke require --out)
     \\  --profile PATH      Build/watch/validate the declared HTML targets (no HTML selectors)
     \\                      Explicit build selectors retain the matching metadata opt-in
     \\  --html              Explicit HTML site mode → --html-dir (default dist)
@@ -3840,6 +3856,17 @@ test "parse: standard-site login requires a DID and persists the session root" {
     try expect(!o.standard_site_publish);
     try expectEqualStrings("did:plc:ewvi7nxzyoun6zhxrhs64oiz", o.session_did.?);
     try expectEqualStrings("/tmp/boris-sessions", o.session_root.?);
+}
+
+test "parse: explicit protected session provider rejects file fallback and stdout reports" {
+    var login = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "did:plc:ewvi7nxzyoun6zhxrhs64oiz", "--session-provider-stdio" });
+    defer login.deinit(std.testing.allocator);
+    try expect(login.session_provider_stdio);
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "did:plc:ewvi7nxzyoun6zhxrhs64oiz", "--session-provider-stdio", "--session-root", "/tmp/forbidden" }));
+    try expectError(error.ConflictingStandardSiteFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "site.json", "--session-provider-stdio" }));
+    var publish = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "site.json", "--session-provider-stdio", "--out", "evidence.json" });
+    defer publish.deinit(std.testing.allocator);
+    try expectEqualStrings("evidence.json", publish.publish_out.?);
 }
 
 test "parse: standard-site sessions lists without a DID" {

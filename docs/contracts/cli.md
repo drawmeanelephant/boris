@@ -336,6 +336,13 @@ command. `plan` is the exception: it always writes its single document to
 stdout and rejects `--timings`, because its stdout is reserved for one JSON
 document and no trailing timing report may be appended.
 
+The explicit `--session-provider-stdio` mode is a separate transport contract:
+stdout carries only framed `boris-session-provider` protocol messages, never an
+ordinary report. Protected `publish`/`smoke` therefore require `--out PATH`,
+and protected `sessions` emits its secret-free list on stderr. The broker
+protocol and caller obligations are normative in
+[`atproto-sessions.md`](atproto-sessions.md#protected-capture-vector-provider-protocol-1).
+
 Everything not listed here — including `build`, `validate`, `check`, `impact`,
 `watch`, `init`, `standard-site login|sessions|logout`, and all bare HTML/IR/
 RAG/Context/llms/RSS/sitemap builds — leaves stdout empty. `check` and

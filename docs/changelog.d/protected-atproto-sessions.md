@@ -1,0 +1,1 @@
+- Add an explicit Capture Vector `--session-provider-stdio` mode with framed, DID/operation-bound keychain broker IPC, acknowledged refresh rotation, and no Boris session-file fallback; legacy file-backed sessions remain the default. See [the protected session provider contract](../contracts/atproto-sessions.md#protected-capture-vector-provider-protocol-1).

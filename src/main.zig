@@ -55,6 +55,8 @@ const atproto_transport = @import("atproto_transport.zig");
 const atproto_transport_std = @import("atproto_transport_std.zig");
 const atproto_interactive_std = @import("atproto_interactive_std.zig");
 const atproto_session_std = @import("atproto_session_std.zig");
+const atproto_session_provider = @import("atproto_session_provider.zig");
+const store_mod = @import("atproto_session_store.zig");
 const standard_site_smoke = @import("standard_site_smoke.zig");
 const recipe_scale = @import("recipe_scale.zig");
 const recipe_scale_view = @import("recipe_scale_view.zig");
@@ -721,6 +723,10 @@ fn classifyPublishError(err: anyerror) ExitCode {
         error.StoreNotFound,
         error.StorePermissionDenied,
         error.StoreUnexpected,
+        error.ProviderMalformed,
+        error.ProviderClosed,
+        error.ProviderDenied,
+        error.ProviderUnavailable,
         => .session,
         // Localhost-client / grant compatibility.
         error.InvalidClientId,
@@ -771,6 +777,9 @@ fn reportSessionError(err: anyerror) ExitCode {
         error.WrongDocumentType => "the stored session document is the other credential type; run `boris standard-site logout --did <DID>` then log in again",
         error.StorePermissionDenied => "the session store is not readable/writable; check permissions on the session root",
         error.StoreLocked => "the session store is locked by another process",
+        error.ProviderMalformed => "the protected session broker sent a malformed or mismatched response",
+        error.ProviderClosed, error.ProviderUnavailable => "the protected session broker channel is unavailable",
+        error.ProviderDenied => "the protected session broker denied the requested operation",
         else => @errorName(err),
     };
     errPrint("error: standard-site session: {s}\n", .{message});
@@ -782,13 +791,136 @@ fn resolveSessionRoot(gpa: std.mem.Allocator, environ: *std.process.Environ.Map,
     return atproto_session_std.Sessions.userRoot(gpa, environ.*, opts.session_root);
 }
 
+const StdioSessionChannel = struct {
+    read_buffer: [4096]u8 = undefined,
+    write_buffer: [4096]u8 = undefined,
+    reader: std.Io.File.Reader = undefined,
+    writer: std.Io.File.Writer = undefined,
+
+    fn init(self: *StdioSessionChannel, io: Io) void {
+        self.reader = std.Io.File.stdin().reader(io, &self.read_buffer);
+        self.writer = std.Io.File.stdout().writer(io, &self.write_buffer);
+    }
+
+    fn channel(self: *StdioSessionChannel) atproto_session_provider.Channel {
+        return .{ .context = self, .read_fn = read, .write_fn = write };
+    }
+
+    fn read(ctx: *anyopaque, buffer: []u8) atproto_session_provider.Channel.Error!usize {
+        const self: *StdioSessionChannel = @ptrCast(@alignCast(ctx));
+        return self.reader.interface.readSliceShort(buffer) catch return error.ReadFailed;
+    }
+
+    fn write(ctx: *anyopaque, bytes: []const u8) atproto_session_provider.Channel.Error!void {
+        const self: *StdioSessionChannel = @ptrCast(@alignCast(ctx));
+        self.writer.interface.writeAll(bytes) catch return error.WriteFailed;
+        self.writer.interface.flush() catch return error.WriteFailed;
+    }
+};
+
+const ProtectedBackend = struct {
+    provider: atproto_session_provider.Provider,
+    channel: *StdioSessionChannel,
+    allocator: std.mem.Allocator,
+};
+
+/// Session storage is explicitly selected: legacy files by default, or a
+/// private framed broker channel. The protected branch has no path capability.
+const SessionBackend = union(enum) {
+    file: atproto_session_std.Sessions,
+    protected: ProtectedBackend,
+
+    fn deinit(self: *SessionBackend) void {
+        switch (self.*) {
+            .file => |*sessions| sessions.deinit(),
+            .protected => |*protected| {
+                protected.provider.deinit();
+                std.crypto.secureZero(u8, &protected.channel.read_buffer);
+                std.crypto.secureZero(u8, &protected.channel.write_buffer);
+                protected.allocator.destroy(protected.channel);
+            },
+        }
+    }
+
+    fn acquire(self: *SessionBackend, did: []const u8, client: atproto_transport.Client, proofs: atproto_authorization.ProofSource, now: u64) atproto_session_provider.Error!atproto_authorization.AuthorizedSession {
+        return switch (self.*) {
+            .file => |*sessions| sessions.acquire(did, client, proofs, now),
+            .protected => |*protected| protected.provider.acquire(did, client, proofs, now),
+        };
+    }
+
+    fn acquirePassword(self: *SessionBackend, did: []const u8, client: atproto_transport.Client, now: u64) atproto_session_provider.Error!atproto_password.AppPasswordSession {
+        return switch (self.*) {
+            .file => |*sessions| sessions.acquirePassword(did, client, now),
+            .protected => |*protected| protected.provider.acquirePassword(did, client, now),
+        };
+    }
+
+    fn storeNew(self: *SessionBackend, did: []const u8, session: *const atproto_authorization.AuthorizedSession) atproto_session_provider.Error!void {
+        return switch (self.*) {
+            .file => |*sessions| sessions.storeNew(did, session),
+            .protected => |*protected| protected.provider.storeNew(did, session),
+        };
+    }
+
+    fn storeNewPassword(self: *SessionBackend, did: []const u8, session: *const atproto_password.AppPasswordSession) atproto_session_provider.Error!void {
+        return switch (self.*) {
+            .file => |*sessions| sessions.storeNewPassword(did, session),
+            .protected => |*protected| protected.provider.storeNewPassword(did, session),
+        };
+    }
+
+    fn remove(self: *SessionBackend, did: []const u8) atproto_session_provider.Error!bool {
+        return switch (self.*) {
+            .file => |*sessions| sessions.remove(did),
+            .protected => |*protected| protected.provider.remove(did),
+        };
+    }
+
+    fn listEntries(self: *SessionBackend) atproto_session_provider.Error![]store_mod.ListedSession {
+        return switch (self.*) {
+            .file => |*sessions| sessions.listEntries(),
+            .protected => |*protected| protected.provider.listEntries(),
+        };
+    }
+
+    fn deinitListEntries(self: *SessionBackend, entries: []store_mod.ListedSession) void {
+        switch (self.*) {
+            .file => |*sessions| sessions.deinitListEntries(entries),
+            .protected => |*protected| protected.provider.deinitListEntries(entries),
+        }
+    }
+
+    fn hasDocument(self: *SessionBackend, did: []const u8) atproto_session_provider.Error!bool {
+        return switch (self.*) {
+            .file => |*sessions| sessions.hasDocument(did),
+            .protected => |*protected| protected.provider.hasDocument(did),
+        };
+    }
+};
+
+fn openSessionBackend(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) atproto_session_provider.Error!SessionBackend {
+    if (!opts.session_provider_stdio) {
+        const root = try resolveSessionRoot(gpa, environ, opts);
+        defer gpa.free(root);
+        return .{ .file = try atproto_session_std.Sessions.open(gpa, io, root) };
+    }
+    const channel = try gpa.create(StdioSessionChannel);
+    errdefer gpa.destroy(channel);
+    channel.init(io);
+    var entropy: [16]u8 = undefined;
+    std.Io.randomSecure(io, &entropy) catch return error.ProviderUnavailable;
+    const instance = std.fmt.bytesToHex(entropy, .lower);
+    const protected = try atproto_session_provider.Provider.connect(gpa, channel.channel(), &instance);
+    return .{ .protected = .{ .provider = protected, .channel = channel, .allocator = gpa } };
+}
 /// Provides the session for a publish/smoke run. The persistent store wins:
 /// a stored session — OAuth first (the primary path), then app-password — is
 /// loaded and refreshed without the browser. Only when no session exists does
 /// the provider run the interactive one-shot OAuth flow, and it immediately
 /// persists the result so future publishes skip the browser.
 const SessionProvider = struct {
-    sessions: *atproto_session_std.Sessions,
+    sessions: *SessionBackend,
     proof_source: atproto_interactive_std.NativeProofSource,
     quiet: bool,
 
@@ -843,8 +975,8 @@ const SessionProvider = struct {
 pub fn runStandardSiteLogin(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
     if (opts.app_password) return runStandardSiteLoginAppPassword(io, gpa, opts, environ);
     const did_text = opts.session_did orelse return .usage;
-    const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
-    defer gpa.free(root);
+    const root = if (opts.session_provider_stdio) null else resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
+    defer if (root) |path| gpa.free(path);
     const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
         errPrint("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
         return .io_error;
@@ -863,9 +995,15 @@ pub fn runStandardSiteLogin(io: Io, gpa: std.mem.Allocator, opts: Options, envir
     if (now_seconds < 0) return reportSessionError(error.InvalidWallClock);
     session.markObtained(@intCast(now_seconds));
 
-    var sessions = atproto_session_std.Sessions.open(gpa, io, root) catch |err| return reportSessionError(err);
-    defer sessions.deinit();
-    sessions.storeNew(account.did.slice(), &session) catch |err| return reportSessionError(err);
+    if (opts.session_provider_stdio) {
+        var backend = openSessionBackend(io, gpa, opts, environ) catch |err| return reportSessionError(err);
+        defer backend.deinit();
+        backend.storeNew(account.did.slice(), &session) catch |err| return reportSessionError(err);
+    } else {
+        var sessions = atproto_session_std.Sessions.open(gpa, io, root.?) catch |err| return reportSessionError(err);
+        defer sessions.deinit();
+        sessions.storeNew(account.did.slice(), &session) catch |err| return reportSessionError(err);
+    }
     if (!opts.quiet) {
         std.debug.print("standard-site: signed in {s} (PDS {s}); session stored securely\n", .{ account.did.slice(), account.pds_origin.slice() });
     }
@@ -901,9 +1039,15 @@ pub fn runStandardSiteLoginAppPassword(io: Io, gpa: std.mem.Allocator, opts: Opt
     // boundary the operator opts into, not progress chatter.
     std.debug.print("standard-site: --app-password grants broad account write access to {s} on {s} (not just the Standard.site scope). Revoke it under App Passwords in your provider's account settings.\n", .{ did.slice(), pds_origin.slice() });
 
-    const app_password = readAppPasswordFromStdin(gpa, io) catch |err| {
-        return reportAppPasswordLoginError(err);
-    };
+    var protected_backend: ?SessionBackend = if (opts.session_provider_stdio)
+        openSessionBackend(io, gpa, opts, environ) catch |err| return reportSessionError(err)
+    else
+        null;
+    defer if (protected_backend) |*backend| backend.deinit();
+    const app_password = if (protected_backend) |*backend|
+        backend.protected.provider.readAppPassword(did.slice()) catch |err| return reportAppPasswordLoginError(err)
+    else
+        readAppPasswordFromStdin(gpa, io) catch |err| return reportAppPasswordLoginError(err);
     defer {
         std.crypto.secureZero(u8, app_password);
         gpa.free(app_password);
@@ -917,11 +1061,15 @@ pub fn runStandardSiteLoginAppPassword(io: Io, gpa: std.mem.Allocator, opts: Opt
     if (now_seconds < 0) return reportSessionError(error.InvalidWallClock);
     session.markObtained(@intCast(now_seconds));
 
-    const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
-    defer gpa.free(root);
-    var sessions = atproto_session_std.Sessions.open(gpa, io, root) catch |err| return reportSessionError(err);
-    defer sessions.deinit();
-    sessions.storeNewPassword(did.slice(), &session) catch |err| return reportSessionError(err);
+    if (protected_backend) |*backend| {
+        backend.storeNewPassword(did.slice(), &session) catch |err| return reportSessionError(err);
+    } else {
+        const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
+        defer gpa.free(root);
+        var sessions = atproto_session_std.Sessions.open(gpa, io, root) catch |err| return reportSessionError(err);
+        defer sessions.deinit();
+        sessions.storeNewPassword(did.slice(), &session) catch |err| return reportSessionError(err);
+    }
     if (!opts.quiet) {
         std.debug.print("standard-site: signed in {s} (PDS {s}) with an app password; session stored securely\n", .{ did.slice(), pds_origin.slice() });
     }
@@ -1057,7 +1205,7 @@ fn reportAppPasswordLoginError(err: anyerror) ExitCode {
         error.Timeout => .timeout,
         error.InvalidDid, error.InvalidHandle, error.HandleMismatch, error.UnsupportedDidMethod => .usage,
         error.InvalidJwt, error.InvalidResponse, error.InvalidStatus, error.InvalidContentType, error.SubjectDidMismatch => .compatibility,
-        error.SessionRevoked, error.InvalidSessionWire, error.StoreCorrupt, error.WrongDocumentType, error.StoreExists, error.StoreFull, error.StoreIo, error.StoreLocked, error.StoreNotFound, error.StorePermissionDenied, error.StoreUnexpected, error.HomeUnavailable => .session,
+        error.SessionRevoked, error.InvalidSessionWire, error.StoreCorrupt, error.WrongDocumentType, error.StoreExists, error.StoreFull, error.StoreIo, error.StoreLocked, error.StoreNotFound, error.StorePermissionDenied, error.StoreUnexpected, error.HomeUnavailable, error.ProviderMalformed, error.ProviderClosed, error.ProviderDenied, error.ProviderUnavailable => .session,
         else => .io_error,
     };
     const message: []const u8 = switch (err) {
@@ -1081,19 +1229,22 @@ fn reportAppPasswordLoginError(err: anyerror) ExitCode {
 /// the closed token `oauth` or `app-password`. No secret material is
 /// ever rendered.
 pub fn runStandardSiteSessions(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
-    const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
-    defer gpa.free(root);
-    var sessions = atproto_session_std.Sessions.open(gpa, io, root) catch |err| return reportSessionError(err);
+    var sessions = openSessionBackend(io, gpa, opts, environ) catch |err| return reportSessionError(err);
     defer sessions.deinit();
     const listed = sessions.listEntries() catch |err| return reportSessionError(err);
     defer sessions.deinitListEntries(listed);
 
-    var stdout_buffer: [4096]u8 = undefined;
-    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
-    for (listed) |entry| {
-        stdout_writer.interface.print("{s} {s} {s}\n", .{ entry.did, entry.flavor.label(), entry.pds_origin }) catch return .io_error;
+    if (opts.session_provider_stdio) {
+        // Stdout belongs exclusively to the secret-bearing broker protocol.
+        for (listed) |entry| std.debug.print("{s} {s} {s}\n", .{ entry.did, entry.flavor.label(), entry.pds_origin });
+    } else {
+        var stdout_buffer: [4096]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+        for (listed) |entry| {
+            stdout_writer.interface.print("{s} {s} {s}\n", .{ entry.did, entry.flavor.label(), entry.pds_origin }) catch return .io_error;
+        }
+        stdout_writer.interface.flush() catch {};
     }
-    stdout_writer.interface.flush() catch {};
     if (!opts.quiet) {
         std.debug.print("standard-site: {d} stored session{s}\n", .{ listed.len, if (listed.len == 1) "" else "s" });
     }
@@ -1107,9 +1258,10 @@ pub fn runStandardSiteSessions(io: Io, gpa: std.mem.Allocator, opts: Options, en
 /// is resolved the same way login resolves it; an unresolvable handle fails
 /// closed.
 pub fn runStandardSiteLogout(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
-    const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
-    defer gpa.free(root);
-
+    const root = if (opts.session_provider_stdio) null else resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
+    defer if (root) |path| gpa.free(path);
+    var effective_opts = opts;
+    if (root) |path| effective_opts.session_root = path;
     var owned_did: ?[]u8 = null;
     defer if (owned_did) |bytes| gpa.free(bytes);
     const did_text = if (opts.session_did) |text| text else blk: {
@@ -1126,9 +1278,9 @@ pub fn runStandardSiteLogout(io: Io, gpa: std.mem.Allocator, opts: Options, envi
         break :blk resolved;
     };
 
-    var sessions = atproto_session_std.Sessions.open(gpa, io, root) catch |err| return reportSessionError(err);
-    defer sessions.deinit();
-    const removed = sessions.remove(did_text) catch |err| return reportSessionError(err);
+    var backend = openSessionBackend(io, gpa, effective_opts, environ) catch |err| return reportSessionError(err);
+    defer backend.deinit();
+    const removed = backend.remove(did_text) catch |err| return reportSessionError(err);
     if (!opts.quiet) {
         if (removed) {
             std.debug.print("standard-site: removed the stored session for {s}\n", .{did_text});
@@ -1171,8 +1323,6 @@ fn smokeResultExitCode(result: *const standard_site_smoke.SmokeResult) ExitCode 
 /// reachable only through this explicit command; no test or CI step invokes
 /// it, and the ordinary offline matrix stays authoritative.
 pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
-    const session_root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
-    defer gpa.free(session_root);
     const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
         errPrint("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
         return .io_error;
@@ -1184,7 +1334,7 @@ pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, envir
     };
     defer gpa.free(did_owned);
     const did_text = did_owned;
-    var sessions = atproto_session_std.Sessions.open(gpa, io, session_root) catch |err| return reportSessionError(err);
+    var sessions = openSessionBackend(io, gpa, opts, environ) catch |err| return reportSessionError(err);
     defer sessions.deinit();
     const stored = sessions.hasDocument(did_text) catch |err| return reportSessionError(err);
     if (!stored) {
@@ -1900,9 +2050,7 @@ pub fn runStandardSitePublish(io: Io, gpa: std.mem.Allocator, opts: Options, env
         return .io_error;
     };
     defer transport_std.destroy();
-    const session_root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
-    defer gpa.free(session_root);
-    var sessions = atproto_session_std.Sessions.open(gpa, io, session_root) catch |err| return reportSessionError(err);
+    var sessions = openSessionBackend(io, gpa, opts, environ) catch |err| return reportSessionError(err);
     defer sessions.deinit();
     var session_provider = SessionProvider{
         .sessions = &sessions,

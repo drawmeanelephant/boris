@@ -185,6 +185,84 @@ loaded and reused without the browser; an expired one is refreshed in place;
 and only when nothing is stored does it open the browser, then persist the new
 session so the next publish skips authorization.
 
+## Protected Capture Vector provider (protocol 1)
+
+The legacy file store above remains the standalone default. Capture Vector must
+instead select `--session-provider-stdio` explicitly. In that mode Boris does
+not resolve or open a session root: app passwords, access/refresh tokens, DPoP
+seeds, nonces, and rotated session documents never enter a Boris filesystem
+store, argv, environment, log, evidence/report, or diagnostic. Restrictive file
+modes and tmpfs are not substitutes for this mode.
+
+The launcher connects Boris stdin/stdout to a private broker and keeps ordinary
+stdin/stdout consumers disconnected. The broker, not Boris, owns OS keychain
+access. Stdout is exclusively a secret-bearing protocol channel in this mode;
+therefore protected `publish` and `smoke` require `--out PATH`, and protected
+`sessions` writes its secret-free list on stderr. `--session-root` is a usage
+conflict, so a broker failure cannot silently fall back to files.
+
+### Framing and binding
+
+Each frame is one UTF-8 JSON object followed by LF, at most 131072 bytes
+(including LF). Empty frames, CR/NUL, unknown fields, invalid JSON, excess
+length, and wrong types are fatal `ProviderMalformed` failures. Boris first
+sends:
+
+```json
+{"protocol":"boris-session-provider","version":1,"kind":"hello","instance":"32 lowercase hex characters"}
+```
+
+The broker must answer `kind:"hello"` with the same protocol, version, and
+cryptographically random per-process `instance`. The launcher must attach only
+the intended broker to the pipes. The instance and bindings below detect
+mismatched/replayed messages; they are not cryptographic peer authentication
+and do not protect against a malicious same-user process that can inspect or
+replace the launcher's pipes.
+
+Every subsequent request has `kind:"request"`, a monotonically increasing
+`id`, `operation`, nullable `did`, and `instance`. Every response has
+`kind:"response"` and must echo the exact `id`, `operation`, `did`, and
+`instance`, plus `status` (`ok`, `not_found` where meaningful, or `denied`).
+A mismatch closes the operation; Boris never skips a response to search for a
+later valid one.
+
+| Operation | Additional request fields | Successful response fields |
+|---|---|---|
+| `load` | `flavor:"oauth"` or `"app-password"` | `found:true`, matching `flavor`, base64 session document; or `status:"not_found"`, `found:false` |
+| `save` | `flavor`, base64 session document | `status:"ok"` only after the keychain update is durable |
+| `remove` | none | `removed:boolean`; keychain entry forgotten before reply |
+| `app-password` | none | `app_password:string` (1–1024 bytes, no CR/LF) |
+| `list` | `did:null` | `entries:[{did,flavor,pds_origin}]`, at most 1024; no secrets |
+
+Session payloads use the existing bounded `boris-session-v1` or
+`boris-app-password-v1` JSON document, base64-encoded only for framing (not as
+encryption). Boris revalidates the document, type, DID, origins, tokens, and
+DPoP seed on receipt. The broker must scope every lookup/mutation to the exact
+request DID and flavor, validate sizes itself, and avoid logging payloads.
+Requests and responses are synchronous: the broker answers one request before
+Boris issues another.
+
+### Login, refresh, logout, and failures
+
+Protected app-password login requests the password with `app-password`; it is
+never read as ordinary stdin. OAuth login and a publish with no stored session
+retain the normal browser flow. Initial sessions and every successful refresh
+are sent with `save`; Boris does not return/use the new session until the
+broker acknowledges that Capture Vector persisted the rotated material. A save
+failure fails the operation and triggers best-effort `remove` of the stale DID.
+
+A definitive revoked refresh returns `SessionRevoked` after `remove`. A timeout,
+transport error, or malformed refresh response returns `RefreshAmbiguous` and
+issues `remove` before reauthorization; Boris never retries a possibly consumed
+refresh token. Logout uses the same DID-bound `remove`. As with file mode, this
+forgets local/keychain material but does not revoke it at the server.
+
+If the broker itself disappears during an ambiguous refresh or a post-refresh
+save, Boris cannot prove that a remote keychain erased or committed anything;
+it fails closed and does not fall back or reuse the session. Capture Vector
+must surface that uncertainty and require reauthorization rather than replaying
+the previous refresh token. Pipe secrecy, broker keychain durability, and
+server revocation remain launcher/platform responsibilities.
 ## Threat model and known limitations
 
 The store protects against the threats it can honestly address, and documents

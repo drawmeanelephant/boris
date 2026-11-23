@@ -23,10 +23,11 @@ const authorization = @import("atproto_authorization.zig");
 const interactive = @import("atproto_interactive_std.zig");
 const password = @import("atproto_password.zig");
 const session_std = @import("atproto_session_std.zig");
+const session_provider = @import("atproto_session_provider.zig");
 const transport = @import("atproto_transport.zig");
 const xrpc = @import("atproto_xrpc.zig");
 
-pub const Error = identity.Error || authorization.Error || password.Error || xrpc.Error || reconcile.Error || interactive.Error || session_std.Error || error{
+pub const Error = identity.Error || authorization.Error || password.Error || xrpc.Error || reconcile.Error || interactive.Error || session_provider.Error || error{
     InvalidWallClock,
     PdsOriginMismatch,
     PlanDrift,
