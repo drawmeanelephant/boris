@@ -371,8 +371,10 @@ Schema for one scaled amount:
 ```
 
 The page envelope is `docs/contracts/schemas/recipe-scale-view-0.2.0.schema.json`
-(`format: boris-recipe-scale`). Additive build provenance (#781): the
-envelope's `vcsRevision` field, emitted directly after `compiler`, carries the
+(`format: boris-recipe-scale`). Its `compiler` field is provenance, not a
+compatibility constraint: a product-version move does not reshape the envelope
+or mutate the meaning of its schema version. Additive build provenance (#781):
+the envelope's `vcsRevision` field, emitted directly after `compiler`, carries the
 opaque VCS revision token the producing binary was compiled from (`""` when
 the build could not detect one); the schema describes it as optional so
 documents from older binaries stay valid, and every current emitter writes it.
@@ -393,9 +395,9 @@ The bump is conditional, exactly like the semantic-relations facet before it:
 
 | Corpus carries | `schemaVersion` | `compiler` |
 |---|---|---|
-| neither facet | `0.2.0` | `boris/0.9.0` |
-| semantic relations only | `0.3.0` | `boris/0.9.0+semantic-relations` |
-| recipes | `0.4.0` | `boris/0.9.0+cooklang` |
+| neither facet | `0.2.0` | `boris/2026.11.0` |
+| semantic relations only | `0.3.0` | `boris/2026.11.0+semantic-relations` |
+| recipes | `0.4.0` | `boris/2026.11.0+cooklang` |
 
 `0.4.0` is a superset of `0.3.0`: a recipe corpus that also carries semantic
 relations still emits `relations`. A corpus with no recipes is byte-identical to

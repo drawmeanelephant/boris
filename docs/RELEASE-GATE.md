@@ -1,9 +1,28 @@
-# Release gate — Boris v0.9.0
+# Release gate — Boris v2026.11.0
 
 Mechanical checklist before tagging a release or claiming a milestone complete.
-This documents the gate for **v0.9.0** (changelog assembled 2026-10-11). The
+This documents the gate for **v2026.11.0** (changelog assembled 2026-11-25). The
 historical v0.8.0
 tag remains preserved as erroneous evidence; do not re-tag prior releases.
+
+## Choosing the version
+
+Product releases use calendar versions `YYYY.M.PATCH`; the normative rule is
+the [product version scheme](contracts/cli.md#product-version-scheme). At a
+cut:
+
+1. Take the release date's year and month in UTC, with no leading zero on
+   the month.
+2. If no release is tagged for that month, `PATCH` is `0`. Otherwise it is the
+   highest `PATCH` tagged that month plus one.
+3. Write the version everywhere `scripts/test-version-pin.sh` checks
+   (`build.zig.zon`, `src/pipeline.zig`, `src/job_runner.zig`, and the
+   `docs/contracts/cli.md` pin example), then advance the remaining tool ids,
+   fixtures, and contract prose that name the previous version.
+4. Name every breaking CLI or output change under **Upgrade notes** in the
+   release section, because the version number does not signal it.
+5. Bump IR `schemaVersion` and other contract versions only by their own
+   rules, never because the product version moved.
 
 Run locally:
 
@@ -110,7 +129,7 @@ verified. Do not check an item because a design doc exists.
 `--out` / `--no-rag`. **P2 and P3 scale-out on the HTML path are complete.**
 **Features 1–7** (native rendering, HTML default, jobs/watch/target, nav/toc,
 includes + wiki) and **F8.1–F8.3** graph-native dependencies are Done — see
-[`docs/STATUS.md`](STATUS.md). Product **v0.9.0** / base IR
+[`docs/STATUS.md`](STATUS.md). Product **v2026.11.0** / base IR
 **0.2.0**. Semantic relations retain their conditional IR **0.3.0** artifacts;
 relation-free output remains IR 0.2. Incremental HTML uses the shared direct-edge
 resolver and reverse affected-set semantics.

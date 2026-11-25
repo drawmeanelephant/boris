@@ -425,7 +425,9 @@ expect_exit 2 "${BORIS}" watch --profile="${PROFILE_ROOT}/validate-single.json" 
 
 # Strict is a complete-site target, not a bare Oliver body switch. The
 # compatible theme builds; the default HTML5 theme fails as a content error
-# with one located diagnostic and no phantom fallback.
+# with one located diagnostic and no phantom fallback. The first refusal is
+# the default theme's opaque no-JS search landing (themes/boris/assets/), which
+# the opaque-asset check reports before any layout is rendered.
 STRICT_INPUT="fixtures/html4-strict/content"
 expect_exit 0 "${BORIS}" build --input="${STRICT_INPUT}" \
   --theme themes/html4-strict --target-profile default=html4-strict \
@@ -436,6 +438,6 @@ expect_exit 1 "${BORIS}" validate --input="${STRICT_INPUT}" \
   --target-profile default=html4-strict --report="${TMP}/strict-invalid.json" --quiet
 grep -q '"errorCount": 1' "${TMP}/strict-invalid.json"
 grep -q '"code": "EHTML4STRICT"' "${TMP}/strict-invalid.json"
-grep -q 'themes/boris/layouts/main.html' "${TMP}/strict-invalid.json"
+grep -q '"sourcePath": "assets/search.html"' "${TMP}/strict-invalid.json"
 
 printf 'CLI contract process tests: PASS\n'

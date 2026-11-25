@@ -1,5 +1,17 @@
 # Queued-fragment inventory
 
+**Note (2026-11-25):** the 35 fragments queued since the v0.9.0 cut
+(`1115-*` through `1167-*` and the slug-named fragments from
+`blueprint-content-resilience` through `watch-json-consumer-recipe`) were
+assembled into the `[2026.11.0]` section of [`CHANGELOG.md`](../../CHANGELOG.md)
+at the v2026.11.0 release cut, the first calendar-versioned release. Categories
+follow the documented order (Added 5, Changed 10, Fixed 13, Security 1, Docs 8
+bullets) and the fragments are removed from this queue. Three bullets were
+corrected at assembly so the notes match what ships: `1125-blueprint-init-archetype`,
+`1136-purpose-fit-starter-layouts`, and `blueprint-content-resilience` no longer
+describe `boris init` starters retired by `trim-init-archetypes` in the same
+release.
+
 **Note (2026-10-11):** the 114 numeric fragments (`809-*` through `1108-*`) and
 six named fragments (`dialog-empty-submit-disabled`, `focus-writing-mode`,
 `graph-nav-disabled`, `nav-token-preserve`, `section-nav-feedback`,

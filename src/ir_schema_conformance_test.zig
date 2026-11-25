@@ -291,6 +291,12 @@ test "the published recipe-scale view schema matches a freshly rendered view" {
     var token_doc = try std.json.parseFromSlice(std.json.Value, gpa, with_token, .{});
     defer token_doc.deinit();
     try v.validate(schema_parsed.value, token_doc.value, "recipe-scale-view");
+
+    const prior_compiler = try std.mem.replaceOwned(u8, gpa, bytes, pipeline.recipe_compiler_id, "boris/0.9.0+cooklang");
+    defer gpa.free(prior_compiler);
+    var prior_doc = try std.json.parseFromSlice(std.json.Value, gpa, prior_compiler, .{});
+    defer prior_doc.deinit();
+    try v.validate(schema_parsed.value, prior_doc.value, "recipe-scale-view-prior-compiler");
 }
 
 test "conformance validator actually rejects drift" {

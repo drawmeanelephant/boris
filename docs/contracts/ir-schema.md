@@ -1,15 +1,15 @@
 # Intermediate representation (IR) schema (v0.2)
 
 **Status:** normative Feature 8 contract — F8.1–F8.3 implemented
-**Target product / compiler id:** `0.9.0` / `boris/0.9.0`
+**Target product / compiler id:** `2026.11.0` / `boris/2026.11.0`
 **schemaVersion:** `0.2.0` base; `0.3.0` / `0.4.0` for optional facets
 
 IR is explicit (`--out DIR` / `--no-rag`) and deterministic. Bare `boris`
 continues to emit HTML under `dist/`; this schema does not change CLI mode
 selection.
 
-The v0.9.0 compiler emits this unchanged dependency shape with
-`schemaVersion: "0.2.0"` and compiler id `boris/0.9.0`.
+The v2026.11.0 compiler emits this unchanged dependency shape with
+`schemaVersion: "0.2.0"` and compiler id `boris/2026.11.0`.
 
 ### Machine-readable schemas
 
@@ -103,9 +103,12 @@ Every top-level IR document **must** include:
 | Breaking change | Typed dependency endpoints and `reverseIndex`; old writers must not silently emit these under `"0.1.0"` |
 
 Also required on success paths: a compiler id string of the form
-`boris/<product-version>` (target `boris/0.9.0`). Product version bumps may
-update this string without changing the IR schema, but this breaking IR change
-requires both the schema and compiler/product bumps.
+`boris/<product-version>` (target `boris/2026.11.0`). Product versions are
+calendar versions with no compatibility meaning
+([product version scheme](cli.md#product-version-scheme)); `schemaVersion` is
+the compatibility signal. Product version bumps may update this string without
+changing the IR schema, but a breaking IR change requires both the schema bump
+and a new product release.
 
 ### Conditional facet versions
 
@@ -115,9 +118,9 @@ adding a facet to the compiler never reshapes an existing consumer's artifacts.
 
 | Corpus carries | `schemaVersion` | Compiler id | Adds |
 |---|---|---|---|
-| neither facet | `0.2.0` | `boris/0.9.0` | — |
-| author semantic relations | `0.3.0` | `boris/0.9.0+semantic-relations` | top-level `relations` in `graph.json` |
-| Cooklang recipes | `0.4.0` | `boris/0.9.0+cooklang` | `recipe` on every `graph.json` node |
+| neither facet | `0.2.0` | `boris/2026.11.0` | — |
+| author semantic relations | `0.3.0` | `boris/2026.11.0+semantic-relations` | top-level `relations` in `graph.json` |
+| Cooklang recipes | `0.4.0` | `boris/2026.11.0+cooklang` | `recipe` on every `graph.json` node |
 
 `0.4.0` is a superset of `0.3.0`: a recipe corpus that also carries semantic
 relations still emits `relations`, so one version string describes both rather
@@ -321,7 +324,7 @@ schemaVersion, compiler, contentRoot, pageCount, pages
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `schemaVersion` | string | yes | `"0.2.0"` |
-| `compiler` | string | yes | e.g. `"boris/0.9.0"` |
+| `compiler` | string | yes | e.g. `"boris/2026.11.0"` |
 | `contentRoot` | string | yes | Content root path string as passed to the pipeline (no trailing slash) |
 | `pageCount` | integer | yes | `pages.length` |
 | `pages` | array | yes | Summary entries sorted by `id` |
@@ -356,7 +359,7 @@ Example (shape only):
 ```json
 {
   "schemaVersion": "0.2.0",
-  "compiler": "boris/0.9.0",
+  "compiler": "boris/2026.11.0",
   "contentRoot": "content",
   "pageCount": 2,
   "pages": [
@@ -632,7 +635,7 @@ schemaVersion, compiler, ok, contentRoot, outDir, pageCount, errorCount, diagnos
 | Field | Type | Description |
 |-------|------|-------------|
 | `schemaVersion` | string | `"0.2.0"` |
-| `compiler` | string | Compiler identity; identical to `manifest.json`'s `compiler` on the same run (e.g. `"boris/0.9.0"`, or a `+`-suffixed variant for Cooklang / semantic-relations corpora) |
+| `compiler` | string | Compiler identity; identical to `manifest.json`'s `compiler` on the same run (e.g. `"boris/2026.11.0"`, or a `+`-suffixed variant for Cooklang / semantic-relations corpora) |
 | `ok` | boolean | `true` iff zero error diagnostics and freeze succeeded |
 | `contentRoot` | string | Same string as pipeline option |
 | `outDir` | string | Same string as pipeline option |

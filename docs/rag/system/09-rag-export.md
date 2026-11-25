@@ -135,10 +135,10 @@ paths, no partial shelf after a failed audit.
 
 **Workshop analogy:** edition stamp on the packet.
 **Invariant:** fixed compact JSON with `format`, `schema_version`, `boris_version`
-(product version from `pipeline.boris_version`, currently `0.9.0`).
+(product version from `pipeline.boris_version`, currently `2026.11.0`).
 
 ```json
-{"format":"boris-rag","schema_version":2,"boris_version":"0.9.0"}
+{"format":"boris-rag","schema_version":2,"boris_version":"2026.11.0"}
 ```
 
 Emitted on complete-corpus exports and documented in INDEX; **not** a

@@ -2,7 +2,8 @@
 
 **Status:** non-normative evaluation protocol. Model-agnostic; proven across
 two agents of very different capability (one low-effort, one thorough) on the
-`boris/0.9.0` kit. Related: [`AGENT-BINARY-KITS.md`](AGENT-BINARY-KITS.md) for
+`boris/0.9.0` kit. That evidence is historical until rerun on a current kit.
+Related: [`AGENT-BINARY-KITS.md`](AGENT-BINARY-KITS.md) for
 how kits are built and verified, and [`watch-json-recipe.md`](watch-json-recipe.md)
 for wiring an agent feedback loop to `boris watch --watch-json` outside the
 blind discovery prompt.
