@@ -76,5 +76,5 @@ remain authoring syntax (no `:::kind` export representation).
 ### catalog_meta.json
 
 ```json
-{"format":"boris-rag","schema_version":2,"boris_version":"0.9.0"}
+{"format":"boris-rag","schema_version":2,"boris_version":"2026.11.0"}
 ```

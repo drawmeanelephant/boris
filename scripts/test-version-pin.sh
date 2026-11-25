@@ -43,6 +43,18 @@ RUNNER_VERSION="$(sed -n 's/^pub const runner_version = "\([^"]*\)".*/\1/p' src/
 [[ -n "$PRODUCT_VERSION" ]] || fail "could not derive boris_version from src/pipeline.zig"
 [[ "$RUNNER_VERSION" == "$PRODUCT_VERSION" ]] \
   || fail "job_runner.runner_version '$RUNNER_VERSION' != pipeline.boris_version '$PRODUCT_VERSION'"
+[[ "$BASE_ID" == "boris/$PRODUCT_VERSION" ]] \
+  || fail "compiler_id '$BASE_ID' != boris/<boris_version> ('$PRODUCT_VERSION')"
+ZON_VERSION="$(sed -n 's/^ *\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
+[[ "$ZON_VERSION" == "$PRODUCT_VERSION" ]] \
+  || fail "build.zig.zon .version '$ZON_VERSION' != pipeline.boris_version '$PRODUCT_VERSION'"
+
+# Calendar version YYYY.M.PATCH (docs/contracts/cli.md "Product version
+# scheme"). The month is unpadded because build.zig.zon's SemanticVersion
+# rejects leading zeros.
+CALVER_RE='^20[0-9][0-9]\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)$'
+[[ "$PRODUCT_VERSION" =~ $CALVER_RE ]] \
+  || fail "boris_version '$PRODUCT_VERSION' is not a YYYY.M.PATCH calendar version"
 
 # --- Version query ---------------------------------------------------------
 note "boris --version and -V print exactly the base compiler id on stdout"

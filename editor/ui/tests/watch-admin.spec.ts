@@ -41,7 +41,7 @@ function mockWatchDaemon() {
       running = true;
       stateName = 'running';
       lastError = null;
-      push({ event: 'hello', watch_events_schema: 1, compiler: 'boris/0.9.0' });
+      push({ event: 'hello', watch_events_schema: 1, compiler: 'boris/2026.11.0' });
       push({ event: 'build-started', phase: 'initial', mode: 'html', targets: ['default'] });
       push({ event: 'watcher-started', mode: 'html', targets: ['default'] });
       return 'started';
@@ -88,7 +88,7 @@ function mockWatchDaemon() {
         oldest_seq: ring.length ? ring[0].seq : null,
         dropped_lines: 0,
         last_event: ring.length ? ring[ring.length - 1].event : null,
-        compiler_id: 'boris/0.9.0',
+        compiler_id: 'boris/2026.11.0',
         hello_schema: 1,
         last_error: lastError
       };
@@ -126,7 +126,7 @@ async function installWatchApi(page: Page, options: WatchApiOptions = {}): Promi
   }));
   await page.route('**/api/version', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ compiler_id: 'boris/0.9.0', supported: { validate_watch: true, watch_json: watchMode === 'supported' } })
+    body: JSON.stringify({ compiler_id: 'boris/2026.11.0', supported: { validate_watch: true, watch_json: watchMode === 'supported' } })
   }));
   await page.route('**/api/files', route => route.fulfill({
     contentType: 'application/json',
@@ -180,7 +180,7 @@ async function installWatchApi(page: Page, options: WatchApiOptions = {}): Promi
   await page.route('**/api/commands/run', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
-      mode: 'validate', exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.9.0',
+      mode: 'validate', exit_code: 0, failure_class: 'success', compiler_id: 'boris/2026.11.0',
       report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: []
     })
   }));
@@ -254,12 +254,12 @@ test('supported flow: start, build-succeeded and build-failed events, then stop'
   await expect(start).toBeDisabled();
   await expect(stop).toBeEnabled();
   const feed = page.getByRole('list', { name: 'Watch event feed' });
-  await expect(feed).toContainText('Handshake: boris/0.9.0 speaks watch events schema 1.');
+  await expect(feed).toContainText('Handshake: boris/2026.11.0 speaks watch events schema 1.');
 
   daemon.succeed(3, 45, ['index.md']);
   await expect(feed).toContainText('Build succeeded: 3 pages written in 45 ms. Changed: index.md.');
   await expect(stateLine).toHaveText('Watch build succeeded (cycle 1).');
-  await expect(page.getByText('Compiler: boris/0.9.0 · Cycle: 1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Compiler: boris/2026.11.0 · Cycle: 1', { exact: true })).toBeVisible();
 
   daemon.fail(2, 'Unknown key.', 'index.md');
   await expect(feed).toContainText('Build failed: 2 errors — EFRONTMATTER index.md:1 Unknown key.');

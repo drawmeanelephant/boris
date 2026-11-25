@@ -3,12 +3,17 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: the current product release is **v0.9.0** (2026-10-11) with base
-IR `schemaVersion` **`0.2.0`** and compiler id **`boris/0.9.0`**. Breaking IR
-changes must bump `schemaVersion` and update `docs/contracts/`. Product version
-bumps may update `compiler_id` / `boris_version` without changing IR schema.
-The historical `v0.8.0` tag is preserved as erroneous evidence; see
-[`docs/STATUS.md`](docs/STATUS.md).
+Versioning: the current product release is **v2026.11.0** (2026-11-25) with
+base IR `schemaVersion` **`0.2.0`** and compiler id **`boris/2026.11.0`**.
+From v2026.11.0, product releases use calendar versions `YYYY.M.PATCH`
+(release year, unpadded month, per-month counter from `0`); releases through
+v0.9.0 used `0.MINOR.PATCH`. The product version identifies provenance and
+recency, not compatibility; see the
+[product version scheme](docs/contracts/cli.md#product-version-scheme).
+Breaking IR changes must bump `schemaVersion` and update `docs/contracts/`.
+Product version bumps may update `compiler_id` / `boris_version` without
+changing IR schema. The historical `v0.8.0` tag is preserved as erroneous
+evidence; see [`docs/STATUS.md`](docs/STATUS.md).
 
 How to use going forward:
 
@@ -28,8 +33,265 @@ How to use going forward:
 
 New fragments land under
 [`docs/changelog.d/`](docs/changelog.d/README.md); the release owner assembles
-them into a dated section at the next release cut. The `[0.9.0]` section was
-assembled from those fragments on 2026-10-11.
+them into a dated section at the next release cut. The `[2026.11.0]` section
+was assembled from those fragments on 2026-11-25.
+
+## [2026.11.0] — 2026-11-25
+
+v2026.11.0 is the first calendar-versioned Boris release and packages the
+post-v0.9.0 line. Base IR stays `0.2.0` (conditional semantic-relation and
+recipe artifacts keep their IR `0.3.0` / `0.4.0` schemas). `boris watch
+--serve` now shows rebuild failures in the preview instead of silently
+serving stale pages, `boris check` gains draft and age-based freshness
+advisories, the `blueprint` documentation theme joins the catalog, the modern
+catalog themes get a forced-colors and content-resilience floor, HTML build
+diagnostics name real loci for Cooklang and XHTML refusals, the editor
+preview and runner surfaces are hardened, and the RSS, sitemap, search,
+evidence, and watch paths stream or reuse buffers instead of holding whole
+artifacts. The Oliver pin advances to `af2233b`.
+
+### Upgrade notes
+
+- **Version scheme.** Product versions are now `YYYY.M.PATCH`: this release
+  is `2026.11.0`, compiler id `boris/2026.11.0`, tag `v2026.11.0`. The
+  string is semver-shaped and sorts after `0.9.0`, but it carries no
+  compatibility meaning. Compatibility lives in the versioned contracts
+  (IR `schemaVersion`, report and evidence formats, `watch_events_schema`,
+  editor host schemas), which keep their own semantic versions. Scripts that
+  pin `boris --version` must update the pin. See the
+  [product version scheme](/docs/contracts/cli.md#product-version-scheme).
+- **`boris init --type`** accepts six archetypes (`docs`, `garden`,
+  `cookbook`, `blog`, `textile`, `photo-gallery`). The v0.9.0 archetypes
+  `landing`, `wiki`, `link-in-bio`, `changelog`, `resume`, `newsletter`,
+  `portfolio`, `archive`, and `dashboard` (and the `blueprint` starter added
+  during this cycle) now fail as an unknown `--type` (exit `2`). All 24
+  themes still ship under [`themes/`](/themes/README.md).
+- **Exit codes.** HTML `build` / `validate` now report Cooklang refusals and
+  the XHTML raw-HTML refusal as content errors (exit `1`, codes `ECOOKLANG` /
+  `EXHTML`) instead of I/O failures (exit `3`). See
+  [diagnostics.md](/docs/contracts/diagnostics.md).
+- **Local preview.** `boris watch --serve` answers `403` unless the `Host`
+  header is `127.0.0.1:<port>` or `localhost:<port>` and any `Origin` matches
+  it, and the editor preview uses credentials separate from its API. See the
+  [CLI contract](/docs/contracts/cli.md#local-preview-watch---serve) and the
+  [editor host contract](/docs/contracts/editor-host.md).
+
+### Added
+
+- `boris watch --serve` now surfaces rebuild failures in the preview: a new
+  `GET /__boris/status` endpoint reports
+  `{state, stale_reason, last_error, last_build_ms}`, the SSE stream emits
+  `stale` instead of `reload` after a failed cycle, and served HTML pages
+  carry an injected `__boris-stale` banner naming the first error diagnostic
+  until the next successful build clears it. Links:
+  [cli.md](/docs/contracts/cli.md),
+  [watch-mode.md](/docs/contracts/watch-mode.md).
+
+- New `blueprint` documentation theme: a docs shell in the Bootstrap 6
+  token grammar (Boris-owned names, no vendored code) with a search header,
+  a `{{nav}}` sidebar that becomes a CSS-only mobile drawer, a collapsible
+  `{{toc}}` rail, and `main`, `home`, and `section` layouts. (The
+  `boris init --type blueprint` starter that landed with it was retired by
+  the init trim in this release; the theme ships.) Links:
+  [the theme README](/themes/blueprint/README.md),
+  [the theme catalog](/themes/README.md).
+
+- `boris check` now reports a `draft_page` advisory finding for each page whose
+  frontmatter declares `status: draft` (leaving `published`, `archived`, and
+  unset `status` unflagged), informational by default (exit 0) and promoted to
+  exit 1 by the check-only `--fail-on-draft` flag without changing report bytes
+  or schema `0.2.0`. See the
+  [Documentation Intelligence contract](/docs/contracts/documentation-intelligence.md)
+  and the [CLI contract](/docs/contracts/cli.md).
+
+- `boris check` now supports deterministic age-based freshness advisories via
+  the check-only `--as-of YYYY-MM-DD` and `--max-age-days N` options: pages
+  whose frontmatter `published_at` UTC calendar date predates `--as-of` by
+  strictly more than `N` days emit a `stale_page` finding (`count` set to age
+  in UTC days), informational by default (exit 0) and promoted to exit 1 by
+  `--fail-on-stale` without changing report bytes or schema `0.2.0`. When
+  `--as-of` is omitted, no wall clock is read and output is byte-identical. See
+  the [Documentation Intelligence contract](/docs/contracts/documentation-intelligence.md)
+  and the [CLI contract](/docs/contracts/cli.md).
+
+- The Boris GitHub Pages site now publishes `robots.txt` (pointing at
+  `sitemap.xml`), a custom `404.html`, and a 1200×630 social card from a root
+  `static/` passthrough directory, and every page carries compiler-owned
+  canonical, Open Graph, and Twitter card metadata. The workflow builds with
+  `boris build --profile`. Links:
+  [the GitHub Pages guide](/docs/github-pages.md),
+  [the head-metadata contract](/docs/contracts/head-metadata.md),
+  [#1189](https://github.com/drawmeanelephant/boris/issues/1189).
+
+### Changed
+
+- The Minimal and Showcase [catalog themes](/themes/README.md) gain dedicated `links` and `portfolio` layouts that lead with the person or studio and its links/work instead of documentation chrome, and preserve compiler-owned child collections. Generic documentation/blog layouts remain unchanged. (The link-in-bio and portfolio `boris init` starters that first used them were retired by the init trim in this release.)
+
+- Adopt current Zig container and codec APIs while preserving structured-output bytes and callback validation, and clarify core module/allocator ownership ([source map](/docs/SOURCE-MAP.md), [diagnostics contract](/docs/contracts/diagnostics.md)).
+
+- Stream [RSS](/docs/contracts/rss-2.0.md), [sitemap](/docs/contracts/xml-sitemap.md), and [rendered-search](/docs/contracts/rendered-search.md) file output through buffered atomic writers without retaining a complete serialized artifact; preserve emitted bytes and the existing in-memory rendering APIs.
+
+- Reuse caller-owned path and link buffers while rendering [navigation and wiki-links](/docs/contracts/includes-and-wiki-links.md), reducing temporary allocations without changing rendered bytes, escaping, fragments, or nested relative links.
+
+- Parse file-backed publication evidence and hosted-job reports without whole-file JSON replay buffers, preserving exact-byte bindings, evidence size limits, and fail-closed validation. See [publication evidence](/docs/contracts/publication-proof-pack.md) and [hosted jobs](/docs/contracts/cloudflare-container-runner.md).
+
+- Reuse tracked file snapshots and traversal buffers across [watch mode](/docs/contracts/watch-mode.md) poll cycles (with bulk directory-attribute reads on macOS), eliminating steady-state heap allocations and per-file re-stat churn on unchanged trees while preserving in-place edit detection and transient root-error recovery.
+
+- CI no longer reruns itself: editing a PR body reruns only the split-out `pr-issue-close lint` workflow, pushes to `main` no longer cancel each other's runs, `build-and-test` drops two steps already covered by `zig build test`, and [changelog fragments](/docs/changelog.d/README.md) are named by slug with no PR number, so they never need a rename push.
+
+- Locked Boris's Oliver 1.3.0 Markdown dialect boundary with regression tests in
+  [`src/render.zig`](/src/render.zig) and normative wording in the
+  [Oliver renderer contract](/docs/contracts/oliver-renderer.md#explicit-dialect-allowlist-and-footnote-pairing):
+  `markdown_options` stays on the explicit four-extension allowlist (never
+  Oliver's `obsidian` preset), Obsidian-only syntax remains literal across
+  `.html`, `.xhtml`, `.html4_strict`, and plain-text projections, `.footnotes`
+  stays paired between parse and render options across all profiles, and GFM
+  table delimiter forms remain intact.
+
+- Completed a Baseline web-platform and accessibility polish pass across all 23 modern catalog themes in [`themes/`](/themes/README.md) (excluding `html4-strict`): added a `@media (forced-colors: active)` floor across all 23 themes, declared explicit `color-scheme` on `corporate`, `cozy`, `journal`, `lab` (per mode), `ledger`, and `minimal` (and aligned `archive`'s meta tag with its light-only stylesheet), moved meaningful status and navigation-heading text into the DOM in `blueprint` and `boris` while suppressing decorative CSS generated content with single-value fallbacks, eliminated nested `<nav>` / unlabeled `<aside>` landmarks and added `tabindex="-1"` on skip-link targets, added `scroll-margin-top` and `text-wrap: balance` on headings, and converted fixed `px` font sizes in `corporate`, `cozy`, `ledger`, and `minimal` to `rem` for OS text scaling ([#1175](https://github.com/drawmeanelephant/boris/issues/1175)).
+
+- Pared `boris init --type` down from sixteen archetypes to six core shapes
+  (`docs`, `garden`, `cookbook`, `blog`, `textile`, `photo-gallery`) so
+  `init` covers each distinct compiler mode and seam without doubling as a
+  shadow theme catalog; all 24 themes remain shipped under
+  [`themes/`](/themes/README.md). Enriched `blog` with a `status: draft`
+  post and a profile declaring `site.url` + `head` + `rss` (`feed.xml`) +
+  `sitemap` (`sitemap.xml`) so the canonical feed/draft recipe stays
+  available out of the box. Links:
+  [CLI contract](/docs/contracts/cli.md#init-deterministic-starter-scaffold-with-self-verification),
+  [init theme matrix](/docs/init-theme-matrix.md).
+
+### Fixed
+
+- Profile RSS refusals and `InvalidHead` diagnostics now name the fix: the
+  feed refusal points at the single-target enabled-`head` rider, an enabled
+  head missing `base_url` reports `missing required field "base_url" in
+  targets[N].head`, and the [publication-profile contract](/docs/contracts/publication-profile.md)
+  cross-links `rss` to [head-metadata.md](/docs/contracts/head-metadata.md).
+
+- `--rss`/`--rss-path` combined with one forbidden companion now names the
+  pair as typed (e.g. `error: --rss conflicts with --html-layout`), and a
+  missing default `themes/boris/layouts/main.html` on archetype sites
+  remediates with the `--html-layout PATH` escape hatch. Links:
+  [CLI contract](/docs/contracts/cli.md),
+  [layout precedence](/docs/contracts/templating-and-themes.md),
+  [issue #1113](https://github.com/drawmeanelephant/boris/issues/1113).
+
+- De-flaked the NIP-42 process custody fault tests: they asserted
+  post-key-read outcomes against a 200ms plan `timeout_ms` that scheduler
+  starvation alone can consume, and now use the 2000ms non-timeout budget
+  convention from #1075. Test-side only; the custody ordering in
+  [the Nostr publication contract](/docs/contracts/nostr-publication.md)
+  is unchanged.
+
+- HTML `build`/`validate` now classify Cooklang refusals and the xhtml
+  raw-HTML refusal as content errors (exit 1) instead of I/O failures
+  (exit 3): `--report` records structured `ECOOKLANG` with the real
+  `path:line:col` locus rather than a bare `EIO` fallback, the xhtml
+  refusal names the refusing page via a new `EXHTML` code, and the
+  zero-width `EUNICODE` advisory prints once on the HTML path as the
+  contract requires. The Oliver pin advances to `af2233b` (oliver#205)
+  so single-word Cooklang names stop at `~`, `~~` stays prose, and
+  nested `{`/`(` inside closed quantity/preparation degrade to literal
+  text (#1122, #1123, #1124). Links:
+  [diagnostics.md](/docs/contracts/diagnostics.md),
+  [oliver-renderer.md](/docs/contracts/oliver-renderer.md).
+
+- Keep complete long titles, navigation labels, prose URLs and inline identifiers inside the [catalog themes](/themes/README.md), and give wide tables/code local scrolling with printable full content. The [shared specimen](/examples/studies-site/README.md#content-resilience-check) covers ordinary and stress content without changing theme voices or adding a site runtime.
+
+- Preserve native table grids inside compiler-owned [keyboard-accessible scroll containers](/docs/contracts/html-output.md#table-presentation), with one entry for every table, including ordinary ones (the explicitly approved cross-browser accessibility tradeoff). Strict uses valid native markup without JavaScript. Printed Columns code retains its original punctuation, and the HTML cache discriminator advances to prevent reuse of earlier unwrapped bodies.
+
+- The [editor](/editor/README.md) preserves the actual 375px, 768px, and 1440px preview CSS viewports inside a keyboard-scrollable pane instead of silently shrinking them. Missing or unsupported authoring/layout hints now offer the existing Build diagnostics flow, and file filters have a keyboard-accessible clear action.
+
+- Serialize the [local preview server](/docs/contracts/cli.md#local-preview-watch---serve)'s first output-directory open, including recovery after the initial build has not created it yet.
+
+- Align the [`blueprint` theme](/themes/blueprint/README.md) with the catalog content-resilience contract: long unspaced headings, prose URLs, navigation/outline labels, and section cards wrap cleanly across narrow and desktop viewports; tables preserve native grids inside keyboard-accessible `.table-viewport` scroll regions with `.table-entry` Strict styling; and `@media print` wraps tables and `<pre>` code without clipping or forced hyphenation. The [specimen docs](/examples/studies-site/README.md#content-resilience-check) stay in sync across all 24 shipped themes ([#1132](https://github.com/drawmeanelephant/boris/issues/1132)).
+
+- The `blueprint`, `corporate`, and `lab` catalog themes now ship a themed
+  `assets/search.html` landing page, and their no-JavaScript search forms
+  submit there instead of the missing `_boris/search/` route — the same
+  fallback the default `boris` theme gained in #1187. Links:
+  [the rendered-search contract](/docs/contracts/rendered-search.md),
+  [#1188](https://github.com/drawmeanelephant/boris/issues/1188).
+
+- Fixed a use-after-free abort in the editor validation daemon when
+  `/api/validate-state` or a validate demand polled during a torn report rewrite
+  (parse into a staged arena before swapping `result_arena`, keep post-save
+  cycles pending until a complete report parses, replace
+  `validate --watch --report` atomically via temp-and-rename, and preserve
+  editor host logs on integration script failure). Links:
+  [editor host contract](/docs/contracts/editor-host.md),
+  [#1170](https://github.com/drawmeanelephant/boris/issues/1170).
+
+- `boris-github-pages-audit` accepts publication-plan schemas 2 and 3, so
+  `audit_deployment` still runs when the Pages profile declares `head`
+  metadata. Link:
+  [the deployment-evidence contract](/docs/contracts/github-pages-deployment-evidence.md).
+
+- The default `boris` theme now ships an SVG favicon linked from every page
+  (browsers no longer request a missing `/favicon.ico`), and its no-JavaScript
+  search form submits to a themed landing page that explains the fallback
+  instead of a missing `_boris/search/` route. Links:
+  [the rendered-search contract](/docs/contracts/rendered-search.md),
+  [the templating-and-themes contract](/docs/contracts/templating-and-themes.md),
+  [#1180](https://github.com/drawmeanelephant/boris/issues/1180).
+
+### Security
+
+- Separate [editor preview credentials](/docs/contracts/editor-host.md) from API
+  access and suppress preview referrers, reject foreign
+  [watch preview authorities](/docs/contracts/cli.md#local-preview-watch---serve),
+  and bound [runner artifact reads and authentication](/docs/contracts/cloudflare-container-runner.md),
+  including authenticated startup in the Cloudflare host example.
+
+### Docs
+
+- Added a fresh-machine cold-start section to [AGENTS.md](/AGENTS.md): Zig install with SHA-256 verification on Linux, macOS, and Windows, the pinned-dependency fetch, the test gate, the CLI install step, and the two known Zig 0.17.0 toolchain traps.
+
+- Added a [publication profile cookbook](/docs/profile-cookbook.md): four
+  complete annotated `boris.json` examples (minimal, +sitemap, +RSS-with-head,
+  +`html4_strict`), the refusal strings each trap produces, and pointers into
+  [publication-profile.md](/docs/contracts/publication-profile.md) and
+  [head-metadata.md](/docs/contracts/head-metadata.md). Closes #1111.
+
+- Added a non-normative NIP-42 relay-authentication signer/auth boundary
+  design document for reviewer decision under issue #1002. Links:
+  [the design proposal](/docs/proposals/nip42-relay-authentication.md),
+  [the normative Nostr contract](/docs/contracts/nostr-publication.md).
+
+- Remove standing-doc drift: [`STATUS.md`](/docs/STATUS.md) drops its stale "through PR #N" line, [`RELEASE-GATE.md`](/docs/RELEASE-GATE.md) points to `ci.yml` for CI coverage and no longer lists the shipped `boris watch --serve` as deferred, and the header of [`check-pr-issue-close.sh`](/scripts/check-pr-issue-close.sh) is now the single statement of the issue-close rules, with the [PR template](/.github/PULL_REQUEST_TEMPLATE.md) pointing to its local `--body-file` check.
+
+- The Boris Pages site is now the front door for the Oliver / Boris /
+  Solipsist stack: a new [The Stack](/content/ecosystem.md) page, a
+  newcomer-first [homepage](/content/index.md) with per-audience entry paths,
+  and a [theme footer](/themes/boris/footer.html) that links all three public
+  sites and stamps the Boris version. Under `--pages-base-path`, an ordinary
+  hyperlink to a same-origin sibling project site is now classified as
+  external ([the contract](/docs/contracts/html-output.md#hosted-publication-locations));
+  root-relative URLs and canonical/public metadata stay strict
+  ([#1189](https://github.com/drawmeanelephant/boris/issues/1189)).
+
+- Refreshed the [README](/README.md) for v0.9.0: the opt-in NIP-42
+  `--auth-session` supervisor is recorded as shipped (macOS-only, tracking
+  [#1002](https://github.com/drawmeanelephant/boris/issues/1002)), the
+  Standard.site verification-surface emit is checked off
+  ([#533](https://github.com/drawmeanelephant/boris/issues/533)), the live
+  Pages site is linked, and `boris init --type` joins the quick start.
+
+- Correct stale site copy: the Zig prerequisite is 0.17+, the frontmatter set
+  is nine keys (`servings` is the ninth, Cooklang-convention key), `boris
+  init` is documented with its six `--type` archetypes and `boris.json`
+  profile, the commands-at-a-glance table lists `init` / `graph` /
+  `proof verify` / `recipe-scale`, the editor preview is positioned against
+  the shipped `boris watch --serve`, and
+  [Getting Started](/content/getting-started.md) gains a "Start your own
+  site" `boris init` step. See the
+  [command reference](/content/reference/commands.md) and the
+  [frontmatter reference](/content/reference/frontmatter.md)
+  ([#1178](https://github.com/drawmeanelephant/boris/issues/1178), refs
+  [#1181](https://github.com/drawmeanelephant/boris/issues/1181)).
+
+- Added the [watch JSON consumer recipe](/docs/watch-json-recipe.md) showing how to redirect `boris watch --watch-json` stderr, check `watch_events_schema` on `hello`, and handle `build-failed`, `recoverable: false`, and recovery `build-succeeded` events per [watch-mode.md](/docs/contracts/watch-mode.md#8---watch-json-ndjson-event-stream), with pointers from [README.md](/README.md), [AGENT-BINARY-KITS.md](/docs/AGENT-BINARY-KITS.md), and [AGENT-COLD-START.md](/docs/AGENT-COLD-START.md).
 
 ## [0.9.0] — 2026-10-11
 

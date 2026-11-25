@@ -180,7 +180,7 @@ Useful first commands:
 ```bash
 # build
 ./zig-out/bin/boris --help
-./zig-out/bin/boris --version                  # print the compiler id (e.g. boris/0.9.0)
+./zig-out/bin/boris --version                  # print the compiler id (e.g. boris/2026.11.0)
 ./zig-out/bin/boris validate --quiet           # HTML source/config preflight; no output
 ./zig-out/bin/boris watch --serve              # rebuild on save; live preview at http://127.0.0.1:8090/
 ./zig-out/bin/boris watch --watch-json         # NDJSON build events: the machine feedback loop
@@ -411,6 +411,7 @@ reviewed or uploaded to an LLM when useful.
 - [x] Embeddable `compileBundle` (native + Wasm) and an example Cloudflare Worker host ([#301](https://github.com/drawmeanelephant/boris/issues/301) M0–M7). Not a verified target. Live Cloudflare smoke and isolate-peak measurement remain open on the parent issue.
 - [x] Cloudflare container hosted runner ([#300](https://github.com/drawmeanelephant/boris/issues/300)). Example only; not a verified target.
 - [x] v0.9.0 release cut (2026-10-11): changelog assembled from the queued fragments; tagged `v0.9.0` on `main`.
+- [x] v2026.11.0 release cut (2026-11-25): first calendar-versioned release (`YYYY.M.PATCH`; see the [product version scheme](docs/contracts/cli.md#product-version-scheme)); changelog assembled from the queued fragments; tagged `v2026.11.0` on `main`.
 
 Current phase and pointers live in [`docs/STATUS.md`](docs/STATUS.md) (phase banner + pointer table); capability details live in [`docs/contracts/`](docs/contracts/) and the archived [v0.8 snapshot](docs/archived/capability-matrix-v0.8.md).
 

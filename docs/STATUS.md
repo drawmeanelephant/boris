@@ -1,21 +1,21 @@
 # Project status — Boris
 
-**As of:** 2026-10-11
+**As of:** 2026-11-25
 
 **Integration line:** `main`. The Build Week judging window is closed; Boris
 did not place (README "AI and OpenAI Build Week"). The `afterparty` line landed
 via PR **#790**. Topic branches target `main`, and
 `afterparty` is retained as the staging line for larger in-flight work.
 
-**Product metadata:** released **`v0.9.0`** / `boris/0.9.0`; base IR `schemaVersion` **`0.2.0`**.
-**Phase:** v0.9.0 shipped; post-release maintenance on `main`.
+**Product metadata:** release **`v2026.11.0`** / `boris/2026.11.0`; base IR `schemaVersion` **`0.2.0`**. Product versions are calendar versions `YYYY.M.PATCH` from this release ([scheme](contracts/cli.md#product-version-scheme)); contract and schema versions stay semantic.
+**Phase:** v2026.11.0 cut; post-release maintenance on `main`.
 **Build baseline:** Zig **0.17** and the Oliver library pinned in `build.zig.zon` (pure Zig; no CMake or other host tools).
 
 Boris is a **graph-native publication compiler** ([publisher platform](https://github.com/drawmeanelephant/boris/issues/538)): Markdown in → validated Trunk/Satellite graph → one or more contracted targets. HTML `dist/` is the default target, not the whole product. Normative behavior lives in [`docs/contracts/`](contracts/).
 
 ## What's next
 
-- ~~v0.9.0 release cut~~ — done: changelog assembled from `docs/changelog.d/` (2026-10-11); tagged `v0.9.0` per the release gate.
+- ~~v2026.11.0 release cut~~ — first calendar-versioned release: changelog assembled from `docs/changelog.d/` (2026-11-25); tag `v2026.11.0` on `main` per the release gate.
 - **Migration-guide review findings** — evidence complete; human review remains for retained MDX/frontmatter/link/asset findings and four missing routes.
 - **Source-RAG publication safety** — dependent on evidence; make only a tested, narrowly justified staging/cleanup improvement.
 

@@ -248,7 +248,7 @@ touches the network. `boris init --help` / `-h` prints init-specific help
 The command parser must reject unknown positional arguments and conflicting
 mode flags before touching the content tree. `--help` exits `0` without reading
 content or writing artifacts. `--version` / `-V` exit `0` printing the compiler
-id (`pipeline.compiler_id`, e.g. `boris/0.9.0`) to stdout without reading
+id (`pipeline.compiler_id`, e.g. `boris/2026.11.0`) to stdout without reading
 content or writing artifacts.
 
 Usage diagnostics on the exit-2 path are self-attributing (issues #761 and
@@ -434,7 +434,7 @@ reading content or writing artifacts, short-circuiting exactly like `--help`
 wins). The output is exactly one line on **stdout**:
 
 ```text
-boris/0.9.0
+boris/2026.11.0
 ```
 
 The id is `pipeline.compiler_id` (`src/pipeline.zig`): the base compiler id,
@@ -442,18 +442,18 @@ never suffixed. Artifacts record the base id, or a variant-suffixed id when
 the corpus engages the Cooklang or semantic-relations stack — the IR
 `manifest.json` (`compiler` field), the IR `build-report.json` (`compiler`
 field, success and failure alike), and the editor `completion.json`
-(`compiler_id` field) write e.g. `boris/0.9.0` for a Markdown corpus and
-`boris/0.9.0+cooklang` for a Cooklang corpus. Scripts and CI can therefore
+(`compiler_id` field) write e.g. `boris/2026.11.0` for a Markdown corpus and
+`boris/2026.11.0+cooklang` for a Cooklang corpus. Scripts and CI can therefore
 pin the compiler, and provenance checks must accept the base or a
 `+`-suffixed artifact id:
 
 ```bash
 # Pin: refuse to build with an unexpected compiler.
 BORIS_VERSION="$(boris --version)"
-[ "$BORIS_VERSION" = "boris/0.9.0" ] || exit 2
+[ "$BORIS_VERSION" = "boris/2026.11.0" ] || exit 2
 
 # Verify an artifact set's provenance: the recorded id is the base id,
-# possibly suffixed for variant corpora (e.g. boris/0.9.0+cooklang).
+# possibly suffixed for variant corpora (e.g. boris/2026.11.0+cooklang).
 ARTIFACT_ID="$(sed -n 's/.*"compiler": "\([^"]*\)".*/\1/p' .boris/manifest.json)"
 case "$ARTIFACT_ID" in
   "$BORIS_VERSION" | "$BORIS_VERSION"+*) ;;  # base or variant-suffixed id
@@ -463,6 +463,36 @@ esac
 
 Treat all ids as opaque `name/version` text: compare them exactly rather than
 substring-matching on the version portion, since suffixes are possible.
+
+### Product version scheme
+
+From `2026.11.0`, product releases use calendar versions `YYYY.M.PATCH`:
+
+- `YYYY` is the four-digit year of the release.
+- `M` is the month of the release, `1` through `12`, with no leading zero.
+- `PATCH` is `0` for the first release of that month and increments for each
+  later release in the same month.
+
+The first December 2026 release is `2026.12.0`, and a corrective release
+later that month is `2026.12.1`. The release tag is `v` plus the version
+(`v2026.11.0`), the compiler id is `boris/` plus the version
+(`boris/2026.11.0`), and `build.zig.zon`'s `.version`,
+`pipeline.boris_version`, and the hosted runner's `runner_version` all carry
+the bare version. Releases through `0.9.0` used `0.MINOR.PATCH`.
+
+The version is semver-shaped on purpose: `build.zig.zon` requires a
+`std.SemanticVersion` (three numeric components, no leading zeros, which is why
+the month is unpadded), and semver-aware tools order `2026.11.0` after
+`0.9.0`. The product version identifies **provenance and recency only**; it
+makes no compatibility promise, and a month or patch step may include a
+breaking CLI or output change, which the release notes name under
+**Upgrade notes**. Compatibility is carried by the versioned contracts, which
+keep their own semantic versions and change only by their own rules: IR
+`schemaVersion` ([ir-schema.md](ir-schema.md)), report, evidence, and
+completion formats, `watch_events_schema` ([watch-mode.md](watch-mode.md)),
+and the [editor host](editor-host.md) schemas. Consumers that need
+compatibility checks should check those fields rather than compare product
+versions.
 
 ### Build info query (`--build-info`)
 
@@ -474,7 +504,7 @@ ignored; first flag seen wins; exits `0`, reads no content, writes no
 artifacts) and prints exactly one JSON line on stdout:
 
 ```text
-{"format": "boris-build-info", "schemaVersion": "1", "version": "boris/0.9.0", "vcsRevision": "a8ef247"}
+{"format": "boris-build-info", "schemaVersion": "1", "version": "boris/2026.11.0", "vcsRevision": "a8ef247"}
 ```
 
 `vcsRevision` is an opaque token baked in at compile time by `build.zig`

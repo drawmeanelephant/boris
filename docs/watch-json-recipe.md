@@ -111,7 +111,7 @@ These records are copied byte for byte from [docs/contracts/watch-mode.md](contr
 `hello`:
 
 ```json
-{"event":"hello","watch_events_schema":1,"compiler":"boris/0.9.0"}
+{"event":"hello","watch_events_schema":1,"compiler":"boris/2026.11.0"}
 ```
 
 `build-started`:

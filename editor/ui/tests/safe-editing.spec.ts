@@ -50,7 +50,7 @@ type CommandResult = {
 
 function commandResult(mode: string, overrides: Partial<CommandResult> = {}): CommandResult {
   return {
-    mode, exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.9.0',
+    mode, exit_code: 0, failure_class: 'success', compiler_id: 'boris/2026.11.0',
     report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
     publication_plan: null,
     recipe_scale_view: null,
@@ -76,7 +76,7 @@ function cookScaleView() {
   return {
     format: 'boris-recipe-scale',
     schemaVersion: '0.1.0',
-    compiler: 'boris/0.9.0+cooklang',
+    compiler: 'boris/2026.11.0+cooklang',
     factor: { num: 2, den: 1 },
     page: 'carbonara',
     ingredients: [
@@ -113,7 +113,7 @@ function authoringPayload(withGraph = true, entities: CompletionEntity[] = [
       }
     },
     completion: withGraph ? {
-      format: 'boris-completion-index', schema_version: 1, compiler_id: 'boris/0.9.0', frozen: true,
+      format: 'boris-completion-index', schema_version: 1, compiler_id: 'boris/2026.11.0', frozen: true,
       entities,
       relation_kinds: ['depends_on', 'relates_to'], parent_targets: ['guides/intro'],
       layout_slots: ['content', 'title', 'nav']
@@ -168,7 +168,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
   }));
   await page.route('**/api/version', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify(options.version ?? { compiler_id: 'boris/0.9.0' })
+    body: JSON.stringify(options.version ?? { compiler_id: 'boris/2026.11.0' })
   }));
   let filesGets = 0;
   await page.route('**/api/files', async route => {
@@ -922,7 +922,7 @@ test('structured problems group, navigate by UTF-8 byte position, and copy a bou
 test('daemon validate-state cycles refresh the problems surface without a manual command (#652)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'success', cycle: 0, failure_class: 'success', problems_count: 0 };
   await installApi(page, {
-    version: { compiler_id: 'boris/0.9.0', supported: { validate_watch: true } },
+    version: { compiler_id: 'boris/2026.11.0', supported: { validate_watch: true } },
     validateState,
     commandByCall: [
       commandResult('validate'),
@@ -955,7 +955,7 @@ test('a successful save fires an immediate cycle-aware validate refresh (#656)',
   // can reach the problems surface is the save-triggered refresh (#656).
   const validateState: Record<string, unknown> = { supported: true, state: 'success', cycle: 0, failure_class: 'success', problems_count: 0 };
   await installApi(page, {
-    version: { compiler_id: 'boris/0.9.0', supported: { validate_watch: true } },
+    version: { compiler_id: 'boris/2026.11.0', supported: { validate_watch: true } },
     validateState,
     commandByCall: [
       commandResult('validate'),
@@ -1016,7 +1016,7 @@ test('a save does not fire a validate refresh on the one-shot path (#656)', asyn
 test('the problems pane names no-report-yet and the clean newest report (#658)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
   await installApi(page, {
-    version: { compiler_id: 'boris/0.9.0', supported: { validate_watch: true } },
+    version: { compiler_id: 'boris/2026.11.0', supported: { validate_watch: true } },
     validateState
   });
   const notice = page.getByRole('status', { name: 'Problems notice' });
@@ -1059,7 +1059,7 @@ test('the one-shot pane names no-report-yet and keeps the clean command line (#6
 test('the clean-report notice never contradicts another command (#658)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'success', cycle: 2, failure_class: 'success', problems_count: 0 };
   await installApi(page, {
-    version: { compiler_id: 'boris/0.9.0', supported: { validate_watch: true } },
+    version: { compiler_id: 'boris/2026.11.0', supported: { validate_watch: true } },
     validateState,
     commands: { html_build: commandResult('html_build') }
   });
@@ -1118,7 +1118,7 @@ test('editing a different line never marks the problem, on the daemon path too (
   const validateState: Record<string, unknown> = { supported: true, state: 'success', cycle: 1, failure_class: 'success', problems_count: 1 };
   await installApi(page, {
     disk: '# Draft\n\n## Section\n\nMore.\n',
-    version: { compiler_id: 'boris/0.9.0', supported: { validate_watch: true } },
+    version: { compiler_id: 'boris/2026.11.0', supported: { validate_watch: true } },
     validateState,
     commands: {
       validate: commandResult('validate', {
@@ -1214,7 +1214,7 @@ test('deleting a line below the problem never marks it (#662)', async ({ page })
 test('validation state line names idle, running, success, failed, and stale (#654)', async ({ page }) => {
   const validateState: Record<string, unknown> = { supported: true, state: 'idle', cycle: 0, failure_class: null, problems_count: 0 };
   await installApi(page, {
-    version: { compiler_id: 'boris/0.9.0', supported: { validate_watch: true } },
+    version: { compiler_id: 'boris/2026.11.0', supported: { validate_watch: true } },
     validateState
   });
   const stateLine = page.getByRole('status', { name: 'Validation state' });
@@ -1239,7 +1239,7 @@ test('validation status line surfaces the live cycle and report age (#A22)', asy
     report_age_ms: 4200
   };
   await installApi(page, {
-    version: { compiler_id: 'boris/0.9.0', supported: { validate_watch: true } },
+    version: { compiler_id: 'boris/2026.11.0', supported: { validate_watch: true } },
     validateState
   });
   const meta = page.locator('.validation-meta');
@@ -1522,7 +1522,7 @@ test('completion categories match Boris artifacts and refresh after a successful
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
   await expect(page.getByText('Frontmatter schema ready. Build diagnostics to create graph completion data.')).toBeVisible();
   await page.getByRole('button', { name: 'Build diagnostics', exact: true }).click();
-  await expect(page.getByText('Boris completion index ready from boris/0.9.0.')).toBeVisible();
+  await expect(page.getByText('Boris completion index ready from boris/2026.11.0.')).toBeVisible();
   await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('wiki_link');
   const wiki = page.getByRole('combobox', { name: 'Filter wiki link', exact: true });
   await wiki.fill('guides');
@@ -2854,7 +2854,7 @@ test('cold Author hints offer the existing diagnostics flow and recover after fa
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Content or graph failure (exit 1)');
   await expect(build).toBeVisible();
   await build.click();
-  await expect(page.getByText('Boris completion index ready from boris/0.9.0.')).toBeVisible();
+  await expect(page.getByText('Boris completion index ready from boris/2026.11.0.')).toBeVisible();
   await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Boris graph ready');
   expect(calls).toEqual(['ir_build', 'ir_build']);
   await expect(build).toHaveCount(0);
@@ -2969,7 +2969,7 @@ test('saving from the inline diagnostics action uses dirty-buffer resolution (#1
     .getByRole('button', { name: 'Save & run', exact: true }).click();
   expect((await save).postDataJSON().content).toBe('# Save this author work\n');
   expect((await command).postDataJSON()).toEqual({ mode: 'ir_build' });
-  await expect(page.getByText('Boris completion index ready from boris/0.9.0.')).toBeVisible();
+  await expect(page.getByText('Boris completion index ready from boris/2026.11.0.')).toBeVisible();
   await expect(editor).toHaveValue('# Save this author work\n');
   await expect(page.getByRole('button', { name: 'Save file', exact: true })).toBeDisabled();
 });
@@ -3365,11 +3365,11 @@ test('a terminated Boris command stays retryable (#418 M11)', async ({ page }) =
 test('compiler version names the supported IR range (#418 M11)', async ({ page }) => {
   await installApi(page, {
     version: {
-      compiler_id: 'boris/0.9.0',
+      compiler_id: 'boris/2026.11.0',
       supported: { completion: [1], ir: ['0.2.0', '0.3.0', '0.4.0'], publication_plan: [1], frontmatter: [1] }
     }
   });
-  await expect(page.getByText('Compiler: boris/0.9.0; IR 0.2.0–0.4.0')).toBeVisible();
+  await expect(page.getByText('Compiler: boris/2026.11.0; IR 0.2.0–0.4.0')).toBeVisible();
 });
 
 test('overlapping saves send one request (#418 M11)', async ({ page }) => {
