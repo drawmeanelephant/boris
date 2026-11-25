@@ -11,7 +11,8 @@ Product releases use calendar versions `YYYY.M.PATCH`; the normative rule is
 the [product version scheme](contracts/cli.md#product-version-scheme). At a
 cut:
 
-1. Take the release date's year and month, with no leading zero on the month.
+1. Take the release date's year and month in UTC, with no leading zero on
+   the month.
 2. If no release is tagged for that month, `PATCH` is `0`. Otherwise it is the
    highest `PATCH` tagged that month plus one.
 3. Write the version everywhere `scripts/test-version-pin.sh` checks

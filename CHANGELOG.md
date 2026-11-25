@@ -57,8 +57,11 @@ artifacts. The Oliver pin advances to `af2233b`.
   string is semver-shaped and sorts after `0.9.0`, but it carries no
   compatibility meaning. Compatibility lives in the versioned contracts
   (IR `schemaVersion`, report and evidence formats, `watch_events_schema`,
-  editor host schemas), which keep their own semantic versions. Scripts that
-  pin `boris --version` must update the pin. See the
+  editor host schemas), which keep their own semantic versions. The
+  recipe-scale view schemas now treat `compiler` as provenance rather than
+  pinning one product version, so a calendar-version move does not reshape a
+  versioned format schema. Scripts that pin `boris --version` must update the
+  pin. See the
   [product version scheme](/docs/contracts/cli.md#product-version-scheme).
 - **`boris init --type`** accepts six archetypes (`docs`, `garden`,
   `cookbook`, `blog`, `textile`, `photo-gallery`). The v0.9.0 archetypes

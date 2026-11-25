@@ -9,7 +9,7 @@
   "properties": {
     "format": { "type": "string", "const": "boris-recipe-scale" },
     "schemaVersion": { "type": "string", "const": "0.1.0" },
-    "compiler": { "type": "string", "const": "boris/2026.11.0+cooklang" },
+    "compiler": { "type": "string", "minLength": 1, "pattern": "^boris/.+\\+cooklang$", "description": "Compiler provenance id. The product version portion is not part of this format's compatibility contract." },
     "factor": { "$ref": "#/$defs/factor" },
     "servings": { "$ref": "#/$defs/servings" },
     "page": { "type": "string", "minLength": 1 },

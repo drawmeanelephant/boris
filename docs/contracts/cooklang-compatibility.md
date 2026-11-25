@@ -371,8 +371,10 @@ Schema for one scaled amount:
 ```
 
 The page envelope is `docs/contracts/schemas/recipe-scale-view-0.2.0.schema.json`
-(`format: boris-recipe-scale`). Additive build provenance (#781): the
-envelope's `vcsRevision` field, emitted directly after `compiler`, carries the
+(`format: boris-recipe-scale`). Its `compiler` field is provenance, not a
+compatibility constraint: a product-version move does not reshape the envelope
+or mutate the meaning of its schema version. Additive build provenance (#781):
+the envelope's `vcsRevision` field, emitted directly after `compiler`, carries the
 opaque VCS revision token the producing binary was compiled from (`""` when
 the build could not detect one); the schema describes it as optional so
 documents from older binaries stay valid, and every current emitter writes it.

@@ -52,9 +52,23 @@ ZON_VERSION="$(sed -n 's/^ *\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head
 # Calendar version YYYY.M.PATCH (docs/contracts/cli.md "Product version
 # scheme"). The month is unpadded because build.zig.zon's SemanticVersion
 # rejects leading zeros.
-CALVER_RE='^20[0-9][0-9]\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)$'
+CALVER_RE='^[0-9][0-9][0-9][0-9]\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)$'
 [[ "$PRODUCT_VERSION" =~ $CALVER_RE ]] \
   || fail "boris_version '$PRODUCT_VERSION' is not a YYYY.M.PATCH calendar version"
+
+check_tool_id() {
+  file="$1"
+  prefix="$2"
+  got="$(sed -n 's/^pub const tool_id = "\([^"]*\)".*/\1/p' "$file" | head -1)"
+  [[ "$got" == "$prefix/$PRODUCT_VERSION" ]] \
+    || fail "$file tool_id '$got' != '$prefix/$PRODUCT_VERSION'"
+}
+check_tool_id tools/docs-maintenance/src/main.zig boris-docs-maintenance
+check_tool_id tools/github-pages-audit/src/main.zig boris-github-pages-audit
+check_tool_id tools/scale-smoke/main.zig boris-scale-smoke
+check_tool_id tools/search-index/main.zig boris-search-index
+check_tool_id tools/source-rag/main.zig boris-source-rag
+check_tool_id tools/testdata-generator/src/main.zig boris-testdata
 
 # --- Version query ---------------------------------------------------------
 note "boris --version and -V print exactly the base compiler id on stdout"

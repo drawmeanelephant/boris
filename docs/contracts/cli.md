@@ -468,8 +468,9 @@ substring-matching on the version portion, since suffixes are possible.
 
 From `2026.11.0`, product releases use calendar versions `YYYY.M.PATCH`:
 
-- `YYYY` is the four-digit year of the release.
-- `M` is the month of the release, `1` through `12`, with no leading zero.
+- `YYYY` is the four-digit year of the release date in UTC.
+- `M` is the month of the release date in UTC, `1` through `12`, with no
+  leading zero.
 - `PATCH` is `0` for the first release of that month and increments for each
   later release in the same month.
 
